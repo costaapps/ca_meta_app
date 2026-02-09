@@ -3,15 +3,18 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
-interface ConnectedChannel {
+export interface ConnectedChannel {
   id: number;
-  facebookPageId: string;
-  facebookPageName: string;
-  instagramAccountId: string;
-  instagramUsername: string;
-  instagramProfilePicture: string;
+  type: 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP';
+  externalId: string;    // Antigo pageId ou accountId
+  name: string;          // Antigo pageName ou username
+  profilePicture: string;
+  privateWelcomeMessage?: string;
+  commentPublicReply?: string; // Novo
+  commentPrivateReply?: string; // Novo
   connectedAt: string;
 }
+
 
 @Injectable({ providedIn: 'root' })
 export class MetaIntegrationService {
@@ -61,21 +64,21 @@ export class MetaIntegrationService {
   }
 
   /**
-   * Saves automatic reply configuration for a Facebook page
-   * @param pageId Facebook Page ID
-   * @param pageType Type of page (e.g., 'facebook', 'instagram')
-   * @param message Welcome message for automation
+   * Saves automatic reply configuration for a connected channel
+   * @param channel ConnectedChannel object with configuration
    * @returns Observable of the save response
    */
-  saveAutoReply(pageId: string, pageType: string, message: string): Observable<any> {
-    const params = new URLSearchParams({ company_uuid: this.companyUUID });
+  saveAutoReply(channel: ConnectedChannel): Observable<any> {
     const payload = {
-      PageID: pageId,
-      PageType: pageType,
-      WelcomeMessage: message
+      CompanyUUID: this.companyUUID,
+      ExternalId: channel.externalId,
+      Type: channel.type.toUpperCase(),
+      PrivateWelcomeMessage: channel.privateWelcomeMessage || '',
+      CommentPublicReply: channel.commentPublicReply || '',
+      CommentPrivateReply: channel.commentPrivateReply || ''
     };
     return this.http.post<any>(
-      `${this.backEndUrl}/save_auto_reply?${params.toString()}`,
+      `${this.backEndUrl}/save_auto_reply`,
       payload
     );
   }

@@ -8,12 +8,13 @@ import { MetaIntegrationService } from '../../../../core/services/meta-integrati
 
 export interface ConnectedChannel {
   id: number;
-  facebookPageId: string;
-  facebookPageName: string;
-  instagramAccountId: string;
-  instagramUsername: string;
-  instagramProfilePicture: string;
-  welcomeMessage?: string;
+  type: 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP';
+  externalId: string;    // Antigo pageId ou accountId
+  name: string;          // Antigo pageName ou username
+  profilePicture: string;
+  privateWelcomeMessage?: string;
+  commentPublicReply?: string; // Novo
+  commentPrivateReply?: string; // Novo
   connectedAt: string;
 }
 
@@ -67,35 +68,59 @@ export class ChannelListComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Saves the automation welcome message for a channel
+   * Saves the automation messages for a channel
+   * Different configurations apply based on channel type:
+   * - Instagram/Facebook: All three message types (private, public, private reply)
+   * - WhatsApp: Only private welcome message
    */
-  saveWelcomeMessage(channel: ConnectedChannel): void {
-    if (!channel.welcomeMessage || !channel.welcomeMessage.trim()) {
-      this.showErrorToast('Please enter a welcome message.');
+  saveChannelConfiguration(channel: ConnectedChannel): void {
+    if (!this.isChannelConfigValid(channel)) {
+      this.showErrorToast('Please enter at least one message.');
       return;
     }
 
     this.isSavingMessage[channel.id] = true;
     
-    this.metaService.saveAutoReply(
-      channel.instagramAccountId,
-      'instagram',
-      channel.welcomeMessage
-    )
+    this.metaService.saveAutoReply(channel)
     .pipe(takeUntil(this.destroy$))
     .subscribe({
       next: () => {
         this.isSavingMessage[channel.id] = false;
-        this.showSuccessToast('Settings Saved Successfully!');
+        this.showSuccessToast('Channel configuration saved successfully!');
         this.cdr.markForCheck();
       },
       error: (err: any) => {
-        console.error('Error saving auto reply:', err);
+        console.error('Error saving channel configuration:', err);
         this.isSavingMessage[channel.id] = false;
-        this.showErrorToast('Error saving settings. Please try again.');
+        this.showErrorToast('Error saving configuration. Please try again.');
         this.cdr.markForCheck();
       }
     });
+  }
+
+  /**
+   * Validates if at least one message field is filled based on channel type
+   */
+  private isChannelConfigValid(channel: ConnectedChannel): any {
+    const hasPrivateWelcome = channel.privateWelcomeMessage?.trim();
+    
+    if (channel.type === 'WHATSAPP') {
+      // WhatsApp only requires privateWelcomeMessage
+      return hasPrivateWelcome;
+    }
+    
+    // Instagram and Facebook can have any of the three fields filled
+    const hasPublicReply = channel.commentPublicReply?.trim();
+    const hasPrivateReply = channel.commentPrivateReply?.trim();
+    
+    return hasPrivateWelcome || hasPublicReply || hasPrivateReply;
+  }
+
+  /**
+   * Checks if a channel type should display comment reply fields
+   */
+  shouldShowCommentReplies(channelType: string): boolean {
+    return channelType === 'INSTAGRAM' || channelType === 'FACEBOOK';
   }
 
   /**
