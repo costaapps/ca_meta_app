@@ -1,4 +1,6 @@
 <div class="channels-container">
+  <app-notification-bell></app-notification-bell>
+
   <!-- Success Modal -->
   <div *ngIf="showSuccessModal" class="modal-overlay">
     <div class="modal-content success-modal" [@slideUp]="showSuccessModal ? 'open' : 'closed'">

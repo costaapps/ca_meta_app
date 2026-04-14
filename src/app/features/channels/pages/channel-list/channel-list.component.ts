@@ -5,6 +5,7 @@ import { RouterModule } from '@angular/router';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { MetaIntegrationService } from '../../../../core/services/meta-integration.service';
+import { NotificationBellComponent } from '../../components/notification-bell/notification-bell.component';
 
 export interface ConnectedChannel {
   id: number;
@@ -21,7 +22,7 @@ export interface ConnectedChannel {
 @Component({
   selector: 'app-channel-list',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule],
+  imports: [CommonModule, RouterModule, FormsModule, NotificationBellComponent],
   templateUrl: './channel-list.component.html',
   styleUrls: ['./channel-list.component.scss']
 })
