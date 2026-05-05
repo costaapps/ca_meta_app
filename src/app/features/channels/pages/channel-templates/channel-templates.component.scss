@@ -1,0 +1,283 @@
+:host {
+  display: block;
+  min-height: 100vh;
+}
+
+$primary: #0f172a;
+$accent: #1d4ed8;
+$muted: #64748b;
+$border: #e2e8f0;
+$bg: #f8fafc;
+$success: #16a34a;
+$error: #dc2626;
+
+.templates-container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+  color: $primary;
+}
+
+.templates-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+
+  h1 {
+    font-size: 2.2rem;
+    margin: 0 0 0.25rem 0;
+  }
+
+  p {
+    margin: 0;
+    color: $muted;
+  }
+
+  .back-link {
+    background: $accent;
+    color: #ffffff;
+    text-decoration: none;
+    padding: 0.6rem 1rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.templates-panel {
+  background: #ffffff;
+  border: 1px solid $border;
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+
+  h2 {
+    font-size: 1.2rem;
+    margin: 0;
+  }
+}
+
+.helper-text {
+  font-size: 0.85rem;
+  color: $muted;
+}
+
+.state-text {
+  color: $muted;
+  font-size: 0.9rem;
+}
+
+.select-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+
+  select {
+    padding: 0.6rem 0.75rem;
+    border-radius: 10px;
+    border: 1px solid $border;
+  }
+}
+
+.refresh-button {
+  background: #ffffff;
+  border: 1px solid $border;
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.template-card {
+  border: 1px solid $border;
+  border-radius: 12px;
+  padding: 1rem;
+  background: $bg;
+
+  h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  .template-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .template-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    color: $muted;
+    font-size: 0.85rem;
+  }
+}
+
+.template-body {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: $primary;
+  background: #ffffff;
+  border: 1px dashed $border;
+  border-radius: 10px;
+  padding: 0.6rem;
+}
+
+.template-placeholders {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: $muted;
+}
+
+.status {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: $primary;
+  font-weight: 600;
+}
+
+.status-approved {
+  background: rgba(22, 163, 74, 0.15);
+  color: $success;
+}
+
+.create-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+
+  input,
+  select,
+  textarea {
+    padding: 0.6rem 0.75rem;
+    border: 1px solid $border;
+    border-radius: 10px;
+    font-size: 0.9rem;
+  }
+}
+
+.variable-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.secondary-button {
+  border: 1px solid $border;
+  background: #ffffff;
+  color: $primary;
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.ghost-button {
+  border: 1px dashed $border;
+  background: transparent;
+  color: $muted;
+  border-radius: 8px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.variable-grid {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.variable-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 0.6rem;
+
+  input {
+    padding: 0.6rem 0.75rem;
+    border: 1px solid $border;
+    border-radius: 10px;
+    font-size: 0.85rem;
+  }
+}
+
+.variable-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: $primary;
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  color: $muted;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-start;
+
+  button {
+    background: $accent;
+    border: none;
+    color: #ffffff;
+    padding: 0.65rem 1.2rem;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.status-banner {
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  margin-top: 1rem;
+}
+
+.status-banner.success {
+  background: rgba(22, 163, 74, 0.15);
+  color: $success;
+}
+
+.status-banner.error {
+  background: rgba(220, 38, 38, 0.12);
+  color: $error;
+}

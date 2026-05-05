@@ -1,0 +1,155 @@
+<div class="templates-container">
+  <header class="templates-header">
+    <div class="header-content">
+      <h1>WhatsApp Templates</h1>
+      <p>Create and manage approved templates for each WhatsApp number.</p>
+    </div>
+    <a routerLink="/channels" class="back-link">Back to Channels</a>
+  </header>
+
+  <section class="templates-panel">
+    <div class="panel-header">
+      <h2>Choose WhatsApp Number</h2>
+      <span class="helper-text">Templates are scoped by number (WABA).</span>
+    </div>
+
+    <div *ngIf="isLoadingNumbers" class="state-text">Loading WhatsApp numbers...</div>
+
+    <div *ngIf="!isLoadingNumbers && whatsAppNumbers.length === 0" class="state-text">
+      No WhatsApp numbers connected yet.
+    </div>
+
+    <div *ngIf="!isLoadingNumbers && whatsAppNumbers.length > 0" class="select-row">
+      <label for="numberSelect">Number</label>
+      <select id="numberSelect" [(ngModel)]="selectedNumberId" (change)="onSelectNumber()">
+        <option value="">Select a number...</option>
+        <option *ngFor="let number of whatsAppNumbers" [value]="number.externalId">
+          {{ number.name }}
+        </option>
+      </select>
+    </div>
+  </section>
+
+  <section class="templates-panel">
+    <div class="panel-header">
+      <h2>Available Templates</h2>
+      <button class="refresh-button" (click)="loadTemplates()" [disabled]="!selectedNumberId || isLoadingTemplates">
+        {{ isLoadingTemplates ? 'Refreshing...' : 'Refresh' }}
+      </button>
+    </div>
+
+    <div *ngIf="isLoadingTemplates" class="state-text">Loading templates...</div>
+
+    <div *ngIf="!isLoadingTemplates && templates.length === 0" class="state-text">
+      No templates found for this number.
+    </div>
+
+    <div class="template-grid" *ngIf="!isLoadingTemplates && templates.length > 0">
+      <article class="template-card" *ngFor="let template of templates; trackBy: trackTemplateByName">
+        <div class="template-head">
+          <h3>{{ template.name }}</h3>
+          <span class="status" [class.status-approved]="template.status === 'APPROVED'">
+            {{ template.status || 'UNKNOWN' }}
+          </span>
+        </div>
+        <div class="template-meta">
+          <span>Category: {{ template.category || 'N/A' }}</span>
+          <span>Language: {{ template.language || 'en' }}</span>
+        </div>
+        <div *ngIf="getTemplateBody(template)" class="template-body">
+          {{ getTemplateBody(template) }}
+        </div>
+        <div *ngIf="getTemplatePlaceholders(template).length" class="template-placeholders">
+          Placeholders: {{ getTemplatePlaceholders(template).join(', ') }}
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="templates-panel">
+    <div class="panel-header">
+      <h2>Create Template</h2>
+      <span class="helper-text">Choose a language and provide examples for placeholders.</span>
+    </div>
+
+    <form class="create-form" (ngSubmit)="createTemplate()">
+      <div class="form-field">
+        <label for="templateName">Template Name</label>
+        <input
+          id="templateName"
+          type="text"
+          [(ngModel)]="createForm.name"
+          name="templateName"
+          placeholder="example_template_name"
+        />
+        <span class="field-hint">Use lowercase and underscores.</span>
+      </div>
+
+      <div class="form-field">
+        <label for="templateCategory">Category</label>
+        <select id="templateCategory" [(ngModel)]="createForm.category" name="templateCategory">
+          <option value="MARKETING">Marketing</option>
+          <option value="UTILITY">Utility</option>
+          <option value="AUTHENTICATION">Authentication</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label for="templateLanguage">Language</label>
+        <select id="templateLanguage" [(ngModel)]="createForm.language" name="templateLanguage">
+          <option value="pt_BR">Portuguese (Brazil)</option>
+          <option value="en">English</option>
+        </select>
+        <span class="field-hint">Use a language that is not being deleted.</span>
+      </div>
+
+      <div class="form-field">
+        <label for="templateBody">Body</label>
+        <textarea
+          id="templateBody"
+          rows="4"
+          [(ngModel)]="createForm.body"
+          name="templateBody"
+          placeholder="Type your template body..."
+        ></textarea>
+        <span class="field-hint">Use {{1}}, {{2}} for placeholders.</span>
+      </div>
+
+      <div class="form-field">
+        <div class="variable-header">
+          <label>Variables & Examples</label>
+          <button type="button" class="secondary-button" (click)="addVariable()">Add Variable</button>
+        </div>
+
+        <div *ngIf="getCreatePlaceholders().length === 0" class="field-hint">
+          Add variables to insert placeholders and provide example values.
+        </div>
+
+        <div class="variable-grid" *ngIf="getCreatePlaceholders().length > 0">
+          <div class="variable-row" *ngFor="let placeholder of getCreatePlaceholders(); let i = index">
+            <div class="variable-label">{{ placeholder }}</div>
+            <button type="button" class="ghost-button" (click)="insertPlaceholder(i)">
+              Insert
+            </button>
+            <input
+              type="text"
+              [ngModel]="variableExamples[i]"
+              (ngModelChange)="variableExamples[i] = $event"
+              name="example-{{ i }}"
+              placeholder="Example value"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" [disabled]="isCreating || !selectedNumberId">
+          {{ isCreating ? 'Creating...' : 'Create Template' }}
+        </button>
+      </div>
+    </form>
+  </section>
+
+  <div *ngIf="successMessage" class="status-banner success">{{ successMessage }}</div>
+  <div *ngIf="errorMessage" class="status-banner error">{{ errorMessage }}</div>
+</div>

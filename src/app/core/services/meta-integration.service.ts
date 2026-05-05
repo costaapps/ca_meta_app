@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { WhatsAppTemplate, WhatsAppTemplateCreateRequest } from '../models/channel.model';
 
 export interface ConnectedChannel {
   id: number;
@@ -81,5 +82,36 @@ export class MetaIntegrationService {
       `${this.backEndUrl}/save_auto_reply`,
       payload
     );
+  }
+
+  /**
+   * Fetch WhatsApp templates for a phone number
+   */
+  getWhatsAppTemplates(phoneNumberId: string): Observable<WhatsAppTemplate[]> {
+    const params = new URLSearchParams({
+      company_uuid: this.companyUUID,
+      phone_number_id: phoneNumberId
+    });
+
+    return this.http
+      .get<{ data: WhatsAppTemplate[] }>(`${this.backEndUrl}/whatsapp/templates?${params.toString()}`)
+      .pipe(map((response) => response.data || []));
+  }
+
+  /**
+   * Create a new WhatsApp template
+   */
+  createWhatsAppTemplate(request: WhatsAppTemplateCreateRequest): Observable<any> {
+    const payload = {
+      company_uuid: this.companyUUID,
+      phone_number_id: request.phoneNumberId,
+      name: request.name,
+      category: request.category,
+      body: request.body,
+      language: request.language || 'en',
+      example_values: request.exampleValues || []
+    };
+
+    return this.http.post<any>(`${this.backEndUrl}/whatsapp/templates`, payload);
   }
 }

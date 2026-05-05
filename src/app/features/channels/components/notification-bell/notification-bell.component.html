@@ -61,9 +61,9 @@
               type="button"
               class="action-button"
               [disabled]="isNotificationLoading(notification.Id)"
-              (click)="handleAction(notification, 'SEND_TEMPLATE')"
+              (click)="toggleTemplatePicker(notification)"
             >
-              {{ isActionLoading(notification.Id, 'SEND_TEMPLATE') ? 'Sending...' : 'Send Template' }}
+              {{ templatePickerNotificationId === notification.Id ? 'Hide Templates' : 'Select Template' }}
             </button>
 
             <button
@@ -86,6 +86,62 @@
               {{ isActionLoading(notification.Id, 'REPLY_COMMENT') ? 'Sending...' : 'Reply to Comment' }}
             </button>
           </ng-container>
+        </div>
+
+        <div *ngIf="notification.PlatformType === 'WHATSAPP' && templatePickerNotificationId === notification.Id" class="template-picker">
+          <div *ngIf="isTemplateLoading(notification.Id)" class="template-state">Loading templates...</div>
+          <div *ngIf="templateErrorByNotification[notification.Id]" class="template-error">
+            {{ templateErrorByNotification[notification.Id] }}
+          </div>
+
+          <ng-container *ngIf="!isTemplateLoading(notification.Id) && templatesByNotification[notification.Id]?.length">
+            <label class="template-label" for="templateSelect-{{ notification.Id }}">Template</label>
+            <select
+              class="template-select"
+              id="templateSelect-{{ notification.Id }}"
+              [(ngModel)]="selectedTemplateByNotification[notification.Id]"
+              (ngModelChange)="onTemplateSelectionChange(notification)"
+            >
+              <option *ngFor="let template of templatesByNotification[notification.Id]" [value]="template.name">
+                {{ template.name }} ({{ template.status || 'UNKNOWN' }})
+              </option>
+            </select>
+
+            <div class="template-preview" *ngIf="getTemplateBody(getSelectedTemplate(notification.Id))">
+              {{ getTemplateBody(getSelectedTemplate(notification.Id)) }}
+            </div>
+
+            <div
+              class="template-params"
+              *ngIf="getSelectedTemplatePlaceholders(notification.Id).length > 0"
+            >
+              <div class="template-param" *ngFor="let placeholder of getSelectedTemplatePlaceholders(notification.Id); let i = index">
+                <label class="template-label">{{ placeholder }}</label>
+                <input
+                  type="text"
+                  class="template-input"
+                  [value]="getTemplateParamValue(notification.Id, i)"
+                  (input)="setTemplateParamValue(notification.Id, i, $any($event.target).value)"
+                  placeholder="Enter value"
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              class="action-button"
+              [disabled]="isNotificationLoading(notification.Id)"
+              (click)="sendTemplate(notification)"
+            >
+              {{ isActionLoading(notification.Id, 'SEND_TEMPLATE') ? 'Sending...' : 'Send Template' }}
+            </button>
+          </ng-container>
+
+          <div
+            *ngIf="!isTemplateLoading(notification.Id) && !templatesByNotification[notification.Id]?.length && !templateErrorByNotification[notification.Id]"
+            class="template-state"
+          >
+            No templates available for this number.
+          </div>
         </div>
       </article>
     </div>

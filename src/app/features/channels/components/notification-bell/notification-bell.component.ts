@@ -1,9 +1,11 @@
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Component, ElementRef, HostListener, OnDestroy } from '@angular/core';
 import { Subject } from 'rxjs';
 import { finalize, takeUntil } from 'rxjs/operators';
 import { environment } from '../../../../../environments/environment';
+import { WhatsAppTemplate } from '../../../../core/models/channel.model';
 
 export interface AppNotification {
   Id: number;
@@ -26,6 +28,9 @@ export interface NotificationActionPayload {
   NotificationId: number;
   ActionType: 'SEND_TEMPLATE' | 'SEND_MESSAGE' | 'REPLY_COMMENT';
   CompanyUUID: string;
+  TemplateName?: string;
+  TemplateLanguage?: string;
+  TemplateParams?: string[];
 }
 
 interface NotificationActionResponse {
@@ -36,7 +41,7 @@ interface NotificationActionResponse {
 @Component({
   selector: 'app-notification-bell',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   templateUrl: './notification-bell.component.html',
   styleUrls: ['./notification-bell.component.scss']
 })
@@ -51,6 +56,12 @@ export class NotificationBellComponent implements OnDestroy {
   lastUpdatedAt: Date | null = null;
   refreshErrorMessage = '';
   loadingActionByNotification: Record<number, NotificationActionPayload['ActionType'] | null> = {};
+  templatePickerNotificationId: number | null = null;
+  templatesByNotification: Record<number, WhatsAppTemplate[]> = {};
+  templateLoadingByNotification: Record<number, boolean> = {};
+  templateErrorByNotification: Record<number, string> = {};
+  selectedTemplateByNotification: Record<number, string> = {};
+  templateParamsByNotification: Record<number, string[]> = {};
 
   private readonly destroy$ = new Subject<void>();
   private lastRefreshRequestAt = 0;
@@ -134,7 +145,8 @@ export class NotificationBellComponent implements OnDestroy {
 
   handleAction(
     notification: AppNotification,
-    actionType: NotificationActionPayload['ActionType']
+    actionType: NotificationActionPayload['ActionType'],
+    extraPayload: Partial<NotificationActionPayload> = {}
   ): void {
     if (this.isNotificationLoading(notification.Id)) {
       return;
@@ -149,7 +161,8 @@ export class NotificationBellComponent implements OnDestroy {
     const payload: NotificationActionPayload = {
       NotificationId: notification.Id,
       ActionType: actionType,
-      CompanyUUID: companyUUID
+      CompanyUUID: companyUUID,
+      ...extraPayload
     };
 
     this.loadingActionByNotification[notification.Id] = actionType;
@@ -173,11 +186,164 @@ export class NotificationBellComponent implements OnDestroy {
 
           // Optimistic update after successful action response.
           this.notifications = this.notifications.filter((item) => item.Id !== notification.Id);
+          if (this.templatePickerNotificationId === notification.Id) {
+            this.templatePickerNotificationId = null;
+          }
         },
         error: (error: unknown) => {
           console.error('Error while sending notification action:', error);
         }
       });
+  }
+
+  toggleTemplatePicker(notification: AppNotification): void {
+    if (this.templatePickerNotificationId === notification.Id) {
+      this.templatePickerNotificationId = null;
+      return;
+    }
+
+    this.templatePickerNotificationId = notification.Id;
+    this.templateErrorByNotification[notification.Id] = '';
+
+    if (!this.templatesByNotification[notification.Id]?.length) {
+      this.loadTemplates(notification);
+    }
+  }
+
+  loadTemplates(notification: AppNotification): void {
+    const companyUUID = this.getCompanyUUID();
+    if (!companyUUID) {
+      this.templateErrorByNotification[notification.Id] = 'Company UUID not found.';
+      return;
+    }
+
+    this.templateLoadingByNotification[notification.Id] = true;
+    this.templateErrorByNotification[notification.Id] = '';
+
+    this.http
+      .get<{ data: WhatsAppTemplate[] }>(
+        `${this.API_BASE_URL}/whatsapp/templates?company_uuid=${encodeURIComponent(companyUUID)}&phone_number_id=${encodeURIComponent(notification.DestinationId)}`
+      )
+      .pipe(
+        takeUntil(this.destroy$),
+        finalize(() => {
+          this.templateLoadingByNotification[notification.Id] = false;
+        })
+      )
+      .subscribe({
+        next: (response) => {
+          this.templatesByNotification[notification.Id] = response.data || [];
+          if (!this.selectedTemplateByNotification[notification.Id] && response.data?.length) {
+            this.selectedTemplateByNotification[notification.Id] = response.data[0].name;
+          }
+          this.syncTemplateParams(notification.Id);
+        },
+        error: (error: unknown) => {
+          console.error('Error while loading templates:', error);
+          this.templateErrorByNotification[notification.Id] = 'Failed to load templates.';
+        }
+      });
+  }
+
+  sendTemplate(notification: AppNotification): void {
+    const templateName = this.selectedTemplateByNotification[notification.Id];
+    if (!templateName) {
+      this.templateErrorByNotification[notification.Id] = 'Select a template first.';
+      return;
+    }
+
+    const selectedTemplate = this.getSelectedTemplate(notification.Id);
+    const templateLanguage = selectedTemplate?.language || 'en';
+    const maxIndex = this.getTemplatePlaceholderMaxIndex(selectedTemplate);
+    const params = (this.templateParamsByNotification[notification.Id] || []).slice(0, maxIndex);
+
+    if (maxIndex > 0 && params.length < maxIndex) {
+      while (params.length < maxIndex) {
+        params.push('');
+      }
+    }
+
+    if (maxIndex > 0 && params.some((value) => !value.trim())) {
+      this.templateErrorByNotification[notification.Id] = 'Fill all placeholder values.';
+      return;
+    }
+
+    this.handleAction(notification, 'SEND_TEMPLATE', {
+      TemplateName: templateName,
+      TemplateLanguage: templateLanguage,
+      TemplateParams: params
+    });
+  }
+
+  onTemplateSelectionChange(notification: AppNotification): void {
+    this.templateErrorByNotification[notification.Id] = '';
+    this.syncTemplateParams(notification.Id);
+  }
+
+  getTemplateBody(template: WhatsAppTemplate | undefined): string {
+    if (!template?.components?.length) {
+      return '';
+    }
+
+    const bodyComponent = template.components.find((component) => component.type === 'BODY');
+    return bodyComponent?.text || '';
+  }
+
+  getTemplatePlaceholders(template: WhatsAppTemplate | undefined): string[] {
+    const maxIndex = this.getTemplatePlaceholderMaxIndex(template);
+    if (maxIndex === 0) {
+      return [];
+    }
+
+    return Array.from({ length: maxIndex }, (_, index) => `{{${index + 1}}}`);
+  }
+
+  getSelectedTemplate(notificationId: number): WhatsAppTemplate | undefined {
+    const selectedName = this.selectedTemplateByNotification[notificationId];
+    return this.templatesByNotification[notificationId]?.find((template) => template.name === selectedName);
+  }
+
+  getSelectedTemplatePlaceholders(notificationId: number): string[] {
+    return this.getTemplatePlaceholders(this.getSelectedTemplate(notificationId));
+  }
+
+  getTemplateParamValue(notificationId: number, index: number): string {
+    return this.templateParamsByNotification[notificationId]?.[index] || '';
+  }
+
+  setTemplateParamValue(notificationId: number, index: number, value: string): void {
+    if (!this.templateParamsByNotification[notificationId]) {
+      this.templateParamsByNotification[notificationId] = [];
+    }
+    this.templateParamsByNotification[notificationId][index] = value;
+  }
+
+  private syncTemplateParams(notificationId: number): void {
+    const template = this.getSelectedTemplate(notificationId);
+    const maxIndex = this.getTemplatePlaceholderMaxIndex(template);
+    const current = this.templateParamsByNotification[notificationId] || [];
+    this.templateParamsByNotification[notificationId] = Array.from(
+      { length: maxIndex },
+      (_, index) => current[index] || ''
+    );
+  }
+
+  private getTemplatePlaceholderMaxIndex(template: WhatsAppTemplate | undefined): number {
+    const bodyText = this.getTemplateBody(template);
+    const indices = this.getPlaceholderIndicesFromText(bodyText);
+    return indices.length > 0 ? Math.max(...indices) : 0;
+  }
+
+  private getPlaceholderIndicesFromText(text: string): number[] {
+    if (!text) {
+      return [];
+    }
+
+    const matches = text.match(/\{\{\d+\}\}/g) || [];
+    const indices = matches
+      .map((match) => parseInt(match.replace(/\D/g, ''), 10))
+      .filter((value) => !Number.isNaN(value));
+    return Array.from(new Set(indices)).sort((a, b) => a - b);
   }
 
   isNotificationLoading(notificationId: number): boolean {
@@ -189,6 +355,10 @@ export class NotificationBellComponent implements OnDestroy {
     actionType: NotificationActionPayload['ActionType']
   ): boolean {
     return this.loadingActionByNotification[notificationId] === actionType;
+  }
+
+  isTemplateLoading(notificationId: number): boolean {
+    return this.templateLoadingByNotification[notificationId] === true;
   }
 
   trackByNotificationId(_: number, notification: AppNotification): number {

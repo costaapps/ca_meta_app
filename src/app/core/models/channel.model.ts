@@ -27,3 +27,26 @@ export interface AuthResponse {
   message?: string;
   token?: string;
 }
+
+export interface WhatsAppTemplate {
+  name: string;
+  status?: string;
+  category?: string;
+  language?: string;
+  components?: WhatsAppTemplateComponent[];
+}
+
+export interface WhatsAppTemplateComponent {
+  type?: string;
+  text?: string;
+  format?: string;
+}
+
+export interface WhatsAppTemplateCreateRequest {
+  phoneNumberId: string;
+  name: string;
+  category: string;
+  body: string;
+  language?: string;
+  exampleValues?: string[];
+}
