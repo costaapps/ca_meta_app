@@ -37,6 +37,8 @@ yarn-error.log
 testem.log
 /typings
 __screenshots__/
+backend/connect.php
+backend/connect_old.php
 
 # System files
 .DS_Store
