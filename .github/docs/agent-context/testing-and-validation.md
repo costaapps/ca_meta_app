@@ -28,45 +28,37 @@ Not available:
 
 ### `npm run build`
 - Result: passed
-- Output location:
-  - `dist/meta-integration`
+- Output location: `dist/meta-integration`
 
 ### `npm test -- --watch=false`
-- Result: failed
-- Confirmed causes:
-  - stale import path using `src/app/...`
-  - Jasmine namespace usage in a Vitest-oriented setup
-  - spec still expects removed `pages`, `getAvailablePages`, `connectPage`, `disconnectPage` API
+- Result: passed
 
-Evidence:
-- `src/app/features/channels/pages/channel-list/channel-list.component.spec.ts`
-- command output captured during validation
+### `php -l backend/meta_auth_helper.php`
+- Result: passed
+
+### `php -l backend/connect_facebook.php`
+- Result: passed
+
+### `php -l backend/connect_instagram.php`
+- Result: passed
 
 ## Current Coverage Reality
-- Existing tests are minimal and at least partially stale.
-- `src/app/app.spec.ts` still expects `Hello, meta-integration`, which does not match the routed app shell.
-- `channel-list.component.spec.ts` targets an older page-list architecture that no longer exists.
-- No tests were found for:
+- `src/app/app.spec.ts` now matches the routed shell instead of the old title check.
+- `src/app/features/channels/pages/channel-list/channel-list.component.spec.ts` now targets the current service contract.
+- No tests were added for:
   - `ChannelSetupComponent`
   - `ChannelTemplatesComponent`
   - `NotificationBellComponent`
-  - `MetaIntegrationService`
+  - `MetaAuthService`
 
 Evidence:
 - `src/app/app.spec.ts`
 - `src/app/features/channels/pages/channel-list/channel-list.component.spec.ts`
 
-## Recommended Test Repair Order
-1. Fix `App` shell spec to assert app creation and routed shell expectations only.
-2. Rewrite `ChannelListComponent` spec against `connectedChannels` and `saveAutoReply`.
-3. Add tests for `ChannelSetupComponent` query param handling of `cUUID`, `auth_success`, and `error`.
-4. Add tests for WhatsApp template placeholder parsing and validation.
-5. Add tests for notification action payload construction.
-
 ## Manual Validation Checklist For Future Changes
 - Confirm route behavior from `/setup`, `/channels`, and `/templates`
 - Confirm `cUUID` persistence and reuse
-- Confirm login redirect request uses current tenant
+- Confirm login redirect request uses the current tenant and product context
 - Confirm channel loading without tenant fails gracefully
 - Confirm WhatsApp template list and creation payloads
 - Confirm notification refresh and action payloads

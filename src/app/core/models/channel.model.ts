@@ -1,6 +1,18 @@
 /**
- * Modelo de Dados para Integração Meta (Facebook/Instagram)
+ * Shared channel and template models for Meta integrations.
  */
+
+export interface ConnectedChannel {
+  id: number;
+  type: 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP';
+  externalId: string;
+  name: string;
+  profilePicture: string;
+  privateWelcomeMessage?: string;
+  commentPublicReply?: string;
+  commentPrivateReply?: string;
+  connectedAt: string;
+}
 
 export interface InstagramAccount {
   id: string;
@@ -9,17 +21,17 @@ export interface InstagramAccount {
 }
 
 export interface FacebookPage {
-  id: string; // Page ID
+  id: string;
   name: string;
-  access_token?: string; // Opcional no front
-  picture?: string; // URL da foto da página (opcional)
-  instagram_business_account?: InstagramAccount | null; // Se null, não serve pro nosso caso
-  is_connected: boolean; // Flag visual: Já está salvo no nosso banco?
-  welcomeMessage?: string; // Welcome message for automation
+  access_token?: string;
+  picture?: string;
+  instagram_business_account?: InstagramAccount | null;
+  is_connected: boolean;
+  welcomeMessage?: string;
 }
 
 export interface ChannelSetupResponse {
-  pages: FacebookPage[]; // Lista de páginas trazidas da API do Facebook via Backend
+  pages: FacebookPage[];
 }
 
 export interface AuthResponse {

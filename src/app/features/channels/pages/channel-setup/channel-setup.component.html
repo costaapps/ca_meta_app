@@ -1,156 +1,78 @@
-<div class="setup-container">
-  
-  <!-- Background Decorative Elements -->
-  <div class="bg-blur blur-1"></div>
-  <div class="bg-blur blur-2"></div>
-
-  <!-- Content Wrapper -->
-  <div class="setup-content">
-    
-    <!-- Success Message -->
-    <div *ngIf="successMessage" class="alert-container success-alert">
-      <div class="alert-icon">✅</div>
-      <div class="alert-content">
-        <h3>Success!</h3>
-        <p>{{ successMessage }}</p>
-      </div>
+<div class="setup-shell">
+  <section class="intro-panel">
+    <div>
+      <div class="eyebrow">Costa Apps</div>
+      <h1>Conecte canais Meta ao Msg4 e ao Agent4</h1>
+      <p>
+        A Costa Apps conecta comunicação, sistemas de gestão e automação para simplificar a
+        operação. Com Msg4 e Agent4, conversas viram processos rastreáveis e dados corporativos
+        ficam mais acessíveis para decisões e atendimentos do dia a dia.
+      </p>
     </div>
 
-    <!-- Error Message -->
-    <div *ngIf="errorMessage" class="alert-container error-alert">
-      <div class="alert-icon">❌</div>
-      <div class="alert-content">
-        <p>{{ errorMessage }}</p>
+    <div class="product-summary" aria-label="Produtos Costa Apps">
+      <div>
+        <strong>Msg4</strong>
+        <span>Orquestra canais, fluxos, regras e integrações com sistemas de gestão.</span>
+      </div>
+      <div>
+        <strong>Agent4</strong>
+        <span>Adiciona inteligência artificial aos dados e processos da operação.</span>
       </div>
     </div>
+  </section>
 
-    <!-- Main Card -->
-    <div class="setup-card">
-      <!-- Brand Header -->
-      <div class="card-brand-header">
-        <div class="brand-logo">
-          <span class="logo-icon">💬</span>
-        </div>
-        <div class="brand-text">
-          <h4 class="brand-name">Msg4</h4>
-          <p class="brand-tagline">Meta Integration</p>
-        </div>
+  <section class="operation-panel">
+    <div>
+      <h2>Inteligência e operação trabalhando juntas</h2>
+      <p>
+        O Msg4 estrutura o atendimento e conecta os canais aos sistemas da empresa. O Agent4
+        complementa essa operação com inteligência artificial, permitindo respostas naturais,
+        relatórios automáticos e apoio a ações dentro dos processos de negócio.
+      </p>
+    </div>
+    <a routerLink="/channels" class="secondary-action">Ver canais conectados</a>
+  </section>
+
+  <section class="flow-grid">
+    <article
+      *ngFor="let flow of flows; trackBy: trackFlow"
+      class="flow-card"
+      [class.whatsapp]="flow.accentClass === 'whatsapp'"
+      [class.facebook]="flow.accentClass === 'facebook'"
+      [class.instagram]="flow.accentClass === 'instagram'"
+    >
+      <div class="flow-header">
+        <div class="badge">{{ flow.badgeLabel }}</div>
       </div>
 
-      <!-- Divider -->
-      <div class="card-divider"></div>
+      <h2>{{ flow.title }}</h2>
+      <p class="summary">{{ flow.summary }}</p>
+      <p class="description">{{ flow.description }}</p>
 
-      <!-- Main Title Section -->
-      <div class="title-section">
-        <h1 class="main-title">Connect Your Meta Account</h1>
-        <p class="main-subtitle">Sync your Instagram messages and start managing conversations in one place</p>
-      </div>
+      <ul class="highlights">
+        <li *ngFor="let highlight of flow.highlights">{{ highlight }}</li>
+      </ul>
 
-      <!-- Supported Platforms Section -->
-      <div class="platforms-section">
-        <h3 class="section-title">Supported Platforms</h3>
-        <div class="platforms-grid">
-          <div class="platform-item instagram">
-            <div class="platform-badge instagram">
-              <span class="platform-icon">📸</span>
-            </div>
-            <h4 class="platform-name">Instagram</h4>
-            <p class="platform-desc">Business accounts with direct messaging enabled</p>
-          </div>
-          <div class="platform-item facebook">
-            <div class="platform-badge facebook">
-              <span class="platform-icon">📄</span>
-            </div>
-            <h4 class="platform-name">Facebook</h4>
-            <p class="platform-desc">Business pages with messaging capabilities</p>
-          </div>
-          <div class="platform-item whatsapp">
-            <div class="platform-badge whatsapp">
-              <span class="platform-icon">💬</span>
-            </div>
-            <h4 class="platform-name">WhatsApp</h4>
-            <p class="platform-desc">Business accounts for customer communication</p>
-          </div>
+      <div class="flow-status" *ngIf="getState(flow.product).successMessage || getState(flow.product).errorMessage">
+        <div class="status success" *ngIf="getState(flow.product).successMessage">
+          {{ getState(flow.product).successMessage }}
+        </div>
+        <div class="status error" *ngIf="getState(flow.product).errorMessage">
+          {{ getState(flow.product).errorMessage }}
         </div>
       </div>
 
-      <!-- Requirements Section -->
-      <div class="requirements-section">
-        <h3 class="section-title">Required Permissions</h3>
-        <ul class="requirements-list">
-          <li class="requirement-item">
-            <span class="requirement-icon">🔐</span>
-            <div>
-              <strong>Administrative Access</strong>
-              <p>You must be an administrator of your Meta business accounts</p>
-            </div>
-          </li>
-          <li class="requirement-item">
-            <span class="requirement-icon">🔗</span>
-            <div>
-              <strong>Connected Accounts</strong>
-              <p>Instagram and WhatsApp must be linked to your Facebook page</p>
-            </div>
-          </li>
-          <li class="requirement-item">
-            <span class="requirement-icon">💬</span>
-            <div>
-              <strong>Messaging Permissions</strong>
-              <p>Access to manage direct messages across all platforms</p>
-            </div>
-          </li>
-        </ul>
-      </div>
-
-      <!-- Main CTA Button -->
-      <button 
-        (click)="connectWithFacebook()"
-        [disabled]="isConnecting"
-        class="cta-button primary"
-        [class.loading]="isConnecting"
+      <button
+        type="button"
+        class="flow-button"
+        [class.loading]="getState(flow.product).isConnecting"
+        [disabled]="getState(flow.product).isConnecting"
+        (click)="connect(flow.product)"
       >
-        <svg *ngIf="!isConnecting" class="button-icon facebook" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-        </svg>
-        <span *ngIf="!isConnecting" class="button-text">Connect with Facebook</span>
-        <span *ngIf="isConnecting" class="button-text loading-text">
-          <span class="spinner"></span>Connecting...
-        </span>
+        <span *ngIf="!getState(flow.product).isConnecting">{{ flow.ctaLabel }}</span>
+        <span *ngIf="getState(flow.product).isConnecting">Conectando...</span>
       </button>
-
-      <!-- Security Info -->
-      <div class="security-info">
-        <svg class="security-icon" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
-        </svg>
-        <div>
-          <strong>Protected by OAuth 2.0</strong>
-          <p>Your credentials are securely managed by Facebook. You will be redirected to secure login.</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Benefits Grid -->
-    <div class="benefits-section">
-      <div class="benefit-card">
-        <div class="benefit-icon">💬</div>
-        <h4 class="benefit-title">Centralized Messages</h4>
-        <p class="benefit-desc">Access all Instagram DMs in a single dashboard</p>
-      </div>
-
-      <div class="benefit-card">
-        <div class="benefit-icon">⚡</div>
-        <h4 class="benefit-title">Respond Quickly</h4>
-        <p class="benefit-desc">Manage conversations efficiently and increase engagement</p>
-      </div>
-
-      <div class="benefit-card">
-        <div class="benefit-icon">🔔</div>
-        <h4 class="benefit-title">Real-Time Notifications</h4>
-        <p class="benefit-desc">Receive alerts for new messages instantly</p>
-      </div>
-    </div>
-
-    <!-- Footer Info -->
-    <div class="setup-footer">
-      <p class="footer-text">💡 Tip: Make sure your Instagram Business account is <strong>connected</strong> to your Facebook page before proceeding.</p>
+    </article>
+  </section>
+</div>
