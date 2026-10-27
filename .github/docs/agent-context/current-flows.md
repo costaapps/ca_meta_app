@@ -1,77 +1,67 @@
 # Current Flows
 
 ## Purpose
-- This file is a map of the main runtime flows.
-- It intentionally stays above implementation detail so it remains useful as the code evolves.
+- This file maps the main runtime flows at a stable level.
 
 ## Main User Journeys
 
 ### App Entry
-- The app is route-driven and starts at the setup experience by default.
-- Tenant initialization happens close to the setup flow rather than in a global app bootstrap.
+- The app still starts at the setup experience.
+- The setup screen now shows three explicit product paths instead of one combined Meta login.
 
 Evidence:
 - `src/app/app.routes.ts`
 - `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
 
 ### Tenant Capture
-- The active tenant is currently derived from `cUUID`.
-- That value is persisted locally and reused across the integration flows.
-- There is no stronger parent-platform handshake yet.
+- The active tenant is still derived from `cUUID`.
+- That value is persisted locally and reused across the Meta flows.
 
 Evidence:
 - `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
 - `src/app/core/services/meta-integration.service.ts`
 
 ### Meta Connection Flow
-- The setup screen delegates login URL generation to the backend.
-- The current authorization journey is still combined across Meta products.
-- After external authorization, the backend redirects the user back into the app.
+- The setup screen now treats WhatsApp, Facebook and Instagram as separate journeys.
+- Each journey has its own CTA, backend entrypoint and in-page state.
+- WhatsApp is prepared as a dedicated Embedded Signup path.
 
 Evidence:
 - `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
-- `src/app/core/services/meta-integration.service.ts`
-- `backend/connect.php`
+- `src/app/core/services/meta-auth.service.ts`
+- `src/app/app.routes.ts`
 
 ### Connected Channel Management
-- The channels area loads the connected assets for the active tenant.
-- It also owns the current automation/message configuration UX.
-- WhatsApp behavior should be treated as structurally distinct from Facebook and Instagram even when shown in the same screen.
+- The channels area still loads connected assets for the active tenant.
+- It continues to own the automation/message configuration UX.
 
 Evidence:
 - `src/app/features/channels/pages/channel-list/channel-list.component.ts`
-- `backend/connect.php`
+- `src/app/core/services/meta-integration.service.ts`
 
 ### WhatsApp Template Flow
-- The templates area is a WhatsApp-specific flow built on top of connected numbers.
-- It supports template listing and creation through the backend boundary.
+- The templates area remains a WhatsApp-specific flow built on connected numbers.
 
 Evidence:
 - `src/app/features/channels/pages/channel-templates/channel-templates.component.ts`
-- `backend/connect.php`
-
-### Review Notification Flow
-- The notification bell loads review-related items and dispatches actions back through the backend.
-- Treat it as a separate operational concern from the main setup flow.
-
-Evidence:
-- `src/app/features/channels/components/notification-bell/notification-bell.component.ts`
-- `backend/connect.php`
+- `src/app/core/services/meta-integration.service.ts`
 
 ## Navigation Shape
-- `/setup`: onboarding and connection entry
+- `/setup`: onboarding entry with three visible product cards
+- `backend/connect.php`: WhatsApp entrypoint and callback handler
+- `backend/connect_facebook.php`: Facebook entrypoint and callback handler
+- `backend/connect_instagram.php`: Instagram entrypoint and callback handler
+- `/setup/callback`: legacy callback alias retained for compatibility
 - `/channels`: primary operational area
 - `/templates`: WhatsApp template subflow
-- callback returns currently land on `/channels`
 
 Evidence:
 - `src/app/app.routes.ts`
-- `backend/connect.php`
+- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
 
 ## Read The Code When
-- you need exact payload shape
-- you need exact redirect behavior
-- you need detailed validation logic
+- you need exact callback handling
+- you need tenant capture details
 - you need product-specific branching
 
 See also:

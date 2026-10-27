@@ -18,18 +18,12 @@
 
 ## P1
 
-### OAuth flow is still unified across products
-- Current code asks for Facebook, Instagram, and WhatsApp scopes together.
-- Impact: over-scoped auth and harder future separation.
+### WhatsApp connection file remains local-only
+- `backend/connect.php` is still a local sensitive reference and remains outside Git.
+- Impact: the WhatsApp path continues to depend on a local-only file that is not versioned here.
 - Evidence:
   - `backend/connect.php`
-
-### Test suite is stale and failing
-- At least two specs target removed behavior and Jasmine globals.
-- Impact: no trustworthy automated regression signal.
-- Evidence:
-  - `src/app/app.spec.ts`
-  - `src/app/features/channels/pages/channel-list/channel-list.component.spec.ts`
+  - `git status --short --branch`
 
 ### WhatsApp notification text reply path is not implemented
 - `SEND_MESSAGE` branch exists conceptually but does not send.
@@ -45,15 +39,8 @@
 - Evidence:
   - no matching code found in `src/` or `backend/`
 
-### Service and component duplicate channel types
-- `ConnectedChannel` is declared in more than one place.
-- Impact: type drift risk.
-- Evidence:
-  - `src/app/core/services/meta-integration.service.ts`
-  - `src/app/features/channels/pages/channel-list/channel-list.component.ts`
-
 ### User-visible errors are inconsistent
-- Some failures use `alert`, some use inline banners, some only log to console.
+- Some failures use inline banners, some only log to console.
 - Impact: uneven UX and supportability.
 - Evidence:
   - `src/app/core/services/meta-integration.service.ts`

@@ -1,56 +1,49 @@
 # Meta Integrations
 
 ## Current Reality
-- The current implementation still treats Facebook, Instagram, and WhatsApp as parts of one combined authorization journey.
-- The code already shows that this is an operational baseline, not the intended long-term architecture.
+- The frontend now separates Meta setup into three product journeys: WhatsApp Embedded Signup, Facebook and Instagram.
+- The setup page renders one card per product and routes callbacks separately.
+- The backend now has product-specific entrypoints for Facebook and Instagram, while WhatsApp keeps the existing `backend/connect.php` flow.
 
 Evidence:
 - `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `src/app/app.routes.ts`
+- `src/app/core/services/meta-auth.service.ts`
+- `src/app/core/services/meta-integration.service.ts`
 - `backend/connect.php`
+- `backend/connect_facebook.php`
+- `backend/connect_instagram.php`
+- `backend/meta_auth_helper.php`
 
 ## Responsibility Split Today
 - Angular:
-  - starts the connection flow
-  - displays connected assets
+  - starts product-specific connection flows
+  - stores tenant context
+  - shows setup and callback state per product
   - manages channel and template UI
 - PHP:
-  - builds the login URL
-  - receives the callback
-  - exchanges tokens
-  - discovers assets
-  - persists channels
-  - performs Meta-facing backend actions
+  - now owns product-specific login initiation and callback processing through separate files
+  - still owns connected channel and WhatsApp template operations
 
 Evidence:
+- `src/app/core/services/meta-auth.service.ts`
 - `src/app/core/services/meta-integration.service.ts`
-- `backend/connect.php`
+- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
 
 ## Product Boundaries Today
-- Facebook is the visible entry point from the frontend.
-- Instagram is still discovered through the broader connected-account flow.
-- WhatsApp is handled through the same authorization baseline and then exposed in dedicated UI areas such as templates and review actions.
-- There is no Embedded Signup implementation yet.
-
-Evidence:
-- `src/app/features/channels/**/*`
-- `backend/connect.php`
-
-## Why This Matters
-- Future work must not assume one callback, one scope bundle, or one token strategy for all Meta products.
-- Product-specific auth separation is a roadmap concern and should be treated as an architectural change, not a small refactor.
+- WhatsApp is treated as a dedicated Embedded Signup journey.
+- Facebook and Instagram now have separate frontend journeys and backend entrypoints.
 
 ## Historical Reference
-- `backend/connect_old.php` exists as a local comparison point for the older unified flow.
-- Use it only for reasoning about drift and migration, not as a documentation target to mirror line by line.
+- `backend/connect_old.php` remains a local comparison point for the older unified flow.
 
 Evidence:
 - `backend/connect_old.php`
 
 ## Read The Code When
-- you need the exact current OAuth parameters
-- you need the exact current scope list
-- you need product-specific persistence details
-- you need to compare the current flow with the older local variant
+- you need the current frontend auth split
+- you need the shared backend boundary
+- you need product-specific branching details
 
 See also:
 - [backend-contracts.md](backend-contracts.md)

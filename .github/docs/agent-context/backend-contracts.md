@@ -2,7 +2,7 @@
 
 ## Purpose
 - This file documents the backend surface area at a stable level.
-- It is meant to identify responsibility and dependency boundaries, not to duplicate every request and response shape from PHP.
+- It separates confirmed behavior from planned product-specific evolution.
 
 ## Contract Classification
 - `Comprovado`: directly supported by the current code
@@ -16,6 +16,7 @@
 Evidence:
 - `src/environments/environment.ts`
 - `src/environments/environment.prod.ts`
+- `src/app/core/services/meta-auth.service.ts`
 - `src/app/core/services/meta-integration.service.ts`
 
 ## Current Endpoint Families
@@ -23,15 +24,25 @@ Evidence:
 ### Auth And Callback
 - Status: Comprovado
 - Responsibilities:
-  - start the current Meta authorization flow
+  - start the Meta authorization flow for each product
   - recover tenant context
   - process the callback
-  - persist discovered assets
   - redirect the user back into the frontend
+- Current frontend contract:
+  - the setup screen now opens product-specific backend entrypoints directly
+  - WhatsApp uses `backend/connect.php`
+  - Facebook uses `backend/connect_facebook.php`
+  - Instagram uses `backend/connect_instagram.php`
+  - the shared helper lives in `backend/meta_auth_helper.php`
 
 Primary sources:
-- `src/app/core/services/meta-integration.service.ts`
+- `src/app/core/services/meta-auth.service.ts`
+- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `src/app/app.routes.ts`
 - `backend/connect.php`
+- `backend/connect_facebook.php`
+- `backend/connect_instagram.php`
+- `backend/meta_auth_helper.php`
 
 ### Connected Channels
 - Status: Comprovado
@@ -68,7 +79,7 @@ Primary sources:
 ## Shared Contract Traits
 - Tenant context is required across the meaningful backend operations.
 - The frontend passes tenant context explicitly rather than through a stronger app session layer.
-- Product-specific logic exists behind a shared backend base path.
+- Product-specific auth logic now exists in both the frontend and the backend entrypoints.
 
 ## Read The Code When
 - you need exact payload or response shape
