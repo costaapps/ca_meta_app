@@ -4,41 +4,46 @@ import { ChannelSetupComponent } from './features/channels/pages/channel-setup/c
 import { ChannelTemplatesComponent } from './features/channels/pages/channel-templates/channel-templates.component';
 
 export const routes: Routes = [
-  // Página de Setup/Conexão (Página Inicial)
   {
     path: 'setup',
-    component: ChannelSetupComponent
+    component: ChannelSetupComponent,
+    data: { metaProduct: null }
   },
-  
-  // Página de Listagem de Canais
+  {
+    path: 'setup/callback',
+    component: ChannelSetupComponent,
+    data: { metaProduct: 'FACEBOOK' }
+  },
+  {
+    path: 'setup/whatsapp/callback',
+    component: ChannelSetupComponent,
+    data: { metaProduct: 'WHATSAPP' }
+  },
+  {
+    path: 'setup/facebook/callback',
+    component: ChannelSetupComponent,
+    data: { metaProduct: 'FACEBOOK' }
+  },
+  {
+    path: 'setup/instagram/callback',
+    component: ChannelSetupComponent,
+    data: { metaProduct: 'INSTAGRAM' }
+  },
   {
     path: 'channels',
     component: ChannelListComponent
   },
-
-  // Página de Templates WhatsApp
   {
     path: 'templates',
     component: ChannelTemplatesComponent
   },
-  
-  // Callback do Facebook (volta para a página de setup onde trata sucesso/erro)
-  {
-    path: 'setup/callback',
-    component: ChannelSetupComponent
-  },
-  
-  // Redirect padrão (começa no setup)
   {
     path: '',
     redirectTo: '/setup',
     pathMatch: 'full'
   },
-  
-  // Wildcard (qualquer rota não encontrada vai para setup)
   {
     path: '**',
     redirectTo: '/setup'
   }
 ];
-
