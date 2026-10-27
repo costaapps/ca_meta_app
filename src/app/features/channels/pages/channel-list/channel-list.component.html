@@ -1,178 +1,161 @@
 <div class="channels-container">
   <app-notification-bell></app-notification-bell>
 
-  <!-- Success Modal -->
   <div *ngIf="showSuccessModal" class="modal-overlay">
     <div class="modal-content success-modal" [@slideUp]="showSuccessModal ? 'open' : 'closed'">
       <div class="modal-header">
         <div class="modal-icon success-icon">
           <svg fill="currentColor" viewBox="0 0 24 24">
-            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
           </svg>
         </div>
       </div>
       <div class="modal-body">
         <h3 class="modal-title">{{ successMessage }}</h3>
-        <p class="modal-description">Your automation settings have been saved successfully.</p>
+        <p class="modal-description">As configurações de automação foram salvas com sucesso.</p>
       </div>
       <div class="modal-footer">
-        <button (click)="closeSuccessModal()" class="modal-button close-button">
-          Close
-        </button>
+        <button (click)="closeSuccessModal()" class="modal-button close-button">Fechar</button>
       </div>
     </div>
   </div>
 
-  <!-- Error Modal -->
   <div *ngIf="showErrorModal" class="modal-overlay">
     <div class="modal-content error-modal" [@slideUp]="showErrorModal ? 'open' : 'closed'">
       <div class="modal-header">
         <div class="modal-icon error-icon">
           <svg fill="currentColor" viewBox="0 0 24 24">
-            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/>
+            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
           </svg>
         </div>
       </div>
       <div class="modal-body">
-        <h3 class="modal-title">Error</h3>
+        <h3 class="modal-title">Erro</h3>
         <p class="modal-description">{{ errorMessage }}</p>
       </div>
       <div class="modal-footer">
-        <button (click)="closeErrorModal()" class="modal-button close-button">
-          Close
-        </button>
+        <button (click)="closeErrorModal()" class="modal-button close-button">Fechar</button>
       </div>
     </div>
   </div>
 
-  <!-- Header Section -->
   <div class="channels-header">
     <div class="header-content">
-      <h1 class="header-title">My Channels</h1>
-      <p class="header-subtitle">Manage your connections with Instagram and other platforms</p>
+      <div class="eyebrow">Canais conectados</div>
+      <h1 class="header-title">Gerencie os canais Meta da operação</h1>
+      <p class="header-subtitle">
+        Acompanhe conexões do WhatsApp, Instagram e Facebook e configure mensagens automáticas
+        para os fluxos do Msg4.
+      </p>
     </div>
     <div class="header-actions">
-      <a routerLink="/templates" class="header-action">WhatsApp Templates</a>
-      <div class="header-icon">📱</div>
+      <a routerLink="/setup" class="header-action secondary">Conectar canal</a>
+      <a routerLink="/templates" class="header-action">Templates WhatsApp</a>
     </div>
   </div>
 
-  <!-- Loading State -->
   <div *ngIf="isLoading" class="loading-container">
     <div class="spinner"></div>
-    <p class="loading-text">Loading your channels...</p>
+    <p class="loading-text">Carregando canais conectados...</p>
   </div>
 
-  <!-- Connected Channels Grid -->
   <div *ngIf="!isLoading && connectedChannels.length > 0" class="channels-grid">
     <div *ngFor="let channel of connectedChannels" class="channel-card">
-      <!-- Card Header with Profile -->
       <div class="card-header">
-        <img 
-          [src]="channel.profilePicture" 
-          [alt]="channel.name"
-          class="profile-image"
-        />
+        <img [src]="channel.profilePicture" [alt]="channel.name" class="profile-image" />
         <div class="profile-info">
           <h3 class="channel-name">{{ channel.name }}</h3>
           <p class="channel-type">{{ channel.type }}</p>
         </div>
         <div class="status-badge active">
           <span class="status-dot"></span>
-          <span class="status-text">Connected</span>
+          <span class="status-text">Conectado</span>
         </div>
       </div>
 
-      <!-- Card Body -->
       <div class="card-body">
         <div class="info-row">
-          <span class="info-label">Channel ID:</span>
+          <span class="info-label">ID do canal</span>
           <span class="info-value">{{ channel.externalId }}</span>
         </div>
         <div class="info-row">
-          <span class="info-label">Connected on:</span>
-          <span class="info-value">{{ channel.connectedAt | date:'MM/dd/yyyy HH:mm' }}</span>
+          <span class="info-label">Conectado em</span>
+          <span class="info-value">{{ channel.connectedAt | date:'dd/MM/yyyy HH:mm' }}</span>
         </div>
 
-        <!-- Automation Configuration Section -->
         <div class="automation-section">
           <div class="automation-header">
-            <div class="automation-header-icon">⚙️</div>
-            <h4 class="automation-title">Automation Configuration</h4>
+            <h4 class="automation-title">Configuração de automação</h4>
           </div>
-          
+
           <div class="automation-divider"></div>
-          
+
           <div class="automation-content">
-            <!-- Private Welcome Message (All channel types) -->
             <div class="automation-field">
               <div class="automation-label">
-                <span class="label-text">Private Welcome Message</span>
-                <span class="label-hint">Automatically sent to new messages</span>
+                <span class="label-text">Mensagem privada de boas-vindas</span>
+                <span class="label-hint">Enviada automaticamente para novas conversas.</span>
               </div>
-              
-              <textarea 
+
+              <textarea
                 [(ngModel)]="channel.privateWelcomeMessage"
-                placeholder="Enter your welcome message... (e.g., 'Hey! Thanks for connecting!')"
+                placeholder="Digite a mensagem de boas-vindas..."
                 class="message-textarea"
                 maxlength="500"
               ></textarea>
-              
+
               <span class="char-count">{{ (channel.privateWelcomeMessage?.length || 0) }}/500</span>
             </div>
 
-            <!-- Comment Replies (Instagram and Facebook only) -->
             <ng-container *ngIf="shouldShowCommentReplies(channel.type)">
-              <!-- Public Comment Reply -->
               <div class="automation-field">
                 <div class="automation-label">
-                  <span class="label-text">Public Comment Reply</span>
-                  <span class="label-hint">Reply to comments publicly</span>
+                  <span class="label-text">Resposta pública em comentários</span>
+                  <span class="label-hint">Resposta exibida publicamente nos comentários.</span>
                 </div>
-                
-                <textarea 
+
+                <textarea
                   [(ngModel)]="channel.commentPublicReply"
-                  placeholder="Enter your public comment reply..."
+                  placeholder="Digite a resposta pública..."
                   class="message-textarea"
                   maxlength="500"
                 ></textarea>
-                
+
                 <span class="char-count">{{ (channel.commentPublicReply?.length || 0) }}/500</span>
               </div>
 
-              <!-- Private Comment Reply -->
               <div class="automation-field">
                 <div class="automation-label">
-                  <span class="label-text">Private Comment Reply</span>
-                  <span class="label-hint">Reply to comments privately via DM</span>
+                  <span class="label-text">Resposta privada em comentários</span>
+                  <span class="label-hint">Mensagem privada enviada a partir de comentários.</span>
                 </div>
-                
-                <textarea 
+
+                <textarea
                   [(ngModel)]="channel.commentPrivateReply"
-                  placeholder="Enter your private comment reply..."
+                  placeholder="Digite a resposta privada..."
                   class="message-textarea"
                   maxlength="500"
                 ></textarea>
-                
+
                 <span class="char-count">{{ (channel.commentPrivateReply?.length || 0) }}/500</span>
               </div>
             </ng-container>
-            
+
             <div class="automation-footer">
-              <button 
+              <button
                 (click)="saveChannelConfiguration(channel)"
                 [disabled]="isSavingMessage[channel.id]"
                 class="save-config-button"
               >
                 <svg *ngIf="!isSavingMessage[channel.id]" class="button-icon" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
+                  <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z" />
                 </svg>
-                <span *ngIf="!isSavingMessage[channel.id]">Save Configuration</span>
+                <span *ngIf="!isSavingMessage[channel.id]">Salvar configuração</span>
                 <span *ngIf="isSavingMessage[channel.id]">
                   <svg class="spinner-icon" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/>
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" />
                   </svg>
-                  Saving...
+                  Salvando...
                 </span>
               </button>
             </div>
@@ -180,12 +163,10 @@
         </div>
       </div>
 
-      <!-- Card Footer with Platform Icon -->
       <div class="card-footer">
         <div [class]="'platform-badge ' + channel.type.toLowerCase()">
           <svg class="platform-icon" fill="currentColor" viewBox="0 0 24 24">
-            <!-- Generic platform icon -->
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
           </svg>
           {{ channel.type }}
         </div>
@@ -193,11 +174,11 @@
     </div>
   </div>
 
-  <!-- Empty State -->
   <div *ngIf="!isLoading && connectedChannels.length === 0" class="empty-state">
-    <div class="empty-icon">📭</div>
-    <h2 class="empty-title">No channels connected</h2>
-    <p class="empty-description">You haven't connected any channels yet. Go to the setup page to connect your Meta account.</p>
-    <a routerLink="/setup" class="empty-cta-button">Connect Channel</a>
+    <h2 class="empty-title">Nenhum canal conectado</h2>
+    <p class="empty-description">
+      Conecte WhatsApp, Instagram ou Facebook para iniciar os fluxos conversacionais do Msg4.
+    </p>
+    <a routerLink="/setup" class="empty-cta-button">Conectar canal</a>
   </div>
 </div>

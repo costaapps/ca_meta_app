@@ -4,7 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
-import { MetaIntegrationService, ConnectedChannel } from '../../../../core/services/meta-integration.service';
+import { ConnectedChannel } from '../../../../core/models/channel.model';
+import { MetaIntegrationService } from '../../../../core/services/meta-integration.service';
 import { WhatsAppTemplate } from '../../../../core/models/channel.model';
 
 @Component({
