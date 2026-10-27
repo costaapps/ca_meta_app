@@ -4,20 +4,9 @@ import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
+import { ConnectedChannel } from '../../../../core/models/channel.model';
 import { MetaIntegrationService } from '../../../../core/services/meta-integration.service';
 import { NotificationBellComponent } from '../../components/notification-bell/notification-bell.component';
-
-export interface ConnectedChannel {
-  id: number;
-  type: 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP';
-  externalId: string;    // Antigo pageId ou accountId
-  name: string;          // Antigo pageName ou username
-  profilePicture: string;
-  privateWelcomeMessage?: string;
-  commentPublicReply?: string; // Novo
-  commentPrivateReply?: string; // Novo
-  connectedAt: string;
-}
 
 @Component({
   selector: 'app-channel-list',
@@ -69,14 +58,12 @@ export class ChannelListComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Saves the automation messages for a channel
-   * Different configurations apply based on channel type:
-   * - Instagram/Facebook: All three message types (private, public, private reply)
-   * - WhatsApp: Only private welcome message
+   * Salva as mensagens de automação do canal.
+   * Instagram/Facebook aceitam os três tipos de mensagem; WhatsApp usa boas-vindas privada.
    */
   saveChannelConfiguration(channel: ConnectedChannel): void {
     if (!this.isChannelConfigValid(channel)) {
-      this.showErrorToast('Please enter at least one message.');
+      this.showErrorToast('Informe pelo menos uma mensagem.');
       return;
     }
 
@@ -87,30 +74,28 @@ export class ChannelListComponent implements OnInit, OnDestroy {
     .subscribe({
       next: () => {
         this.isSavingMessage[channel.id] = false;
-        this.showSuccessToast('Channel configuration saved successfully!');
+        this.showSuccessToast('Configuração do canal salva com sucesso.');
         this.cdr.markForCheck();
       },
       error: (err: any) => {
-        console.error('Error saving channel configuration:', err);
+        console.error('Erro ao salvar configuração do canal:', err);
         this.isSavingMessage[channel.id] = false;
-        this.showErrorToast('Error saving configuration. Please try again.');
+        this.showErrorToast('Erro ao salvar a configuração. Tente novamente.');
         this.cdr.markForCheck();
       }
     });
   }
 
   /**
-   * Validates if at least one message field is filled based on channel type
+   * Valida se pelo menos um campo de mensagem foi preenchido para o tipo de canal.
    */
   private isChannelConfigValid(channel: ConnectedChannel): any {
     const hasPrivateWelcome = channel.privateWelcomeMessage?.trim();
     
     if (channel.type === 'WHATSAPP') {
-      // WhatsApp only requires privateWelcomeMessage
       return hasPrivateWelcome;
     }
     
-    // Instagram and Facebook can have any of the three fields filled
     const hasPublicReply = channel.commentPublicReply?.trim();
     const hasPrivateReply = channel.commentPrivateReply?.trim();
     
@@ -118,14 +103,14 @@ export class ChannelListComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Checks if a channel type should display comment reply fields
+   * Verifica se o canal deve exibir respostas para comentários.
    */
   shouldShowCommentReplies(channelType: string): boolean {
     return channelType === 'INSTAGRAM' || channelType === 'FACEBOOK';
   }
 
   /**
-   * Shows success modal and auto-hides after 3 seconds
+   * Exibe o modal de sucesso e fecha automaticamente após 3 segundos.
    */
   private showSuccessToast(message: string): void {
     this.successMessage = message;
@@ -137,7 +122,7 @@ export class ChannelListComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Shows error modal and auto-hides after 4 seconds
+   * Exibe o modal de erro e fecha automaticamente após 4 segundos.
    */
   private showErrorToast(message: string): void {
     this.errorMessage = message;
@@ -149,14 +134,14 @@ export class ChannelListComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Closes success modal manually
+   * Fecha o modal de sucesso manualmente.
    */
   closeSuccessModal(): void {
     this.showSuccessModal = false;
   }
 
   /**
-   * Closes error modal manually
+   * Fecha o modal de erro manualmente.
    */
   closeErrorModal(): void {
     this.showErrorModal = false;
