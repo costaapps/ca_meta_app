@@ -73,6 +73,11 @@
               "buildTarget": "meta-integration:build:development"
             }
           },
+          "options": {
+            "allowedHosts": [
+              "structures-stages-federal-consumer.trycloudflare.com"
+            ]
+          },
           "defaultConfiguration": "development"
         },
         "test": {
