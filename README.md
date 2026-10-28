@@ -57,3 +57,7 @@ Angular CLI does not come with an end-to-end testing framework by default. You c
 ## Additional Resources
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+# Execução das Milestones Meta v2
+
+Para configurar os agentes, validar o ambiente e executar o planejamento por dependências, consulte [o guia de execução](docs/execution/README.md). Os PRs de pacote são integrados exclusivamente por squash; o PR consolidado de cada Milestone aguarda aceite humano.
+

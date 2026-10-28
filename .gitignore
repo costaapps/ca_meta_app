@@ -43,3 +43,8 @@ backend/connect_old.php
 # System files
 .DS_Store
 Thumbs.db
+
+# Local automation state, worktrees, evidence inputs and model outputs
+/.orchestrator/
+__pycache__/
+*.py[cod]

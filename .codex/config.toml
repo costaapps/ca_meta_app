@@ -1,0 +1,6 @@
+# Project-scoped defaults. Authentication, sandbox and approval policy remain
+# operator/organization settings; this file does not broaden them.
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
+
