@@ -190,3 +190,26 @@ O comando de emenda não roda agentes nem desbloqueia automaticamente. Exige loc
 Cada construção do controlador recarrega a emenda registrada e verifica seus hashes contra o runner revisado. Portanto use esta versão do executor também para status, retomada e finalização; o executor antigo não conhece a emenda. O manifesto original permanece intacto, com o adendo explícito no checkpoint e neste arquivo versionado. Não editar hashes SQLite manualmente. Esta ferramenta não migra develop e não invalida aprovações existentes: recusa o caso antes que haja aceitação/PR. Uma evolução futura do contrato precisa de nova reconciliação revisada.
 
 O relatório de uma tarefa bloqueada agora substitui o motivo antigo de desbloqueio pelo resumo atual do agente. A decisão e os critérios efetivos são enviados no pacote de contexto a todos os revisores.
+
+## Recuperar mudança de CRLF/LF da validação legada
+
+O validador `.planning/validate.py` gera arquivos como efeito colateral. `csv.writer` usa CRLF por padrão; o CSV rastreado pode estar em LF. O supervisor agora executa essa etapa através de `planning_check.py`, que compara os quatro artefatos gerados com o conteúdo existente, normalizando CRLF/LF sem escrever nenhum deles. Conteúdo divergente ou tentativa de escrever outro destino falha. O registro da validação inclui o comando original e o efetivamente executado. O gate de worktree limpa continua ativo, sem mudança de política ou checkpoint.
+
+Após atualizar a worktree runner, restaure somente a variação de fim de linha confirmada, com o controlador parado:
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+import subprocess
+root = Path('/mnt/c/VsCodeRepos/ca_meta_app/.orchestrator/worktrees/M1.01')
+name = 'docs/meta-v2/acceptance-matrix.csv'
+original = subprocess.run(['git', 'show', 'HEAD:' + name], cwd=root, check=True, capture_output=True).stdout
+path = root / name
+if path.read_bytes().replace(b'\r\n', b'\n') != original.replace(b'\r\n', b'\n'):
+    raise SystemExit('Conteúdo diferente do commit: nenhum arquivo foi alterado; revisar manualmente.')
+path.write_bytes(original)
+print('CSV restaurado aos bytes do commit; nenhuma alteração de conteúdo descartada.')
+PY
+```
+
+Só depois do sucesso, `unblock M1 --issue M1.01 --reason "Validação do planejamento agora é somente leitura; CSV reconciliado por igualdade de conteúdo"`, seguido do `resume` habitual com modelo, esforço e opção de orçamento explícitos. Não renovar tentativas sem necessidade; a ocorrência relatada estava na tentativa 2 de 3. Não repetir `amend-baseline`, pois a emenda já está registrada.

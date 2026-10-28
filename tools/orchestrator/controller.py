@@ -218,12 +218,16 @@ class Controller:
         checks = []
         for argv in self.policy["validation_commands"]:
             try:
-                command(argv, worktree, min(self.remaining(), self.policy["agent_timeout_seconds"]), sanitized=True)
+                # The legacy planning validator generates files, including CRLF CSV.
+                # Check those outputs without mutating the reviewed candidate.
+                actual_argv = ([argv[0], str(Path(__file__).with_name("planning_check.py"))]
+                               if argv == ["python3", ".planning/validate.py"] else argv)
+                command(actual_argv, worktree, min(self.remaining(), self.policy["agent_timeout_seconds"]), sanitized=True)
             except ProcessTimeout:
                 raise
             except ProcessError as exc:
                 raise ValidationFailure(argv, exc.output + "\n" + exc.stderr) from None
-            checks.append({"argv": argv, "status": "passed", "revision": revision})
+            checks.append({"argv": argv, "executed_argv": actual_argv, "status": "passed", "revision": revision})
         if git(worktree, "status", "--porcelain"):
             raise RuntimeError("Validation changed tracked/untracked deliverables; reconcile and rerun")
         return checks
