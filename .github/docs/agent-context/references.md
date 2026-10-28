@@ -72,6 +72,7 @@
 - Consulted on: 2026-10-28
 - Evidence record: [Meta capability matrix](../../../docs/meta-v2/meta-capability-matrix.md)
 - Accessible primary material: Meta-authored WhatsApp Business Platform Postman workspace and Cloud API / Embedded Signup collections; Meta's official Instagram API Postman collection.
+- The Instagram collection includes an Instagram Login Send API example at `POST https://graph.instagram.com/{api_version}/{ig_user_id}/messages` and says the recipient must initiate the conversation. This is collection guidance, not app-grant or Sandbox evidence.
 - Retrieval limitation: direct `developers.facebook.com` pages for Facebook Login for Business, WhatsApp Coexistence, Instagram variants and Graph webhooks returned HTTP 429 in this check; the Graph access-token guide was not accessible through the research tool.
 - Decision: use accessible collection claims only within their stated flow/endpoint scope; keep app/dashboard state, Facebook Login details, Coexistence-specific behavior and Sandbox authorization **Not confirmed** until independently evidenced. Do not treat the 2026-06-23 statuses above as current retrieval results.
 - Version note: tracked PHP calls use Graph API `v24.0`; deployed/current support status is **Not confirmed**. The official Postman requests reviewed parameterize the version.

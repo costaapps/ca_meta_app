@@ -4,11 +4,11 @@
 
 Use this experiment before changing the Graph API version or any Facebook JavaScript SDK / Embedded Signup SDK, configuration, or feature type. It compares a verified incumbent setup with a candidate in an isolated Meta Sandbox and records behavior without storing codes, tokens, secrets, customer payloads, or operational identifiers.
 
-**Offline fixture experiment: Passed on 2026-10-28.** The synthetic check below selects configured version/capability proposals and rejects incompatible or unresolved inputs. This is a local policy experiment only.
+**Offline fixture experiment: Passed locally in the current M1.03 worktree on 2026-10-28.** The synthetic check below selects configured version/capability proposals and rejects incompatible or unresolved inputs. This is a local policy experiment only; the supervisor must record validation against its post-edit checkpoint SHA for exact reviewed-revision provenance.
 
 **Meta Sandbox compatibility comparison: Not run.** The inspected PHP source uses Graph API `v24.0`, but the deployed version and currently supported version are **Not confirmed**. Accessible Meta Postman requests use a `{{Version}}` variable. No active app/config export, candidate release, authorized Sandbox assets, or provider test run was supplied.
 
-The earlier M1.03 snapshot at `6095a1990c89c39e3399c774b3a9aca6138af9a2` is historical; this experiment uses it only as the tested repository source baseline and then-current worktree artifacts. That SHA is not a claim about the final reviewed package commit. The supervisor checkpoint/PR records final review provenance after the supervisor commits the edits.
+The repository source baseline `6095a1990c89c39e3399c774b3a9aca6138af9a2` and earlier package snapshot `7adf06997b9446b445778290a1a684de433a5f37` are historical provenance only. This run used the synthetic fixtures and checker from the current worktree based on that earlier package snapshot, including the uncommitted documentation updates. Neither SHA is presented as the final reviewed package revision. The supervisor checkpoint/PR records final review provenance after the supervisor commits the edits.
 
 ## Ownership
 
@@ -37,7 +37,7 @@ Do not change more than one variable family in a single comparison. Graph API ve
 
 The fixture set is [`meta-capability-fixtures.json`](meta-capability-fixtures.json), marked synthetic and containing no app IDs, credentials, tenant IDs, or provider run results. The checker [`check_meta_capabilities.py`](check_meta_capabilities.py) uses only the Python standard library. It requires exact app alias, environment, Graph API version, flow, config alias, and operation; only `documented-proposal` and `repo-observed-proposal` records can be selected. A successful selection is explicitly a design candidate and cannot authorize a live provider operation.
 
-Command executed from the package root at the source baseline stated above:
+Command run from the package root in the current worktree:
 
 ```text
 python3 experiments/check_meta_capabilities.py
@@ -58,7 +58,7 @@ PASS distinct flow/config variants: WhatsApp Cloud exclusive, WhatsApp Coexisten
 LIMITATION synthetic offline selection only; no Meta or Sandbox result
 ```
 
-The fixture's `v24.0` value is a repository-source example, not a claim of current Meta support. The `v25.0` rejection only checks that an unconfigured request fails closed; it makes no claim that this version exists or is supported. The same run also validated fixture JSON with `python3 -m json.tool experiments/meta-capability-fixtures.json` and whitespace with `git diff --check 6095a1990c89c39e3399c774b3a9aca6138af9a2`; both commands exited 0.
+The fixture's `v24.0` value is a repository-source example, not a claim of current Meta support. The `v25.0` rejection only checks that an unconfigured request fails closed; it makes no claim that this version exists or is supported. This local run does not certify Meta permissions, app configuration, or Sandbox behavior. The supervisor's post-edit validation record is still needed to bind the result to the committed review SHA.
 
 No build, Angular tests, PHP, network API call, Meta app, or Sandbox operation was part of this local documentation/fixture check.
 

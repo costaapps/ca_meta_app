@@ -13,6 +13,7 @@
 ### M1.03 follow-up — 2026-10-28
 - The official Meta WhatsApp Cloud API / Embedded Signup Postman collections and Instagram API collection were accessible; see [M1.03 capability matrix](../../../docs/meta-v2/meta-capability-matrix.md) for the dated claims and URLs.
 - Direct developer documentation returned HTTP 429 for Facebook Login for Business, WhatsApp Coexistence, Instagram flow guides and Graph webhooks; the Graph access-token guide was not accessible through the research tool.
+- Meta's official Instagram Postman collection was accessible and includes an Instagram Login Send API example and its recipient-initiated conversation prerequisite; see the dated evidence in the capability matrix. App-specific grants and Sandbox behavior remain **Not confirmed**.
 - Sandbox authorization/token/asset proof for all required flows remains **Not confirmed**. Do not treat documentation retrieval or a browser event as a successful end-to-end authorization.
 
 ## Backend Deployment Ownership
