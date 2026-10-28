@@ -31,10 +31,10 @@ Os destinos abaixo preservam o layout e as jornadas validadas; mudança visual d
 
 | Tela/rota | Fonte e estado observado | Destino funcional proposto | Cenário de paridade / pacote |
 |---|---|---|---|
-| `/setup` | `src/app/app.routes.ts:8-10`; `channel-setup.component.html:1`; `meta-auth.service.ts:8-60` | Portal de onboarding com cartões e jornadas separadas de WhatsApp, Facebook e Instagram; iniciar o módulo de autorização do produto escolhido | Cartões, CTA e estados de erro/sucesso mantêm layout; testar tenant ausente e cada produto; M5.01/M5.03/M4.03 |
+| `/setup` | `src/app/app.routes.ts:8-10`; `channel-setup.component.html:1`; `meta-auth.service.ts:8-60,83-91` | Portal de onboarding com cartões e jornadas separadas de WhatsApp, Facebook e Instagram; iniciar o módulo de autorização do produto escolhido | Cartões, CTA e estados de erro/sucesso mantêm layout; testar tenant ausente e cada produto; M5.01/M5.03/M4.03 |
 | `/channels` | `src/app/app.routes.ts:33-35`; `channel-list.component.html:1`; `.ts:42` | Portal de gerenciamento de canais; consulta de canais autorizada por tenant e edição de configuração por ativo | Loading/erro/vazio/lista e três tipos de ativo; preservar feedback; M5.01/M5.02/M5.05 |
 | `/templates` | `src/app/app.routes.ts:37-39`; `channel-templates.component.html:1`; `.ts:42` | Portal de gerenciamento de templates WhatsApp, separado de Facebook/Instagram; query/create por grant e número verificados | Zero/um/vários números, leitura/criação e erro de provider; manter fluxo; M5.04 |
-| Callbacks do setup | `src/app/app.routes.ts:13-30`; `channel-setup.component.ts:82` | Estado/result view do módulo do produto, encaminhado por rota local allowlisted; não aceitar `auth_success` sem confirmação do backend | Sucesso, recusa, erro, zero ativos, callback direto e refresh; M4.03/M4.08/M4.09 |
+| Callbacks do setup | `src/app/app.routes.ts:13-30`; `channel-setup.component.ts:79-100` | Estado/result view do módulo do produto, encaminhado por rota local allowlisted; não aceitar `auth_success` sem confirmação do backend | Sucesso, recusa, erro, zero ativos, callback direto e refresh; M4.03/M4.08/M4.09 |
 | `/` e `**` | `src/app/app.routes.ts:41-48` | Shell mantém redirect para `/setup` | Teste de rota raiz e desconhecida; M5.01 |
 
 ## Destino de cada função PHP versionada

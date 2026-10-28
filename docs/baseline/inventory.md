@@ -15,16 +15,16 @@ Artefatos: [endpoints](endpoint-matrix.csv), [paridade e cobertura das funções
 ## Fronteiras observadas
 
 - `src/main.ts:1`, `src/app/app.config.ts:1` e `src/app/app.routes.ts:6`: bootstrap standalone, HttpClient e router. `/` e wildcard levam ao setup; não há guard de identidade nas três telas.
-- `src/app/core/services/meta-auth.service.ts:101`: URL de autorização abre arquivo PHP por produto com `company_uuid` obtido de localStorage. Produto pendente fica em sessionStorage. Configuração de callback no catálogo não obriga o PHP a usá-la.
+- `src/app/core/services/meta-auth.service.ts:67-69,83-91,93-106`: URL de autorização abre arquivo PHP por produto com `company_uuid` obtido de localStorage. Produto pendente fica em sessionStorage. Configuração de callback no catálogo não obriga o PHP a usá-la.
 - `src/app/core/services/meta-integration.service.ts:14`: captura UUID no construtor; setter atualiza memória e storage. Setup grava somente storage (`channel-setup.component.ts:76`), portanto uma instância já criada do serviço pode manter contexto anterior (Hipótese de sequência, não reproduzida em navegador).
-- `notification-bell.component.ts:106`: lê storage a cada refresh/ação e usa HttpClient diretamente. Não há polling automático no componente; atualização é manual e limitada a 3 segundos.
+- `src/app/features/channels/components/notification-bell/notification-bell.component.ts:96-120,146-172,368-370`: lê storage a cada refresh/ação e usa HttpClient diretamente. Não há polling automático no componente; atualização é manual e limitada a 3 segundos.
 - `src/environments/environment.ts:1` e `environment.prod.ts:1`: base de API; seu valor configurado não prova onde cada URL é roteada na implantação.
 
 ## Divergências comprovadas no fonte
 
 | ID | Evidência | Consequência / destino |
 |---|---|---|
-| B01 | `channel-setup.component.ts:76`; `meta-auth.service.ts:101`; `meta-integration.service.ts:23` | UUID controlado pelo cliente é enviado como tenant. Membership/autenticação no bootstrap ausente: Not confirmed. M3.01–M3.05 |
+| B01 | `channel-setup.component.ts:73-76`; `meta-auth.service.ts:67-69,83-91`; `meta-integration.service.ts:13,20-27` | UUID controlado pelo cliente é enviado como tenant. Membership/autenticação no bootstrap ausente: Not confirmed. M3.01–M3.05 |
 | B02 | `backend/meta_auth_helper.php:58` e `:77`; `connect_whatsapp.php:94` e `:156` | State é JSON/Base64; não há vínculo com sessão/nonce de consumo demonstrado nessas funções. M4.03 |
 | B03 | `meta-auth.service.ts:16-17`; `connect_whatsapp.php:45-67` | GET direto do arquivo não casa com os predicados versionados do roteador; fixture offline retorna fallback 404. O operador relata rewrite para `connect.php`, mas regra e comportamento implantado: Not confirmed. Resolver em M4.03 antes de trocar/desativar a rota; esta lacuna não bloqueia o inventário versionado. |
 | B04 | `connect_whatsapp.php:763`, `:808`, `:894` | Templates e envio usam token root global; callback tenta usá-lo em `:236` sem declará-lo global em `:144`. Permissões efetivas: Not confirmed. M3.08/M5.07 |
