@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .amendment import apply_recorded
 from .discovery import apply_recorded as apply_discovery
+from .package_checks import discover as package_checks
 from .agents import Codex
 from .catalog import Catalog, REPOSITORY, digest
 from .github import GitHub, GitHubError, MergeBlocked
@@ -242,6 +243,9 @@ class Controller:
         trace_command = ["python3", "experiments/baseline/trace_routes.py"]
         if trace.is_file() and trace_command not in commands:
             commands.append(trace_command)
+        for extra in package_checks(worktree):
+            if extra not in commands:
+                commands.append(extra)
         for argv in commands:
             try:
                 # The legacy planning validator generates files, including CRLF CSV.
@@ -257,6 +261,45 @@ class Controller:
         if git(worktree, "status", "--porcelain"):
             raise RuntimeError("Validation changed tracked/untracked deliverables; reconcile and rerun")
         return checks
+
+    def task_context(self, task, base, data):
+        key = task["key"]
+        return {"allowed_paths": self.policy["allowed_paths"][key[:2]], "base": base,
+                "dependencies": {d: self.state.task(d)["data"] for d in task["deps"]},
+                "external_evidence": external_evidence(self.state.directory, task),
+                "operator_context": data.get("operator_context"),
+                "previous_attempt": data.get("feedback"),
+                "protected_controls": "No automation/instruction/workflow changes"}
+
+    def queue_recheck(self, key, reason):
+        task = self.catalog.tasks[key]
+        old = self.state.task(key)
+        data = old["data"]
+        run = self.state.run(key[:2])
+        if old["status"] not in {"blocked", "retry"} or not run or data.get("pr"):
+            raise ValueError("Recheck requires blocked/retry candidate without a PR")
+        if run["status"] == "usage_unknown" or data.get("base") != run["integration_sha"]:
+            raise ValueError("Unknown usage or moved integration; reconcile before recheck")
+        worktree = self.state.directory / "worktrees" / key
+        expected_branch = "codex/" + key.lower().replace(".", "-")
+        if git(worktree, "branch", "--show-current") != expected_branch:
+            raise ValueError("Unexpected candidate branch")
+        head = git(worktree, "rev-parse", "HEAD")
+        if head != data.get("revision", data["base"]):
+            raise ValueError("Candidate HEAD differs from checkpoint")
+        context = self.task_context(task, data["base"], data)
+        if task.get("external") and not context["external_evidence"]:
+            raise ValueError("Required external evidence missing; recheck cannot waive it")
+        check_paths(self.changed_paths(worktree, data["base"]), self.policy["allowed_paths"][key[:2]], worktree)
+        pending = self.changed_paths(worktree)
+        if pending:
+            git(worktree, "add", "-A", "--", *pending)
+            git(worktree, "commit", "-m", f"fix({key.lower()}): checkpoint candidate for supervisor validation")
+        revision = git(worktree, "rev-parse", "HEAD")
+        self.state.save(key, "retry", stage="validate", revision=revision,
+                        stage_context_hash=digest(context), gate_signature=None, checks=[], saved_reviews=[],
+                        transport_failures=0, reason=reason)
+        self.state.event(key[:2], "operator_recheck_queued", task=key, revision=revision, reason=reason)
 
     def execute_task(self, task, branch):
         key = task["key"]
@@ -283,11 +326,7 @@ class Controller:
         attempt = old["attempt"] + (0 if resumable else 1)
         self.state.save(key, "running", attempt=attempt, base=base, branch=head_branch, worktree=str(worktree))
         self.sync(key, "running")
-        context = {"allowed_paths": self.policy["allowed_paths"][key[:2]], "base": base,
-                   "dependencies": {d: self.state.task(d)["data"] for d in task["deps"]},
-                   "external_evidence": external_evidence(self.state.directory, task),
-                   "operator_context": old["data"].get("operator_context"),
-                   "previous_attempt": old["data"].get("feedback"), "protected_controls": "No automation/instruction/workflow changes"}
+        context = self.task_context(task, base, old["data"])
         initial_head = git(worktree, "rev-parse", "HEAD")
         if resumable:
             if initial_head != old["data"].get("revision") or git(worktree, "status", "--porcelain"):
@@ -328,7 +367,8 @@ class Controller:
         signature = digest({"revision": revision, "context": context, "task": task,
                             "policy": self.policy, "model": self.model, "effort": self.reasoning_effort,
                             "runner": Path(__file__).read_text(encoding="utf-8"),
-                            "transport": Path(__file__).with_name("agents.py").read_text(encoding="utf-8")})
+                            "transport": Path(__file__).with_name("agents.py").read_text(encoding="utf-8"),
+                            "package_checks": Path(__file__).with_name("package_checks.py").read_text(encoding="utf-8")})
         cached = old.get("gate_signature") == signature
         checks = old.get("checks") if cached else None
         if not checks:

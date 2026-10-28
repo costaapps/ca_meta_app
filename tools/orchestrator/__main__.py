@@ -39,7 +39,7 @@ def main(argv=None):
     sub.add_parser("validate", help="Validate catalog, policy and agent definitions without network/model calls")
     doctor = sub.add_parser("doctor", help="Check local prerequisites; --online checks GitHub access read-only")
     doctor.add_argument("--online", action="store_true")
-    for name in ("plan", "status", "report", "run", "resume", "unblock", "account-usage", "finalize", "amend-baseline", "amend-discovery"):
+    for name in ("plan", "status", "report", "run", "resume", "unblock", "account-usage", "finalize", "amend-baseline", "amend-discovery", "recheck"):
         part = sub.add_parser(name)
         part.add_argument("milestone", choices=[f"M{i}" for i in range(1, 7)])
         if name in {"run", "resume"}:
@@ -52,6 +52,10 @@ def main(argv=None):
             part.add_argument("--model", default="gpt-6-luna", help="Exact Codex model; no automatic fallback")
             part.add_argument("--reasoning-effort", default="xhigh",
                               choices=["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
+        if name == "recheck":
+            part.add_argument("--issue", required=True)
+            part.add_argument("--reason", required=True)
+            part.add_argument("--execute", action="store_true")
         if name == "unblock":
             part.add_argument("--issue", required=True, help="Catalog key such as M1.01")
             part.add_argument("--reason", required=True)
@@ -97,7 +101,16 @@ def main(argv=None):
         return 0
     state = State(root / ".orchestrator")
     try:
-        if args.command == "amend-discovery":
+        if args.command == "recheck":
+            if args.issue not in catalog.milestone(args.milestone):
+                raise ValueError("Issue does not belong to milestone")
+            if not args.execute:
+                print("Dry run: queue current candidate for supervisor checks and fresh reviews")
+            else:
+                with state.lock():
+                    Controller(root, state).queue_recheck(args.issue, args.reason)
+                    print("Candidate queued for validation; implementation preserved; PAUSE unchanged")
+        elif args.command == "amend-discovery":
             if not args.execute:
                 print("Dry run: M1.02/M1.03 independent design; no operational certification")
             else:

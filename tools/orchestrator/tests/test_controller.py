@@ -560,6 +560,19 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.state.task("M1.01")["attempt"], 1)
         self.assertEqual(self.state.task("M1.01")["status"], "pr_pending")
 
+    def test_recheck_preserves_candidate_and_skips_implementer_after_budget_exhaustion(self):
+        self.agent.outcomes["implementer"] = ["blocked"]
+        self.tick()
+        self.assertEqual(self.state.task("M1.01")["status"], "blocked")
+        self.state.save("M1.01", "blocked", attempt=3)
+        with self.state.lock():
+            self.controller.queue_recheck("M1.01", "Missing supervisor checks recovered")
+        self.tick()
+        record = self.state.task("M1.01")
+        self.assertEqual(record["status"], "pr_pending")
+        self.assertEqual(record["attempt"], 3)
+        self.assertEqual(sum(role == "implementer" for _,role,_ in self.agent.calls), 1)
+
     def test_unknown_token_usage_requires_operator_accounting_before_resume(self):
         self.agent.tokens = None
         with self.assertRaises(TimeoutError):
