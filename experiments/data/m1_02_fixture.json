@@ -1,0 +1,135 @@
+{
+  "synthetic": true,
+  "source_system": "msg4-synthetic",
+  "environment": "fixture",
+  "app_config_id": "meta-app-fixture",
+  "source_version": "fixture-snapshot-1",
+  "mapping_version": "m1.02-proposed-1",
+  "projection_version": "fixture-projection-1",
+  "tenants": [
+    {
+      "tenant_id": "tenant-A",
+      "legacy_database_id": "DB-A",
+      "legacy_company_id": "COMPANY-A",
+      "legacy_company_uuid": "legacy-company-uuid-A"
+    },
+    {
+      "tenant_id": "tenant-B",
+      "legacy_database_id": "DB-A",
+      "legacy_company_id": "COMPANY-B",
+      "legacy_company_uuid": "legacy-company-uuid-B"
+    },
+    {
+      "tenant_id": "tenant-C",
+      "legacy_database_id": "DB-B",
+      "legacy_company_id": "COMPANY-C",
+      "legacy_company_uuid": "legacy-company-uuid-C"
+    }
+  ],
+  "assets": [
+    {
+      "source_row_id": "page-A-1",
+      "legacy_database_id": "DB-A",
+      "legacy_company_id": "COMPANY-A",
+      "provider": "META",
+      "asset_kind": "FACEBOOK_PAGE",
+      "external_asset_id": "ASSET-7"
+    },
+    {
+      "source_row_id": "page-B-1",
+      "legacy_database_id": "DB-A",
+      "legacy_company_id": "COMPANY-B",
+      "provider": "META",
+      "asset_kind": "FACEBOOK_PAGE",
+      "external_asset_id": "ASSET-7"
+    },
+    {
+      "source_row_id": "page-C-1",
+      "legacy_database_id": "DB-B",
+      "legacy_company_id": "COMPANY-C",
+      "provider": "META",
+      "asset_kind": "FACEBOOK_PAGE",
+      "external_asset_id": "ASSET-7"
+    },
+    {
+      "source_row_id": "duplicate-A-1",
+      "legacy_database_id": "DB-A",
+      "legacy_company_id": "COMPANY-A",
+      "provider": "META",
+      "asset_kind": "FACEBOOK_PAGE",
+      "external_asset_id": "ASSET-DUPLICATE",
+      "fixture_only_login_hint": "2030-01-01T00:00:00Z"
+    },
+    {
+      "source_row_id": "duplicate-A-2",
+      "legacy_database_id": "DB-A",
+      "legacy_company_id": "COMPANY-A",
+      "provider": "META",
+      "asset_kind": "FACEBOOK_PAGE",
+      "external_asset_id": "ASSET-DUPLICATE",
+      "fixture_only_login_hint": "2029-01-01T00:00:00Z"
+    },
+    {
+      "source_row_id": "ambiguous-incoming-1",
+      "legacy_database_id": "DB-A",
+      "legacy_company_id": null,
+      "provider": "META",
+      "asset_kind": "FACEBOOK_PAGE",
+      "external_asset_id": "ASSET-7",
+      "fixture_only_login_hint": "2031-01-01T00:00:00Z"
+    }
+  ],
+  "expiry_observations": [
+    {
+      "case_id": "expiry-unknown-missing",
+      "provider_observation": "missing",
+      "deadline_result": "unknown",
+      "legacy_value": null
+    },
+    {
+      "case_id": "expiry-known",
+      "provider_observation": "successful",
+      "deadline_result": "confirmed",
+      "deadline_at": "2030-01-02T03:04:05Z"
+    },
+    {
+      "case_id": "expiry-no-deadline",
+      "provider_observation": "successful",
+      "deadline_result": "no_deadline_confirmed"
+    },
+    {
+      "case_id": "expiry-never-sentinel",
+      "provider_observation": "missing",
+      "deadline_result": "unknown",
+      "legacy_value": "Never"
+    },
+    {
+      "case_id": "expiry-sql-null",
+      "provider_observation": "missing",
+      "deadline_result": "unknown",
+      "legacy_value": null
+    },
+    {
+      "case_id": "expiry-5184000-fallback",
+      "provider_observation": "missing",
+      "deadline_result": "unknown",
+      "legacy_value": "2030-03-02 00:00:00",
+      "legacy_origin": "code_fallback_5184000"
+    }
+  ],
+  "expected": {
+    "tenant_count": 3,
+    "distinct_legacy_database_count": 2,
+    "shared_database_company_pair_count": 1,
+    "asset_count": 6,
+    "mapped_asset_count": 3,
+    "quarantined_asset_count": 3,
+    "duplicate_asset_group_count": 1,
+    "ambiguous_tenant_match_count": 1,
+    "expiry_counts": {
+      "KNOWN": 1,
+      "NO_DEADLINE_RETURNED": 1,
+      "UNKNOWN": 4
+    }
+  }
+}
