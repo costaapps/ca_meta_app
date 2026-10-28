@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:costaapps:meta-v2:internal-event:proposed-v1",
+  "title": "Envelope interno após autenticação e resolução de tenant",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "asset.changed",
+        "authorization.changed",
+        "subscription.changed",
+        "projection.requested",
+        "onboarding.changed"
+      ]
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "aggregateId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "aggregateVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "causationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "metadataRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "legacyDatabaseId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "legacyCompanyId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "required": [
+    "id",
+    "tenantId",
+    "type",
+    "schemaVersion",
+    "aggregateId",
+    "aggregateVersion",
+    "correlationId",
+    "occurredAt"
+  ],
+  "description": "Tenant é atribuído pelo servidor após validação; não é schema para confiar no webhook bruto. Segredos e conteúdo de mensagem não pertencem a este envelope operacional."
+}

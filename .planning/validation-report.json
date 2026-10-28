@@ -1,0 +1,12 @@
+{
+  "issues": 73,
+  "work_packages": 66,
+  "milestones": 6,
+  "hierarchy_edges": 72,
+  "dependency_edges": 280,
+  "acceptance_criteria": 330,
+  "construction_steps": 396,
+  "planned_validation_groups": 198,
+  "relative_points": 427,
+  "topological_waves": 34
+}

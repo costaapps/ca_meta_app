@@ -1,0 +1,15 @@
+{
+  "planning_pr": "https://github.com/costaapps/ca_meta_app/pull/76",
+  "structure_run": "https://github.com/costaapps/ca_meta_app/actions/runs/40687060925",
+  "audited_planning_commit": "f6b1095840e6695c6485f088a7a3fea1292bfeb2",
+  "baseline_commit": "7062247a15d15b1b1a5213353517bdc1596a1d38",
+  "issues_verified": 73,
+  "hierarchy_edges_verified": 72,
+  "dependency_edges_verified": 280,
+  "planning_script_tests_passed": 15,
+  "baseline": {"build": "passed", "test_files": 2, "tests_passed": 5, "php_files_syntax_passed": 4},
+  "npm_audit_snapshot": {"total": 47, "critical": 4, "high": 31, "moderate": 11, "low": 1},
+  "native_project": {"status": "blocked", "created": false, "reason": "GraphQL request failed: FORBIDDEN"},
+  "production": "unchanged",
+  "implementation": "planned; issues remain open"
+}
