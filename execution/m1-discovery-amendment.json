@@ -1,0 +1,65 @@
+{
+  "version": "m1-independent-discovery-v1",
+  "patches": {
+    "M1.02": {
+      "original_task_hash": "a876cbf0491be5b2ea5c194131cd0c62d6ea9d1ca6e00dce137bebbe9192ba08",
+      "changes": {
+        "goal": "Projetar o mapeamento e a integridade do banco novo a partir dos acessos observados no backend versionado, com fixtures sintéticas. DDL real é prova para migração dependente, não condição de desenho independente.",
+        "steps": [
+          "Inventariar campos e tabelas referenciados pelos quatro PHP versionados, com arquivo/linha. Não afirmar índices reais sem DDL.",
+          "Definir modelo novo com tenant e empresa isolados, distinguindo IdDatabase, IdCompany e UUID legado.",
+          "Construir fixtures sintéticas de duas empresas no mesmo banco e duas bases diferentes, sem dados reais.",
+          "Documentar conversão e expiração, credenciais por grant e casos ambíguos em quarentena.",
+          "Definir precedência de campos, mapeamento e algoritmo dry-run sem executar contra produção.",
+          "Registrar DDL, índices e consumidores não confirmados com cenário de migração afetado e gate antes de importar dados reais."
+        ],
+        "acceptance": [
+          "Cada coluna consumida pelo código versionado tem destino proposto e regra de conversão, com referências; colunas/índices reais não observados são explicitamente não confirmados.",
+          "Fixtures demonstram isolamento de duas empresas no mesmo IdDatabase e duas bases diferentes.",
+          "Fixtures de ativo ambíguo resultam em quarentena, sem reatribuição automática por último login.",
+          "A proposta distingue expiração desconhecida, conhecida e sem prazo, sem tratar Never como prazo comprovado.",
+          "Um dry-run sintético reproduz contagens/conflitos sem gravar em produção, e o plano exige reconciliação do DDL real antes da migração dependente."
+        ],
+        "tests": [
+          "Executar testes offline das fixtures sintéticas e registrar comando/resultado no supervisor.",
+          "Comparar o inventário com consultas e ON DUPLICATE KEY UPDATE dos PHP versionados, sem presumir índices reais.",
+          "Verificar ausência de credenciais/dados reais em fixtures, relatórios e documentação."
+        ],
+        "external": false,
+        "risk": "Aceite de descoberta/projeto, sem aprovação de deploy, migração, acesso a produção ou certificação Meta. Evidência real continua obrigatória antes do cenário dependente.",
+        "contract": "Entregas: schema-legacy.md, field-mapping.csv, integrity-report.md e plano de consulta somente leitura. Mapeamento inclui tenant_id, legacy_database_id, legacy_company_id, external_asset_id, source_version e projection_version. Complemento: fixtures/experimento offline executável e registro de lacunas e gates dependentes.",
+        "body": "Adendo explícito do operador: desenvolvimento independente da nova plataforma; evidência operacional no cenário dependente.\n\n- Cada coluna consumida pelo código versionado tem destino proposto e regra de conversão, com referências; colunas/índices reais não observados são explicitamente não confirmados.\n- Fixtures demonstram isolamento de duas empresas no mesmo IdDatabase e duas bases diferentes.\n- Fixtures de ativo ambíguo resultam em quarentena, sem reatribuição automática por último login.\n- A proposta distingue expiração desconhecida, conhecida e sem prazo, sem tratar Never como prazo comprovado.\n- Um dry-run sintético reproduz contagens/conflitos sem gravar em produção, e o plano exige reconciliação do DDL real antes da migração dependente."
+      }
+    },
+    "M1.03": {
+      "original_task_hash": "81e758159ce05d0f170af1b104eaa3c1a174830b92874109071e861e9fe0fe45",
+      "changes": {
+        "goal": "Projetar a matriz de capacidades e compatibilidade dos fluxos Meta separados. Distinguir fonte oficial consultada, configuração informada, hipótese e prova de Sandbox; liberar desenvolvimento independente sem certificar permissões reais.",
+        "steps": [
+          "Mapear Facebook, Instagram, WhatsApp exclusivo e Coexistence como jornadas distintas.",
+          "Pesquisar documentação primária acessível para escopos, endpoints e versões; citar URLs consultadas e registrar indisponibilidade com data sem inventar requisitos atuais.",
+          "Definir capacidades por recurso/operação e configuração por app/ambiente, sem token global como requisito novo.",
+          "Criar fixtures locais das decisões de versão/capacidade com hipóteses explicitamente identificadas.",
+          "Definir erros recuperáveis, retomada, permissões insuficientes e fallback suportado por evidência ou marcado proposto.",
+          "Listar verificação de app, permissões, configuração e Sandbox pendentes; atribuir ao operador do projeto a coordenação de acesso e ao pacote dependente a validação antes de integrar/certificar o cenário real."
+        ],
+        "acceptance": [
+          "A matriz distingue os quatro fluxos e relaciona operações, endpoints, escopos propostos e evidências/hipóteses sem afirmar certificação do provedor.",
+          "App, ambiente e versão são dimensões explícitas da configuração proposta; dados não disponíveis são marcados não confirmados sem solicitar segredos no repositório.",
+          "Fixtures offline verificam seleção de versão/capacidade e rejeição de configuração incompatível, com comandos e resultados registrados.",
+          "Cada afirmação atual sobre Meta cita fonte primária consultada ou é marcada não confirmada; falhas de acesso à documentação ficam registradas, sem fabricar confirmação.",
+          "O plano de validação lista evidências Meta/Sandbox necessárias por cenário e gate antes da certificação/ativação real. A ausência dessas evidências não bloqueia o desenho ou implementação local independente."
+        ],
+        "tests": [
+          "Executar experimento offline de compatibilidade com fixtures sintéticas.",
+          "Revisar a matriz contra os quatro fluxos e separar mock, documentação e Sandbox real.",
+          "Verificar que nenhum resultado offline é apresentado como aprovação de permissões ou configuração real da Meta."
+        ],
+        "external": false,
+        "risk": "Aceite de descoberta/projeto, sem aprovação de deploy, migração, acesso a produção ou certificação Meta. Evidência real continua obrigatória antes do cenário dependente.",
+        "contract": "Entregas: meta-capability-matrix.md com provider/API version, flow variant, scopes, token family, asset/operation, subscription target, eligibility, expiration/refresh rule e evidência. Registrar 429 ou documentação inacessível como pendência, nunca como validação. Complemento: fixtures/experimento offline executável e registro de lacunas e gates dependentes.",
+        "body": "Adendo explícito do operador: desenvolvimento independente da nova plataforma; evidência operacional no cenário dependente.\n\n- A matriz distingue os quatro fluxos e relaciona operações, endpoints, escopos propostos e evidências/hipóteses sem afirmar certificação do provedor.\n- App, ambiente e versão são dimensões explícitas da configuração proposta; dados não disponíveis são marcados não confirmados sem solicitar segredos no repositório.\n- Fixtures offline verificam seleção de versão/capacidade e rejeição de configuração incompatível, com comandos e resultados registrados.\n- Cada afirmação atual sobre Meta cita fonte primária consultada ou é marcada não confirmada; falhas de acesso à documentação ficam registradas, sem fabricar confirmação.\n- O plano de validação lista evidências Meta/Sandbox necessárias por cenário e gate antes da certificação/ativação real. A ausência dessas evidências não bloqueia o desenho ou implementação local independente."
+      }
+    }
+  }
+}

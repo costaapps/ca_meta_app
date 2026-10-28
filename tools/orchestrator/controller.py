@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .amendment import apply_recorded
+from .discovery import apply_recorded as apply_discovery
 from .agents import Codex
 from .catalog import Catalog, REPOSITORY, digest
 from .github import GitHub, GitHubError, MergeBlocked
@@ -85,6 +86,7 @@ class Controller:
         self.root, self.state = root, state
         self.catalog, self.policy = Catalog(root), load_policy(root)
         apply_recorded(self.catalog, state)
+        apply_discovery(self.catalog, state)
         self.github = github or GitHub(root)
         self.no_token_limit = no_token_limit
         self.model, self.reasoning_effort = model, reasoning_effort
@@ -108,6 +110,8 @@ class Controller:
         sha = self.github.branch_sha("develop")
         if git(self.root, "rev-parse", "HEAD") != sha:
             raise RuntimeError("Controller checkout must match the current develop commit")
+        git(self.root, "var", "GIT_AUTHOR_IDENT")
+        git(self.root, "var", "GIT_COMMITTER_IDENT")
         branch = "automation/milestone-" + milestone.lower()
         previous = self.state.run(milestone)
         if previous and previous["develop_sha"] != sha:
@@ -193,6 +197,21 @@ class Controller:
         return sorted(set(x for x in (tracked + others).split("\0") if x))
 
     def agent_run(self, task, role, worktree, revision, context):
+        original_head = git(worktree, "rev-parse", "HEAD")
+        for repair in range(3):
+            try:
+                return self.agent_turn(task, role, worktree, revision, context)
+            except ValueError as exc:
+                if repair == 2:
+                    raise
+                context = dict(context, repair_output_only=True, protocol_error=str(exc),
+                               previous_result=getattr(self.agent, "last_result", None))
+                self.state.event(task["key"][:2], "protocol_repair", task=task["key"], role=role,
+                                 revision=revision, repair=repair + 1)
+                if git(worktree, "rev-parse", "HEAD") != original_head:
+                    raise RuntimeError("Agent changed history during protocol recovery")
+
+    def agent_turn(self, task, role, worktree, revision, context):
         self.agent.timeout = min(self.policy["agent_timeout_seconds"], self.remaining())
         run = self.state.run(task["key"][:2])
         if not self.no_token_limit and run["tokens"] >= self.policy["max_total_tokens"]:
@@ -242,7 +261,8 @@ class Controller:
     def execute_task(self, task, branch):
         key = task["key"]
         old = self.state.task(key)
-        if old["attempt"] >= self.policy["max_attempts"]:
+        resumable = old["data"].get("stage") in {"validate", "review", "publish"}
+        if not resumable and old["attempt"] >= self.policy["max_attempts"]:
             self.state.save(key, "blocked", reason="Attempt budget exhausted")
             self.sync(key, "blocked")
             return
@@ -260,7 +280,7 @@ class Controller:
             if old["data"].get("base") != base:
                 self.state.save(key, "blocked", reason="Integration moved; preserve worktree for reconciliation")
                 return
-        attempt = old["attempt"] + 1
+        attempt = old["attempt"] + (0 if resumable else 1)
         self.state.save(key, "running", attempt=attempt, base=base, branch=head_branch, worktree=str(worktree))
         self.sync(key, "running")
         context = {"allowed_paths": self.policy["allowed_paths"][key[:2]], "base": base,
@@ -269,6 +289,13 @@ class Controller:
                    "operator_context": old["data"].get("operator_context"),
                    "previous_attempt": old["data"].get("feedback"), "protected_controls": "No automation/instruction/workflow changes"}
         initial_head = git(worktree, "rev-parse", "HEAD")
+        if resumable:
+            if initial_head != old["data"].get("revision") or git(worktree, "status", "--porcelain"):
+                raise RuntimeError("Checkpoint candidate changed; explicit reconciliation required")
+            if digest(context) != old["data"].get("stage_context_hash"):
+                self.state.save(key, "retry", stage="implement", reason="Context changed; invalidate cached gates")
+                return
+            return self.finish_candidate(task, branch, worktree, initial_head, context)
         result = self.agent_run(task, "implementer", worktree, initial_head, context)
         if git(worktree, "rev-parse", "HEAD") != initial_head:
             raise RuntimeError("Implementer changed git history; manual reconciliation required")
@@ -286,25 +313,46 @@ class Controller:
         pending = self.changed_paths(worktree)
         if pending:
             git(worktree, "add", "-A", "--", *pending)
-            git(worktree, "-c", "user.name=Meta automation", "-c", "user.email=automation@users.noreply.github.com",
-                "commit", "-m", f"feat({key.lower()}): implement work package")
+            git(worktree, "commit", "-m", f"feat({key.lower()}): implement work package (attempt {attempt})")
         revision = git(worktree, "rev-parse", "HEAD")
         if revision == base:
             raise RuntimeError("No candidate commit to review")
-        checks = self.validate_candidate(worktree, revision)
-        self.state.save(key, "reviewing", revision=revision, checks=checks)
+        self.state.save(key, "running", stage="validate", revision=revision,
+                        stage_context_hash=digest(context), saved_reviews=[])
+        return self.finish_candidate(task, branch, worktree, revision, context)
+
+    def finish_candidate(self, task, branch, worktree, revision, context):
+        key = task["key"]
+        old = self.state.task(key)["data"]
+        base = old["base"]
+        signature = digest({"revision": revision, "context": context, "task": task,
+                            "policy": self.policy, "model": self.model, "effort": self.reasoning_effort,
+                            "runner": Path(__file__).read_text(encoding="utf-8"),
+                            "transport": Path(__file__).with_name("agents.py").read_text(encoding="utf-8")})
+        cached = old.get("gate_signature") == signature
+        checks = old.get("checks") if cached else None
+        if not checks:
+            checks = self.validate_candidate(worktree, revision)
+            self.state.save(key, "reviewing", stage="review", revision=revision, checks=checks,
+                            gate_signature=signature, saved_reviews=[])
+        old = self.state.task(key)["data"]
         review_context = dict(context, diff_base=base, validation=checks,
                               instruction="Inspect the actual diff and all criteria independently; do not rely on implementer summary")
-        reviews = []
+        reviews = list(old.get("saved_reviews", [])) if cached else []
         for role in self.policy["review_roles"]:
+            if any(r["role"] == role and r["revision"] == revision for r in reviews):
+                continue
             reviews.append(self.agent_run(task, role, worktree, revision, review_context))
+            self.state.save(key, "reviewing", stage="review", saved_reviews=reviews)
             if git(worktree, "rev-parse", "HEAD") != revision or git(worktree, "status", "--porcelain"):
                 raise RuntimeError("Review changed the pinned checkout")
         if any(r["outcome"] != "pass" for r in reviews):
-            self.state.save(key, "retry", feedback=reviews,
+            self.state.save(key, "retry", stage="implement", feedback=reviews,
                             reason="Review requires changes: " + "; ".join(
                                 r["role"] + ": " + r["summary"] for r in reviews if r["outcome"] != "pass"))
             return
+        self.state.save(key, "reviewing", stage="publish", saved_reviews=reviews)
+        head_branch = self.state.task(key)["data"]["branch"]
         git(worktree, "push", "origin", head_branch)
         body = (f"Refs #{task['issue']}\n\nAutomated package {key}; final issue closure only after milestone approval.\n\n"
                 f"Base: `{base}`\nReviewed head: `{revision}`\nMerge policy: **squash only**.\n\n"
@@ -473,7 +521,7 @@ class Controller:
                     status = self.state.task(key)["status"]
                     if status in {"running", "reviewing"}:
                         # Interrupted work is retried on the preserved branch, never silently accepted.
-                        self.state.save(key, "retry", reason="Recovered interrupted attempt; review/checks must rerun")
+                        self.state.save(key, "retry", reason="Recovering recorded stage and SHA-bound gates")
                     elif status == "pr_pending":
                         self.poll_pr(key, branch, merge_packages)
                 states = self.state.states()
@@ -488,11 +536,19 @@ class Controller:
                     try:
                         self.execute_task(self.catalog.tasks[key], branch)
                     except ValidationFailure as exc:
-                        self.state.save(key, "retry", feedback=exc.feedback, reason=str(exc))
+                        self.state.save(key, "retry", stage="implement", feedback=exc.feedback, reason=str(exc))
                         self.sync(key, "running")
                     except (TimeoutError, KeyboardInterrupt):
                         self.state.event(milestone, "checkpoint", reason="Time budget/interruption")
                         raise
+                    except (GitHubError, ProcessError) as exc:
+                        data = self.state.task(key)["data"]
+                        failures = data.get("transport_failures", 0) + 1
+                        recover = data.get("stage") in {"validate", "review", "publish"} and failures < 4
+                        self.state.save(key, "retry" if recover else "blocked", transport_failures=failures,
+                                        reason=str(exc))
+                        if recover:
+                            time.sleep(min(5 * failures, self.remaining()))
                     except (ValueError, RuntimeError) as exc:
                         self.state.save(key, "blocked", reason=str(exc))
                         self.sync(key, "blocked")
@@ -511,6 +567,9 @@ class Controller:
             row = self.state.task(key)
             d = row["data"]
             lines.append(f"| {key} | {row['status']} | {row['attempt']} | {d.get('url', '')} | {d.get('revision', '')} |")
+            if row["status"] in {"running", "reviewing", "retry"} and d.get("stage"):
+                lines.append(f"\n{key}: etapa `{d['stage']}`; revisões concluídas: " +
+                             ", ".join(r["role"] for r in d.get("saved_reviews", [])))
             if d.get("reason") and row["status"] in {"blocked", "retry"}:
                 lines.append(f"\n{key}: {d['reason']}\n")
         for key in self.catalog.milestone(milestone):

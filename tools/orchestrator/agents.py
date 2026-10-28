@@ -44,15 +44,21 @@ class Codex:
         identity = {"task": task["key"], "role": role, "revision": revision}
         for field, value in identity.items():
             bound_schema["properties"][field]["enum"] = [value]
+        criteria_schema = bound_schema["properties"]["criteria"]
+        criteria_schema["minItems"] = criteria_schema["maxItems"] = len(task["acceptance"])
+        criteria_schema["items"]["properties"]["index"]["enum"] = list(range(1, len(task["acceptance"]) + 1))
         schema.write_text(json.dumps(bound_schema), encoding="utf-8", newline="\n")
         role_path = self.root / ".codex/agents" / (role + ".toml")
         import tomllib
         instructions = tomllib.loads(role_path.read_text(encoding="utf-8"))["developer_instructions"]
+        if context.get("repair_output_only"):
+            instructions += "\nRepair only the previous structured output using supplied feedback. Do not edit files or rerun implementation. Return every criterion with the original evidence or an explicit blocked status; never invent evidence."
         if role != "implementer":
             instructions += (
                 "\nReview is read-only. Do not run npm ci, builds, generators or test suites that need "
                 "write access in this checkout. The supervisor already ran validation before review; "
-                "context.validation contains its recorded checks for the exact revision. Verify every "
+                "context.validation contains its recorded checks for the exact revision. Advisory findings alone "
+                "must not fail an otherwise satisfied criterion; do not introduce acceptance gates. Verify every "
                 "record has status=passed and revision equal to the supplied revision; inspect command "
                 "coverage, source, fixtures and test assertions independently. Cite those records as "
                 "supervisor-executed evidence, never as commands you personally ran. Missing, failed, "
@@ -78,10 +84,10 @@ class Codex:
                   json.dumps(identity) + "\n" +
                   json.dumps({"task": task, "role": role, "revision": revision, "context": context}, ensure_ascii=False))
         args = ["codex", "exec", "--model", self.model,
-                "-c", "model_reasoning_effort=" + json.dumps(self.reasoning_effort), "--sandbox", "workspace-write" if role == "implementer" else "read-only",
+                "-c", "model_reasoning_effort=" + json.dumps(self.reasoning_effort), "--sandbox", "workspace-write" if role == "implementer" and not context.get("repair_output_only") else "read-only",
                 "--json", "--output-schema", str(schema), "-o", str(output),
-                "-c", "features.apps=false", "-c", "features.plugins=false", "-c", "agents.enabled=false", "-"]
-        self.tokens, self.sessions = None, []
+                "-c", 'web_search="live"', "-c", "features.apps=false", "-c", "features.plugins=false", "-c", "agents.enabled=false", "-"]
+        self.tokens, self.sessions, self.last_result = None, [], None
         try:
             events = command(args, worktree, timeout=self.timeout, stdin=prompt, sanitized=True)
         except ProcessError as exc:
@@ -91,7 +97,8 @@ class Codex:
         # JSONL reasoning/command output is intentionally not persisted or published.
         if not output.is_file() or output.stat().st_size > 1_000_000:
             raise ValueError("Codex did not produce a bounded result file")
-        return check_result(json.loads(output.read_text(encoding="utf-8")), task, revision, role)
+        self.last_result = json.loads(output.read_text(encoding="utf-8"))
+        return check_result(self.last_result, task, revision, role)
 
     def read_usage(self, events):
         for line in events.splitlines():

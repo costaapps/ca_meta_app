@@ -235,3 +235,29 @@ python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app resume M1 --
 ```
 
 Isso autoriza squash somente na branch da milestone, nunca develop. Mantém limite de tentativas, timeout por agente, limite de 4 horas por invocação, evidências, revisões e gate humano final. No estado retry/attempt=1 não precisa executar unblock nem resetar tentativas. O supervisor pode parar antes por gate externo de outra issue, orçamento de tempo/tentativas, falha de GitHub ou validação; não garante uma milestone sem intervenção. As correções desta seção não descartam trabalho nem alteram histórico.
+
+## Recuperação por etapa e descoberta independente (revisão consolidada)
+
+A atualização preserva PAUSE: instalar código/adotar escopo não inicia o controlador. Não atualizar arquivos do runner enquanto existir controlador ativo. O novo executor usa a identidade Git configurada para commits futuros (verificada por git var); não altera autoria de commits existentes. Removida a identidade fixa Meta automation/automation@users.noreply.github.com.
+
+Cada candidato registra stage=validate/review/publish, SHA e hash do contexto. Na retomada limpa e com mesma base, SHA e contexto, não chama novamente o implementador. Checks e reviews concluídos são reaproveitados somente quando a assinatura do gate corresponde a tarefa, contexto, política, modelo/esforço e código do runner/transport. Um SHA novo invalida as aprovações; achados que exigem edição voltam ao implementador. Interrupção na validação ainda repete o perfil de checks; não existe checkpoint por comando nesta versão. Publicação pode ser repetida idempotentemente após falha com até quatro falhas de transporte; não repete implementação e reviews válidos. Verificações de branch, árvore, escopo e squash permanecem obrigatórias.
+
+O schema vincula identidade e quantidade/índices dos critérios. Resultados inválidos têm até duas chamadas de reparação de JSON, em sandbox somente leitura, com uso contabilizado; nunca se preenchem critérios como pass por programação. Se a reparação continuar inválida, a tarefa permanece bloqueada. Consumo desconhecido continua exigindo reconciliação. Avisos advisory não devem reprovar critérios satisfeitos; achados realmente bloqueantes são encaminhados na tentativa seguinte dentro do orçamento existente.
+
+Pesquisa de documentação é solicitada com web_search="live" em cada processo, independente de conectores. Referência oficial: https://learn.chatgpt.com/docs/web-search. Disponibilidade continua sujeita ao cliente, modelo e requisitos gerenciados. Não é garantia de acesso a qualquer página, nem autorização para enviar dados privados às buscas. Pesquisa deve usar documentação primária pública e não exige Sandbox Meta. Um Sandbox Meta só fornece prova de integração real; fixtures não substituem essa prova.
+
+A emenda execution/m1-discovery-amendment.json redefine somente M1.02/M1.03 para projeto de banco/mapeamento e matriz Meta/compatibilidade com fontes, hipóteses e fixtures verificáveis. Não bloqueia desenho independente por falta de DDL/configuração Meta/Sandbox, mas mantém evidência real antes do cenário operacional dependente. Não altera as outras tarefas nem finge que a milestone inteira está concluída. Outros contratos que exijam dados reais podem exigir decisões adicionais; não há promessa de execução que nunca pare.
+
+Para aplicar enquanto pausado:
+
+```bash
+cd /mnt/c/VsCodeRepos/ca_meta_app
+git fetch origin fix/orchestrator-model-token-runtime
+cd "$HOME/.local/share/ca-meta/runner-token-fix"
+git switch --detach origin/fix/orchestrator-model-token-runtime
+python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app amend-discovery M1 --execute --reason "Desenvolvimento independente autorizado; documentação oficial e fixtures agora, prova operacional antes do cenário dependente"
+```
+
+O comando exige checkpoint/política/base compatíveis, nenhuma tarefa M1 running/reviewing e nenhuma tarefa alvo já aceita/com PR. Faz backup, registra hashes/motivo e muda os alvos bloqueados para retry preservando consumo e contagem. Mantém M1.01 accepted integralmente. Não remove PAUSE, executa agentes, pesquisa nem toca produção. Executar uma única vez. Não repetir amend-baseline. Os dois adendos são verificados em sequência por todos os controladores novos.
+
+Quando autorizado a executar, usar o mesmo resume contínuo com --execute --merge-packages --no-token-limit --model gpt-6-luna --reasoning-effort xhigh --max-seconds 14400. Esse comando remove PAUSE e reinicia agentes. Limites de tempo/tentativas/conta e gates de integridade continuam existindo; o modo contínuo não é execução infinita. Aceite final da milestone e deploy permanecem humanos. Não misturar atualização da develop com checkpoint ativo.

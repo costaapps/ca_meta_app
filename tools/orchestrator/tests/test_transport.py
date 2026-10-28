@@ -34,6 +34,7 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--sandbox") + 1], "workspace-write")
             self.assertEqual(argv[-1], "-")
             self.assertIn("agents.enabled=false", argv)
+            self.assertIn('web_search="live"', argv)
             self.assertIn('"task":', stdin)
             schema = json.loads(Path(argv[argv.index("--output-schema") + 1]).read_text())
             self.assertFalse(schema["additionalProperties"])

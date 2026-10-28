@@ -500,6 +500,66 @@ class ControllerTests(unittest.TestCase):
                          ["python3", "experiments/baseline/trace_routes.py"])
         self.assertFalse(self.github.prs)
 
+    def test_resume_after_reviewer_interruption_reuses_validation_and_completed_roles(self):
+        original = self.agent.run
+        interrupted = [False]
+        def agent(*args):
+            if args[1] == "validator" and not interrupted[0]:
+                interrupted[0] = True
+                raise TimeoutError("Interrupted reviewer")
+            return original(*args)
+        self.agent.run = agent
+        with patch.object(self.controller, "validate_candidate", wraps=self.controller.validate_candidate) as checks:
+            with self.assertRaises(TimeoutError):
+                self.tick()
+            self.assertEqual(self.state.task("M1.01")["data"]["stage"], "review")
+            self.tick()
+            self.assertEqual(checks.call_count, 1)
+        self.assertEqual(self.state.task("M1.01")["status"], "pr_pending")
+        roles = [role for _, role, _ in self.agent.calls]
+        self.assertEqual(roles.count("implementer"), 1)
+        self.assertEqual(roles.count("reviewer"), 1)
+        self.assertEqual(self.state.task("M1.01")["attempt"], 1)
+        author = git(self.root, "show", "-s", "--format=%an <%ae>",
+                     self.state.task("M1.01")["data"]["revision"])
+        self.assertEqual(author, "Test <test@example.invalid>")
+
+    def test_protocol_output_repair_accounts_usage_and_preserves_criteria_gate(self):
+        original = self.agent.run
+        bad = [True]
+        def agent(*args):
+            result = original(*args)
+            if args[1] == "implementer" and bad[0]:
+                bad[0] = False
+                result["criteria"] = []
+                self.agent.last_result = result
+            return result
+        self.agent.run = agent
+        self.tick()
+        self.assertEqual(self.state.task("M1.01")["status"], "pr_pending")
+        self.assertEqual(self.state.run("M1")["tokens"], 50)
+        self.assertEqual(self.state.task("M1.01")["attempt"], 1)
+
+    def test_publication_recovery_reuses_implementation_validation_and_reviews(self):
+        from tools.orchestrator.github import GitHubError
+        original = self.github.ensure_pr
+        failed = [False]
+        def publish(*args, **kwargs):
+            if not failed[0]:
+                failed[0] = True
+                raise GitHubError("Transient publication failure")
+            return original(*args, **kwargs)
+        with patch.object(self.github, "ensure_pr", side_effect=publish), patch("tools.orchestrator.controller.time.sleep"):
+            with patch.object(self.controller, "validate_candidate", wraps=self.controller.validate_candidate) as checks:
+                self.tick()
+                self.assertEqual(self.state.task("M1.01")["data"]["stage"], "publish")
+                self.assertEqual(self.state.task("M1.01")["status"], "retry")
+                self.tick()
+                self.assertEqual(checks.call_count, 1)
+        self.assertEqual(len(self.agent.calls), 4)
+        self.assertEqual(self.state.task("M1.01")["attempt"], 1)
+        self.assertEqual(self.state.task("M1.01")["status"], "pr_pending")
+
     def test_unknown_token_usage_requires_operator_accounting_before_resume(self):
         self.agent.tokens = None
         with self.assertRaises(TimeoutError):

@@ -10,6 +10,7 @@ import tomllib
 from pathlib import Path
 
 from .amendment import adopt
+from .discovery import adopt as adopt_discovery
 from .catalog import Catalog, digest
 from .controller import Controller, external_evidence, load_policy
 from .github import GitHub
@@ -38,7 +39,7 @@ def main(argv=None):
     sub.add_parser("validate", help="Validate catalog, policy and agent definitions without network/model calls")
     doctor = sub.add_parser("doctor", help="Check local prerequisites; --online checks GitHub access read-only")
     doctor.add_argument("--online", action="store_true")
-    for name in ("plan", "status", "report", "run", "resume", "unblock", "account-usage", "finalize", "amend-baseline"):
+    for name in ("plan", "status", "report", "run", "resume", "unblock", "account-usage", "finalize", "amend-baseline", "amend-discovery"):
         part = sub.add_parser(name)
         part.add_argument("milestone", choices=[f"M{i}" for i in range(1, 7)])
         if name in {"run", "resume"}:
@@ -59,7 +60,7 @@ def main(argv=None):
         if name == "account-usage":
             part.add_argument("--tokens", type=int, required=True, help="Conservative additional usage for interrupted turn")
             part.add_argument("--reason", required=True)
-        if name == "amend-baseline":
+        if name in {"amend-baseline", "amend-discovery"}:
             part.add_argument("--execute", action="store_true")
             part.add_argument("--reason", required=True)
         if name == "finalize":
@@ -96,7 +97,15 @@ def main(argv=None):
         return 0
     state = State(root / ".orchestrator")
     try:
-        if args.command == "amend-baseline":
+        if args.command == "amend-discovery":
+            if not args.execute:
+                print("Dry run: M1.02/M1.03 independent design; no operational certification")
+            else:
+                with state.lock():
+                    effective = Controller(root, state).catalog
+                    print(json.dumps(adopt_discovery(root, state, effective, load_policy(root),
+                                                    args.milestone, args.reason), indent=2))
+        elif args.command == "amend-baseline":
             if not args.execute:
                 print("Dry run: only M1.01 discovery scope changes; migration gates remain")
             else:
