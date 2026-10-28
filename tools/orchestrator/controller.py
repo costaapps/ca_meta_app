@@ -216,7 +216,14 @@ class Controller:
 
     def validate_candidate(self, worktree, revision):
         checks = []
-        for argv in self.policy["validation_commands"]:
+        commands = list(self.policy["validation_commands"])
+        # A delivered offline route fixture is package-specific evidence, not covered
+        # by Angular tests. Execute it again at the candidate SHA before any reviews.
+        trace = worktree / "experiments/baseline/trace_routes.py"
+        trace_command = ["python3", "experiments/baseline/trace_routes.py"]
+        if trace.is_file() and trace_command not in commands:
+            commands.append(trace_command)
+        for argv in commands:
             try:
                 # The legacy planning validator generates files, including CRLF CSV.
                 # Check those outputs without mutating the reviewed candidate.

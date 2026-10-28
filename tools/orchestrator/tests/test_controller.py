@@ -462,6 +462,44 @@ class ControllerTests(unittest.TestCase):
         self.assertIn("External evidence", self.state.task("M1.01")["data"]["reason"])
         self.assertFalse(self.github.prs)
 
+    def test_route_trace_is_executed_and_recorded_at_reviewed_sha(self):
+        trace = self.root / "experiments/baseline/trace_routes.py"
+        trace.parent.mkdir(parents=True)
+        trace.write_text("print('eight matched routes and two unmatched fixtures')\n", encoding="utf-8")
+        git(self.root, "add", ".")
+        git(self.root, "commit", "-m", "Offline route fixture")
+        git(self.root, "push", "origin", "develop")
+        original = self.agent.run
+        reviews = []
+        def recording(*args):
+            if args[1] != "implementer":
+                reviews.append((args[3], args[4]))
+            return original(*args)
+        self.agent.run = recording
+        self.controller.run("M1", once=True)
+        self.assertEqual(self.state.task("M1.01")["status"], "pr_pending")
+        self.assertEqual(len(reviews), 3)
+        for sha, context in reviews:
+            matching = [c for c in context["validation"] if c["argv"] ==
+                        ["python3", "experiments/baseline/trace_routes.py"]]
+            self.assertEqual(len(matching), 1)
+            self.assertEqual(matching[0]["revision"], sha)
+            self.assertEqual(matching[0]["status"], "passed")
+
+    def test_failing_route_trace_prevents_review_and_pr(self):
+        trace = self.root / "experiments/baseline/trace_routes.py"
+        trace.parent.mkdir(parents=True)
+        trace.write_text("raise SystemExit(1)\n", encoding="utf-8")
+        git(self.root, "add", ".")
+        git(self.root, "commit", "-m", "Failing route fixture")
+        git(self.root, "push", "origin", "develop")
+        self.controller.run("M1", once=True)
+        record = self.state.task("M1.01")
+        self.assertEqual(record["status"], "retry")
+        self.assertEqual(record["data"]["feedback"]["argv"],
+                         ["python3", "experiments/baseline/trace_routes.py"])
+        self.assertFalse(self.github.prs)
+
     def test_unknown_token_usage_requires_operator_accounting_before_resume(self):
         self.agent.tokens = None
         with self.assertRaises(TimeoutError):

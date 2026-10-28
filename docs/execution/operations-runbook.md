@@ -223,3 +223,15 @@ Relatórios rastreados identificam o commit da baseline testada e rotulam snapsh
 Quando reviews retornarem correções, o relatório passa a mostrar o resumo dos resultados não aprovados, sem reutilizar o motivo antigo de desbloqueio. `unblock --reset-attempts` agora aceita também estado retry; sem essa autorização explícita não renova o orçamento. Nunca se aplica a tarefas running, reviewing, pr_pending ou accepted.
 
 Para recuperar a rodada de M1.01 em retry/attempt=3, atualize a worktree runner. Acrescente ao arquivo de contexto do operador: corrigir oito fixtures com handler (não sete), rotular SHA 2bc3bee como snapshot histórico sem chamá-lo de HEAD final e referenciar a proveniência final do supervisor; acrescentar cenários explícitos de replay após consumo do state e cancelamento. Execute unblock com --reset-attempts, --context-file e motivo; depois resume --execute --once --no-token-limit --model gpt-6-luna --reasoning-effort xhigh. Não repetir amend-baseline, descartar alterações ou editar resultados dos revisores. O próximo implementador recebe os três pareceres via previous_attempt e todas as validações/revisões são executadas novamente sobre o novo SHA.
+
+## Trace offline como evidência por SHA e execução contínua
+
+Quando `experiments/baseline/trace_routes.py` está presente no candidato, o supervisor executa `python3 experiments/baseline/trace_routes.py` além do perfil de validação, antes das revisões individuais e da revisão agregada. Registra comando, status e SHA no mesmo conjunto de checks. Falha é ValidationFailure, sem PR nem aceite; revisores continuam verificando a suficiência dos cenários. A ausência do arquivo não é evidência de execução: continua sujeita ao contrato/critério do pacote. A presença do trace nas próximas milestones também mantém esse check ativo. Não altera política fixada nem hashes da emenda.
+
+Uma sessão com --once encerra após um ciclo, incluindo eventual resultado retry. Para deixar o controlador repetir correções/revisões e integrar pacotes aprovados por squash sem pedir um novo comando a cada ciclo, remova --once e autorize --merge-packages explicitamente. Exemplo, executado no runner atualizado:
+
+```bash
+python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app resume M1 --execute --merge-packages --no-token-limit --model gpt-6-luna --reasoning-effort xhigh --max-seconds 14400
+```
+
+Isso autoriza squash somente na branch da milestone, nunca develop. Mantém limite de tentativas, timeout por agente, limite de 4 horas por invocação, evidências, revisões e gate humano final. No estado retry/attempt=1 não precisa executar unblock nem resetar tentativas. O supervisor pode parar antes por gate externo de outra issue, orçamento de tempo/tentativas, falha de GitHub ou validação; não garante uma milestone sem intervenção. As correções desta seção não descartam trabalho nem alteram histórico.
