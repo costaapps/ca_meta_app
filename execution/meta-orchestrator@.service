@@ -1,0 +1,19 @@
+# Optional systemd --user template. Review paths/PATH on the authorized runner.
+[Unit]
+Description=Meta v2 Codex milestone %i
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ca_meta_app
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 -m tools.orchestrator run %i --execute --merge-packages --max-seconds 14400
+Restart=on-failure
+RestartSec=60
+KillMode=control-group
+TimeoutStopSec=15
+UMask=0077
+
+[Install]
+WantedBy=default.target

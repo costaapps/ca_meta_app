@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "repository": "costaapps/ca_meta_app",
+  "base_branch": "develop",
+  "integration_prefix": "automation/milestone-",
+  "required_checks": ["orchestrator"],
+  "max_attempts": 3,
+  "max_seconds": 14400,
+  "agent_timeout_seconds": 1800,
+  "max_total_tokens": 500000,
+  "review_roles": ["reviewer", "validator", "security"],
+  "validation_commands": [
+    ["npm", "ci", "--ignore-scripts"],
+    ["python3", ".planning/validate.py"],
+    ["python3", "-m", "unittest", "discover", "-s", ".planning", "-p", "test_planning.py"],
+    ["python3", "-m", "unittest", "discover", "-s", "tools/orchestrator/tests", "-v"],
+    ["npm", "run", "build"],
+    ["npm", "test", "--", "--watch=false"]
+  ],
+  "allowed_paths": {
+    "M1": ["docs/*", "specs/*", "contracts/*", "experiments/*", "tests/*", ".github/docs/*", ".github/prompt_templates/*", ".github/ISSUE_TEMPLATE/*", ".github/PULL_REQUEST_TEMPLATE.md"],
+    "M2": ["docs/*", "apps/*", "packages/*", "database/*", "infra/*", "src/*", "public/*", "tests/*", "package.json", "package-lock.json", "angular.json", "tsconfig*.json", "compose*.yml", "compose*.yaml", "Dockerfile", ".dockerignore", ".gitignore"],
+    "M3": ["docs/*", "apps/*", "packages/*", "database/*", "tests/*", "src/*", "backend/*", "package.json", "package-lock.json"],
+    "M4": ["docs/*", "apps/*", "packages/*", "database/*", "tests/*", "src/*", "backend/*", "package.json", "package-lock.json"],
+    "M5": ["docs/*", "apps/*", "packages/*", "database/*", "tests/*", "src/*", "backend/*", "package.json", "package-lock.json"],
+    "M6": ["docs/*", "apps/*", "packages/*", "infra/*", "tests/*"]
+  },
+  "project": {
+    "enabled": true,
+    "owner": "costaapps",
+    "number": 12,
+    "statuses": {"pending": "Todo", "running": "In Progress", "blocked": "Todo", "pr_pending": "In Progress", "accepted": "In Progress", "done": "Done"}
+  }
+}
