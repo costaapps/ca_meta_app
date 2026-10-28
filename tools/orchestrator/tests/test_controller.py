@@ -419,6 +419,32 @@ class ControllerTests(unittest.TestCase):
             self.tick(merge=True)
         self.assertEqual(len(self.github.merge_calls), 1)
 
+    def test_unlimited_tokens_resume_preserves_usage_and_review_gates(self):
+        self.controller.preflight("M1")
+        self.state.update_run("M1", tokens=760142)
+        self.state.save("M1.01", "running", attempt=1)
+        self.controller.no_token_limit = True
+        self.controller.run("M1", once=True)
+        self.assertGreater(self.state.run("M1")["tokens"], 760142)
+        self.assertEqual(self.state.task("M1.01")["status"], "pr_pending")
+        self.assertEqual(self.github.merge_calls, [])
+        self.assertEqual(self.github.closed, [])
+        self.assertEqual(self.state.task("M1.01")["attempt"], 2)
+
+    def test_unlimited_tokens_still_stops_on_unknown_usage(self):
+        self.controller.no_token_limit = True
+        self.agent.tokens = None
+        with self.assertRaisesRegex(TimeoutError, "Usage unavailable"):
+            self.controller.run("M1", once=True)
+        self.assertEqual(self.state.run("M1")["status"], "usage_unknown")
+
+    def test_default_budget_still_stops_before_another_agent(self):
+        self.controller.preflight("M1")
+        self.state.update_run("M1", tokens=760142)
+        with self.assertRaisesRegex(TimeoutError, "Cumulative token budget reached"):
+            self.controller.run("M1", once=True)
+        self.assertEqual(self.state.run("M1")["tokens"], 760142)
+
     def test_unknown_token_usage_requires_operator_accounting_before_resume(self):
         self.agent.tokens = None
         with self.assertRaises(TimeoutError):

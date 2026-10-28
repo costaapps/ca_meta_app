@@ -28,6 +28,14 @@ class CLITests(unittest.TestCase):
         with patch("tools.orchestrator.__main__.State", side_effect=AssertionError("No checkpoint writes")):
             self.assertEqual(self.call(["resume", "M1"])[0], 0)
 
+    def test_runtime_overrides_dry_run_never_starts_agents(self):
+        with patch("tools.orchestrator.__main__.State", side_effect=AssertionError("No checkpoint writes")):
+            code, output = self.call(["resume", "M1", "--no-token-limit",
+                                      "--model", "gpt-6.1-luna", "--reasoning-effort", "xhigh"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output)["runtime"], {
+            "model": "gpt-6.1-luna", "reasoning_effort": "xhigh", "no_token_limit": True})
+
     def test_configuration_validation_covers_all_catalog_packages(self):
         code, output = self.call(["validate"])
         self.assertEqual(code, 0)

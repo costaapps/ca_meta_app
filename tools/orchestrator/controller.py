@@ -79,11 +79,15 @@ def external_evidence(directory: Path, task: dict) -> dict | None:
 
 
 class Controller:
-    def __init__(self, root: Path, state: State, *, github=None, agent=None):
+    def __init__(self, root: Path, state: State, *, github=None, agent=None, no_token_limit=False,
+                 model="gpt-6.1-luna", reasoning_effort="xhigh"):
         self.root, self.state = root, state
         self.catalog, self.policy = Catalog(root), load_policy(root)
         self.github = github or GitHub(root)
-        self.agent = agent or Codex(root, state.directory / "agents", self.policy["agent_timeout_seconds"])
+        self.no_token_limit = no_token_limit
+        self.model, self.reasoning_effort = model, reasoning_effort
+        self.agent = agent or Codex(root, state.directory / "agents", self.policy["agent_timeout_seconds"],
+                                    model=model, reasoning_effort=reasoning_effort)
         self.deadline = float("inf")
 
     def remaining(self):
@@ -189,7 +193,7 @@ class Controller:
     def agent_run(self, task, role, worktree, revision, context):
         self.agent.timeout = min(self.policy["agent_timeout_seconds"], self.remaining())
         run = self.state.run(task["key"][:2])
-        if run["tokens"] >= self.policy["max_total_tokens"]:
+        if not self.no_token_limit and run["tokens"] >= self.policy["max_total_tokens"]:
             raise TimeoutError("Cumulative token budget reached")
         try:
             result = self.agent.run(task, role, worktree, revision, context)
@@ -204,7 +208,7 @@ class Controller:
                              known=usage is not None)
         if usage is None:
             raise TimeoutError("Usage unavailable; account-usage required before another agent turn")
-        if tokens > self.policy["max_total_tokens"]:
+        if not self.no_token_limit and tokens > self.policy["max_total_tokens"]:
             raise TimeoutError("Cumulative token budget exceeded after current turn")
         return result
 
@@ -435,6 +439,8 @@ class Controller:
         self.deadline = time.monotonic() + min(max_seconds or self.policy["max_seconds"], self.policy["max_seconds"])
         with self.state.lock():
             branch = self.preflight(milestone)
+            self.state.event(milestone, "runtime_settings", model=self.model,
+                             reasoning_effort=self.reasoning_effort, no_token_limit=self.no_token_limit)
             while self.remaining():
                 if self.state.run(milestone)["status"] == "usage_unknown":
                     raise RuntimeError("Usage unavailable; account-usage required")

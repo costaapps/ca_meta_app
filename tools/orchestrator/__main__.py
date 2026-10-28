@@ -43,6 +43,11 @@ def main(argv=None):
             part.add_argument("--merge-packages", action="store_true", help="Authorize squash into milestone branch after checks; never develop")
             part.add_argument("--once", action="store_true", help="One scheduler tick then checkpoint")
             part.add_argument("--max-seconds", type=int)
+            part.add_argument("--no-token-limit", action="store_true",
+                              help="Disable cumulative token ceiling for this invocation; preserve usage accounting")
+            part.add_argument("--model", default="gpt-6.1-luna", help="Exact Codex model; no automatic fallback")
+            part.add_argument("--reasoning-effort", default="xhigh",
+                              choices=["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
         if name == "unblock":
             part.add_argument("--issue", required=True, help="Catalog key such as M1.01")
             part.add_argument("--reason", required=True)
@@ -77,7 +82,10 @@ def main(argv=None):
                           "waves": [wave for full in catalog.waves() if (wave := [k for k in full if k.startswith(args.milestone + ".")])],
                           "scope": load_policy(root)["allowed_paths"][args.milestone],
                           "external_evidence_required": [k for k, t in catalog.milestone(args.milestone).items() if t.get("external")],
-                          "merge": "squash", "final_gate": "human"}, indent=2))
+                          "merge": "squash", "final_gate": "human",
+                          **({"runtime": {"model": args.model, "reasoning_effort": args.reasoning_effort,
+                                          "no_token_limit": args.no_token_limit}}
+                             if args.command in {"run", "resume"} else {})}, indent=2))
         return 0
     state = State(root / ".orchestrator")
     try:
@@ -120,7 +128,9 @@ def main(argv=None):
             if args.command == "resume":
                 with state.lock():
                     (state.directory / "PAUSE").unlink(missing_ok=True)
-            Controller(root, state).run(args.milestone, merge_packages=args.merge_packages, once=args.once,
+            Controller(root, state, no_token_limit=args.no_token_limit,
+                       model=args.model, reasoning_effort=args.reasoning_effort).run(
+                                        args.milestone, merge_packages=args.merge_packages, once=args.once,
                                         max_seconds=args.max_seconds)
             print(Controller(root, state).report(args.milestone))
     finally:

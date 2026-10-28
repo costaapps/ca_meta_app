@@ -32,6 +32,33 @@ O processo deve terminar de forma controlada quando alcança orçamento, limite 
 
 `max_total_tokens` soma o consumo informado pelo transporte e é conferido entre turnos. Um único turno pode ultrapassar o saldo restante antes de retornar. O parâmetro não representa preço em dinheiro; preços, limites da conta e execução interna do modelo continuam externos ao supervisor.
 
+### Modelo explícito e execução sem teto de tokens
+
+O transporte agora envia `--model gpt-6.1-luna` e `-c model_reasoning_effort="xhigh"` em cada processo, incluindo revisões. Esses são valores solicitados, não uma certificação de disponibilidade na conta; um modelo/esforço não suportado deve falhar, sem fallback implementado pelo supervisor. A opção `--reasoning-effort` permite usar o valor exato anunciado pelo cliente/modelo (inclusive `ultra`, se disponível). Referência: https://learn.chatgpt.com/docs/config-file/config-reference.
+
+Para dispensar apenas o teto acumulado nesta invocação:
+
+```bash
+python3 -m tools.orchestrator resume M1 --execute --once --no-token-limit --model gpt-6.1-luna --reasoning-effort xhigh
+```
+
+Repita `--no-token-limit` em cada retomada; sem a flag, vale o teto da política. O consumo continua acumulado e o evento `runtime_settings` registra os parâmetros solicitados. A flag não modifica a política fixada, não zera tentativas e não remove timeouts, revisões, gates de evidência ou limites do provedor. A contabilização de entrada pode incluir contexto repetido ao longo dos turnos; não equivale a tokens únicos nem a uma medida de custo monetário.
+
+### Aplicar o executor corrigido a uma M1 já iniciada
+
+Não faça pull/merge na `develop` durante a execução fixada. A atualização dessa base exige reconciliação e não é autorizada pela flag de tokens. Para o incidente iniciado no commit `7b3b38b`, revise o PR da branch de manutenção e carregue seu código em uma worktree separada, mantendo o checkout controlador original intacto:
+
+```bash
+cd /mnt/c/VsCodeRepos/ca_meta_app
+git fetch origin fix/orchestrator-model-token-runtime
+mkdir -p "$HOME/.local/share/ca-meta"
+git worktree add --detach "$HOME/.local/share/ca-meta/runner-token-fix" origin/fix/orchestrator-model-token-runtime
+cd "$HOME/.local/share/ca-meta/runner-token-fix"
+python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app resume M1 --execute --once --no-token-limit --model gpt-6.1-luna --reasoning-effort xhigh
+```
+
+Execute no terminal com o ambiente Python e ssh-agent carregados. Se a worktree já existir, não repita sua criação: entre nela e confira o commit. O diretório atual deve ser a worktree do executor atualizado para o Python carregar o módulo correto; `--root` aponta para o checkout com o estado original. A retomada preserva o trabalho e repete as verificações da tentativa interrompida, consumindo uma nova tentativa. Os 760142 tokens anteriores permanecem registrados. Aguarde o gate humano da M1 antes de integrar a manutenção em `develop`; mover a base durante a M1 continua bloqueando a execução. Não há migração automática da base nesta correção.
+
 Quando um turno terminar sem evento de consumo utilizável, o estado fica `usage_unknown` e bloqueia a retomada. Confira o consumo nos registros oficiais da conta/execução, escolha um valor adicional conservador e registre a justificativa:
 
 ```bash

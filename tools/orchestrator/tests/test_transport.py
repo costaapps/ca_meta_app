@@ -29,6 +29,8 @@ class TransportTests(unittest.TestCase):
         def fake(argv, cwd, timeout, *, stdin, sanitized):
             self.assertEqual(cwd, self.directory)
             self.assertTrue(sanitized)
+            self.assertEqual(argv[argv.index("--model") + 1], "gpt-6.1-luna")
+            self.assertIn('model_reasoning_effort="xhigh"', argv)
             self.assertEqual(argv[argv.index("--sandbox") + 1], "workspace-write")
             self.assertEqual(argv[-1], "-")
             self.assertIn("agents.enabled=false", argv)

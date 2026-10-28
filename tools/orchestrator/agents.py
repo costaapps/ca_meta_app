@@ -28,8 +28,9 @@ RESULT_SCHEMA = {
 
 
 class Codex:
-    def __init__(self, root: Path, directory: Path, timeout: int):
+    def __init__(self, root: Path, directory: Path, timeout: int, *, model="gpt-6.1-luna", reasoning_effort="xhigh"):
         self.root, self.directory, self.timeout = root, directory, timeout
+        self.model, self.reasoning_effort = model, reasoning_effort
         self.tokens = None
         self.sessions: list[str] = []
 
@@ -48,7 +49,8 @@ class Codex:
                   "already assigns independent processes. Return exactly the output schema. All acceptance "
                   "criteria need evidence, not assertions. External evidence missing means blocked.\n" +
                   json.dumps({"task": task, "role": role, "revision": revision, "context": context}, ensure_ascii=False))
-        args = ["codex", "exec", "--sandbox", "workspace-write" if role == "implementer" else "read-only",
+        args = ["codex", "exec", "--model", self.model,
+                "-c", "model_reasoning_effort=" + json.dumps(self.reasoning_effort), "--sandbox", "workspace-write" if role == "implementer" else "read-only",
                 "--json", "--output-schema", str(schema), "-o", str(output),
                 "-c", "features.apps=false", "-c", "features.plugins=false", "-c", "agents.enabled=false", "-"]
         self.tokens, self.sessions = None, []
