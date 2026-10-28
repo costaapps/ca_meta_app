@@ -1,0 +1,23 @@
+{
+  "organization": "costaapps",
+  "title": "ca_meta_app · Meta Platform v2",
+  "marker": "ca_meta_app/meta-v2/planning-20261028",
+  "status_options": ["Backlog", "Ready", "In progress", "In review", "Blocked", "Done"],
+  "select_fields": {
+    "Etapa": ["Programa", "M1", "M2", "M3", "M4", "M5", "M6"],
+    "Area": ["architecture", "platform", "security", "data", "meta", "web", "integration", "delivery", "quality", "operations"],
+    "Prioridade": ["P0", "P1", "P2"],
+    "Risco": ["Alto", "Medio"],
+    "Tipo": ["Programa", "Epic", "Pacote"]
+  },
+  "other_fields": {"Esforco": "NUMBER", "Responsabilidade": "TEXT", "Inicio": "DATE", "Alvo": "DATE"},
+  "views": [
+    {"name":"01 · Backlog completo","layout":"TABLE_LAYOUT","filter":"is:open"},
+    {"name":"02 · Execucao","layout":"BOARD_LAYOUT","filter":"label:\"type:work-package\" is:open"},
+    {"name":"03 · Prioridade P0","layout":"TABLE_LAYOUT","filter":"prioridade:P0 is:open"},
+    {"name":"04 · Bloqueios","layout":"TABLE_LAYOUT","filter":"status:Blocked"},
+    {"name":"05 · Revisao","layout":"TABLE_LAYOUT","filter":"status:\"In review\""},
+    {"name":"06 · Integracoes Meta","layout":"TABLE_LAYOUT","filter":"area:meta is:open"},
+    {"name":"07 · Roteiro das milestones","layout":"ROADMAP_LAYOUT","filter":"label:\"type:epic\""}
+  ]
+}

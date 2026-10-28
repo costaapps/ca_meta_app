@@ -1,0 +1,2242 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Meta Platform v2 · contrato proposto",
+    "version": "0.1.0-planning",
+    "description": "Rascunho revisável para M1.07. Não representa endpoints implementados. Ratificar nomes, constraints e políticas por produto antes da geração de cliente."
+  },
+  "servers": [
+    {
+      "url": "https://connections.example.invalid/api/v1",
+      "description": "Placeholder sem ambiente operacional"
+    }
+  ],
+  "x-status": "proposed",
+  "paths": {
+    "/auth/exchanges": {
+      "post": {
+        "operationId": "exchangeIdentity",
+        "summary": "exchangeIdentity",
+        "security": [],
+        "responses": {
+          "201": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExchangeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/magic-links": {
+      "post": {
+        "operationId": "requestMagicLink",
+        "summary": "requestMagicLink",
+        "security": [],
+        "responses": {
+          "202": {
+            "description": "Resultado seguro; verificar status e evidência do servidor"
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MagicLinkRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/magic-links/consume": {
+      "post": {
+        "operationId": "consumeMagicLink",
+        "summary": "consumeMagicLink",
+        "security": [],
+        "responses": {
+          "201": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MagicLinkConsume"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session": {
+      "get": {
+        "operationId": "readSession",
+        "summary": "readSession",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/tenant-switch": {
+      "post": {
+        "operationId": "switchTenant",
+        "summary": "switchTenant",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CsrfHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantSwitch"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      }
+    },
+    "/session/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "logout",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CsrfHeader": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Resultado seguro; verificar status e evidência do servidor"
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      }
+    },
+    "/integrations/flows": {
+      "get": {
+        "operationId": "listFlows",
+        "summary": "listFlows",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Flow"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onboarding-sessions": {
+      "post": {
+        "operationId": "createOnboarding",
+        "summary": "createOnboarding",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CsrfHeader": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBootstrap"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOnboarding"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      }
+    },
+    "/onboarding-sessions/{id}/authorization-code": {
+      "post": {
+        "operationId": "submitAuthorizationCode",
+        "summary": "submitAuthorizationCode",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CsrfHeader": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitCode"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/onboarding-sessions/{id}": {
+      "get": {
+        "operationId": "readOnboarding",
+        "summary": "readOnboarding",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Onboarding"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/jobs/{id}": {
+      "get": {
+        "operationId": "readJob",
+        "summary": "readJob",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/connections": {
+      "get": {
+        "operationId": "listConnections",
+        "summary": "listConnections",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/assets/{id}": {
+      "get": {
+        "operationId": "readAsset",
+        "summary": "readAsset",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Asset"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/assets/{id}/refresh": {
+      "post": {
+        "operationId": "refreshAsset",
+        "summary": "refreshAsset",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CsrfHeader": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/connections/{id}/reauthorizations": {
+      "post": {
+        "operationId": "reauthorizeConnection",
+        "summary": "reauthorizeConnection",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CsrfHeader": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBootstrap"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/connections/{id}": {
+      "delete": {
+        "operationId": "disconnectConnection",
+        "summary": "disconnectConnection",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CsrfHeader": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/assets/{id}/automation-config": {
+      "patch": {
+        "operationId": "updateAutomationConfig",
+        "summary": "updateAutomationConfig",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CsrfHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationConfig"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationConfig"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/whatsapp/accounts/{id}/templates": {
+      "get": {
+        "operationId": "listTemplates",
+        "summary": "listTemplates",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplatePage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createTemplate",
+        "summary": "createTemplate",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CsrfHeader": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateCreate"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/notifications": {
+      "get": {
+        "operationId": "listNotifications",
+        "summary": "listNotifications",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/notifications/{id}/actions": {
+      "post": {
+        "operationId": "performNotificationAction",
+        "summary": "performNotificationAction",
+        "security": [
+          {
+            "SessionCookie": [],
+            "CsrfHeader": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationAction"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/operations/{id}": {
+      "get": {
+        "operationId": "readOperation",
+        "summary": "readOperation",
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "ID interno autorizado; não aceita tenant/ExternalId como credencial"
+        }
+      ]
+    },
+    "/internal/v1/assets/{id}/operations": {
+      "servers": [
+        {
+          "url": "https://connections.example.invalid"
+        }
+      ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      ],
+      "post": {
+        "operationId": "executeServiceOperation",
+        "summary": "Relay S2S autorizado por tenant/ativo/operação; outcome UNKNOWN não é reenviado cegamente",
+        "security": [
+          {
+            "ServiceAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceOperation"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"
+          }
+        ]
+      }
+    },
+    "/meta/{flow}/callback": {
+      "parameters": [
+        {
+          "name": "flow",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/FlowVariant"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "providerCallback",
+        "security": [],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Redirect permitido com ID/resultado seguro; nunca token permanente"
+          },
+          "400": {
+            "description": "State/callback inválido"
+          }
+        }
+      }
+    },
+    "/webhooks/meta/{appConfigRef}": {
+      "parameters": [
+        {
+          "name": "appConfigRef",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      ],
+      "get": {
+        "operationId": "verifyWebhookChallenge",
+        "security": [],
+        "parameters": [
+          {
+            "name": "hub.mode",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hub.challenge",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hub.verify_token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Challenge validado; retornar texto solicitado"
+          },
+          "403": {
+            "description": "Verificação recusada"
+          }
+        }
+      },
+      "post": {
+        "operationId": "acceptWebhook",
+        "security": [
+          {
+            "MetaWebhookSignature": []
+          }
+        ],
+        "x-raw-body-required": true,
+        "description": "Validar HMAC sobre bytes originais e resolver tenant por item/ativo. Não confiar em tenant do envelope externo.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Envelope de provedor não confiável; parsers versionados sob matriz M1.03"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persistência durável confirmada; negócio processado depois"
+          },
+          "403": {
+            "description": "Assinatura inválida"
+          },
+          "503": {
+            "description": "Não persistido; não confirmar recebimento"
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "servers": [
+        {
+          "url": "https://connections.example.invalid"
+        }
+      ],
+      "get": {
+        "operationId": "readLiveness",
+        "summary": "readLiveness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "servers": [
+        {
+          "url": "https://connections.example.invalid"
+        }
+      ],
+      "get": {
+        "operationId": "readReadiness",
+        "summary": "readReadiness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Resultado seguro; verificar status e evidência do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro normalizado seguro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "FlowVariant": {
+        "type": "string",
+        "enum": [
+          "WHATSAPP_CLOUD",
+          "WHATSAPP_COEXISTENCE",
+          "FACEBOOK",
+          "INSTAGRAM"
+        ]
+      },
+      "SafeError": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "safeMessage": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "action": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "safeMessage",
+          "requestId",
+          "retryable"
+        ]
+      },
+      "Session": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "activeTenantId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "tenantDisplayName": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "principalId",
+          "activeTenantId",
+          "roles",
+          "expiresAt"
+        ]
+      },
+      "ExchangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "writeOnly": true,
+            "maxLength": 16384
+          }
+        },
+        "required": [
+          "ticket"
+        ]
+      },
+      "MagicLinkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "MagicLinkConsume": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "writeOnly": true,
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "TenantSwitch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "tenantId"
+        ]
+      },
+      "Flow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "flowVariant": {
+            "$ref": "#/components/schemas/FlowVariant"
+          },
+          "authVariant": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "prerequisites": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unavailableReason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "flowVariant",
+          "title",
+          "available"
+        ]
+      },
+      "CreateOnboarding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "flowVariant": {
+            "$ref": "#/components/schemas/FlowVariant"
+          },
+          "returnRoute": {
+            "type": "string",
+            "enum": [
+              "connections",
+              "embedded-return"
+            ]
+          },
+          "requestedCapabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "flowVariant",
+          "returnRoute"
+        ]
+      },
+      "PublicBootstrap": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "onboardingId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "flowVariant": {
+            "$ref": "#/components/schemas/FlowVariant"
+          },
+          "publicAppId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "publicConfigId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "redirectUri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "sdkVersion": {
+            "type": "string"
+          },
+          "signupVersion": {
+            "type": "string"
+          },
+          "authorizationUrl": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "onboardingId",
+          "flowVariant"
+        ]
+      },
+      "SubmitCode": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "writeOnly": true,
+            "maxLength": 16384
+          },
+          "state": {
+            "type": "string",
+            "writeOnly": true,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ]
+      },
+      "Job": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "RETRY_PENDING",
+              "SUCCEEDED",
+              "FAILED",
+              "DEAD_LETTER"
+            ]
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "nextAction": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "requestId"
+        ]
+      },
+      "OnboardingStep": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "safeError": {
+            "$ref": "#/components/schemas/SafeError"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ]
+      },
+      "Onboarding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "flowVariant": {
+            "$ref": "#/components/schemas/FlowVariant"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CREATED",
+              "AWAITING_PROVIDER",
+              "CODE_RECEIVED",
+              "EXCHANGING",
+              "ASSETS_VERIFIED",
+              "PROVISIONING",
+              "READY",
+              "PARTIAL",
+              "CANCELLED",
+              "EXPIRED",
+              "FAILED"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OnboardingStep"
+            }
+          },
+          "nextAction": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "id",
+          "flowVariant",
+          "status",
+          "steps",
+          "requestId"
+        ]
+      },
+      "StatusDimension": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "lastVerifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "evidenceSource": {
+            "type": "string"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "nextAction": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "stale"
+        ]
+      },
+      "Asset": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "kind": {
+            "type": "string"
+          },
+          "flowVariant": {
+            "$ref": "#/components/schemas/FlowVariant"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "displayPhoneNumber": {
+            "type": "string"
+          },
+          "providerStatus": {
+            "$ref": "#/components/schemas/StatusDimension"
+          },
+          "credentialHealth": {
+            "$ref": "#/components/schemas/StatusDimension"
+          },
+          "webhookStatus": {
+            "$ref": "#/components/schemas/StatusDimension"
+          },
+          "projectionStatus": {
+            "$ref": "#/components/schemas/StatusDimension"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "displayName",
+          "capabilities",
+          "version"
+        ]
+      },
+      "AssetPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Asset"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "nextCursor"
+        ]
+      },
+      "Connection": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "flowVariant": {
+            "$ref": "#/components/schemas/FlowVariant"
+          },
+          "asset": {
+            "$ref": "#/components/schemas/Asset"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StatusDimension"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "flowVariant",
+          "asset",
+          "status",
+          "version"
+        ]
+      },
+      "ConnectionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Connection"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "nextCursor"
+        ]
+      },
+      "AutomationConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "privateWelcomeMessage": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "commentPublicReply": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "commentPrivateReply": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "TemplateCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "exampleValues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "category",
+          "language",
+          "body"
+        ]
+      },
+      "Template": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "name": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "lastVerifiedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "name",
+          "language",
+          "status"
+        ]
+      },
+      "TemplatePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Template"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "nextCursor"
+        ]
+      },
+      "Notification": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "assetId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "type": {
+            "type": "string"
+          },
+          "safeSummary": {
+            "type": "string"
+          },
+          "isRead": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "assetId",
+          "type",
+          "isRead",
+          "allowedActions"
+        ]
+      },
+      "NotificationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Notification"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "nextCursor"
+        ]
+      },
+      "NotificationAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "SEND_MESSAGE",
+              "SEND_TEMPLATE",
+              "REPLY_COMMENT",
+              "READ",
+              "DISMISS"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "templateName": {
+            "type": "string"
+          },
+          "templateLanguage": {
+            "type": "string"
+          },
+          "templateParams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "Operation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "assetId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "RUNNING",
+              "SUCCEEDED",
+              "FAILED",
+              "UNKNOWN"
+            ]
+          },
+          "providerResultRef": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "safeError": {
+            "$ref": "#/components/schemas/SafeError"
+          }
+        },
+        "required": [
+          "id",
+          "assetId",
+          "status",
+          "requestId"
+        ]
+      },
+      "ServiceOperation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "SEND_WHATSAPP_TEXT",
+              "SEND_WHATSAPP_TEMPLATE",
+              "REPLY_FACEBOOK_COMMENT",
+              "SEND_FACEBOOK_MESSAGE",
+              "REPLY_INSTAGRAM_COMMENT",
+              "SEND_INSTAGRAM_MESSAGE"
+            ]
+          },
+          "recipientRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "text": {
+            "type": "string"
+          },
+          "templateName": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "templateParams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "recipientRef"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "NOT_READY"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "SessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-meta_session"
+      },
+      "CsrfHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CSRF-Token"
+      },
+      "ServiceAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Identidade S2S com escopos; não é access token Meta"
+      },
+      "MetaWebhookSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Hub-Signature-256",
+        "description": "HMAC do raw body com app secret; não é token de operação"
+      }
+    }
+  }
+}

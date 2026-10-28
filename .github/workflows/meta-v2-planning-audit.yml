@@ -1,0 +1,79 @@
+name: Meta v2 - planning audit and structure
+on:
+  push:
+    branches: [plan/meta-platform-v2-20261028]
+    paths:
+      - .planning/**
+      - docs/meta-v2/**
+      - .github/workflows/meta-v2-planning-audit.yml
+  pull_request:
+    branches: [develop]
+    paths:
+      - .planning/**
+      - docs/meta-v2/**
+      - .github/workflows/meta-v2-planning-audit.yml
+permissions:
+  contents: read
+concurrency:
+  group: meta-v2-planning-audit-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Validate planning catalog, DAG, contracts and links
+        run: python3 .planning/validate.py
+      - name: Verify safe and idempotent metadata synchronization
+        run: python3 -m unittest discover -s .planning -p test_planning.py -v
+      - name: Validate scripts without credentials or mutations
+        run: |
+          python3 .planning/sync_relationships.py
+          python3 .planning/project.py
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 7062247a15d15b1b1a5213353517bdc1596a1d38
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.22.1
+          cache: npm
+      - name: Install exact baseline dependencies
+        run: npm ci
+      - name: Build exact Angular baseline
+        run: npm run build
+      - name: Test exact Angular baseline
+        run: npm test -- --watch=false
+      - name: Lint versioned PHP syntax only
+        run: |
+          php -l backend/meta_auth_helper.php
+          php -l backend/connect_whatsapp.php
+          php -l backend/connect_facebook.php
+          php -l backend/connect_instagram.php
+  structure:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/plan/meta-platform-v2-20261028'
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Reconcile and reread native sub-issues and blocked-by edges
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .planning/sync_relationships.py --apply
+      - name: Attempt private Project only with existing authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .planning/project_attempt.py
