@@ -573,6 +573,53 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(record["attempt"], 3)
         self.assertEqual(sum(role == "implementer" for _,role,_ in self.agent.calls), 1)
 
+    def test_recheck_reconciles_integration_without_reimplementing_or_losing_commits(self):
+        self.agent.outcomes["implementer"] = ["blocked"]
+        self.tick()
+        self.controller.queue_recheck("M1.01", "checkpoint existing implementation")
+        original = self.state.task("M1.01")["data"]["revision"]
+        base = self.state.run("M1")["integration_sha"]
+        incoming = self.directory / "incoming"
+        git(self.root, "worktree", "add", "--detach", str(incoming), base)
+        (incoming / "docs").mkdir(exist_ok=True)
+        (incoming / "docs/other-package.md").write_text("Accepted independent package\n", encoding="utf-8")
+        git(incoming, "add", ".")
+        git(incoming, "commit", "-m", "Independent package squash fixture")
+        new_base = git(incoming, "rev-parse", "HEAD")
+        git(incoming, "push", "origin", "HEAD:automation/milestone-m1")
+        self.state.update_run("M1", integration_sha=new_base)
+        self.controller.queue_recheck("M1.01", "revalidate on current integration")
+        candidate = self.state.task("M1.01")["data"]
+        self.assertEqual(candidate["base"], new_base)
+        worktree = self.state.directory / "worktrees/M1.01"
+        git(worktree, "merge-base", "--is-ancestor", original, candidate["revision"])
+        git(worktree, "merge-base", "--is-ancestor", new_base, candidate["revision"])
+        self.assertEqual(candidate["saved_reviews"], [])
+        self.tick()
+        self.assertEqual(self.state.task("M1.01")["status"], "pr_pending")
+        self.assertEqual(sum(role == "implementer" for _,role,_ in self.agent.calls), 1)
+
+    def test_integration_conflict_aborts_only_the_merge_and_preserves_candidate(self):
+        self.agent.outcomes["implementer"] = ["blocked"]
+        self.tick()
+        self.controller.queue_recheck("M1.01", "checkpoint existing implementation")
+        before = self.state.task("M1.01")["data"]["revision"]
+        base = self.state.run("M1")["integration_sha"]
+        incoming = self.directory / "conflicting"
+        git(self.root, "worktree", "add", "--detach", str(incoming), base)
+        (incoming / "docs").mkdir(exist_ok=True)
+        (incoming / "docs/result.md").write_text("Conflicting accepted content\n", encoding="utf-8")
+        git(incoming, "add", ".")
+        git(incoming, "commit", "-m", "Conflicting integration fixture")
+        new_base = git(incoming, "rev-parse", "HEAD")
+        git(incoming, "push", "origin", "HEAD:automation/milestone-m1")
+        self.state.update_run("M1", integration_sha=new_base)
+        with self.assertRaisesRegex(ValueError, "original candidate preserved"):
+            self.controller.queue_recheck("M1.01", "reconcile")
+        worktree = self.state.directory / "worktrees/M1.01"
+        self.assertEqual(git(worktree, "rev-parse", "HEAD"), before)
+        self.assertFalse(git(worktree, "status", "--porcelain"))
+
     def test_unknown_token_usage_requires_operator_accounting_before_resume(self):
         self.agent.tokens = None
         with self.assertRaises(TimeoutError):

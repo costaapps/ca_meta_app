@@ -271,6 +271,42 @@ class Controller:
                 "previous_attempt": data.get("feedback"),
                 "protected_controls": "No automation/instruction/workflow changes"}
 
+    def reconcile_candidate_base(self, key, base):
+        data = self.state.task(key)["data"]
+        branch = "automation/milestone-" + key[:2].lower()
+        if data.get("pr") or self.state.run(key[:2])["integration_sha"] != base or self.github.branch_sha(branch) != base:
+            raise ValueError("Cannot reconcile an unverified integration or PR-bearing task")
+        self.fetch(branch)
+        worktree = self.state.directory / "worktrees" / key
+        expected = "codex/" + key.lower().replace(".", "-")
+        if git(worktree, "branch", "--show-current") != expected or git(worktree, "status", "--porcelain"):
+            raise ValueError("Base reconciliation requires the expected clean worktree")
+        head = git(worktree, "rev-parse", "HEAD")
+        original = data.get("reconcile_head") or data.get("revision") or head
+        if head != original:
+            parents = git(worktree, "rev-list", "--parents", "-n", "1", head).split()[1:]
+            if data.get("reconcile_target") != base or parents != [original, base]:
+                raise ValueError("Unexpected candidate movement during base reconciliation")
+        else:
+            self.state.save(key, "retry", reconcile_head=head, reconcile_target=base)
+            try:
+                git(worktree, "merge", "--no-edit", base)
+            except ProcessError:
+                # Entry required a clean checkout; abort only this merge, preserving
+                # all pre-existing candidate commits. Never reset or force-push.
+                git(worktree, "merge", "--abort")
+                raise ValueError("Integration conflict; original candidate preserved for resolution") from None
+        revision = git(worktree, "rev-parse", "HEAD")
+        git(worktree, "merge-base", "--is-ancestor", base, revision)
+        git(worktree, "merge-base", "--is-ancestor", original, revision)
+        context = self.task_context(self.catalog.tasks[key], base, data)
+        self.state.save(key, "retry", base=base, revision=revision, stage="validate",
+                        stage_context_hash=digest(context), gate_signature=None, checks=[], saved_reviews=[],
+                        reconcile_head=None, reconcile_target=None,
+                        reason="Integration updated; candidate preserved; fresh validation required")
+        self.state.event(key[:2], "candidate_base_reconciled", task=key,
+                         previous_revision=original, revision=revision, base=base)
+
     def queue_recheck(self, key, reason):
         task = self.catalog.tasks[key]
         old = self.state.task(key)
@@ -278,8 +314,12 @@ class Controller:
         run = self.state.run(key[:2])
         if old["status"] not in {"blocked", "retry"} or not run or data.get("pr"):
             raise ValueError("Recheck requires blocked/retry candidate without a PR")
-        if run["status"] == "usage_unknown" or data.get("base") != run["integration_sha"]:
-            raise ValueError("Unknown usage or moved integration; reconcile before recheck")
+        if run["status"] == "usage_unknown":
+            raise ValueError("Unknown usage; reconcile before recheck")
+        if data.get("base") != run["integration_sha"]:
+            self.reconcile_candidate_base(key, run["integration_sha"])
+            old = self.state.task(key)
+            data = old["data"]
         worktree = self.state.directory / "worktrees" / key
         expected_branch = "codex/" + key.lower().replace(".", "-")
         if git(worktree, "branch", "--show-current") != expected_branch:
@@ -321,8 +361,8 @@ class Controller:
             if git(worktree, "branch", "--show-current") != head_branch:
                 raise RuntimeError("Worktree branch changed unexpectedly")
             if old["data"].get("base") != base:
-                self.state.save(key, "blocked", reason="Integration moved; preserve worktree for reconciliation")
-                return
+                self.reconcile_candidate_base(key, base)
+                return self.execute_task(task, branch)
         attempt = old["attempt"] + (0 if resumable else 1)
         self.state.save(key, "running", attempt=attempt, base=base, branch=head_branch, worktree=str(worktree))
         self.sync(key, "running")
@@ -363,6 +403,9 @@ class Controller:
     def finish_candidate(self, task, branch, worktree, revision, context):
         key = task["key"]
         old = self.state.task(key)["data"]
+        if task.get("external") and not context["external_evidence"]:
+            self.state.save(key, "blocked", reason="External evidence attestation missing")
+            return
         base = old["base"]
         signature = digest({"revision": revision, "context": context, "task": task,
                             "policy": self.policy, "model": self.model, "effort": self.reasoning_effort,
