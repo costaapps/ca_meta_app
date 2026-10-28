@@ -1,0 +1,32 @@
+{
+  "repository": "costaapps/ca_meta_app",
+  "baseline": "7062247a15d15b1b1a5213353517bdc1596a1d38",
+  "milestones": [
+    {"key":"M1","title":"M1 · Descoberta, arquitetura e especificações executáveis","description":"0→100%: inventário comprovado da develop e do PHP operacional; contratos de identidade, dados e APIs; decisões arquiteturais; jornadas dos quatro fluxos; riscos, SLOs e matriz SDD. Gate: nenhuma suposição crítica sem evidência ou experimento com responsável; critérios de aceite rastreáveis. Entrega de planejamento não representa implementação concluída."},
+    {"key":"M2","title":"M2 · Monorepositório, containers e engenharia de entrega","description":"0→100%: Angular preservado em apps/web; API NestJS em apps/api; contratos, migrations e jobs; Dockerfiles separados; Compose; CI de qualidade e release no Docker Hub; staging reproduzível. Gate: clone limpo sobe e testa; imagens por digest e rollback ensaiado; nenhum segredo em build ou frontend."},
+    {"key":"M3","title":"M3 · Identidade, isolamento empresarial e credenciais","description":"0→100%: acesso seguro Suite4 e portal sem nova senha; sessões, RBAC e isolamento; modelo autorização↔ativos; cofre criptografado; resolução de credenciais por operação; ciclo de vida e auditoria. Gate: UUID não autentica; zero acesso cruzado entre tenants; quatro números usam concessões corretas; tokens nunca chegam ao navegador."},
+    {"key":"M4","title":"M4 · Quatro fluxos Meta e processamento de webhooks","description":"0→100%: WhatsApp Cloud API exclusivo, WhatsApp Coexistence, Instagram e Facebook com adaptadores, troca de códigos, descoberta validada de ativos e subscriptions reconciliadas; webhooks assinados, inbox idempotente, histórico/echo/state sync quando suportados. Gate: sandboxes e permissões comprovados; falhas parciais recuperáveis; nenhum register convencional em Coexistence."},
+    {"key":"M5","title":"M5 · Portal completo, compatibilidade Msg4 e migração","description":"0→100%: dashboard e status verificáveis; onboarding repetível por número; templates, respostas e notificações preservados; API interna sem token global; projeção para bancos empresariais por outbox; importação, comparação e piloto. Gate: paridade mensurável, isolamento, replicação recuperável e operação de quatro números sem credenciais trocadas."},
+    {"key":"M6","title":"M6 · Homologação, produção e retirada controlada do legado","description":"0→100%: E2E dos quatro fluxos, segurança, carga, falhas e restauração; observabilidade e runbooks; publicação e promoção por digest; canário por empresa/canal; rollback; estabilização e desativação gradual da Hostinger. Gate: evidências assinadas, restauração e rollback comprovados, SLOs observados e nenhuma dependência operacional oculta do token global."}
+  ],
+  "labels": [
+    {"name":"program:meta-v2","color":"5319e7","description":"Reconstrução Meta v2; planejamento e execução rastreáveis"},
+    {"name":"type:program","color":"3E4B9E","description":"Índice geral e governança do programa"},
+    {"name":"type:epic","color":"7057ff","description":"Coordenação e gate de uma milestone"},
+    {"name":"type:work-package","color":"1d76db","description":"Pacote implementável com contrato e aceite"},
+    {"name":"priority:P0","color":"b60205","description":"Fundação ou bloqueio crítico de segurança/produção"},
+    {"name":"priority:P1","color":"d93f0b","description":"Obrigatório para o produto completo"},
+    {"name":"priority:P2","color":"fbca04","description":"Melhoria necessária após fundações"},
+    {"name":"area:architecture","color":"c5def5","description":"Arquitetura, contratos e decisões"},
+    {"name":"area:platform","color":"bfdadc","description":"Monorepo, runtime e jobs"},
+    {"name":"area:security","color":"f9d0c4","description":"Identidade, permissões e credenciais"},
+    {"name":"area:data","color":"d4c5f9","description":"Dados, migrations e replicação"},
+    {"name":"area:meta","color":"0e8a16","description":"APIs, onboarding e eventos da Meta"},
+    {"name":"area:web","color":"bfd4f2","description":"Portal Angular e experiência do usuário"},
+    {"name":"area:integration","color":"c2e0c6","description":"Contratos Suite4/Msg4 e compatibilidade"},
+    {"name":"area:delivery","color":"e99695","description":"Containers, CI/CD, ambientes e releases"},
+    {"name":"area:quality","color":"fef2c0","description":"Homologação, testes e resiliência"},
+    {"name":"area:operations","color":"d1d5da","description":"Observabilidade, suporte e produção"},
+    {"name":"evidence:external-required","color":"fef2c0","description":"Exige evidência real da Meta, Suite4 ou ambiente operacional"}
+  ]
+}

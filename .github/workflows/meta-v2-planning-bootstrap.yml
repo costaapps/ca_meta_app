@@ -1,0 +1,28 @@
+name: Meta v2 - planning metadata
+on:
+  push:
+    branches: [plan/meta-platform-v2-20261028]
+    paths:
+      - .planning/bootstrap.json
+      - .planning/bootstrap.py
+      - .github/workflows/meta-v2-planning-bootstrap.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: meta-v2-planning-metadata
+  cancel-in-progress: false
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout planning scripts
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Create missing milestones and labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .planning/bootstrap.py
