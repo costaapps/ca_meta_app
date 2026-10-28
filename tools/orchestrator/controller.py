@@ -7,6 +7,7 @@ import re
 import time
 from pathlib import Path
 
+from .amendment import apply_recorded
 from .agents import Codex
 from .catalog import Catalog, REPOSITORY, digest
 from .github import GitHub, GitHubError, MergeBlocked
@@ -83,6 +84,7 @@ class Controller:
                  model="gpt-6-luna", reasoning_effort="xhigh"):
         self.root, self.state = root, state
         self.catalog, self.policy = Catalog(root), load_policy(root)
+        apply_recorded(self.catalog, state)
         self.github = github or GitHub(root)
         self.no_token_limit = no_token_limit
         self.model, self.reasoning_effort = model, reasoning_effort
@@ -260,7 +262,8 @@ class Controller:
         if git(worktree, "rev-parse", "HEAD") != initial_head:
             raise RuntimeError("Implementer changed git history; manual reconciliation required")
         if result["outcome"] != "pass":
-            self.state.save(key, "blocked" if result["outcome"] == "blocked" else "retry", feedback=result)
+            self.state.save(key, "blocked" if result["outcome"] == "blocked" else "retry", feedback=result,
+                            reason="Agent reported " + result["outcome"] + ": " + result["summary"])
             self.sync(key, "blocked")
             return
         if task.get("external") and not context["external_evidence"]:

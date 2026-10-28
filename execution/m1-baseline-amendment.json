@@ -1,0 +1,27 @@
+{
+  "version": "m1-baseline-replacement-v1",
+  "original_task_hash": "22ed157df5c37fcdbfe258597c741ea9a59b9d48af3d886192e1ba9c62998a57",
+  "changes": {
+    "title": "[M1.01] Fixar baseline do repositório para substituir PHP por fluxos separados",
+    "goal": "Documentar a baseline versionada e os contratos funcionais para a nova implementação. O PHP implantado é referência histórica, não arquitetura obrigatória do backend novo.",
+    "steps": [
+      "Registrar SHA, árvore, lockfile, versões e resultados atuais de instalação, build e testes. Inspecionar e preservar documentos das tentativas anteriores.",
+      "Inventariar endpoints dos quatro PHP versionados em backend/, serviços Angular e telas /setup, /channels e /templates. Cada função tem destino explícito de preservação, correção ou remoção justificada na nova arquitetura.",
+      "Registrar como evidência informada pelo operador: implantação compartilhada Hostinger em public_html/meta/auth; connect.php e connect_old.php presentes; rewrite encaminha caminhos inexistentes para connect.php. O conteúdo foi fornecido ao responsável pelo projeto, não está automaticamente disponível ao agente. Não alegar comparação de código não acessível.",
+      "Separar o fluxo unificado implantado dos fluxos separados de Facebook, Instagram e WhatsApp no repositório. Não portar falhas conhecidas, token global ou state inseguro como requisitos de compatibilidade.",
+      "Registrar consumidores, contratos e tabelas observados no código. Marcar donos, versões, DDL e consumidores externos não comprovados como não confirmados, com responsável/pacote dependente e gate antes do cenário de migração/corte afetado. Não exigir comprovação completa de produção para aceitar este inventário.",
+      "Criar matriz comportamento → arquivo/linha → contrato → cenário de teste → pacote de implementação. Usar fixtures sanitizadas sem chamadas ou alterações de produção. Documentação Meta indisponível é pendência da decisão específica, sem inventar suporte atual."
+    ],
+    "contract": "Entregas: docs/baseline/inventory.md, endpoint-matrix.csv, parity-matrix.md e execution-report.md. Incluir pendências operacionais com cenário afetado e gate de migração; não afirmar paridade operacional certificada.",
+    "acceptance": [
+      "Todos os endpoints dos quatro PHP versionados e as três telas Angular têm destino funcional explícito na arquitetura nova; nenhuma função versionada é omitida.",
+      "Roteamento do frontend e PHP versionado estão traçados por arquivo/linha. O rewrite relatado pelo operador e o fluxo unificado legado são distinguídos de comportamento reproduzido; diferenças ainda não comprovadas ficam identificadas.",
+      "Baseline compilada e testada em ambiente identificado, ou bloqueio documentado com comando e causa exatos.",
+      "Nenhum segredo ou identificador operacional desnecessário é publicado em issues, logs ou documentação.",
+      "Cada lacuna operacional tem status não confirmado, cenário afetado e gate antes da migração/corte dependente. A ausência de inventário operacional completo não impede concluir a descoberta versionada; não se inventa PHP, DDL ou consumidores."
+    ],
+    "risk": "Esta aceitação libera desenvolvimento do novo backend, não migração, deploy ou corte do PHP. Reconciliar consumidores e dados reais antes do cenário operacional dependente; gates externos das outras issues permanecem ativos.",
+    "external": false,
+    "body": "Decisão explícita do operador: substituir o PHP, usando os fluxos separados versionados como referência funcional. Inventário do legado não bloqueia desenvolvimento independente.\n\nCritérios revisados:\n- Todos os endpoints dos quatro PHP versionados e as três telas Angular têm destino funcional explícito na arquitetura nova; nenhuma função versionada é omitida.\n- Roteamento do frontend e PHP versionado estão traçados por arquivo/linha. O rewrite relatado pelo operador e o fluxo unificado legado são distinguídos de comportamento reproduzido; diferenças ainda não comprovadas ficam identificadas.\n- Baseline compilada e testada em ambiente identificado, ou bloqueio documentado com comando e causa exatos.\n- Nenhum segredo ou identificador operacional desnecessário é publicado em issues, logs ou documentação.\n- Cada lacuna operacional tem status não confirmado, cenário afetado e gate antes da migração/corte dependente. A ausência de inventário operacional completo não impede concluir a descoberta versionada; não se inventa PHP, DDL ou consumidores.\n\nEsta aceitação libera desenvolvimento do novo backend, não migração, deploy ou corte do PHP. Reconciliar consumidores e dados reais antes do cenário operacional dependente; gates externos das outras issues permanecem ativos."
+  }
+}

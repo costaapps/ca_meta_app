@@ -17,6 +17,7 @@ class State:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript("""
+        CREATE TABLE IF NOT EXISTS scope_amendments (milestone TEXT PRIMARY KEY, data TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS runs (
           milestone TEXT PRIMARY KEY, catalog_hash TEXT NOT NULL,
           policy_hash TEXT NOT NULL, develop_sha TEXT NOT NULL,

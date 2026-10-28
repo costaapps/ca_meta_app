@@ -166,3 +166,27 @@ python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app resume M1 --
 `--context-file` está disponível em `unblock`: lê UTF-8 até 20000 bytes, rejeita contexto vazio e padrões conhecidos de credenciais, salva texto/hash no checkpoint e registra hash no evento. Esse filtro não detecta todo segredo; sanitizar manualmente antes. A nota chega ao implementador e às revisões na tentativa seguinte. Não é um chat ao vivo; editar o arquivo depois não altera o texto já registrado. Para fornecer outra nota, usar um novo desbloqueio explícito de tarefa bloqueada. `--reset-attempts` renova a contagem, mantendo eventos e evidências anteriores.
 
 A M1.01 canônica tem `external: true` e exige reconciliação operacional, especialmente roteamento WhatsApp. Sem `.orchestrator/inputs/M1.01.json` e referências sanitizadas verificáveis, o controlador não aceita o pacote mesmo que o agente retorne pass. A correção permite descoberta e comunicação melhores; não garante liberação das dependências sem os insumos externos. Não criar atestados fictícios para passar pelo gate. O DDL só pode ser tratado como requisito comprovado quando ligado a contrato/cenário realmente dependente; não transformar qualquer informação histórica ausente em exigência nova de aceite.
+
+## Emenda explícita: descoberta para substituição do PHP
+
+Decisão do operador em 2026-10-28: o backend novo substitui PHP e usa os quatro PHP versionados como referência funcional dos fluxos separados. A investigação exaustiva do ambiente antigo não bloqueia a descoberta do repositório. O operador forneceu listagem, fonte e rewrite da Hostinger; este PR registra somente o resumo sanitizado, sem copiar o fonte operacional anexado ou identificadores de hospedagem.
+
+`execution/m1-baseline-amendment.json` é a emenda versionada ao contrato da M1.01. Não altera as outras 65 tarefas nem declara paridade, DDL, consumidores, permissões Meta ou implantação certificados. Lacunas reais bloqueiam o cenário dependente de migração/corte. M1.02 e outros pacotes mantêm suas próprias exigências; esta emenda não promete execução de M1–M6 sem insumos.
+
+Para a execução existente, atualizar somente a worktree runner e então executar uma vez:
+
+```bash
+cd /mnt/c/VsCodeRepos/ca_meta_app
+git fetch origin fix/orchestrator-model-token-runtime
+cd "$HOME/.local/share/ca-meta/runner-token-fix"
+git switch --detach origin/fix/orchestrator-model-token-runtime
+python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app amend-baseline M1 --execute --reason "Autorizo substituir PHP; descoberta usa backend versionado e pendências operacionais ficam no cenário de migração dependente"
+python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app unblock M1 --issue M1.01 --reason "Retomar sob contrato de descoberta revisado; preservar entregas e evidências anteriores"
+python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app resume M1 --execute --once --no-token-limit --model gpt-6-luna --reasoning-effort xhigh
+```
+
+O comando de emenda não roda agentes nem desbloqueia automaticamente. Exige lock exclusivo, M1 existente com catálogo/política/base originais, consumo conhecido e nenhum pacote M1 em execução/revisão, aceito ou com PR. Verifica o hash exato da tarefa de origem, faz backup SQLite, registra hashes antigo/novo e motivo, e atualiza atomicamente o catálogo efetivo fixado. Preserva tokens, tentativas, trabalho local, feedback e base Git. Sem `--execute` é apenas diagnóstico. Repetir a adoção é rejeitado; depois da confirmação basta retomar/desbloquear quando apropriado.
+
+Cada construção do controlador recarrega a emenda registrada e verifica seus hashes contra o runner revisado. Portanto use esta versão do executor também para status, retomada e finalização; o executor antigo não conhece a emenda. O manifesto original permanece intacto, com o adendo explícito no checkpoint e neste arquivo versionado. Não editar hashes SQLite manualmente. Esta ferramenta não migra develop e não invalida aprovações existentes: recusa o caso antes que haja aceitação/PR. Uma evolução futura do contrato precisa de nova reconciliação revisada.
+
+O relatório de uma tarefa bloqueada agora substitui o motivo antigo de desbloqueio pelo resumo atual do agente. A decisão e os critérios efetivos são enviados no pacote de contexto a todos os revisores.
