@@ -19,7 +19,7 @@ DATE = {"type": "string", "format": "date-time"}
 SCHEMAS = {
     "FlowVariant": {"type": "string", "enum": ["WHATSAPP_CLOUD", "WHATSAPP_COEXISTENCE", "FACEBOOK", "INSTAGRAM"]},
     "SafeError": obj({"code": S, "safeMessage": S, "requestId": ID, "retryable": {"type": "boolean"}, "action": S}, ["code", "safeMessage", "requestId", "retryable"]),
-    "Session": obj({"principalId": ID, "activeTenantId": ID, "tenantDisplayName": S, "roles": {"type": "array", "items": S}, "expiresAt": DATE}, ["principalId", "activeTenantId", "roles", "expiresAt"]),
+    "Session": obj({"principalId": ID, "activeTenantId": ID, "contextRef": ID, "tenantDisplayName": S, "roles": {"type": "array", "items": S}, "expiresAt": DATE}, ["principalId", "activeTenantId", "contextRef", "roles", "expiresAt"]),
     "ExchangeRequest": obj({"ticket": {"type": "string", "writeOnly": True, "maxLength": 16384}}, ["ticket"]),
     "MagicLinkRequest": obj({"email": {"type": "string", "format": "email", "maxLength": 320}}, ["email"]),
     "MagicLinkConsume": obj({"code": {"type": "string", "writeOnly": True, "maxLength": 8192}}, ["code"]),
@@ -58,8 +58,11 @@ def operation(method, operation_id, result, request=None, status="200", public=F
           "responses": {status: response, "default": {"description": "Erro normalizado seguro", "content": {"application/json": {"schema": ref("SafeError")}}}}}
     if request:
         op["requestBody"] = {"required": True, "content": {"application/json": {"schema": ref(request)}}}
+    if not public and not service and operation_id not in ["readSession", "logout"]:
+        op.setdefault("parameters", []).append({"name": "X-Tenant-Context", "in": "header", "required": True,
+            "schema": ID, "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"})
     if method in ("post", "delete", "patch") and not public:
-        op["parameters"] = [{"name": "Idempotency-Key", "in": "header", "required": True, "schema": {"type": "string", "maxLength": 128}, "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"}]
+        op.setdefault("parameters", []).append({"name": "Idempotency-Key", "in": "header", "required": True, "schema": {"type": "string", "maxLength": 128}, "description": "Escopo por tenant+operação, com hash de payload; não garante exactly-once externo"})
     return op
 
 
@@ -117,6 +120,7 @@ def build_api():
             "responses": {"200": {"description": "Persistência durável confirmada; negócio processado depois"}, "403": {"description": "Assinatura inválida"}, "503": {"description": "Não persistido; não confirmar recebimento"}}}}
     for path, opid in [("/health/live", "readLiveness"), ("/health/ready", "readReadiness")]:
         paths[path] = {"servers": [{"url": "https://connections.example.invalid"}], "get": operation("get", opid, "Health", public=True)}
+    paths["/health/ready"]["get"]["responses"]["503"] = {"description": "Dependência essencial indisponível; processo continua vivo", "content": {"application/json": {"schema": ref("Health")}}}
     return {"openapi": "3.1.0", "info": {"title": "Meta Platform v2 · contrato proposto", "version": "0.1.0-planning", "description": "Rascunho revisável para M1.07. Não representa endpoints implementados. Ratificar nomes, constraints e políticas por produto antes da geração de cliente."},
             "servers": [{"url": "https://connections.example.invalid/api/v1", "description": "Placeholder sem ambiente operacional"}],
             "x-status": "proposed", "paths": paths, "components": {"schemas": SCHEMAS, "securitySchemes": {

@@ -34,6 +34,7 @@ Os arquivos `meta-auth.service.ts` e `meta-auth.model.ts` existem nessa revisão
 | B12 | `meta_auth_helper.php::meta_call_meta_api` | Redação cobre alguns nomes de token, mas não todos os segredos possíveis, como code/client_secret/input_token. M3.10/M4.02 usam allowlist e testes |
 | B13 | headers PHP | Fallback de CORS pode combinar wildcard/credentials ou devolver origem sem autorização coerente. M3.04 endurece por origem exata e sessão |
 | B14 | docs `known-issues`, `roadmap`, `git-workflow` | Há afirmações históricas de backend untracked/testes falhando/nomes antigos. Atualização é tarefa SDD, sem tratar documentos como estado vivo |
+| B15 | Instalação da baseline no run 40687060925 | npm reportou 47 vulnerabilidades: 4 critical, 31 high, 11 moderate, 1 low. M2.08/M6.02 exigem triagem por pacote, uso dev/runtime, alcance e correção revisada; relatório não foi tratado como incidente confirmado |
 
 Não foram publicados valores operacionais de configuração encontrados nos fontes. Links de evidência devem apontar ao arquivo/SHA, sem copiar tokens, app secrets ou dados de cliente para a issue.
 
@@ -61,4 +62,4 @@ Cada lacuna possui pacote e gate. É permitido preparar código independente, ma
 
 ## Registro de validação
 
-O workflow de auditoria deste planejamento executará checagem do catálogo/grafo e, em job isolado, build/testes Angular e lint PHP da baseline exata. Resultado deve ser vinculado na issue índice com run/SHA; ausência de PHP/serviço operacional não é compensada por lint sintático. Nenhum teste desse workflow envia mensagem, consome credencial Meta ou altera ativo de produção.
+O [run 40687060925](https://github.com/costaapps/ca_meta_app/actions/runs/40687060925) confirmou build da baseline, duas suítes e cinco testes Angular passando, além de lint sintático dos quatro arquivos PHP. A validação do plano e os 15 testes dos scripts também passaram. O npm reportou as vulnerabilidades registradas em B15, ainda pendentes de triagem/correção na implantação. Lint sintático não comprova integração PHP/Hostinger. Nenhum teste desse workflow envia mensagem, consome credencial Meta ou altera ativo de produção.

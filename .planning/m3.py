@@ -3,7 +3,7 @@ task("M3.01", "Implementar tenants, identidades, memberships e autorização por
 [
 "Implementar Tenant e mapeamento legado IdDatabase+IdCompany; identidade usa subject estável do emissor e memberships explícitas, sem tomar CompanyUUID como credencial.",
 "Definir guards/policies por operação e recurso com papéis owner/admin/operator/viewer; evitar autorização baseada só na presença de sessão ou em role enviado pelo frontend.",
-"Criar contexto de tenant imutável por requisição/job; repositórios exigem tenantId e rejeitam consultas sem escopo. Filtrar relacionamentos e updates além das listagens.",
+"Criar contexto de tenant imutável por requisição/job; repositórios exigem tenantId e rejeitam consultas sem escopo. Filtrar relacionamentos e updates além das listagens. Devolver contextRef opaca vinculada à sessão/tenant/versão e exigir X-Tenant-Context nas operações empresariais; aba com contexto antigo recebe CONTEXT_CHANGED antes de qualquer efeito, evitando iniciar onboarding em empresa diferente após troca em outra aba.",
 "Provisionar tenants e memberships via contrato interno autenticado ou processo administrativo auditado; não abrir endpoint público que cria associação por UUID ou domínio de e-mail.",
 "Implementar seleção de empresa da sessão consultando memberships ativas; troca de contexto não modifica onboards em andamento, ligados ao tenant original.",
 "Criar fixtures de tenants A/B, duas empresas na mesma base legada e ativos com IDs externos iguais; aplicar isolamento também em caches, jobs e métricas de suporte."
@@ -69,7 +69,7 @@ task("M3.04", "Implementar sessões seguras, CSRF, CORS e limites de abuso", "se
 [
 "Criar sessão opaca com segredo de alta entropia, hash no servidor, cookie HttpOnly/Secure/host-only e SameSite apropriado ao modo; preferir mesmo origin web/API.",
 "Definir idle e absolute timeout configuráveis, revogação/logout e rotação em login/elevação; valores iniciais propostos 30min idle e 8h absoluto sujeitos a validação de produto.",
-"Proteger mutações com mecanismo CSRF e validação Origin/Fetch Metadata compatível com callbacks públicos separados. SameSite não é considerado defesa única.",
+"Proteger mutações com mecanismo CSRF e validação Origin/Fetch Metadata compatível com callbacks públicos separados. SameSite não é considerado defesa única. Validar contextRef de sessão/tenant/versão nas operações empresariais; troca de empresa rotaciona a referência e abas antigas precisam atualizar o contexto antes de ler ou gravar.",
 "Configurar CORS apenas para origens exatas necessárias; não refletir Origin desconhecido nem combinar wildcard com credentials. Tratar trusted proxy e Secure cookies corretamente.",
 "Aplicar rate limits distribuídos para login, magic link, onboarding, status refresh e ações administrativas, com chaves separadas por tenant/ator/IP e erros seguros.",
 "Separar callback OAuth e webhook das rotas de sessão: validações específicas não removem a segurança do restante da API. Definir CSP, proteção de framing e política de referrer por rota."

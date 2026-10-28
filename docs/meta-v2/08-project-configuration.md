@@ -10,11 +10,15 @@ As 73 issues estão mapeadas por número/URL reais em `.planning/issues-map.json
 
 O workflow de auditoria verifica catálogo/grafo/links e executa build/testes da baseline exata em job isolado. O job de relações cria e relê subissues e blocked-by pela API, sem trocar título, conteúdo, estado, assignee ou progresso. Seu relatório/summary é evidência da estrutura efetiva, não de implementação do aplicativo.
 
+[Run 40687060925](https://github.com/costaapps/ca_meta_app/actions/runs/40687060925): plano, baseline e estrutura concluídos com sucesso. Relatório: 73 issues verificadas, 72 relações de hierarquia e 280 dependências criadas e relidas. O [PR 76](https://github.com/costaapps/ca_meta_app/pull/76) preserva o material para revisão. Os checks do PR identificam as revisões posteriores dos contratos e do diagnóstico de dependências.
+
 ## Pendência: Project V2 nativo
 
 O navegador acessado para a configuração não tinha sessão GitHub e o repositório privado apareceu como não acessível nessa sessão. O conector continuou funcionando para o repositório, mas não oferece a capacidade organizacional de Projects. Nenhuma credencial ou permissão adicional foi criada ou obtida por atalho.
 
 O `GITHUB_TOKEN` do workflow tem escopo do repositório; a [documentação GitHub](https://docs.github.com/en/actions/concepts/security/github_token) explica esse limite. O script de probe registra o resultado de leitura de Projects com a credencial disponível; leitura bem-sucedida também não comprova escrita. O provisionamento não afirma criar Project quando o acesso falha.
+
+A tentativa real de provisionamento no run acima terminou em `GraphQL request failed: FORBIDDEN`, com `project_created: false`. A pendência está comprovada, não é uma suposição sobre o painel. Não houve expansão de acesso ou criação de credencial para contorná-la.
 
 `.planning/project.py` está preparado para um ambiente com autenticação já autorizada que possua Projects organizacional write e leitura das issues privadas do repositório. Recebe `GH_TOKEN` do mecanismo seguro de runtime, nunca de corpo de issue/chat/arquivo versionado. Não concede colaboradores, não vincula team nem muda permissões do repositório. Credencial e login devem ser fornecidos pelo fluxo seguro apropriado, fora da documentação de planejamento.
 
@@ -81,7 +85,7 @@ Uma epic contém pacotes; o índice contém as seis epics. Dependências são en
 
 - 6 milestones nativas e labels: provisionamento confirmado.
 - 1 índice + 6 epics + 66 pacotes: números/URLs reais no manifesto.
-- 72 relações de hierarquia e 280 blocked-by: exigem sucesso do job de sync e releitura; consultar report/run vinculados no índice.
+- 72 relações de hierarquia e 280 blocked-by: criadas e relidas no run 40687060925.
 - Catálogo, critérios e fontes estruturadas: validados em local/CI.
 - Código de aplicação, banco e ativos Meta de produção: implantação permanece fora deste PR.
 - Project V2: pendente de acesso organizacional autorizado; configuração e importação preparadas, sem declaração de criação antecipada.

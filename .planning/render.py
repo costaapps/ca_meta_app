@@ -175,6 +175,19 @@ Usar as dependências dos pacotes, não a ordem numérica de criação das issue
 
 def program_body(config, tasks, mapping=None):
     rows = "\n".join(f'| {m["key"]} | [{m["title"].split(" · ",1)[1]}](https://github.com/{REPO}/milestone/{m["key"][1:]}) | {issue_link(m["key"], mapping)} | {sum(t["milestone"]==m["key"] for t in tasks)} |' for m in config["milestones"])
+    evidence_path = ROOT / "delivery-evidence.json"
+    evidence_text = ""
+    if evidence_path.exists():
+        evidence = json.loads(evidence_path.read_text())
+        evidence_text = f'''### Evidência da entrega do planejamento
+
+[PR de revisão]({evidence["planning_pr"]}) · [Run de auditoria e estrutura]({evidence["structure_run"]}). O run registrou {evidence["issues_verified"]} issues verificadas, {evidence["hierarchy_edges_verified"]} relações de hierarquia e {evidence["dependency_edges_verified"]} dependências nativas criadas e relidas.
+
+Passaram {evidence["planning_script_tests_passed"]} testes dos scripts, build Angular da baseline, {evidence["baseline"]["tests_passed"]} testes em {evidence["baseline"]["test_files"]} suítes e lint sintático de {evidence["baseline"]["php_files_syntax_passed"]} arquivos PHP. O npm reportou 47 vulnerabilidades de dependências (4 critical); a triagem/correção foi incorporada em M2.08/M6.02. Esses resultados não certificam os novos fluxos externos ainda não implementados.
+
+Project V2 nativo: **não criado**. Tentativa com autoridade existente recebeu `{evidence["native_project"]["reason"]}`. Configuração de campos, visões e importação está pronta; falta acesso organizacional autorizado. Código de aplicação, dados, credenciais e ativos Meta de produção permanecem sem alteração.
+
+'''
     return f'''<!-- meta-v2-key: PROGRAM -->
 **Programa de reconstrução do ca_meta_app: de frontend Angular + PHP externo para portal Meta seguro, multicliente, com API independente, quatro fluxos e entrega por containers.**
 
@@ -228,7 +241,7 @@ Todas as issues de execução começam abertas. Fechar exige evidência de crit�
 
 **Project nativo:** configuração e importação estão preparadas em `.planning/project.py` e no documento 08. A criação depende de acesso organizacional Projects, não exposto pelo conector atual; o navegador está sem sessão autenticada. Essa limitação não impede issues, milestones, hierarquia e dependências do repositório. Registrar a URL nativa e a evidência aqui quando a autenticação/permissão estiver disponível; não declarar Project criado antecipadamente.
 
-### Condição final de 100%
+{evidence_text}### Condição final de 100%
 
 - [ ] Quatro fluxos operacionais e homologados, com quatro números Coexistence e isolamento multiempresa comprovados.
 - [ ] Portal simples, acesso seguro, credenciais corretas e funções legadas preservadas/corrigidas.

@@ -91,6 +91,7 @@ Probabilidade/impacto são avaliação inicial, a revisar com evidência. A fun�
 | R25 | Remover root token afeta outros produtos Costa Apps | Média / crítico | Inventário cruzado e revogação seletiva tardia; M6.10 | Operação |
 | R26 | Documentação vira estado paralelo desatualizado | Alta / médio | SDD checks, contrato/PR/release rastreáveis; M1.10/M2.04 | Tech lead |
 | R27 | Project nativo sem acesso organizacional | Comprovado no ambiente / gestão | Manter issues/milestones/grafo e script idempotente; documento 08 | Maintainer |
+| R28 | Baseline npm com 47 vulnerabilidades reportadas, incluindo quatro critical | Comprovado no audit / impacto a triar | Relatório por pacote/caminho, dev/runtime e alcance; correções revisadas, sem audit fix --force cego; M2.08/M6.02 | Backend/segurança |
 
 ## Decisões pendentes com próximo experimento
 

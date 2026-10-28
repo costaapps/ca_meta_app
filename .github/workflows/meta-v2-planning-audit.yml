@@ -47,6 +47,31 @@ jobs:
           cache: npm
       - name: Install exact baseline dependencies
         run: npm ci
+      - name: Record dependency audit for planning without changing packages
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          result = subprocess.run(['npm', 'audit', '--json'], capture_output=True, text=True, check=False)
+          try:
+              data = json.loads(result.stdout)
+          except ValueError:
+              raise SystemExit('Dependency audit unavailable; no packages were changed')
+          if result.returncode not in (0, 1) or 'metadata' not in data:
+              raise SystemExit('Dependency audit incomplete; inspect service availability')
+          lock = json.loads(Path('package-lock.json').read_text()).get('packages', {})
+          packages = []
+          for name, finding in sorted(data.get('vulnerabilities', {}).items()):
+              nodes = finding.get('nodes', [])
+              usage = 'dev-only according to lockfile' if nodes and all(lock.get(node, {}).get('dev') is True for node in nodes) else 'runtime-or-mixed; triage required'
+              packages.append({'name': name, 'severity': finding.get('severity'), 'direct': finding.get('isDirect'), 'usage': usage, 'fixAvailable': bool(finding.get('fixAvailable'))})
+          report = {'counts': data['metadata'].get('vulnerabilities', {}), 'packages': packages, 'scope': 'baseline dependency report; exploitation/reachability not established; no fix applied'}
+          print(json.dumps(report, indent=2))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as target:
+              target.write('## Baseline dependency audit - discovery\n\n```json\n' + json.dumps(report, indent=2) + '\n```\n')
+          PY
       - name: Build exact Angular baseline
         run: npm run build
       - name: Test exact Angular baseline

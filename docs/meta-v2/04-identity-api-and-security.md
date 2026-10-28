@@ -34,6 +34,8 @@ Envio por e-mail depende de provedor/domínio configurado, fila e quotas. Ambien
 - Serviço interno usa identidade/escopos próprios com rotação e revogação. Não reutilizar sessão de pessoa ou token Meta como chave da API.
 - Qualquer tenant de URL/body é identificador a comparar com a sessão, nunca autoridade. Mudança de empresa valida membership e não altera onboards já iniciados.
 
+Para evitar ação na empresa errada após troca em outra aba, a API devolve `contextRef` opaca ligada à sessão, tenant e versão. Operações empresariais exigem `X-Tenant-Context`; trocar empresa rotaciona a referência. A aba antiga recebe `CONTEXT_CHANGED` antes de leitura/efeito e precisa reconciliar a empresa exibida. A referência pode ficar em memória/sessionStorage e não autoriza sozinha sem cookie/membership. Onboards/jobs continuam ligados ao tenant de origem, sem serem reatribuídos pela troca.
+
 ## Embed e janelas Meta
 
 Protocolo parent/child versionado: `EMBED_READY` com nonce; bootstrap com ticket curto; troca na API; ACK seguro. Validar `event.origin` exato e `event.source`, schema/version, nonce e frescor. Resize/theme/navigation têm schemas próprios e não carregam execução arbitrária nem segredo permanente.
@@ -68,7 +70,7 @@ Os paths são contrato inicial para ratificação em OpenAPI. Segurança de toda
 | Operações | GET `/operations/:id` | Outcome incluindo UNKNOWN, sem token/resposta bruta |
 | Webhook | GET/POST `/webhooks/meta/:appConfigRef` | Challenge/assinatura/raw body/limites; referência pública não é segredo |
 | Revogação/exclusão Meta | Rota por configuração/produto | Mecanismo assinado conforme documentação validada |
-| Relay interno | POST `/internal/v1/assets/:id/operations/:type` | Serviço com escopos de tenant/ativo/operação; sem Graph URL arbitrária |
+| Relay interno | POST `/internal/v1/assets/:id/operations` | Operação tipada no payload; serviço com escopos de tenant/ativo/operação, sem Graph URL arbitrária |
 | Liveness/readiness | GET `/health/live`, `/health/ready` | Detail restrito e sem segredos; não chama Meta no liveness |
 
 Rotas de portal/Meta são relativas a `/api/v1`; relay `/internal/v1` e health possuem prefixos próprios no ingress. IDs públicos são internos opacos; uso de external ID legado exige compatibilidade explicitamente autorizada.

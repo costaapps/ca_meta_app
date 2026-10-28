@@ -134,6 +134,9 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual("#/components/schemas/ConnectionPage", response["content"]["application/json"]["schema"]["$ref"])
         self.assertIn("asset", api["components"]["schemas"]["Connection"]["properties"])
         self.assertIn("servers", api["paths"]["/internal/v1/assets/{id}/operations"])
+        self.assertIn("503", api["paths"]["/health/ready"]["get"]["responses"])
+        headers = api["paths"]["/onboarding-sessions"]["post"]["parameters"]
+        self.assertIn("X-Tenant-Context", [x["name"] for x in headers])
 
     def test_public_response_schemas_have_no_permanent_secret_fields(self):
         api = build_api()

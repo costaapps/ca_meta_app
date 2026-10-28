@@ -16,6 +16,7 @@ Estes scripts mantêm documentação e metadados de planejamento, sem implementa
 - `project_attempt.py`: tenta com autoridade existente e registra bloqueio de acesso claramente.
 - `github_api.py`: transporte com segredo só em memória, paginação e throttle.
 - `test_planning.py`: provas de idempotência, segurança de escopo, contrato e rejeição de estado divergente.
+- `delivery-evidence.json`: evidências de publicação/CI e bloqueio real de Projects, sem segredos.
 
 ## Atualizar e revisar
 

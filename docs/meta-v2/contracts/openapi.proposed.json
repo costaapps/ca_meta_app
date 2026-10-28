@@ -200,6 +200,17 @@
         },
         "parameters": [
           {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
+          {
             "name": "Idempotency-Key",
             "in": "header",
             "required": true,
@@ -284,7 +295,20 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          }
+        ]
       }
     },
     "/onboarding-sessions": {
@@ -330,6 +354,17 @@
           }
         },
         "parameters": [
+          {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -387,6 +422,17 @@
         },
         "parameters": [
           {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
+          {
             "name": "Idempotency-Key",
             "in": "header",
             "required": true,
@@ -442,7 +488,20 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          }
+        ]
       },
       "parameters": [
         {
@@ -488,7 +547,20 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          }
+        ]
       },
       "parameters": [
         {
@@ -537,6 +609,17 @@
         },
         "parameters": [
           {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
+          {
             "name": "cursor",
             "in": "query",
             "schema": {
@@ -576,7 +659,20 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          }
+        ]
       },
       "parameters": [
         {
@@ -625,6 +721,17 @@
           }
         },
         "parameters": [
+          {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -685,6 +792,17 @@
         },
         "parameters": [
           {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
+          {
             "name": "Idempotency-Key",
             "in": "header",
             "required": true,
@@ -743,6 +861,17 @@
           }
         },
         "parameters": [
+          {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -813,6 +942,17 @@
         },
         "parameters": [
           {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
+          {
             "name": "Idempotency-Key",
             "in": "header",
             "required": true,
@@ -871,6 +1011,17 @@
         },
         "parameters": [
           {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
+          {
             "name": "cursor",
             "in": "query",
             "schema": {
@@ -921,6 +1072,17 @@
           }
         },
         "parameters": [
+          {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -980,6 +1142,17 @@
         },
         "parameters": [
           {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
+          {
             "name": "cursor",
             "in": "query",
             "schema": {
@@ -1032,6 +1205,17 @@
           }
         },
         "parameters": [
+          {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          },
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -1088,7 +1272,20 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "X-Tenant-Context",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Referência servidor vinculada à sessão+tenant+versão; contexto antigo gera CONTEXT_CHANGED antes de efeito"
+          }
+        ]
       },
       "parameters": [
         {
@@ -1374,6 +1571,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Dependência essencial indisponível; processo continua vivo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
           }
         }
       }
@@ -1433,6 +1640,11 @@
             "minLength": 1,
             "maxLength": 128
           },
+          "contextRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
           "tenantDisplayName": {
             "type": "string"
           },
@@ -1450,6 +1662,7 @@
         "required": [
           "principalId",
           "activeTenantId",
+          "contextRef",
           "roles",
           "expiresAt"
         ]

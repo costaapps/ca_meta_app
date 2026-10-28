@@ -5,7 +5,7 @@ task("M5.01", "Construir shell do portal, entrada segura e catálogo dos quatro 
 "Implementar entrada a partir Suite4 e link direto, expiração/logout e estados de ausência de membership; guards protegem navegação, mas API continua responsável pela autorização.",
 "Renderizar quatro cards de catálogo a partir da configuração/capabilities: WhatsApp API, WhatsApp + aplicativo, Instagram e Facebook, com pré-requisitos claros.",
 "Manter componentes/SCSS existentes quando úteis, extraindo padrões comuns sem redesenho gratuito; substituir alert/console-only por mensagens seguras com requestId.",
-"Definir lazy routes, loading/empty/error acessíveis e interceptor de sessão/CSRF; não armazenar tickets ou tokens Meta em localStorage.",
+"Definir lazy routes, loading/empty/error acessíveis e interceptor de sessão/CSRF/X-Tenant-Context. contextRef fica em memória ou sessionStorage e só funciona com sessão válida; CONTEXT_CHANGED interrompe ação e reconcilia a empresa exibida. Não armazenar tickets ou tokens Meta em localStorage.",
 "Preservar navegação direta e retorno depois de popup/callback/refresh, sem transportar empresa por query não autenticada."
 ],
 "Rotas públicas de acesso são separadas das áreas autenticadas /connections, /connections/new/:flow, /assets/:id, /templates e /notifications; aliases legados de /setup e /channels recebem transição documentada.",
@@ -140,7 +140,7 @@ task("M5.07", "Integrar Msg4/Suite4 por API de serviço e eliminar token global 
 "Remover leituras indevidas de GeneralSettings/SYSTEM_ROOT_USER_TOKEN progressivamente por consumidor, com feature flag e comparação de paridade sem duplicar envios.",
 "Se sistema legado exigir segredo local temporariamente, criar ADR de exceção com prazo, escopo, distribuição criptografada e dono; caminho padrão permanece sem exportar token bruto."
 ],
-"API interna /internal/v1/assets/:id/operations/<tipo> com escopos restritos e audit trail. Nunca permitir URL Graph arbitrária nem caller escolher token de outra autorização. Timeout de envio retorna outcome UNKNOWN com operationId.",
+"API interna /internal/v1/assets/:id/operations, com operação tipada no payload, escopos restritos e audit trail. Nunca permitir URL Graph arbitrária nem caller escolher token de outra autorização. Timeout de envio retorna outcome UNKNOWN com operationId.",
 [
 "Cada operação dos quatro números usa concessão correta mesmo com credenciais distintas.",
 "Serviço de tenant A não opera ativo do B nem muda tenant no payload para ampliar acesso.",

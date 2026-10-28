@@ -158,7 +158,7 @@ task("M2.08", "Implantar CI de qualidade, contratos, segurança e builds", "deli
 "Criar workflow pull_request/push confiável com permissões mínimas, actions fixadas por SHA, lockfile/caches, concorrência e limites de tempo.",
 "Executar formatação/lint/typecheck, testes Angular e API, contratos e integração com MariaDB real; guardar relatórios JUnit/cobertura sem payload de clientes.",
 "Construir ambas as imagens e executar smoke/Compose quando aplicável. PRs de forks ou não confiáveis não recebem segredos nem publicam artefatos privilegiados.",
-"Adicionar secret scanning, dependências/licenças e imagens com severidade/política de exceção; findings têm dono e validade, não são silenciados indefinidamente.",
+"Adicionar secret scanning, dependências/licenças e imagens com severidade/política de exceção; findings têm dono e validade, não são silenciados indefinidamente. A execução da baseline em 28/10/2026 reportou 47 vulnerabilidades npm (4 critical, 31 high, 11 moderate, 1 low): gerar relatório por pacote/caminho, distinguir dependência dev/runtime, avaliar alcance e corrigir patches/majors de forma revisada antes do gate, sem npm audit fix --force indiscriminado.",
 "Checar migrations, schema drift, generated-client e links/specs; usar testes de fronteiras e invariantes, sem meta de cobertura que premie testes espelho de implementação.",
 "Documentar checks que deverão proteger develop/main e processo de habilitação por maintainer. Planejamento do requisito não altera permissões ou regras do repositório automaticamente."
 ],

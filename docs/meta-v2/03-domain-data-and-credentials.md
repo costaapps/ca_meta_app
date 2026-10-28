@@ -40,7 +40,7 @@ Tipos de referência: IDs internos opacos em string (UUID com tipo MariaDB adequ
 | LegacyTenantMap | tenant_id, legacy_database_id, legacy_company_id, environment | UNIQUE de origem completa; DSN não vem do cliente |
 | Principal | id, kind USER/SERVICE, issuer, subject, status | UNIQUE issuer+subject; serviço e pessoa têm permissões distintas |
 | Membership | tenant_id, principal_id, roles, status, version | UNIQUE tenant+principal; revogação observada em sessão/jobs |
-| PortalSession | id, secret_hash, principal_id, active_tenant_id, issued_at, idle_at, expires_at, revoked_at | Secret hash único; índice de revogação/principal e limpeza; cookie opaco |
+| PortalSession | id, secret_hash, principal_id, active_tenant_id, context_ref_hash, context_version, issued_at, idle_at, expires_at, revoked_at | Secret hash único; contexto opaco rotacionado na troca de tenant; cookie e membership continuam obrigatórios |
 | ConsumedTicket | issuer, jti_hash, consumed_at, expires_at, exchange_binding | UNIQUE issuer+jti_hash e consumo atômico entre réplicas |
 | MagicLink | token_hash, principal_ref, expires_at, consumed_at, attempts | Não informa e-mail existente; hash, TTL e propósito limitados |
 | MetaAppConfig | id, provider_app_id, environment, flow_variant, auth_variant, graph_version, signup_version, secret_ref, public_config, capabilities_version | Config servidor; segredos por referência; alterações auditadas |
