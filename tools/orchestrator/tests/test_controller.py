@@ -445,6 +445,23 @@ class ControllerTests(unittest.TestCase):
             self.controller.run("M1", once=True)
         self.assertEqual(self.state.run("M1")["tokens"], 760142)
 
+    def test_operator_context_reaches_agent_without_satisfying_external_gate(self):
+        self.controller.preflight("M1")
+        note = {"text": "Operator reports five passing tests; deployment remains unconfirmed.", "sha256": "example"}
+        self.state.save("M1.01", "retry", operator_context=note)
+        self.controller.catalog.tasks["M1.01"]["external"] = True
+        original = self.agent.run
+        contexts = []
+        def recording(*args):
+            contexts.append(args[-1])
+            return original(*args)
+        self.agent.run = recording
+        self.controller.run("M1", once=True)
+        self.assertEqual(contexts[0]["operator_context"], note)
+        self.assertEqual(self.state.task("M1.01")["status"], "blocked")
+        self.assertIn("External evidence", self.state.task("M1.01")["data"]["reason"])
+        self.assertFalse(self.github.prs)
+
     def test_unknown_token_usage_requires_operator_accounting_before_resume(self):
         self.agent.tokens = None
         with self.assertRaises(TimeoutError):

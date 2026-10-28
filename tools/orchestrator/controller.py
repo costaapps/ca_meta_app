@@ -80,7 +80,7 @@ def external_evidence(directory: Path, task: dict) -> dict | None:
 
 class Controller:
     def __init__(self, root: Path, state: State, *, github=None, agent=None, no_token_limit=False,
-                 model="gpt-6.1-luna", reasoning_effort="xhigh"):
+                 model="gpt-6-luna", reasoning_effort="xhigh"):
         self.root, self.state = root, state
         self.catalog, self.policy = Catalog(root), load_policy(root)
         self.github = github or GitHub(root)
@@ -253,6 +253,7 @@ class Controller:
         context = {"allowed_paths": self.policy["allowed_paths"][key[:2]], "base": base,
                    "dependencies": {d: self.state.task(d)["data"] for d in task["deps"]},
                    "external_evidence": external_evidence(self.state.directory, task),
+                   "operator_context": old["data"].get("operator_context"),
                    "previous_attempt": old["data"].get("feedback"), "protected_controls": "No automation/instruction/workflow changes"}
         initial_head = git(worktree, "rev-parse", "HEAD")
         result = self.agent_run(task, "implementer", worktree, initial_head, context)

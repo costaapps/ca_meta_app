@@ -29,7 +29,7 @@ class TransportTests(unittest.TestCase):
         def fake(argv, cwd, timeout, *, stdin, sanitized):
             self.assertEqual(cwd, self.directory)
             self.assertTrue(sanitized)
-            self.assertEqual(argv[argv.index("--model") + 1], "gpt-6.1-luna")
+            self.assertEqual(argv[argv.index("--model") + 1], "gpt-6-luna")
             self.assertIn('model_reasoning_effort="xhigh"', argv)
             self.assertEqual(argv[argv.index("--sandbox") + 1], "workspace-write")
             self.assertEqual(argv[-1], "-")
@@ -37,6 +37,9 @@ class TransportTests(unittest.TestCase):
             self.assertIn('"task":', stdin)
             schema = json.loads(Path(argv[argv.index("--output-schema") + 1]).read_text())
             self.assertFalse(schema["additionalProperties"])
+            for field, value in {"task": "M1.01", "role": "implementer", "revision": self.sha}.items():
+                self.assertEqual(schema["properties"][field]["enum"], [value])
+            self.assertIn('"task": "M1.01"', stdin)
             Path(argv[argv.index("-o") + 1]).write_text(json.dumps(self.result("implementer")))
             return '\n'.join([json.dumps({"type": "thread.started", "thread_id": "opaque-id"}),
                 json.dumps({"type": "turn.completed", "usage": {"input_tokens": 42, "output_tokens": 7}})])

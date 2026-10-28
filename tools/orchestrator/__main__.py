@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -12,6 +13,7 @@ from .catalog import Catalog, digest
 from .controller import Controller, external_evidence, load_policy
 from .github import GitHub
 from .process import command, git
+from .safety import SECRET
 from .state import State
 
 
@@ -45,12 +47,13 @@ def main(argv=None):
             part.add_argument("--max-seconds", type=int)
             part.add_argument("--no-token-limit", action="store_true",
                               help="Disable cumulative token ceiling for this invocation; preserve usage accounting")
-            part.add_argument("--model", default="gpt-6.1-luna", help="Exact Codex model; no automatic fallback")
+            part.add_argument("--model", default="gpt-6-luna", help="Exact Codex model; no automatic fallback")
             part.add_argument("--reasoning-effort", default="xhigh",
                               choices=["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
         if name == "unblock":
             part.add_argument("--issue", required=True, help="Catalog key such as M1.01")
             part.add_argument("--reason", required=True)
+            part.add_argument("--context-file", type=Path, help="Sanitized operator context passed to agents; not external evidence")
             part.add_argument("--reset-attempts", action="store_true", help="Explicit operator approval for a new bounded attempt budget")
         if name == "account-usage":
             part.add_argument("--tokens", type=int, required=True, help="Conservative additional usage for interrupted turn")
@@ -103,10 +106,20 @@ def main(argv=None):
             with state.lock():
                 if state.task(args.issue)["status"] != "blocked":
                     raise ValueError("Only a blocked issue can be explicitly unblocked")
-                state.save(args.issue, "retry", reason=args.reason,
+                details = {}
+                if args.context_file:
+                    if args.context_file.stat().st_size > 20000:
+                        raise ValueError("Operator context exceeds 20000 bytes")
+                    note = args.context_file.read_text(encoding="utf-8")
+                    if not note.strip() or SECRET.search(note):
+                        raise ValueError("Operator context is empty or contains a potential credential")
+                    details["operator_context"] = {"text": note,
+                        "sha256": hashlib.sha256(note.encode("utf-8")).hexdigest()}
+                state.save(args.issue, "retry", reason=args.reason, **details,
                            **({"attempt": 0} if args.reset_attempts else {}))
                 state.event(args.milestone, "operator_unblocked", task=args.issue, reason=args.reason,
-                            attempt_budget_reset=args.reset_attempts)
+                            attempt_budget_reset=args.reset_attempts,
+                            context_sha256=details.get("operator_context", {}).get("sha256"))
                 print("Unblocked; previous evidence and audit history are preserved")
         elif args.command == "account-usage":
             with state.lock():

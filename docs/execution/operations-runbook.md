@@ -34,12 +34,12 @@ O processo deve terminar de forma controlada quando alcança orçamento, limite 
 
 ### Modelo explícito e execução sem teto de tokens
 
-O transporte agora envia `--model gpt-6.1-luna` e `-c model_reasoning_effort="xhigh"` em cada processo, incluindo revisões. Esses são valores solicitados, não uma certificação de disponibilidade na conta; um modelo/esforço não suportado deve falhar, sem fallback implementado pelo supervisor. A opção `--reasoning-effort` permite usar o valor exato anunciado pelo cliente/modelo (inclusive `ultra`, se disponível). Referência: https://learn.chatgpt.com/docs/config-file/config-reference.
+O transporte agora envia `--model gpt-6-luna` e `-c model_reasoning_effort="xhigh"` em cada processo, incluindo revisões. Esses são valores solicitados, não uma certificação de disponibilidade na conta; um modelo/esforço não suportado deve falhar, sem fallback implementado pelo supervisor. A opção `--reasoning-effort` permite usar o valor exato anunciado pelo cliente/modelo (inclusive `ultra`, se disponível). Referência: https://learn.chatgpt.com/docs/config-file/config-reference.
 
 Para dispensar apenas o teto acumulado nesta invocação:
 
 ```bash
-python3 -m tools.orchestrator resume M1 --execute --once --no-token-limit --model gpt-6.1-luna --reasoning-effort xhigh
+python3 -m tools.orchestrator resume M1 --execute --once --no-token-limit --model gpt-6-luna --reasoning-effort xhigh
 ```
 
 Repita `--no-token-limit` em cada retomada; sem a flag, vale o teto da política. O consumo continua acumulado e o evento `runtime_settings` registra os parâmetros solicitados. A flag não modifica a política fixada, não zera tentativas e não remove timeouts, revisões, gates de evidência ou limites do provedor. A contabilização de entrada pode incluir contexto repetido ao longo dos turnos; não equivale a tokens únicos nem a uma medida de custo monetário.
@@ -54,7 +54,7 @@ git fetch origin fix/orchestrator-model-token-runtime
 mkdir -p "$HOME/.local/share/ca-meta"
 git worktree add --detach "$HOME/.local/share/ca-meta/runner-token-fix" origin/fix/orchestrator-model-token-runtime
 cd "$HOME/.local/share/ca-meta/runner-token-fix"
-python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app resume M1 --execute --once --no-token-limit --model gpt-6.1-luna --reasoning-effort xhigh
+python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app resume M1 --execute --once --no-token-limit --model gpt-6-luna --reasoning-effort xhigh
 ```
 
 Execute no terminal com o ambiente Python e ssh-agent carregados. Se a worktree já existir, não repita sua criação: entre nela e confira o commit. O diretório atual deve ser a worktree do executor atualizado para o Python carregar o módulo correto; `--root` aponta para o checkout com o estado original. A retomada preserva o trabalho e repete as verificações da tentativa interrompida, consumindo uma nova tentativa. Os 760142 tokens anteriores permanecem registrados. Aguarde o gate humano da M1 antes de integrar a manutenção em `develop`; mover a base durante a M1 continua bloqueando a execução. Não há migração automática da base nesta correção.
@@ -133,3 +133,36 @@ Revise o relatório e o PR consolidado contra a epic da Milestone. Exija resulta
 
 Depois da integração humana por squash, execute `python3 -m tools.orchestrator finalize M1 --execute`. O controlador verifica o PR e a árvore final antes de fechar somente as issues e a epic da etapa; isso libera os pré-requisitos da próxima Milestone. A verificação tolera a exclusão da branch de origem pelo GitHub; preserve o checkpoint e os objetos Git locais. Ele não realiza o merge final. Deploy, permissões, migrações operacionais e alterações Meta de produção exigem os procedimentos próprios das etapas do plano; preparar o código não autoriza essas ações.
 
+
+## Retomar M1.01 após erro de identidade e correção do ambiente
+
+A branch `fix/orchestrator-model-token-runtime` também fixa `task`, `role` e `revision` por enum no schema de cada chamada, sem normalizar respostas incorretas nem relaxar `check_result`. O modelo padrão corrigido é `gpt-6-luna`, esforço `xhigh`.
+
+No WSL, sem controlador ativo, atualize somente a worktree do runner. Não faça pull na develop fixada:
+
+```bash
+cd /mnt/c/VsCodeRepos/ca_meta_app
+git fetch origin fix/orchestrator-model-token-runtime
+cd "$HOME/.local/share/ca-meta/runner-token-fix"
+git switch --detach origin/fix/orchestrator-model-token-runtime
+```
+
+`git switch` deve ser usado sem force; se houver modificações, inspecione antes. Crie uma nota sanitizada no checkout controlador. Ela comunica o relato do operador, não certifica resultados nem substitui evidência externa:
+
+```bash
+cat > /mnt/c/VsCodeRepos/ca_meta_app/.orchestrator/operator-m1-01.txt <<'NOTE'
+Contexto informado pelo operador em 2026-10-28:
+- Os quatro PHP versionados estão presentes no checkout e na worktree M1.01: connect_facebook.php, connect_instagram.php, connect_whatsapp.php e meta_auth_helper.php, sob backend/.
+- connect.php não aparece nos dois checkouts. connect_old.php é local/não versionado; não copiar, versionar ou ler esse arquivo sem autorização específica.
+- Na worktree M1.01, npm ci --ignore-scripts concluiu; npm run build passou; npm test -- --watch=false passou com 5 testes em 2 arquivos. Verificar novamente os resultados necessários e registrar o ambiente/commit.
+- npm ping funcionou no terminal do operador. Isso não prova acesso à rede dentro do sandbox do agente. Se o sandbox impedir comandos, informar comando e causa exatos; não repetir descoberta indefinidamente.
+- Inspecionar e preservar os documentos da tentativa anterior. Separar fonte versionado de implantação não confirmada. Não inventar regras rewrite, consumidores externos, DDL ou evidência Meta.
+- As evidências externas exigidas continuam pendentes; registrar uma lista concreta e mínima para o operador, sem apresentar os PHP versionados como ausentes.
+NOTE
+python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app unblock M1 --issue M1.01 --reset-attempts --context-file /mnt/c/VsCodeRepos/ca_meta_app/.orchestrator/operator-m1-01.txt --reason "Contrato de identidade e modelo corrigidos; ambiente validado pelo operador; renovar tentativas mantendo auditoria"
+python3 -m tools.orchestrator --root /mnt/c/VsCodeRepos/ca_meta_app resume M1 --execute --once --no-token-limit --model gpt-6-luna --reasoning-effort xhigh
+```
+
+`--context-file` está disponível em `unblock`: lê UTF-8 até 20000 bytes, rejeita contexto vazio e padrões conhecidos de credenciais, salva texto/hash no checkpoint e registra hash no evento. Esse filtro não detecta todo segredo; sanitizar manualmente antes. A nota chega ao implementador e às revisões na tentativa seguinte. Não é um chat ao vivo; editar o arquivo depois não altera o texto já registrado. Para fornecer outra nota, usar um novo desbloqueio explícito de tarefa bloqueada. `--reset-attempts` renova a contagem, mantendo eventos e evidências anteriores.
+
+A M1.01 canônica tem `external: true` e exige reconciliação operacional, especialmente roteamento WhatsApp. Sem `.orchestrator/inputs/M1.01.json` e referências sanitizadas verificáveis, o controlador não aceita o pacote mesmo que o agente retorne pass. A correção permite descoberta e comunicação melhores; não garante liberação das dependências sem os insumos externos. Não criar atestados fictícios para passar pelo gate. O DDL só pode ser tratado como requisito comprovado quando ligado a contrato/cenário realmente dependente; não transformar qualquer informação histórica ausente em exigência nova de aceite.
