@@ -7,7 +7,7 @@ on:
       - docs/meta-v2/**
       - .github/workflows/meta-v2-planning-audit.yml
   pull_request:
-    branches: [develop]
+    branches: [develop, 'desktop/milestone-*']
     paths:
       - .planning/**
       - docs/meta-v2/**

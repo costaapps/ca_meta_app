@@ -2,7 +2,7 @@
 
 ## Purpose
 - `msg4_Meta_Application` is a standalone Angular frontend for Meta channel onboarding and management in Msg4.
-- Today it demonstrates and operates a unified Meta connection flow; future work will split Facebook, Instagram, WhatsApp, and Embedded Signup.
+- The versioned backend references contain separated product flows. The deployed legacy PHP may still use a unified flow; do not assume source/deployment equivalence. The new platform replaces PHP and treats Facebook, Instagram, WhatsApp exclusive and Coexistence as distinct journeys.
 - Treat the current code as the source of truth. Legacy docs often diverge.
 
 ## Installed Stack
@@ -77,24 +77,24 @@
 - Preparing validation or repairing tests: load `testing-and-validation.md`
 - Preparing commits or deciding what must stay local-only: load `git-workflow.md`
 
-## Meta v2 Milestone Automation
-- For authorized automated execution, read [docs/execution/README.md](docs/execution/README.md), [protocol.md](docs/execution/protocol.md) and [review-policy.md](docs/execution/review-policy.md).
-- The canonical work graph is `.planning/manifest.json` with real issue identities in `.planning/issues-map.json`. Runtime checkpoint state is under ignored `.orchestrator/`; do not create a competing backlog.
-- Explicitly delegate independent bounded tasks to the project agents under `.codex/agents/`. Supply the issue, exact base/head commit, permitted paths, acceptance criteria and required output schema. Do not allow two writers to share one checkout.
-- The supervisor invoked through `python3 -m tools.orchestrator` owns GitHub mutations, checkpoints and integration. Agent roles propose and review; they do not bypass supervisor gates.
-- Every automated PR merge MUST be **squash**. Never fall back to merge commits or rebase merge, force push, use administrative bypass or change protections when a gate rejects an operation.
-- Work-package PRs target `automation/milestone-mN`. The final Milestone PR targets `develop` and requires the responsible human's acceptance; no unattended final merge, deployment or production changes.
-- A package accepted in the Milestone branch is not yet completed in `develop`. Do not close implementation issues or epics early, and do not add automatic closing keywords to package PRs.
-- After the responsible human merges the final PR by squash, use the supervisor's `finalize M1 --execute` equivalent for that milestone to verify the exact final tree before closing scoped issues and releasing downstream work. GitHub may delete the source branch after merge; keep the local checkpoint and Git objects available for verification.
-- Independent reviews and validation evidence must refer to the exact reviewed SHA. New changes or a changed integration base invalidate the affected acceptance and must be reconciled.
-- Missing operational PHP, DDL, Suite4 identity, Meta permissions or external approvals is an explicit blocker; mocks and historical reports do not satisfy those gates.
-- Agents may not modify execution policy, supervisor, agent definitions or CI gates to pass their own delivery. Legitimate changes to those controls need a dedicated reviewed scope.
-- Custom agent instructions do not create separate sandboxes or GitHub identities. Respect the parent's actual permissions and branch protections; never claim an AI verdict is a required human approval.
-- Keep credentials, runtime logs, raw provider payloads and local sensitive PHP out of tracked files, prompts, issues and PRs. Use the least privileged authorized environment.
+## Codex Desktop milestone delivery
+- New milestone execution uses the native Desktop principal chat and subagents. Read [the Desktop kit](docs/codex-desktop/README.md), [execution contract](docs/codex-desktop/execution-contract.md), [scope decisions](docs/codex-desktop/scope-decisions.md) and the assigned prompt under docs/codex-desktop/prompts/.
+- The user restarts delivery from develop using new desktop/milestone-mN and desktop/mN-XX branches. Preserve historical branches/PRs and uncommitted work; do not inherit old acceptance without verifying develop.
+- Do not invoke tools.orchestrator run/resume/finalize, use .orchestrator SQLite as the execution ledger, or require its result schemas/attempt budget. Legacy docs/execution and controller code are retained for history, not the Desktop workflow authority.
+- Use .planning/manifest.json and issues-map.json plus current issue bodies, accepted specs and explicit scope decisions. Execute dependencies in order while advancing independent discovery with documented assumptions; do not invent provider, DDL or deployment evidence.
+- The Desktop principal owns planning, environment, checkpoints, tests and integration. Delegate bounded work to .codex/agents roles with issue, worktree, base/head, scope and criteria. One writer per worktree and one GitHub integration lane. If native delegation is unavailable, perform the roles sequentially and state the limitation.
+- Package PRs target desktop/milestone-mN and all PR integrations MUST be squash. The final milestone PR targets develop and requires human acceptance. Never force-push, use administrative bypass, impersonate an approval or change protections to pass a gate.
+- Use the configured Git identity. Never set a fabricated automation email. Agents are roles, not separate GitHub users or permission boundaries.
+- Run package-specific experiments and tests in writable isolated checkouts/services; source reviewers may use exact-SHA evidence independently. Missing tests are coordinated in-session, not deferred to user commands. Do not require a report to contain the hash of its own final commit.
+- Preserve files/commits and resume the pending stage after interruption. Base movement, setup, CI failures and review corrections are normal coordination work. Record handoffs under docs/delivery/MN/ and keep the main Desktop chat updated.
+- Keep issues open while accepted only in the milestone branch. After human squash into develop, verify the actual final integration, then close only delivered issues and release their dependencies. Never use the old Python finalize command for Desktop delivery.
+- Public official Meta research needs no Sandbox. Local design/fixtures do not certify real grants, subscriptions, Suite4 identity or production behavior. Record the exact remaining gate before the dependent real scenario; do not stop unrelated implementation.
+- Do not deploy, migrate real data, send real messages, publish to shared environments, import real credentials or retire PHP without the corresponding explicit authorization. M6 separates release readiness from the authorized real rollout.
+- Changes to delivery controls require dedicated reviewed scope; M2 CI/platform issues may implement their assigned controls, but cannot weaken tests or approvals to pass their own changes. Keep secrets and sensitive local PHP out of tracked artifacts and chat output.
 
 ## Specification-driven delivery
 - Start from the package's accepted spec and use [spec-template.md](docs/meta-v2/spec-template.md), [adr-template.md](docs/meta-v2/adr-template.md) and [governance](docs/meta-v2/07-acceptance-risk-and-governance.md). Record scope, invariants, contracts, Given/When/Then scenarios, migration/recovery and verifiable acceptance.
 - Ready requires satisfied dependencies, stable contracts, fixtures and the operational evidence required by the package. Done requires the reviewed deliverable, relevant checks, documentation and verified final milestone integration; planning alone does not complete implementation.
 - Maintain requirement → issue → spec → contract → test → PR traceability. A contract/ADR change must update consumers and affected tests in the same reviewed scope; do not silently override the approved contract from a chat or code comment.
 - Historical documents under `.github/docs/agent-context/` describe their recorded baseline. Reconcile them with the current code and recorded experiment before treating their claims as current behavior.
-- Controls protected by the supervisor require a dedicated human-reviewed change. Do not weaken a validation or expand allowed paths as part of the delivery being validated. Review validation profiles at each milestone boundary as the application moves into the planned monorepository.
+- Delivery controls require a dedicated reviewed scope, not self-approval by the implementation being checked. Do not weaken a validation or expand allowed paths as part of the delivery being validated. Review validation profiles at each milestone boundary as the application moves into the planned monorepository.
