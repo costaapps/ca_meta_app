@@ -13,6 +13,7 @@ O resultado desejado é um portal recorrente de gerenciamento de conexões Meta 
 | [03 · Dados e credenciais](03-domain-data-and-credentials.md) | Como autorizações, tokens, números, contas e empresas se relacionam? |
 | [04 · Identidade, API e segurança](04-identity-api-and-security.md) | Como entrar, autorizar ações e proteger callbacks/segredos? |
 | [05 · Quatro fluxos Meta](05-meta-flows-and-webhooks.md) | Como cada login conclui, assina eventos e recupera falhas? |
+| [Matriz de capacidades Meta · M1.03](meta-capability-matrix.md) | Quais capacidades têm fonte primária atual, quais são apenas evidência de código e quais aguardam Sandbox? |
 | [06 · Entrega e migração](06-delivery-migration-and-operations.md) | Como desenvolver, empacotar, publicar, migrar, operar e voltar? |
 | [07 · Aceite e governança](07-acceptance-risk-and-governance.md) | Qual sequência, responsáveis funcionais, riscos e provas de 100%? |
 | [08 · Project e provisionamento](08-project-configuration.md) | Como organizar campos, visões, issues, hierarquia e dependências? |

@@ -1,0 +1,193 @@
+{
+  "fixture_set": "M1.03-meta-capability-selection",
+  "synthetic": true,
+  "disclaimer": "Local policy fixtures only. These aliases do not identify a real Meta app, environment, grant, or Sandbox run.",
+  "profiles": [
+    {
+      "app_alias": "fixture-meta-app",
+      "environment": "fixture-sandbox",
+      "graph_api_version": "v24.0",
+      "graph_version_evidence": "repository-source-only",
+      "facebook_js_sdk_version": "not-confirmed-fixture",
+      "embedded_signup_sdk_version": "not-confirmed-fixture",
+      "flow": "whatsapp_cloud_exclusive",
+      "variant": "embedded_signup_cloud_exclusive",
+      "config_alias": "fixture-wa-cloud-exclusive",
+      "feature_type": "fixture-standard-cloud",
+      "token_family": "provider-returned-not-asserted",
+      "asset_type": "WABA and phone number; fixture labels only",
+      "subscription_target": "WABA subscribed_apps; fixture label only",
+      "eligibility": "not-confirmed",
+      "capabilities": {
+        "SEND_MESSAGE": {
+          "status": "documented-proposal",
+          "scopes": ["whatsapp_business_messaging"],
+          "endpoint": "POST /{phone-number-id}/messages",
+          "evidence": "meta-whatsapp-cloud-api-collection"
+        },
+        "MANAGE_TEMPLATES": {
+          "status": "documented-proposal",
+          "scopes": ["whatsapp_business_management"],
+          "endpoint": "/{WABA-ID}/message_templates",
+          "evidence": "meta-whatsapp-cloud-api-collection"
+        },
+        "SUBSCRIBE_WEBHOOKS": {
+          "status": "documented-proposal",
+          "scopes": ["whatsapp_business_management"],
+          "endpoint": "POST /{WABA-ID}/subscribed_apps",
+          "evidence": "meta-whatsapp-cloud-api-collection"
+        },
+        "READ_STATUS": {
+          "status": "not-confirmed",
+          "scopes": [],
+          "endpoint": "endpoint and fields not pinned",
+          "evidence": "operation-specific evidence required"
+        }
+      }
+    },
+    {
+      "app_alias": "fixture-meta-app",
+      "environment": "fixture-sandbox",
+      "graph_api_version": "v24.0",
+      "graph_version_evidence": "repository-source-only",
+      "facebook_js_sdk_version": "not-confirmed-fixture",
+      "embedded_signup_sdk_version": "not-confirmed-fixture",
+      "flow": "whatsapp_coexistence",
+      "variant": "business_app_coexistence",
+      "config_alias": "fixture-wa-coexistence",
+      "feature_type": "not-confirmed-fixture",
+      "token_family": "not-confirmed",
+      "asset_type": "WABA/phone relationship not-confirmed",
+      "subscription_target": "not-confirmed",
+      "eligibility": "not-confirmed",
+      "capabilities": {
+        "SEND_MESSAGE": {
+          "status": "not-confirmed",
+          "scopes": [],
+          "endpoint": "not-confirmed",
+          "evidence": "direct Coexistence documentation and Sandbox proof required"
+        },
+        "READ_STATUS": {
+          "status": "not-confirmed",
+          "scopes": [],
+          "endpoint": "not-confirmed",
+          "evidence": "direct Coexistence documentation and Sandbox proof required"
+        },
+        "SUBSCRIBE_WEBHOOKS": {
+          "status": "not-confirmed",
+          "scopes": [],
+          "endpoint": "not-confirmed",
+          "evidence": "direct Coexistence documentation and Sandbox proof required"
+        }
+      }
+    },
+    {
+      "app_alias": "fixture-meta-app",
+      "environment": "fixture-sandbox",
+      "graph_api_version": "v24.0",
+      "graph_version_evidence": "repository-source-only",
+      "facebook_js_sdk_version": "not-confirmed-fixture",
+      "embedded_signup_sdk_version": "not-applicable-fixture",
+      "flow": "facebook_page",
+      "variant": "facebook_login_for_business",
+      "config_alias": "fixture-facebook-page",
+      "feature_type": "not-applicable-fixture",
+      "token_family": "provider-returned-not-asserted",
+      "asset_type": "Facebook Page; fixture label only",
+      "subscription_target": "Page subscribed_apps; source-observed only",
+      "eligibility": "not-confirmed",
+      "capabilities": {
+        "READ_STATUS": {
+          "status": "repo-observed-proposal",
+          "scopes": ["pages_show_list", "pages_read_engagement"],
+          "endpoint": "GET /me/accounts; map required fields before adoption",
+          "evidence": "backend/connect_facebook.php source; minimum grants not-confirmed"
+        },
+        "SEND_MESSAGE": {
+          "status": "repo-observed-proposal",
+          "scopes": ["pages_messaging"],
+          "endpoint": "POST /{page-id}/messages",
+          "evidence": "backend/connect_facebook.php source; provider grant not-confirmed"
+        },
+        "SUBSCRIBE_WEBHOOKS": {
+          "status": "repo-observed-proposal",
+          "scopes": ["pages_manage_metadata"],
+          "endpoint": "POST /{page-id}/subscribed_apps",
+          "evidence": "backend/connect_facebook.php source; current fields/grant not-confirmed"
+        }
+      }
+    },
+    {
+      "app_alias": "fixture-meta-app",
+      "environment": "fixture-sandbox",
+      "graph_api_version": "v24.0",
+      "graph_version_evidence": "repository-source-only",
+      "facebook_js_sdk_version": "not-confirmed-fixture",
+      "embedded_signup_sdk_version": "not-applicable-fixture",
+      "flow": "instagram_professional_facebook_login",
+      "variant": "instagram_via_facebook_login",
+      "config_alias": "fixture-instagram-facebook-login",
+      "feature_type": "not-applicable-fixture",
+      "token_family": "provider-returned-not-asserted",
+      "asset_type": "Professional Instagram account linked to Page; fixture label only",
+      "subscription_target": "not-confirmed",
+      "eligibility": "not-confirmed",
+      "capabilities": {
+        "READ_STATUS": {
+          "status": "repo-observed-proposal",
+          "scopes": ["pages_show_list", "instagram_basic"],
+          "endpoint": "GET /me/accounts then Page instagram_business_account lookup",
+          "evidence": "Meta Instagram collection plus backend/connect_instagram.php source; minimum grants not-confirmed"
+        },
+        "SEND_MESSAGE": {
+          "status": "not-confirmed",
+          "scopes": ["instagram_manage_messages"],
+          "endpoint": "current operation endpoint not verified for this auth variant",
+          "evidence": "source-requested scope only; current endpoint/grant proof required"
+        },
+        "SUBSCRIBE_WEBHOOKS": {
+          "status": "not-confirmed",
+          "scopes": [],
+          "endpoint": "not-confirmed",
+          "evidence": "no checked-in subscription call or current provider evidence"
+        }
+      }
+    },
+    {
+      "app_alias": "fixture-meta-app",
+      "environment": "fixture-sandbox",
+      "graph_api_version": "v24.0",
+      "graph_version_evidence": "repository-source-only",
+      "facebook_js_sdk_version": "not-confirmed-fixture",
+      "embedded_signup_sdk_version": "not-applicable-fixture",
+      "flow": "instagram_professional_instagram_login",
+      "variant": "instagram_login_optional_separate",
+      "config_alias": "fixture-instagram-login",
+      "feature_type": "not-applicable-fixture",
+      "token_family": "not-confirmed",
+      "asset_type": "Instagram professional account; fixture label only",
+      "subscription_target": "not-confirmed",
+      "eligibility": "not-confirmed",
+      "capabilities": {
+        "READ_STATUS": {
+          "status": "documented-proposal",
+          "scopes": ["instagram_business_basic"],
+          "endpoint": "Instagram Login API operation must be selected per field",
+          "evidence": "Meta Instagram API collection; operation minimum not-confirmed"
+        },
+        "SEND_MESSAGE": {
+          "status": "documented-proposal",
+          "scopes": ["instagram_business_manage_messages"],
+          "endpoint": "Instagram Login messaging endpoint; eligibility still to verify",
+          "evidence": "Meta Instagram API collection; app grant/Sandbox not-confirmed"
+        },
+        "SUBSCRIBE_WEBHOOKS": {
+          "status": "not-confirmed",
+          "scopes": [],
+          "endpoint": "not-confirmed",
+          "evidence": "variant-specific target/fields need direct verification"
+        }
+      }
+    }
+  ]
+}

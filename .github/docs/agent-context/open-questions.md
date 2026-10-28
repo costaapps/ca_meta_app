@@ -1,6 +1,6 @@
 # Open Questions
 
-## Meta Official Validation Pending
+## Meta Official Validation Pending (baseline record: 2026-06-23)
 - Official Meta documentation pages for:
   - Facebook Login for Business
   - WhatsApp Embedded Signup
@@ -9,6 +9,11 @@
 - Status: not confirmed from this environment during this session
 - Missing evidence: direct successful retrieval of current official docs
 - Why it matters: future auth split and token decisions should not rely on older assumptions
+
+### M1.03 follow-up — 2026-10-28
+- The official Meta WhatsApp Cloud API / Embedded Signup Postman collections and Instagram API collection were accessible; see [M1.03 capability matrix](../../../docs/meta-v2/meta-capability-matrix.md) for the dated claims and URLs.
+- Direct developer documentation returned HTTP 429 for Facebook Login for Business, WhatsApp Coexistence, Instagram flow guides and Graph webhooks; the Graph access-token guide was not accessible through the research tool.
+- Sandbox authorization/token/asset proof for all required flows remains **Not confirmed**. Do not treat documentation retrieval or a browser event as a successful end-to-end authorization.
 
 ## Backend Deployment Ownership
 - Which repository or deploy process owns the PHP currently exposed at `https://msg4.app/meta/auth`?
