@@ -15,8 +15,8 @@ def digest(value: object) -> str:
 
 class Catalog:
     def __init__(self, root: Path):
-        manifest = json.loads((root / ".planning/manifest.json").read_text())
-        mapping = json.loads((root / ".planning/issues-map.json").read_text())
+        manifest = json.loads((root / ".planning/manifest.json").read_text(encoding="utf-8"))
+        mapping = json.loads((root / ".planning/issues-map.json").read_text(encoding="utf-8"))
         if manifest.get("repository") != REPOSITORY:
             raise ValueError("Planning repository mismatch")
         self.tasks = {}

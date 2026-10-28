@@ -47,7 +47,7 @@ class State:
             import fcntl
         except ImportError as exc:
             raise RuntimeError("Controller requires Linux/macOS/WSL with flock support") from exc
-        with (self.directory / "controller.lock").open("a+") as handle:
+        with (self.directory / "controller.lock").open("a+", encoding="utf-8") as handle:
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:

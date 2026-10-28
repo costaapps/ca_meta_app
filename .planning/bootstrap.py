@@ -6,7 +6,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-CONFIG = json.loads((ROOT / "bootstrap.json").read_text())
+CONFIG = json.loads((ROOT / "bootstrap.json").read_text(encoding="utf-8"))
 REPO = CONFIG["repository"]
 if os.environ.get("GITHUB_REPOSITORY", REPO) != REPO:
     raise SystemExit("Repository mismatch; refusing cross-repository writes")
@@ -53,7 +53,7 @@ def main():
     print(json.dumps(mapping, ensure_ascii=False))
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
-        with open(summary, "a") as target:
+        with open(summary, "a", encoding="utf-8") as target:
             target.write("\n".join(lines) + "\n")
 
 

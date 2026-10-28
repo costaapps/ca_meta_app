@@ -40,7 +40,7 @@ def validate_catalog(tasks):
 def check_links():
     broken = []
     for path in DOCS.rglob("*.md"):
-        for target in re.findall(r"\]\(([^)]+)\)", path.read_text()):
+        for target in re.findall(r"\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
             if "://" in target or target.startswith("#"):
                 continue
             target = target.split("#", 1)[0]
@@ -60,21 +60,21 @@ def generate_catalog(tasks, mapping, waves):
     lines.extend(["", "## Ondas topológicas", "", "Uma onda pode exigir múltiplas funções. Respeitar evidências externas e limites de trabalho em curso; não tratar esta ordenação como cronograma contratado.", ""])
     for index, wave in enumerate(waves, 1):
         lines.append(f'- Onda {index}: ' + ", ".join(wave))
-    (DOCS / "work-packages.md").write_text("\n".join(lines) + "\n")
+    (DOCS / "work-packages.md").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["requirement_id", "package", "issue_url", "milestone", "acceptance", "planned_validation", "evidence_status"])
     for t in tasks:
         for i, acceptance in enumerate(t["acceptance"], 1):
             writer.writerow([f'{t["key"]}.AC{i:02}', t["key"], mapping.get(t["key"], {}).get("url", ""), t["milestone"], acceptance, " | ".join(t["tests"]), "PLANNED"])
-    (DOCS / "acceptance-matrix.csv").write_text(output.getvalue())
-    (ROOT / "dependency-waves.json").write_text(json.dumps(waves, indent=2) + "\n")
+    (DOCS / "acceptance-matrix.csv").write_text(output.getvalue(), encoding="utf-8", newline="\n")
+    (ROOT / "dependency-waves.json").write_text(json.dumps(waves, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def main():
     tasks = load_catalog()
     waves = validate_catalog(tasks)
-    mapping = json.loads((ROOT / "issues-map.json").read_text())
+    mapping = json.loads((ROOT / "issues-map.json").read_text(encoding="utf-8"))
     manifest = build(mapping)
     expected = {x["key"] for x in manifest["items"]}
     if set(mapping) != expected or len({x["number"] for x in mapping.values()}) != len(expected):
@@ -85,15 +85,15 @@ def main():
     for item in manifest["items"]:
         if len(item["title"]) > 256 or len(item["body"]) > 60000:
             raise ValueError("GitHub content size exceeds safety limit")
-    saved = json.loads((ROOT / "manifest.json").read_text())
+    saved = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
     if saved != manifest:
         raise ValueError("Generated manifest is stale; run render.py")
     generate_catalog(tasks, mapping, waves)
     api = build_api()
     validate_references(api)
-    if json.loads((DOCS / "contracts/openapi.proposed.json").read_text()) != api:
+    if json.loads((DOCS / "contracts/openapi.proposed.json").read_text(encoding="utf-8")) != api:
         raise ValueError("Proposed OpenAPI is stale; run contracts.py")
-    if json.loads((DOCS / "contracts/internal-event.proposed.schema.json").read_text()) != EVENT_SCHEMA:
+    if json.loads((DOCS / "contracts/internal-event.proposed.schema.json").read_text(encoding="utf-8")) != EVENT_SCHEMA:
         raise ValueError("Proposed event schema is stale")
     check_links()
     summary = {"issues": len(expected), "work_packages": len(tasks), "milestones": 6,
@@ -103,7 +103,7 @@ def main():
                "construction_steps": sum(len(t["steps"]) for t in tasks),
                "planned_validation_groups": sum(len(t["tests"]) for t in tasks),
                "relative_points": sum(t["effort"] for t in tasks), "topological_waves": len(waves)}
-    (ROOT / "validation-report.json").write_text(json.dumps(summary, indent=2) + "\n")
+    (ROOT / "validation-report.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps(summary))
 
 

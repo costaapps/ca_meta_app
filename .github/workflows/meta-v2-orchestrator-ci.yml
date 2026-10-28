@@ -39,6 +39,10 @@ jobs:
         run: python3 -m tools.orchestrator validate
       - name: Check source syntax
         run: python3 -m compileall -q tools/orchestrator
+      - name: Reject implicit locale-dependent text decoding
+        run: |
+          python3 -X warn_default_encoding -W error::EncodingWarning -m tools.orchestrator validate
+          python3 -X warn_default_encoding -W error::EncodingWarning .planning/validate.py
       - name: Exercise orchestration without credentials or external effects
         run: python3 -m unittest discover -s tools/orchestrator/tests -v
       - name: Preserve planning consistency

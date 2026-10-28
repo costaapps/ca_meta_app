@@ -178,7 +178,7 @@ def program_body(config, tasks, mapping=None):
     evidence_path = ROOT / "delivery-evidence.json"
     evidence_text = ""
     if evidence_path.exists():
-        evidence = json.loads(evidence_path.read_text())
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
         evidence_text = f'''### Evidência da entrega do planejamento
 
 [PR de revisão]({evidence["planning_pr"]}) · [Run de auditoria e estrutura]({evidence["structure_run"]}). O run registrou {evidence["issues_verified"]} issues verificadas, {evidence["hierarchy_edges_verified"]} relações de hierarquia e {evidence["dependency_edges_verified"]} dependências nativas criadas e relidas.
@@ -253,7 +253,7 @@ Todas as issues de execução começam abertas. Fechar exige evidência de crit�
 
 def build(mapping=None):
     tasks = load_catalog()
-    config = json.loads((ROOT / "bootstrap.json").read_text())
+    config = json.loads((ROOT / "bootstrap.json").read_text(encoding="utf-8"))
     items = [{"key": "PROGRAM", "title": "[META v2] Programa de reconstrução: arquitetura, implantação e operação", "body": program_body(config, tasks, mapping), "labels": ["program:meta-v2", "type:program", "priority:P0"]}]
     for m in config["milestones"]:
         items.append({"key": m["key"], "milestone": int(m["key"][1:]), "title": f'[{m["key"]}] {m["title"].split(" · ",1)[1]} — plano e gate de conclusão', "body": epic_body(m["key"], m, tasks, mapping), "labels": ["program:meta-v2", "type:epic", "priority:P0"], "parent": "PROGRAM"})
@@ -276,7 +276,7 @@ def build(mapping=None):
 
 if __name__ == "__main__":
     map_path = ROOT / "issues-map.json"
-    mapping = json.loads(map_path.read_text()) if map_path.exists() else {}
+    mapping = json.loads(map_path.read_text(encoding="utf-8")) if map_path.exists() else {}
     data = build(mapping)
-    (ROOT / "manifest.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    (ROOT / "manifest.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({"items": len(data["items"]), "tasks": len(load_catalog()), "characters": sum(len(x["body"]) for x in data["items"])}))

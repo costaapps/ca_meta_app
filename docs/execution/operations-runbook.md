@@ -76,6 +76,8 @@ O conteúdo sanitizado é inserido no contexto do agente com caminho e impressã
 
 ## Diagnóstico de bloqueios
 
+Arquivos de catálogo, TOML, evidências e relatórios são UTF-8. O controlador e os scripts de planejamento declaram essa codificação explicitamente, incluindo a comunicação com subprocessos. Isso evita o erro `charmap`/CP1252 no Windows; não é necessário converter ou regravar o manifesto. Para execução completa, use Linux/macOS/WSL: o lock de processo usa `flock`, indisponível no Windows nativo.
+
 | Situação | Ação |
 |---|---|
 | Codex/gh ausente ou sem autenticação | Configurar o runner pelo mecanismo oficial e repetir `doctor` |

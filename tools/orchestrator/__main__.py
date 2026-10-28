@@ -18,10 +18,10 @@ from .state import State
 def validate(root):
     catalog, policy = Catalog(root), load_policy(root)
     for role in ["orchestrator", "implementer", "reviewer", "validator", "security", "pr-manager", "project-manager"]:
-        config = tomllib.loads((root / ".codex/agents" / (role + ".toml")).read_text())
+        config = tomllib.loads((root / ".codex/agents" / (role + ".toml")).read_text(encoding="utf-8"))
         if not all(config.get(k) for k in ("name", "description", "developer_instructions")):
             raise ValueError("Incomplete custom agent: " + role)
-    custom = tomllib.loads((root / ".codex/config.toml").read_text())
+    custom = tomllib.loads((root / ".codex/config.toml").read_text(encoding="utf-8"))
     if custom["agents"]["max_concurrent_threads_per_session"] > 3:
         raise ValueError("Unexpected agent concurrency")
     return {"tasks": len(catalog.tasks), "criteria": sum(len(t["acceptance"]) for t in catalog.tasks.values()),
@@ -87,7 +87,7 @@ def main(argv=None):
             if args.command == "report":
                 target = state.directory / "reports" / (args.milestone + ".md")
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(report)
+                target.write_text(report, encoding="utf-8", newline="\n")
             print(report)
         elif args.command == "unblock":
             if args.issue not in catalog.milestone(args.milestone):

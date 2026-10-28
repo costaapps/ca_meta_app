@@ -10,7 +10,7 @@ from github_api import GitHub, ApiError, REPOSITORY
 from render import ROLE
 
 ROOT = Path(__file__).resolve().parent
-CONFIG = json.loads((ROOT / "project-config.json").read_text())
+CONFIG = json.loads((ROOT / "project-config.json").read_text(encoding="utf-8"))
 PROJECT_FIELDS = """... on ProjectV2Field {id name dataType}
 ... on ProjectV2SingleSelectField {id name dataType options {id name color description}}
 ... on ProjectV2IterationField {id name dataType}"""
@@ -59,7 +59,7 @@ def options(names, previous=None):
 def find_or_create(api, mapping):
     state_path = ROOT / "project-state.json"
     if state_path.exists():
-        saved = json.loads(state_path.read_text())
+        saved = json.loads(state_path.read_text(encoding="utf-8"))
         project = project_node(api, saved["id"])
         if CONFIG["marker"] in (project["readme"] or ""):
             return project
@@ -90,14 +90,14 @@ def find_or_create(api, mapping):
         project = mutation(api, "createProjectV2", "CreateProjectV2Input", {
             "ownerId": owner["id"], "repositoryId": repo["id"], "title": CONFIG["title"]
         }, "projectV2{id number title url}")["projectV2"]
-        state_path.write_text(json.dumps(project, indent=2) + "\n")
+        state_path.write_text(json.dumps(project, indent=2) + "\n", encoding="utf-8", newline="\n")
 
     readme = CONFIG["marker"] + "\n\nPlano de implantação Meta v2. Índice: " + mapping["PROGRAM"]["url"] + "\n\nImplementação pendente. Todos os pacotes exigem evidência de aceite. Datas/assignees dependem de capacidade confirmada."
     updated = mutation(api, "updateProjectV2", "UpdateProjectV2Input", {
         "projectId": project["id"], "public": False, "readme": readme,
         "shortDescription": "Quatro fluxos Meta, acesso seguro, credenciais, portal, Docker/CI e migração Msg4/Suite4."
     }, "projectV2{id number title url public readme owner{... on Organization{login}}}")["projectV2"]
-    state_path.write_text(json.dumps({k: updated[k] for k in ["id", "number", "url", "title"]}, indent=2) + "\n")
+    state_path.write_text(json.dumps({k: updated[k] for k in ["id", "number", "url", "title"]}, indent=2) + "\n", encoding="utf-8", newline="\n")
     return updated
 
 
@@ -199,7 +199,7 @@ def provision(api, manifest, mapping):
         raise ApiError("Project import verification failed")
     result = {"status": "created_or_reconciled", "url": project["url"], "number": project["number"],
               "private": True, "issues_verified": len(manifest["items"]), "views": len(CONFIG["views"])}
-    (ROOT / "project-report.json").write_text(json.dumps(result, indent=2) + "\n")
+    (ROOT / "project-report.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8", newline="\n")
     return result
 
 
@@ -215,7 +215,7 @@ def main():
             result = {"project_read_access": True, "write_access": "not verified"}
         except ApiError as exc:
             result = {"project_read_access": False, "reason": str(exc), "project_created": False}
-        (ROOT / "project-access-report.json").write_text(json.dumps(result, indent=2) + "\n")
+        (ROOT / "project-access-report.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8", newline="\n")
         print(json.dumps(result))
         return
     if not args.apply:
@@ -223,8 +223,8 @@ def main():
                           "private_required": True, "fields": list(CONFIG["select_fields"]) + list(CONFIG["other_fields"]),
                           "views": CONFIG["views"]}, ensure_ascii=False))
         return
-    manifest = json.loads((ROOT / "manifest.json").read_text())
-    mapping = json.loads((ROOT / "issues-map.json").read_text())
+    manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
+    mapping = json.loads((ROOT / "issues-map.json").read_text(encoding="utf-8"))
     print(json.dumps(provision(GitHub(), manifest, mapping), ensure_ascii=False))
 
 
