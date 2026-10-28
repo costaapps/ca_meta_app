@@ -11,7 +11,7 @@ The tracked PHP accesses a PDO handle initialized by a bootstrap outside this re
 ### Tables and source-observed columns
 
 | Table name in source | Columns observed by PHP/UI | Source use | Limits |
-|---|---|---|---|
+|---|---|---|---|---|
 | `Company` | `CompanyUUID`, `IdDatabase`, `IdCompany` | Resolve the input company context; some notification handlers read only `IdDatabase`. | Actual identity constraints and whether one UUID maps to one row are **Not confirmed**. |
 | `Databases` | `CompanyUUID`, `IdDatabase` | `saveAutoReply` joins this table to locate rows for updates. | The issue says `Database`; the tracked SQL says plural `Databases`. Whether a singular table also exists is **Not confirmed**. |
 | `MetaConnectedPages` | `Id`, `IdDatabase`, `IdCompany`, `Type`, `ExternalId`, `ExternalName`, `ProfilePicture`, `UserAccessToken`, `PageAccessToken`, `ExpiresUserAccessTokenAt`, `ExpiresPageAccessTokenAt`, `ParentChannelId`, `ConnectedAt`, `PrivateWelcomeMessage`, `CommentPublicReply`, `CommentPrivateReply` | Facebook, Instagram, and WhatsApp WABA upserts; channel list; message configuration; token lookup for comment response; WABA-parent resolution. | Types, defaults, nullability, indexes, and whether tokens are encrypted at rest are **Not confirmed**. |
@@ -79,16 +79,17 @@ The offline experiment in [`experiments/data/`](../../../experiments/data/m1_02_
 
 ## Verifiable scenarios
 
-These synthetic cases define the required fixture behavior. They are contract scenarios, not production evidence.
+These are proposed contract scenarios, not production evidence. DATA-01, DATA-02, DATA-05, and the incomplete-company ambiguity case in DATA-07 are exercised by the offline fixture. DATA-03, DATA-04, and DATA-06 define later operational dry-run requirements; the current synthetic runner does not claim to validate parent resolution or credential fingerprint processing. Those cases require additional fixtures and, for real-data reconciliation, authorized DDL/source evidence.
 
-| ID | Given | When | Then |
+| ID | Given | When | Then | Fixture status |
 |---|---|---|---|
-| DATA-01 | Tenant A maps to `(DB-A, COMPANY-A)` and Tenant B maps to `(DB-A, COMPANY-B)`; both rows use synthetic external ID `ASSET-7` and the same type. | Build the legacy asset map. | Two distinct tenant-scoped asset mappings are created; neither row can read/write the other's data. `IdDatabase` and `ExternalId` alone never select the tenant. |
-| DATA-02 | Tenant C maps to `(DB-B, COMPANY-C)` and reuses `ASSET-7`. | Build the map alongside DATA-01. | A third independent mapping is retained; no cross-database merge occurs. |
-| DATA-03 | A number has no WABA row, two candidate WABA rows, or a WABA parent with a mismatching company/type. | Run dry-run classification. | The number is `QUARANTINED` with a reason code and protected source-row references; no automatic parent or tenant is assigned. |
-| DATA-04 | An Instagram row references a missing or cross-company `ParentChannelId`; a competing row has a more recent login. | Run dry-run classification. | The asset remains quarantined. Recency and last login are not a tie-breaker. |
-| DATA-05 | Expiry evidence is absent; contains a provider-confirmed timestamp; or contains a successful provider observation with no applicable deadline. | Normalize each fixture. | Results are respectively `UNKNOWN`, `KNOWN`, and `NO_DEADLINE_RETURNED`; `Never`, SQL `NULL`, and the code's fallback timestamp alone classify as `UNKNOWN`. |
-| DATA-06 | A report detects repeated credential values in a synthetic protected fixture. | Produce the summary. | Output contains only internal credential row IDs, a keyed HMAC fingerprint, and counts; no credential value is emitted. This does not prove an operational reporting implementation exists. |
+| DATA-01 | Tenant A maps to `(DB-A, COMPANY-A)` and Tenant B maps to `(DB-A, COMPANY-B)`; both rows use synthetic external ID `ASSET-7` and the same type. | Build the legacy asset map. | Two distinct tenant-scoped asset mappings are created; neither row can read/write the other's data. `IdDatabase` and `ExternalId` alone never select the tenant. | Exercised by offline fixture and test. |
+| DATA-02 | Tenant C maps to `(DB-B, COMPANY-C)` and reuses `ASSET-7`. | Build the map alongside DATA-01. | A third independent mapping is retained; no cross-database merge occurs. | Exercised by offline fixture and test. |
+| DATA-03 | A number has no WABA row, two candidate WABA rows, or a WABA parent with a mismatching company/type. | Run dry-run classification. | The number is `QUARANTINED` with a reason code and protected source-row references; no automatic parent or tenant is assigned. | Operational dry-run design only; not implemented in the synthetic fixture. |
+| DATA-04 | An Instagram row references a missing or cross-company `ParentChannelId`; a competing row has a more recent login. | Run dry-run classification. | The asset remains quarantined. Recency and last login are not a tie-breaker. | Operational dry-run design only; not implemented in the synthetic fixture. |
+| DATA-05 | Expiry evidence is absent; contains a provider-confirmed timestamp; or contains a successful provider observation with no applicable deadline. | Normalize each fixture. | Results are respectively `UNKNOWN`, `KNOWN`, and `NO_DEADLINE_RETURNED`; `Never`, SQL `NULL`, and the code's fallback timestamp alone classify as `UNKNOWN`. | Exercised by offline fixture and test. |
+| DATA-06 | A report detects repeated credential values in a synthetic protected fixture. | Produce the summary. | Output contains only internal credential row IDs, a keyed HMAC fingerprint, and counts; no credential value is emitted. | Operational report design only; no fingerprint implementation or test is included in this package. |
+| DATA-07 | An asset row has an incomplete company pair and its external ID/type match rows belonging to multiple tenants; a synthetic login hint favors one candidate. | Run the offline mapper. | The row is quarantined with `ambiguous_tenant_match`, no tenant is selected, and the login hint does not affect the result. | Exercised by offline fixture and test. |
 
 ## Migration, recovery, and gates
 
