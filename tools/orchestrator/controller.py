@@ -24,7 +24,7 @@ class ValidationFailure(RuntimeError):
 
 
 def load_policy(root: Path) -> dict:
-    policy = json.loads((root / "execution/config.json").read_text())
+    policy = json.loads((root / "execution/config.json").read_text(encoding="utf-8"))
     if policy.get("version") != 1 or policy.get("repository") != REPOSITORY or policy.get("base_branch") != "develop":
         raise ValueError("Unsupported or cross-repository execution policy")
     if policy.get("integration_prefix") != "automation/milestone-":
@@ -57,7 +57,7 @@ def external_evidence(directory: Path, task: dict) -> dict | None:
     path = directory / "inputs" / (task["key"] + ".json")
     if not path.exists():
         return None
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("task") != task["key"] or not data.get("verified_by") or not data.get("references"):
         raise ValueError("External evidence record needs task, verified_by and references")
     for ref in data["references"]:
@@ -66,7 +66,7 @@ def external_evidence(directory: Path, task: dict) -> dict | None:
             raise ValueError("External evidence reference is missing or outside inputs")
         if hashlib.sha256(file.read_bytes()).hexdigest() != ref["sha256"]:
             raise ValueError("External evidence fingerprint changed")
-        if SECRET.search(file.read_text(errors="replace")):
+        if SECRET.search(file.read_text(errors="replace", encoding="utf-8")):
             raise ValueError("Potential secret in external evidence; sanitize before execution")
     # Supply scoped, sanitized contents: the agent's worktree sandbox cannot read controller inputs.
     data["documents"] = []
@@ -74,7 +74,7 @@ def external_evidence(directory: Path, task: dict) -> dict | None:
         file = directory / "inputs" / ref["path"]
         if file.stat().st_size > 200_000:
             raise ValueError("External evidence document exceeds context budget; provide a sanitized extract")
-        data["documents"].append({"path": ref["path"], "sha256": ref["sha256"], "text": file.read_text()})
+        data["documents"].append({"path": ref["path"], "sha256": ref["sha256"], "text": file.read_text(encoding="utf-8")})
     return data
 
 
@@ -376,7 +376,7 @@ class Controller:
         report = self.report(milestone)
         report_path = self.state.directory / "reports" / (milestone + ".md")
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(report)
+        report_path.write_text(report, encoding="utf-8", newline="\n")
         # Keep the PR bounded. Persist the complete human evidence report in
         # idempotent comments on the milestone epic as well as the local checkpoint.
         chunks = [report[i:i + 40000] for i in range(0, len(report), 40000)]

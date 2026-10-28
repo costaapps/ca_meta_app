@@ -75,19 +75,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    manifest = json.loads((ROOT / "manifest.json").read_text())
+    manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
     if not args.apply:
         print(json.dumps({"mode": "dry-run", "issues": len(manifest["items"]),
                           "hierarchy_edges": sum(bool(x.get("parent")) for x in manifest["items"]),
                           "dependency_edges": sum(len(x.get("deps", [])) for x in manifest["items"])}))
         return
-    mapping = json.loads((ROOT / "issues-map.json").read_text())
+    mapping = json.loads((ROOT / "issues-map.json").read_text(encoding="utf-8"))
     report = synchronize(GitHub(), manifest, mapping)
-    (ROOT / "relationships-report.json").write_text(json.dumps(report, indent=2) + "\n")
+    (ROOT / "relationships-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps(report))
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
-        with open(summary, "a") as target:
+        with open(summary, "a", encoding="utf-8") as target:
             target.write("## Meta v2 · relações nativas verificadas\n\n```json\n" + json.dumps(report, indent=2) + "\n```\n")
 
 

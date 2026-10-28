@@ -30,7 +30,7 @@ def check_paths(paths: list[str], allowed: list[str], root: Path):
         if target.exists() and target.is_file():
             if target.stat().st_size > 2_000_000:
                 raise ValueError("Deliverable exceeds review size budget")
-            if SECRET.search(target.read_text(errors="replace")):
+            if SECRET.search(target.read_text(errors="replace", encoding="utf-8")):
                 raise ValueError("Potential credential in deliverable: " + path)
 
 

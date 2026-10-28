@@ -74,7 +74,7 @@ class GitHub:
     def _subprocess(self, args: list[str], data: str | None) -> str:
         try:
             result = subprocess.run(args, cwd=self.cwd, input=data, text=True,
-                                    capture_output=True, timeout=90, check=False)
+                                    capture_output=True, timeout=90, check=False, encoding="utf-8")
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise GitHubError("GitHub CLI unavailable or timed out") from exc
         if result.returncode:

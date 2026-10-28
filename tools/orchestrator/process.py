@@ -30,7 +30,7 @@ def command(argv: list[str], cwd: Path, timeout=300, *, stdin=None, sanitized=Fa
         raise ValueError("Invalid command argv")
     proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                            env=clean_environment() if sanitized else None, start_new_session=True)
+                            env=clean_environment() if sanitized else None, start_new_session=True, encoding="utf-8")
     try:
         stdout, stderr = proc.communicate(stdin, timeout=timeout)
     except (subprocess.TimeoutExpired, KeyboardInterrupt):

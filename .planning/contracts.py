@@ -159,8 +159,8 @@ def main():
     DEST.mkdir(parents=True, exist_ok=True)
     api = build_api()
     validate_references(api)
-    (DEST / "openapi.proposed.json").write_text(json.dumps(api, ensure_ascii=False, indent=2) + "\n")
-    (DEST / "internal-event.proposed.schema.json").write_text(json.dumps(EVENT_SCHEMA, ensure_ascii=False, indent=2) + "\n")
+    (DEST / "openapi.proposed.json").write_text(json.dumps(api, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    (DEST / "internal-event.proposed.schema.json").write_text(json.dumps(EVENT_SCHEMA, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({"api_paths": len(api["paths"]), "api_operations": sum(len([m for m in v if m in ["get", "post", "delete", "patch"]]) for v in api["paths"].values()), "schemas": len(SCHEMAS), "status": "proposed; references checked, external semantics pending M1.07"}))
 
 

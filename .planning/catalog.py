@@ -20,5 +20,5 @@ def load_catalog():
     if TASKS:
         return TASKS
     for name in ("m1", "m2", "m3", "m4", "m5", "m6"):
-        exec(compile((ROOT / (name + ".py")).read_text(), name, "exec"), globals())
+        exec(compile((ROOT / (name + ".py")).read_text(encoding="utf-8"), name, "exec"), globals())
     return TASKS
