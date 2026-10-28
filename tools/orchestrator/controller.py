@@ -294,7 +294,9 @@ class Controller:
             if git(worktree, "rev-parse", "HEAD") != revision or git(worktree, "status", "--porcelain"):
                 raise RuntimeError("Review changed the pinned checkout")
         if any(r["outcome"] != "pass" for r in reviews):
-            self.state.save(key, "retry", feedback=reviews)
+            self.state.save(key, "retry", feedback=reviews,
+                            reason="Review requires changes: " + "; ".join(
+                                r["role"] + ": " + r["summary"] for r in reviews if r["outcome"] != "pass"))
             return
         git(worktree, "push", "origin", head_branch)
         body = (f"Refs #{task['issue']}\n\nAutomated package {key}; final issue closure only after milestone approval.\n\n"

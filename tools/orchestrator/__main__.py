@@ -115,8 +115,9 @@ def main(argv=None):
             if args.issue not in catalog.milestone(args.milestone):
                 raise ValueError("Issue does not belong to requested milestone")
             with state.lock():
-                if state.task(args.issue)["status"] != "blocked":
-                    raise ValueError("Only a blocked issue can be explicitly unblocked")
+                status = state.task(args.issue)["status"]
+                if status != "blocked" and not (status == "retry" and args.reset_attempts):
+                    raise ValueError("Only blocked issues, or retry with --reset-attempts, can be unblocked")
                 details = {}
                 if args.context_file:
                     if args.context_file.stat().st_size > 20000:

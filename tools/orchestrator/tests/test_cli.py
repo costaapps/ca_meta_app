@@ -43,7 +43,10 @@ class CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             state = State(Path(temp) / "state")
             self.addCleanup(state.close)
-            state.save("M1.01", "blocked", attempt=3, revision="original")
+            state.save("M1.01", "retry", attempt=3, revision="original")
+            with patch("tools.orchestrator.__main__.State", return_value=state), patch.object(state, "close"):
+                with self.assertRaisesRegex(ValueError, "retry with --reset-attempts"):
+                    self.call(["unblock", "M1", "--issue", "M1.01", "--reason", "test"])
             note = Path(temp) / "note.txt"
             note.write_text("Build and five tests passed; deployment unconfirmed.", encoding="utf-8")
             with patch("tools.orchestrator.__main__.State", return_value=state), patch.object(state, "close"):

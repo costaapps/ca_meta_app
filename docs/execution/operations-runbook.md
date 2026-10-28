@@ -213,3 +213,13 @@ PY
 ```
 
 Só depois do sucesso, `unblock M1 --issue M1.01 --reason "Validação do planejamento agora é somente leitura; CSV reconciliado por igualdade de conteúdo"`, seguido do `resume` habitual com modelo, esforço e opção de orçamento explícitos. Não renovar tentativas sem necessidade; a ocorrência relatada estava na tentativa 2 de 3. Não repetir `amend-baseline`, pois a emenda já está registrada.
+
+## Revisões somente leitura e evidência executada pelo supervisor
+
+Antes de chamar os revisores, o supervisor executa o perfil de validação no candidato, exige worktree limpa e fornece `context.validation` com comando, resultado e SHA. Os revisores continuam somente leitura: inspecionam diff, critérios, fontes, fixtures e suficiência dos checks. Não devem tentar `npm ci`, builds, geradores ou suítes que exigem arquivos temporários nessa sessão. Devem atribuir os resultados ao supervisor e exigir SHA correspondente, status passed e cobertura suficiente; ausência ou insuficiência continua bloqueando. Uma tentativa redundante impedida por EROFS não invalida checks reais e correspondentes do supervisor. Esta correção não concede escrita ao validador nem aceita relato do implementador como teste executado.
+
+Relatórios rastreados identificam o commit da baseline testada e rotulam snapshots anteriores como históricos. O SHA final do documento só existe depois de commitá-lo: a proveniência final é registrada pelo checkpoint e pelo PR, sem tentar embutir no arquivo o hash do próprio commit.
+
+Quando reviews retornarem correções, o relatório passa a mostrar o resumo dos resultados não aprovados, sem reutilizar o motivo antigo de desbloqueio. `unblock --reset-attempts` agora aceita também estado retry; sem essa autorização explícita não renova o orçamento. Nunca se aplica a tarefas running, reviewing, pr_pending ou accepted.
+
+Para recuperar a rodada de M1.01 em retry/attempt=3, atualize a worktree runner. Acrescente ao arquivo de contexto do operador: corrigir oito fixtures com handler (não sete), rotular SHA 2bc3bee como snapshot histórico sem chamá-lo de HEAD final e referenciar a proveniência final do supervisor; acrescentar cenários explícitos de replay após consumo do state e cancelamento. Execute unblock com --reset-attempts, --context-file e motivo; depois resume --execute --once --no-token-limit --model gpt-6-luna --reasoning-effort xhigh. Não repetir amend-baseline, descartar alterações ou editar resultados dos revisores. O próximo implementador recebe os três pareceres via previous_attempt e todas as validações/revisões são executadas novamente sobre o novo SHA.

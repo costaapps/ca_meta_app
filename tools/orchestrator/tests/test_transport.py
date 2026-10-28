@@ -51,6 +51,8 @@ class TransportTests(unittest.TestCase):
     def test_reviewer_uses_read_only_transport(self):
         def fake(argv, *args, **kwargs):
             self.assertEqual(argv[argv.index("--sandbox") + 1], "read-only")
+            self.assertIn("supervisor-executed evidence", kwargs["stdin"])
+            self.assertIn("wrong-revision or insufficient checks remain blockers", kwargs["stdin"])
             Path(argv[argv.index("-o") + 1]).write_text(json.dumps(self.result("reviewer")))
             return '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         with patch("tools.orchestrator.agents.command", fake):
