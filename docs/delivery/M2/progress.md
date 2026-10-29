@@ -6,7 +6,7 @@ Milestone branch: `desktop/milestone-m2`, initially created at that SHA.
 | Package / issue | Stage | Candidate | Latest evidence | Package PR | Next action |
 |---|---|---|---|---|---|
 | M2.01 / #20 | Accepted in `desktop/milestone-m2` | source candidate `069b057721f4748bcae9ebfb92c621eaed5ad747`; PR head `957d00dfbf0113a41a5642282baf293532b29648` | PR #95 merged by squash as `45d32ca7f6b4ad004b52d6f675644139e17c10ca`. Checks: `desktop-candidate`, baseline, planning audit, and orchestrator success; structure skipped by workflow condition. Node 24.22.2/npm 11.19.1; clean install on unchanged lock; build 372.81 kB; 5/5 tests; typecheck/lint/bundle/routes PASS. Functional/security reviews PASS. | [#95](https://github.com/costaapps/ca_meta_app/pull/95), squash `45d32ca` | continue with M2.02; keep issue open until consolidated acceptance in develop |
-| M2.02 / #21 | Follow-up P1 request-drain fix committed locally; awaiting independent re-review | runtime/test candidate 5283cf85e015a67f430bb2ea8a7720da1fab7d91 on desktop/m2-02, parent 0812c20ba125071ee6351de7687a5302b83339bd | Clean-install, root checks, MariaDB harness, and isolated Linux shutdown suite recorded below; no push or PR | none | principal to review the updated branch head; keep #21 open until consolidated acceptance in develop |
+| M2.02 / #21 | P1 Observable cancellation fix committed locally; awaiting independent re-review | code candidate 05a837d96593999b14d8fdf9c4292d95d2aa237e on desktop/m2-02, parent 80548645b562147abb713cbff9751349f1d857b0 | Linux subprocess suite 21/21, exact Windows CI, typecheck/build, and MariaDB readiness PASS; details below; no push or PR | none | principal/reviewers to review code SHA 05a837d96593999b14d8fdf9c4292d95d2aa237e; keep #21 open until consolidated acceptance in develop |
 | M2.03 / #22 | Waiting on M2.02 | pending | M1.02/#11 and M1.05/#14 are included in develop | none | MariaDB migrations and recovery harness |
 | M2.04 / #23 | Waiting on M2.02 | pending | M1.07/#17 is included in develop | none | canonical OpenAPI compatibility |
 | M2.05 / #24 | Waiting on M2.03 | pending | M1.05/#14 and M1.09/#16 are included in develop | none | durable outbox/inbox/worker tests |
@@ -49,3 +49,24 @@ git diff --check and the staged/code-commit diff checks passed. apps/api/dist-te
 ## Acceptance boundaries
 
 M1 is integrated at `develop@2f0944d` via merged consolidated PR #94. This permits M2 implementation; M1's external Meta, Suite4, deployment and production gates remain Not confirmed. M2.09 publication and M2.10 real staging checks are not complete without the respective external permissions and evidence.
+
+### P1 functional-review follow-up — Observable cancellation
+
+The independent functional review found that RequestDrainInterceptor could treat a complete/error emitted by RxJS takeUntil(signal) as handler completion while asynchronous cleanup was still running. Code commit 05a837d96593999b14d8fdf9c4292d95d2aa237e is based on 80548645b562147abb713cbff9751349f1d857b0; it changes apps/api/src/common/http/request-drain.interceptor.ts, apps/api/src/common/http/request-drain.ts, apps/api/test/api-boundaries.spec.ts, apps/api/test/fixtures/sigterm-drain-child.ts, apps/api/README.md, and tools/m2-02/run-sigterm-drain-linux.ps1.
+
+The interceptor reads design:returntype metadata from the controller prototype and method name. An Observable route that completes/errors after abort keeps its lease until acknowledgeCancellation() succeeds after cleanup. Promise completion after client abort and synchronous Object/void handlers (including /health) settle normally. Missing return-type metadata fails closed; Promise<Observable<...>>, type-erased Observable, and dynamic handlers must use @RequireCancellationAcknowledgement(). Reflect.hasMetadata distinguishes an explicitly emitted void return type from missing metadata. RxJS unsubscribe/finalize are not cleanup proof.
+
+Final evidence on the code snapshot at 05a837d96593999b14d8fdf9c4292d95d2aa237e:
+
+- Fail-first regression on the pre-fix candidate reproduced the P1: takeUntil completion after abort allowed drain/app close before cleanup acknowledgement.
+- tools/m2-02/run-sigterm-drain-linux.ps1 -TestName 'Observable takeUntil completion': exit 0, 1/1 pass, run UUID 5ad920ccd2954e22be339d38818f9eb9. Both UUID dependency volumes were removed.
+- tools/m2-02/run-sigterm-drain-linux.ps1: exit 0, 21/21 pass, 0 failed, 0 skipped, pinned Node 24.22.2 image. Final UUID be0e6eb71da741c1891425d352967261; volumes m202-sigterm-root-be0e6eb71da741c1891425d352967261 and m202-sigterm-api-be0e6eb71da741c1891425d352967261 were absent after cleanup. The isolated npm ci added 237 packages/audited 239 and reported 2 development advisories (1 moderate, 1 high); no dependency change or audit fix was made.
+- Windows npm test -- --watch=false: exit 0; API 16 passed, 0 failed, 5 POSIX subprocess cases skipped on Windows; Angular 5/5 passed. Linux ran all process cases without skips.
+- npm run typecheck: exit 0 for API source/tests and Angular.
+- npm run build: exit 0; Angular initial bundle 372.81 kB.
+- npm run lint: exit 0; the web boundary scanner inspected 16 source files.
+- npm audit --workspace=@ca-meta/api --omit=dev: exit 0; 0 production API vulnerabilities. The package lock did not change.
+- tools/m2-02/run-mariadb-readiness.ps1: exit 0 under isolated project m202-api-ready-6701c8cd145f46ae8bcdc5b85a23162e. Invalid settings logged field names only; /ready returned 200, then canonical 503 Unavailable during DB outage, then 200 after recovery; /health stayed 200 while MariaDB was stopped. Project container/network/volumes were absent afterward. Existing db-migrations-mariadb-1 remained Exited (0) 3 months ago.
+- git diff --check: exit 0. No production, migration, Meta, or shared staging operation occurred.
+
+The Windows-only skips are covered by the pinned Linux runner. No package PR or push exists. Next action: independent functional/security review and validation of code SHA 05a837d96593999b14d8fdf9c4292d95d2aa237e; coordinator owns any integration. Keep #21 open until milestone acceptance in develop.
