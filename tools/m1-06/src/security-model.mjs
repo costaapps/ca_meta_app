@@ -17,6 +17,7 @@ export const CLOCK_SKEW_SECONDS = 5;
 
 const SESSION_IDLE_MS = 30 * 60 * 1000;
 const SESSION_ABSOLUTE_MS = 8 * 60 * 60 * 1000;
+const PREAUTH_CHALLENGE_TTL_MS = 60 * 1000;
 const MAGIC_LINK_TTL_MS = 10 * 60 * 1000;
 const MAGIC_LINK_RATE_LIMIT = 3;
 const MAGIC_LINK_RATE_WINDOW_MS = 60 * 1000;
@@ -42,12 +43,19 @@ export class SecurityFailure extends Error {
   }
 }
 
-export function createTrustedExchangeContext({ requestOrigin, hostOrigin, entryMode }) {
+function assertAllowedEntry({ requestOrigin, hostOrigin, entryMode }) {
   if (requestOrigin !== APP_ORIGIN) reject('EXCHANGE_ORIGIN_DENIED');
   const expectedHostOrigin = EXCHANGE_ENTRY_MODES.get(entryMode);
   if (!expectedHostOrigin) reject('EXCHANGE_FLOW_DENIED');
   if (hostOrigin !== expectedHostOrigin) reject('EXCHANGE_HOST_ORIGIN_DENIED');
-  const context = Object.freeze({ requestOrigin, hostOrigin, entryMode });
+}
+
+export function createTrustedExchangeContext({ requestOrigin, hostOrigin, entryMode, preAuthCookie }) {
+  assertAllowedEntry({ requestOrigin, hostOrigin, entryMode });
+  if (typeof preAuthCookie !== 'string' || !/^[A-Za-z0-9_-]{32,128}$/.test(preAuthCookie)) {
+    reject('PREAUTH_COOKIE_REQUIRED');
+  }
+  const context = Object.freeze({ requestOrigin, hostOrigin, entryMode, preAuthCookie });
   trustedExchangeContexts.add(context);
   return context;
 }
@@ -125,6 +133,7 @@ export function issueFakeTicket(issuer, overrides = {}, options = {}) {
     iss: FAKE_ISSUER,
     aud: FAKE_AUDIENCE,
     purpose: 'META_PORTAL_ENTRY',
+    preauth_challenge: randomSecret(),
     sub: 'user-owner-01',
     tenant: 'tenant-a',
     roles: ['owner'],
@@ -183,6 +192,7 @@ export function verifyFakeTicket(token, trustedJwks, nowMs = Date.parse('2026-10
   if (claims.iss !== FAKE_ISSUER) reject('TICKET_ISSUER_INVALID');
   if (claims.aud !== FAKE_AUDIENCE) reject('TICKET_AUDIENCE_INVALID');
   if (claims.purpose !== 'META_PORTAL_ENTRY') reject('TICKET_PURPOSE_INVALID');
+  if (typeof claims.preauth_challenge !== 'string' || !/^[A-Za-z0-9_-]{32,128}$/.test(claims.preauth_challenge)) reject('TICKET_CHALLENGE_REQUIRED');
   if (claims.ver !== 1) reject('TICKET_VERSION_INVALID');
   if (typeof claims.sub !== 'string' || claims.sub.length < 1 || claims.sub.length > 128) reject('TICKET_SUBJECT_INVALID');
   if (typeof claims.tenant !== 'string' || claims.tenant.length < 1 || claims.tenant.length > 48) reject('TICKET_TENANT_INVALID');
@@ -203,6 +213,10 @@ export function verifyFakeTicket(token, trustedJwks, nowMs = Date.parse('2026-10
 
 function cookieFor(sessionSecret) {
   return `__Host-meta_portal=${sessionSecret}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+}
+
+function preAuthCookieFor(secret) {
+  return `__Host-meta_pre_auth=${secret}; Path=/; Secure; HttpOnly; SameSite=Lax`;
 }
 
 function assertMutation({ origin, csrfToken, csrfHash }) {
@@ -265,13 +279,34 @@ function isDuplicateKey(error) {
 export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
   const magicLinkBuckets = new Map();
 
+  async function beginPreAuth({ requestOrigin, hostOrigin, entryMode, at = nowMs }) {
+    assertAllowedEntry({ requestOrigin, hostOrigin, entryMode });
+    const preAuthCookie = randomSecret();
+    const challenge = randomSecret();
+    await pool.execute(
+      `INSERT INTO m106_preauth_challenge (challenge_hash, preauth_cookie_hash, expires_at, consumed_at)
+       VALUES (?, ?, ?, NULL)`,
+      [sha256(challenge), sha256(preAuthCookie), sqlTime(at + PREAUTH_CHALLENGE_TTL_MS)],
+    );
+    // The cookie represents Set-Cookie; the challenge is returned separately for the trusted issuer handoff.
+    return { preAuthCookie, cookie: preAuthCookieFor(preAuthCookie), challenge };
+  }
+
   async function exchangeTicket(token, exchangeContext, at = nowMs) {
-    // Validate server-derived Origin/host/flow context before JWT work or any jti/session write.
+    // Validate server-derived Origin/host/flow and the browser's HttpOnly pre-auth cookie before JWT work.
     assertTrustedExchangeContext(exchangeContext);
     const claims = verifyFakeTicket(token, fakeIssuer.jwks, at);
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
+      const [challengeRows] = await conn.execute(
+        `SELECT * FROM m106_preauth_challenge
+         WHERE challenge_hash = ? AND preauth_cookie_hash = ? FOR UPDATE`,
+        [sha256(claims.preauth_challenge), sha256(exchangeContext.preAuthCookie)],
+      );
+      const challenge = challengeRows[0];
+      if (!challenge || timestampMs(challenge.expires_at) <= at) reject('EXCHANGE_CHALLENGE_INVALID');
+      if (challenge.consumed_at !== null) reject('EXCHANGE_CHALLENGE_INVALID');
       const membership = await activeMembership(conn, claims.tenant, FAKE_ISSUER, claims.sub, true);
       try {
         await conn.execute(
@@ -282,6 +317,12 @@ export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
         if (isDuplicateKey(error)) reject('TICKET_REPLAY');
         throw error;
       }
+      const [challengeConsumed] = await conn.execute(
+        `UPDATE m106_preauth_challenge SET consumed_at = ?
+         WHERE challenge_hash = ? AND preauth_cookie_hash = ? AND consumed_at IS NULL`,
+        [sqlTime(at), sha256(claims.preauth_challenge), sha256(exchangeContext.preAuthCookie)],
+      );
+      if (challengeConsumed.affectedRows !== 1) reject('EXCHANGE_CHALLENGE_INVALID');
       // Roles in the signed claim are deliberately not used; current membership is authoritative.
       const result = await insertSession(conn, {
         tenantId: claims.tenant,
@@ -364,9 +405,22 @@ export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      const { row } = await lockLiveSession(conn, sessionSecret, at);
+      if (typeof sessionSecret !== 'string') reject('AUTH_REQUIRED');
+      const [sessions] = await conn.execute(
+        `SELECT s.*, t.status AS current_tenant_status
+         FROM m106_portal_session s JOIN m106_tenant t ON t.id = s.tenant_id
+         WHERE s.session_hash = ? FOR UPDATE`,
+        [sha256(sessionSecret)],
+      );
+      const row = sessions[0];
+      assertSessionLive(row, at);
       assertMutation({ origin, csrfToken, csrfHash: row.csrf_hash });
       if (!equalHash(row.context_ref_hash, expectedContextRef)) reject('CONTEXT_CHANGED');
+      // A suspended tenant grants no resource access, but an existing session can recover
+      // by switching to a different active tenant where this principal still has membership.
+      if (row.current_tenant_status === 'ACTIVE') {
+        await activeMembership(conn, row.tenant_id, row.issuer, row.subject, true);
+      }
       const membership = await activeMembership(conn, targetTenantId, row.issuer, row.subject, true);
       const nextContextRef = randomSecret();
       const nextVersion = Number(row.context_version) + 1;
@@ -478,15 +532,10 @@ export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
        WHERE tenant_id = ? AND issuer = ? AND subject = ?`,
       [tenantId, FAKE_ISSUER, subject],
     );
-    await pool.execute(
-      `UPDATE m106_principal SET status = 'REVOKED'
-       WHERE issuer = ? AND subject = ?`,
-      [FAKE_ISSUER, subject],
-    );
     return at;
   }
 
-  return { exchangeTicket, resolveCurrentContext, readAsset, startOnboarding, switchTenant, requestMagicLink, previewMagicLink, consumeMagicLink, revokeMembership };
+  return { beginPreAuth, exchangeTicket, resolveCurrentContext, readAsset, startOnboarding, switchTenant, requestMagicLink, previewMagicLink, consumeMagicLink, revokeMembership };
 }
 
 export function operationAllowed({ role, operation, serviceScopes, tenantId, assetId, resourceTenantId }) {

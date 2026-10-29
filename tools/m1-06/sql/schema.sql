@@ -32,6 +32,14 @@ CREATE TABLE m106_consumed_ticket (
   PRIMARY KEY (issuer, jti_hash)
 ) ENGINE=InnoDB;
 
+CREATE TABLE m106_preauth_challenge (
+  challenge_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+  preauth_cookie_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  expires_at DATETIME(6) NOT NULL,
+  consumed_at DATETIME(6) NULL,
+  KEY ix_m106_preauth_cookie (preauth_cookie_hash)
+) ENGINE=InnoDB;
+
 CREATE TABLE m106_portal_session (
   session_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
   issuer VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,

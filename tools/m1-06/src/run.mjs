@@ -29,16 +29,6 @@ const nowMs = Date.parse('2026-10-28T12:00:00.000Z');
 const db = mysql.createPool(safeDatabaseConfig());
 const fakeIssuer = createFakeIssuer();
 const model = createSecurityModel({ pool: db, fakeIssuer, nowMs });
-const topLevelExchangeContext = createTrustedExchangeContext({
-  requestOrigin: APP_ORIGIN,
-  hostOrigin: APP_ORIGIN,
-  entryMode: 'PORTAL_TOP_LEVEL',
-});
-const embeddedExchangeContext = createTrustedExchangeContext({
-  requestOrigin: APP_ORIGIN,
-  hostOrigin: EMBED_ORIGIN,
-  entryMode: 'SUITE4_EMBED',
-});
 const emailHash = (email) => sha256(email.trim().toLowerCase());
 
 function parseCsv(text) {
@@ -129,8 +119,50 @@ async function expectFailure(promise, code) {
 
 async function expectTicketUnused(ticket) {
   const { jti } = verifyFakeTicket(ticket, fakeIssuer.jwks, nowMs);
+  await expectJtiUnused(jti);
+}
+
+async function expectJtiUnused(jti) {
   const [rows] = await db.execute('SELECT jti_hash FROM m106_consumed_ticket WHERE issuer = ? AND jti_hash = ?', [FAKE_ISSUER, sha256(jti)]);
   assert.equal(rows.length, 0, 'rejected exchange context leaves the ticket unused');
+}
+
+async function expectJtiConsumed(jti) {
+  const [rows] = await db.execute('SELECT jti_hash FROM m106_consumed_ticket WHERE issuer = ? AND jti_hash = ?', [FAKE_ISSUER, sha256(jti)]);
+  assert.equal(rows.length, 1, 'successful exchange consumes the ticket jti exactly once');
+}
+
+async function expectChallengeUnused(challenge) {
+  const [rows] = await db.execute('SELECT consumed_at FROM m106_preauth_challenge WHERE challenge_hash = ?', [sha256(challenge)]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].consumed_at, null, 'failed exchange leaves the browser challenge unused');
+}
+
+async function beginBrowserEntry({ hostOrigin = APP_ORIGIN, entryMode = 'PORTAL_TOP_LEVEL' } = {}) {
+  const preAuth = await model.beginPreAuth({
+    requestOrigin: APP_ORIGIN,
+    hostOrigin,
+    entryMode,
+    at: nowMs,
+  });
+  return {
+    ...preAuth,
+    context: createTrustedExchangeContext({
+      requestOrigin: APP_ORIGIN,
+      hostOrigin,
+      entryMode,
+      preAuthCookie: preAuth.preAuthCookie,
+    }),
+  };
+}
+
+async function issueBrowserTicket(claims, entryOptions = {}, ticketOptions = {}) {
+  const browser = await beginBrowserEntry(entryOptions);
+  const ticket = issueFakeTicket(fakeIssuer, {
+    ...claims,
+    preauth_challenge: browser.challenge,
+  }, { nowMs, ...ticketOptions });
+  return { ...browser, ticket };
 }
 
 async function record(name, fn) {
@@ -149,6 +181,7 @@ async function seed() {
     ['user-viewer-01', 'USER', 'ACTIVE'],
     ['user-revoked-01', 'USER', 'ACTIVE'],
     ['user-session-revoked-01', 'USER', 'ACTIVE'],
+    ['user-cross-tenant-revocation-01', 'USER', 'ACTIVE'],
   ];
   for (const [subject, kind, status] of people) {
     await db.execute('INSERT INTO m106_principal (issuer, subject, kind, status) VALUES (?, ?, ?, ?)', [FAKE_ISSUER, subject, kind, status]);
@@ -162,6 +195,8 @@ async function seed() {
     ['tenant-a', 'user-viewer-01', 'viewer', 'viewer@fake.invalid'],
     ['tenant-a', 'user-revoked-01', 'owner', 'revoked@fake.invalid'],
     ['tenant-a', 'user-session-revoked-01', 'owner', 'session-revoked@fake.invalid'],
+    ['tenant-a', 'user-cross-tenant-revocation-01', 'owner', 'cross-tenant-a@fake.invalid'],
+    ['tenant-b', 'user-cross-tenant-revocation-01', 'admin', 'cross-tenant-b@fake.invalid'],
   ];
   for (const [tenant, subject, role, email] of memberships) {
     await db.execute(
@@ -188,33 +223,83 @@ try {
   verifyEndpointCrosswalk();
   await seed();
 
-  await record('AC01.arbitrary-cUUID-no-session-or-cross-tenant-asset', async () => {
+  await record('AC01.cUUID-is-not-auth-and-preauth-challenge-blocks-login-CSRF', async () => {
     const [before] = await db.execute('SELECT COUNT(*) AS total FROM m106_portal_session');
     await expectFailure(model.readAsset({ sessionSecret: undefined, contextRef: undefined, assetId: 'asset-a-1', cUUID: 'tenant-a' }), 'AUTH_REQUIRED');
     assert.equal(await db.execute('SELECT COUNT(*) AS total FROM m106_portal_session').then(([rows]) => Number(rows[0].total)), Number(before[0].total));
 
-    const ticket = issueFakeTicket(fakeIssuer, { sub: 'user-owner-01', tenant: 'tenant-a', roles: ['owner'] }, { nowMs });
-    await expectFailure(model.exchangeTicket(ticket, undefined, nowMs), 'EXCHANGE_CONTEXT_REQUIRED');
-    await expectTicketUnused(ticket);
-    await expectFailure(Promise.resolve().then(() => model.exchangeTicket(ticket, createTrustedExchangeContext({
+    const ownerEntry = await issueBrowserTicket({ sub: 'user-owner-01', tenant: 'tenant-a', roles: ['owner'] });
+    await expectFailure(model.exchangeTicket(ownerEntry.ticket, undefined, nowMs), 'EXCHANGE_CONTEXT_REQUIRED');
+    await expectTicketUnused(ownerEntry.ticket);
+    await expectFailure(Promise.resolve().then(() => model.exchangeTicket(ownerEntry.ticket, createTrustedExchangeContext({
       requestOrigin: 'https://attacker.fake.invalid',
       hostOrigin: APP_ORIGIN,
       entryMode: 'PORTAL_TOP_LEVEL',
+      preAuthCookie: ownerEntry.preAuthCookie,
     }), nowMs)), 'EXCHANGE_ORIGIN_DENIED');
-    await expectTicketUnused(ticket);
-    await expectFailure(Promise.resolve().then(() => model.exchangeTicket(ticket, createTrustedExchangeContext({
+    await expectTicketUnused(ownerEntry.ticket);
+    await expectFailure(Promise.resolve().then(() => model.exchangeTicket(ownerEntry.ticket, createTrustedExchangeContext({
       requestOrigin: APP_ORIGIN,
       hostOrigin: 'https://suite4.fake.invalid.attacker.test',
       entryMode: 'SUITE4_EMBED',
+      preAuthCookie: ownerEntry.preAuthCookie,
     }), nowMs)), 'EXCHANGE_HOST_ORIGIN_DENIED');
-    await expectTicketUnused(ticket);
-    await expectFailure(Promise.resolve().then(() => model.exchangeTicket(ticket, createTrustedExchangeContext({
+    await expectTicketUnused(ownerEntry.ticket);
+    await expectFailure(Promise.resolve().then(() => model.exchangeTicket(ownerEntry.ticket, createTrustedExchangeContext({
       requestOrigin: APP_ORIGIN,
       hostOrigin: APP_ORIGIN,
       entryMode: 'MAGIC_LINK',
+      preAuthCookie: ownerEntry.preAuthCookie,
     }), nowMs)), 'EXCHANGE_FLOW_DENIED');
-    await expectTicketUnused(ticket);
-    ownerSession = await model.exchangeTicket(ticket, topLevelExchangeContext, nowMs);
+    await expectTicketUnused(ownerEntry.ticket);
+    await expectFailure(Promise.resolve().then(() => model.exchangeTicket(ownerEntry.ticket, createTrustedExchangeContext({
+      requestOrigin: APP_ORIGIN,
+      hostOrigin: APP_ORIGIN,
+      entryMode: 'PORTAL_TOP_LEVEL',
+    }), nowMs)), 'PREAUTH_COOKIE_REQUIRED');
+    await expectTicketUnused(ownerEntry.ticket);
+
+    const missingChallengeJti = 'missing-preauth-challenge-jti-001';
+    const missingChallenge = issueFakeTicket(fakeIssuer, {
+      sub: 'user-owner-01', tenant: 'tenant-a', jti: missingChallengeJti, preauth_challenge: '',
+    }, { nowMs });
+    await expectFailure(model.exchangeTicket(missingChallenge, ownerEntry.context, nowMs), 'TICKET_CHALLENGE_REQUIRED');
+    await expectJtiUnused(missingChallengeJti);
+
+    const attackerEntry = await issueBrowserTicket({ sub: 'user-owner-01', tenant: 'tenant-a', roles: ['owner'] });
+    const victimEntry = await beginBrowserEntry();
+    await expectFailure(model.exchangeTicket(attackerEntry.ticket, victimEntry.context, nowMs), 'EXCHANGE_CHALLENGE_INVALID');
+    await expectTicketUnused(attackerEntry.ticket);
+    const victimTicket = issueFakeTicket(fakeIssuer, {
+      sub: 'user-owner-01', tenant: 'tenant-a', roles: ['owner'], preauth_challenge: victimEntry.challenge,
+    }, { nowMs });
+    ownerSession = await model.exchangeTicket(victimTicket, victimEntry.context, nowMs);
+    const replayedChallengeJti = 'replayed-preauth-challenge-jti-001';
+    const replayedChallengeTicket = issueFakeTicket(fakeIssuer, {
+      sub: 'user-owner-01', tenant: 'tenant-a', preauth_challenge: victimEntry.challenge, jti: replayedChallengeJti,
+    }, { nowMs });
+    await expectFailure(model.exchangeTicket(replayedChallengeTicket, victimEntry.context, nowMs), 'EXCHANGE_CHALLENGE_INVALID');
+    await expectJtiUnused(replayedChallengeJti);
+    const victimJti = verifyFakeTicket(victimTicket, fakeIssuer.jwks, nowMs).jti;
+    await expectFailure(model.exchangeTicket(victimTicket, victimEntry.context, nowMs), 'EXCHANGE_CHALLENGE_INVALID');
+    await expectJtiConsumed(victimJti);
+    const duplicateJtiEntry = await beginBrowserEntry();
+    const duplicateJtiTicket = issueFakeTicket(fakeIssuer, {
+      sub: 'user-owner-01', tenant: 'tenant-a', jti: victimJti, preauth_challenge: duplicateJtiEntry.challenge,
+    }, { nowMs });
+    await expectFailure(model.exchangeTicket(duplicateJtiTicket, duplicateJtiEntry.context, nowMs), 'TICKET_REPLAY');
+    await expectJtiConsumed(victimJti);
+    await expectChallengeUnused(duplicateJtiEntry.challenge);
+    assert.match(victimEntry.cookie, /^__Host-meta_pre_auth=[A-Za-z0-9_-]+; Path=\/; Secure; HttpOnly; SameSite=Lax$/);
+    assert.equal(victimEntry.cookie.includes('Domain='), false);
+    const [storedChallenge] = await db.execute(
+      'SELECT challenge_hash, preauth_cookie_hash, consumed_at FROM m106_preauth_challenge WHERE challenge_hash = ?',
+      [sha256(victimEntry.challenge)],
+    );
+    assert.equal(storedChallenge.length, 1);
+    assert.equal(storedChallenge[0].preauth_cookie_hash, sha256(victimEntry.preAuthCookie), 'pre-auth cookie is bound by hash');
+    assert.notEqual(storedChallenge[0].challenge_hash, victimEntry.challenge, 'challenge is stored only as a hash');
+    assert.notEqual(storedChallenge[0].consumed_at, null, 'successful exchange consumes the challenge');
     assert.equal((await model.readAsset({ ...ownerSession, assetId: 'asset-a-1', cUUID: 'tenant-a', at: nowMs })).id, 'asset-a-1');
     await expectFailure(model.readAsset({ ...ownerSession, assetId: 'asset-b-1', cUUID: 'tenant-a', at: nowMs }), 'RESOURCE_NOT_AVAILABLE');
     await expectFailure(model.readAsset({ ...ownerSession, assetId: 'asset-b-1', cUUID: 'tenant-b', at: nowMs }), 'TENANT_CONTEXT_MISMATCH');
@@ -225,8 +310,12 @@ try {
   });
 
   await record('AC02.ticket-profile-signature-rotation-jti-replay-and-revocation', async () => {
-    const valid = issueFakeTicket(fakeIssuer, { sub: 'user-operator-01', tenant: 'tenant-a', roles: ['owner'] }, { nowMs });
-    operatorSession = await model.exchangeTicket(valid, embeddedExchangeContext, nowMs);
+    const operatorEntry = await issueBrowserTicket(
+      { sub: 'user-operator-01', tenant: 'tenant-a', roles: ['owner'] },
+      { hostOrigin: EMBED_ORIGIN, entryMode: 'SUITE4_EMBED' },
+    );
+    const valid = operatorEntry.ticket;
+    operatorSession = await model.exchangeTicket(valid, operatorEntry.context, nowMs);
     assert.equal(operatorSession.role, 'operator', 'current membership overrides signed role claims');
     assert.equal(verifyFakeTicket(valid, fakeIssuer.jwks, nowMs).aud, 'urn:synthetic:msg4:meta-portal');
 
@@ -263,37 +352,56 @@ try {
     currentOnly.delete('fake-key-previous');
     assert.throws(() => verifyFakeTicket(oldKeyToken, currentOnly, nowMs), (error) => error.code === 'TICKET_KID_UNKNOWN', 'removing a key revokes its tickets');
 
-    const concurrentTicket = issueFakeTicket(fakeIssuer, { sub: 'user-owner-01', tenant: 'tenant-a' }, { nowMs });
+    const concurrentEntry = await issueBrowserTicket({ sub: 'user-owner-01', tenant: 'tenant-a' });
     const race = await Promise.allSettled([
-      model.exchangeTicket(concurrentTicket, topLevelExchangeContext, nowMs),
-      model.exchangeTicket(concurrentTicket, topLevelExchangeContext, nowMs),
+      model.exchangeTicket(concurrentEntry.ticket, concurrentEntry.context, nowMs),
+      model.exchangeTicket(concurrentEntry.ticket, concurrentEntry.context, nowMs),
     ]);
     assert.equal(race.filter((entry) => entry.status === 'fulfilled').length, 1);
-    assert.equal(race.filter((entry) => entry.status === 'rejected' && entry.reason.code === 'TICKET_REPLAY').length, 1);
+    assert.equal(race.filter((entry) => entry.status === 'rejected' && entry.reason.code === 'EXCHANGE_CHALLENGE_INVALID').length, 1);
 
-    const revokedTicket = issueFakeTicket(fakeIssuer, { sub: 'user-revoked-01', tenant: 'tenant-a' }, { nowMs });
+    const revokedEntry = await issueBrowserTicket({ sub: 'user-revoked-01', tenant: 'tenant-a' });
     await model.revokeMembership('tenant-a', 'user-revoked-01', nowMs);
-    await expectFailure(model.exchangeTicket(revokedTicket, topLevelExchangeContext, nowMs), 'MEMBERSHIP_INVALID');
-    const revokeSessionTicket = issueFakeTicket(fakeIssuer, { sub: 'user-session-revoked-01', tenant: 'tenant-a' }, { nowMs });
-    const revokedSession = await model.exchangeTicket(revokeSessionTicket, topLevelExchangeContext, nowMs);
+    await expectFailure(model.exchangeTicket(revokedEntry.ticket, revokedEntry.context, nowMs), 'MEMBERSHIP_INVALID');
+    const revokeSessionEntry = await issueBrowserTicket({ sub: 'user-session-revoked-01', tenant: 'tenant-a' });
+    const revokedSession = await model.exchangeTicket(revokeSessionEntry.ticket, revokeSessionEntry.context, nowMs);
     await model.revokeMembership('tenant-a', 'user-session-revoked-01', nowMs);
     await expectFailure(model.readAsset({ ...revokedSession, assetId: 'asset-a-1', cUUID: 'tenant-a', at: nowMs }), 'MEMBERSHIP_INVALID');
 
-    const tenantSessionTicket = issueFakeTicket(fakeIssuer, { sub: 'user-owner-01', tenant: 'tenant-d' }, { nowMs });
-    const tenantSession = await model.exchangeTicket(tenantSessionTicket, topLevelExchangeContext, nowMs);
+    const crossTenantAEntry = await issueBrowserTicket({ sub: 'user-cross-tenant-revocation-01', tenant: 'tenant-a' });
+    const crossTenantASession = await model.exchangeTicket(crossTenantAEntry.ticket, crossTenantAEntry.context, nowMs);
+    const crossTenantBEntry = await issueBrowserTicket({ sub: 'user-cross-tenant-revocation-01', tenant: 'tenant-b' });
+    const crossTenantBSession = await model.exchangeTicket(crossTenantBEntry.ticket, crossTenantBEntry.context, nowMs);
+    await model.revokeMembership('tenant-a', 'user-cross-tenant-revocation-01', nowMs);
+    await expectFailure(model.readAsset({ ...crossTenantASession, assetId: 'asset-a-1', cUUID: 'tenant-a', at: nowMs }), 'MEMBERSHIP_INVALID');
+    assert.equal((await model.readAsset({ ...crossTenantBSession, assetId: 'asset-b-1', cUUID: 'tenant-b', at: nowMs })).id, 'asset-b-1', 'revoking tenant A membership preserves tenant B access');
+
+    const tenantSessionEntry = await issueBrowserTicket({ sub: 'user-owner-01', tenant: 'tenant-d' });
+    let tenantSession = await model.exchangeTicket(tenantSessionEntry.ticket, tenantSessionEntry.context, nowMs);
     await db.execute("UPDATE m106_tenant SET status = 'SUSPENDED' WHERE id = 'tenant-d'");
     await expectFailure(model.readAsset({ ...tenantSession, assetId: 'asset-d-1', cUUID: 'tenant-d', at: nowMs }), 'TENANT_NOT_ACTIVE');
     await expectFailure(model.switchTenant({
+      sessionSecret: tenantSession.sessionSecret,
+      expectedContextRef: tenantSession.contextRef,
+      targetTenantId: 'tenant-d',
+      csrfToken: tenantSession.csrfToken,
+      origin: APP_ORIGIN,
+      at: nowMs,
+    }), 'TENANT_NOT_ACTIVE');
+    tenantSession = await model.switchTenant({
       sessionSecret: tenantSession.sessionSecret,
       expectedContextRef: tenantSession.contextRef,
       targetTenantId: 'tenant-a',
       csrfToken: tenantSession.csrfToken,
       origin: APP_ORIGIN,
       at: nowMs,
-    }), 'TENANT_NOT_ACTIVE');
-    const suspendedTicket = issueFakeTicket(fakeIssuer, { sub: 'user-owner-01', tenant: 'tenant-d' }, { nowMs });
-    await expectFailure(model.exchangeTicket(suspendedTicket, topLevelExchangeContext, nowMs), 'TENANT_NOT_ACTIVE');
-    await expectTicketUnused(suspendedTicket);
+    });
+    assert.equal(tenantSession.tenantId, 'tenant-a', 'suspended tenant permits only recovery to a different active membership');
+    assert.equal((await model.readAsset({ ...tenantSession, assetId: 'asset-a-1', cUUID: 'tenant-a', at: nowMs })).id, 'asset-a-1');
+    await expectFailure(model.readAsset({ ...tenantSession, assetId: 'asset-d-1', at: nowMs }), 'RESOURCE_NOT_AVAILABLE');
+    const suspendedEntry = await issueBrowserTicket({ sub: 'user-owner-01', tenant: 'tenant-d' });
+    await expectFailure(model.exchangeTicket(suspendedEntry.ticket, suspendedEntry.context, nowMs), 'TENANT_NOT_ACTIVE');
+    await expectTicketUnused(suspendedEntry.ticket);
     const suspendedLink = await model.requestMagicLink('suspended@fake.invalid', 'tenant-d', nowMs, 'suspended-tenant');
     assert.equal(suspendedLink.localOutboxToken, null, 'a suspended tenant cannot initiate direct access');
 
