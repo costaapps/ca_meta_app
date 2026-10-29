@@ -1,0 +1,15 @@
+{
+  "name": "@m1-04/web-toolchain",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@angular/compiler": "21.0.8"
+  },
+  "devDependencies": {
+    "@angular/compiler-cli": "21.0.8",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "check": "node -e \"const assert=require('node:assert/strict'); const ts=require('typescript'); const ng=require('@angular/compiler-cli'); assert.equal(ts.version,'5.9.3'); assert.ok(ng); console.log('web toolchain OK: Angular compiler 21.0.8 / TypeScript '+ts.version)\""
+  }
+}

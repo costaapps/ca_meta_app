@@ -40,24 +40,17 @@ A experiência completa de conversas continua no Msg4. Este repositório gere co
 
 Domínio não depende de framework, HTTP da Meta ou tabelas legadas. Aplicação coordena casos de uso. Adaptadores implementam portas de persistência, cofre, transporte, mensageria e consumidores. Controllers validam DTO/autorização e chamam casos de uso; workers invocam os mesmos casos com identidade de serviço controlada.
 
-## ADRs a ratificar e experimentos
+## ADRs M1.04 e tópicos de arquitetura relacionados
 
 | ADR | Decisão inicial | Alternativas e consequência | Prova/gate |
 |---|---|---|---|
-| 001 · Stack | Angular existente + NestJS | PHP modernizado reduz migração; Next.js exige reescrever UI e não resolve identidade/jobs por si | Compatibilidade/versionamento suportado; build baseline; módulos mínimos |
-| 002 · Monorepo | npm workspaces e diretórios apps/packages | Nx/Turborepo somente se escala de tarefas justificar custo | Instalação e scripts determinísticos, imports isolados |
-| 003 · Persistência | MariaDB mantido | PostgreSQL não é necessário só para reconstruir; ORM exige driver e migrations reais | Testes MariaDB, DDL/indices, lock, UTC e expand/contract |
-| 004 · Jobs | Inbox/outbox duráveis no banco; fila como adaptador | Redis/BullMQ se volume/latência justificar; banco segue fonte da intenção | Crash/lease/redelivery, fairness e benchmark |
-| 005 · Edge/sessão | Mesmo origin + cookie opaco | Origens separadas aumentam CORS/CSRF e não resolvem iframe | Browser E2E, trusted proxy e CSRF |
-| 006 · Identidade | Ticket curto Suite4 + magic link para membros | OIDC nativo se Suite4 já oferecer pode substituir ticket sob o mesmo contrato | Emissor real, membership, replay e rotação |
-| 007 · Credenciais | Cofre servidor com criptografia autenticada | Secret manager/KMS envelope quando disponível; chaves versionadas fora do DB no primeiro adapter | Tamper, restore, rotação e controle de acesso |
-| 008 · Isolamento | Tenant obrigatório em todo agregado/query/job/cache | Não reduzir a base legada; validação em policy/repository e constraints | BOLA/IDOR e duas empresas na mesma base |
-| 009 · Meta variants | Quatro fluxos, estratégias próprias | Instagram via Facebook preserva baseline; Instagram Login direto exige ADR específico | Matriz primária e sandbox por produto |
-| 010 · Distribuição | Operações internas como relay; projeção sem segredo por padrão | Exportação temporária restrita apenas com exceção documentada e retirada | Testes consumidores e zero fallback global |
-| 011 · Migração | Fatias com flags, um escritor por função | Reescrita big-bang aumenta corte/rollback simultâneos | Shadow-read, lote, canário e rollback por comportamento |
-| 012 · Releases | Duas imagens, digests imutáveis e manifest | Rebuild por ambiente não preserva homologação | Proveniência, SBOM, smoke e promoção por digest |
+| [001 · Stack](adrs/ADR-001-stack.md) | Angular preservado + NestJS 12; toolchains TypeScript por workspace | PHP modernizado é rota menor; Next.js não atende requisito identificado que justifique reescrever a UI | Faixas oficiais, toolchain isolada e build Nest no Node comum |
+| [002 · Monorepo](adrs/ADR-002-monorepo.md) | npm workspaces com limites modulares | Nx/Turborepo só se o grafo/CI medir necessidade; M1 não reorganiza baseline | Lockfile prova workspaces, limites registrados para M2 |
+| [003 · Persistência e jobs](adrs/ADR-003-persistence-jobs.md) | MariaDB + TypeORM explícito; inbox/outbox durável, polling worker | Redis/BullMQ adaptador opcional; DB segue fonte de intenção | PoC MariaDB de migration, JSON, índice, rollback, claim, crash/lease/redelivery e drain |
+| [004 · Edge e sessão](adrs/ADR-004-edge-session.md) | Mesmo origin HTTPS; proxy roteia `/` e `/api` | Origins separados elevam CORS/cookie/CSRF; iframe precisa cenário próprio | M1 fixa a direção; Browser/Suite4/proxy real ficam gates posteriores |
+| [005 · Segredos e legado](adrs/ADR-005-secrets-legacy.md) | Segredo central server-side; projeções empresariais sem token; bridge tipada | KMS/secret manager depois de owner/ambiente; legado continua referência até rollout | Nenhum valor operacional lido/ingressado; custody, DDL e deployment reais não confirmados |
 
-Cada ADR inclui contexto, opções, decisão, riscos, consequência operacional, experimentos e condição de revisão. Não deixar ORM/fila/provedor de e-mail como escolha implícita do primeiro desenvolvedor.
+Estas cinco ADRs atendem ao pacote M1.04. Decisões sobre identidade Suite4, isolamento completo por tenant, variantes Meta, distribuição, migração, release e e-mail continuam especificadas como tópicos para suas issues M1/M2; não devem ganhar autoridade por aparecerem como exemplos neste documento. As ADRs desta etapa incluem contexto, opções, decisão, risco, consequência, verificação e condição de revisão. A [topologia de containers e responsabilidades](m1-04-container-topology.md) complementa a arquitetura sem afirmar que ela já está implantada.
 
 ## Organização alvo
 
