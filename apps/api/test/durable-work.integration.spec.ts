@@ -751,7 +751,11 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     );
 
     const tenantCombinedClaimPlan = await dataSource.query(
-      `EXPLAIN SELECT id FROM ca_meta_jobs
+      `EXPLAIN SELECT id, tenant_id, job_type, schema_version, lane, effect_mode, resource_scope_ref, idempotency_key,
+                      correlation_id, causation_id, payload_json, attempt, max_attempts, claim_token, budget_started_at,
+                      TIMESTAMPDIFF(MICROSECOND, budget_started_at, UTC_TIMESTAMP(6)) DIV 1000 AS budget_elapsed_ms,
+                      created_at
+       FROM ca_meta_jobs
        WHERE tenant_id = ? AND lane = ? AND job_type IN (?, ?) AND NOT EXISTS (
          SELECT 1 FROM ca_meta_jobs active
          WHERE active.tenant_id = ca_meta_jobs.tenant_id
@@ -760,7 +764,7 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
        ) AND (
          (status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)) OR
          (status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6))
-       ) ORDER BY COALESCE(lease_expires_at, next_run_at), created_at, id LIMIT 1`,
+       ) ORDER BY COALESCE(lease_expires_at, next_run_at), created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`,
       [tenantWorker, 'WEBHOOK_URGENT', 'INBOX_PROCESS', 'PROJECTION_RECONCILE'],
     ) as Array<{ table: string | null; key: string | null; type: string; rows: number | string }>;
     const tenantCombinedClaimScan = tenantCombinedClaimPlan.find((row) => row.table === 'ca_meta_jobs');
