@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:costaapps:meta-v2:inbox-event:v1",
   "title": "Meta Platform v2 inbox event envelope",
-  "description": "Proposed normalized inbox metadata. Provider payload bytes remain in a protected, short-retention store referenced only by an opaque handle. This is not the external Meta webhook schema, which is Not confirmed.",
+  "description": "Proposed normalized metadata for one provider item, not a raw multi-item delivery. Tenant routing is resolved per item. Provider payload bytes remain in a protected, short-retention store referenced only by an opaque handle. This is not the external Meta webhook schema, which is Not confirmed.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -146,6 +146,10 @@
     {
       "if": { "properties": { "routingState": { "const": "ROUTED" } }, "required": ["routingState"] },
       "then": { "properties": { "tenantRef": { "type": "string", "minLength": 1, "maxLength": 128 } } }
+    },
+    {
+      "if": { "properties": { "routingState": { "enum": ["PENDING", "QUARANTINED", "REJECTED"] } }, "required": ["routingState"] },
+      "then": { "properties": { "tenantRef": { "const": null } } }
     },
     {
       "if": { "properties": { "eventType": { "const": "provider.unclassified" } }, "required": ["eventType"] },

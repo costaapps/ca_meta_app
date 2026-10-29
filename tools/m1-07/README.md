@@ -31,7 +31,7 @@ Run a single validation stage with `npm run lint`, `npm run test:contract`, `npm
 - Mutable configuration uses ETag/`If-Match`; asynchronous work returns `202` and `Location`. HTTP 200, redirect, provider callback, code exchange or popup completion does not establish `READY`; status is read from the server and derived from current policy/evidence.
 - External effects have bounded adapter retries. Ambiguous outcomes, especially message sends, become `UNKNOWN` and require reconciliation before another attempt. No exactly-once provider guarantee is assumed.
 - Inbox/outbox events carry actor, correlation/causation, schema and aggregate versions, and UTC timestamps. They carry references/allowlisted metadata, never unbounded message content.
-- An unmapped provider event is retained only by opaque protected-payload reference and represented as `provider.unclassified`, with `tenantRef: null` and `routingState: QUARANTINED` until an explicit mapping is reviewed.
+- Inbox envelopes represent one normalized provider item, not a whole multi-item webhook. An unmapped item is retained only by opaque protected-payload reference and represented as `provider.unclassified`, with `tenantRef: null` and `routingState: QUARANTINED` until an explicit mapping is reviewed. The original quarantined envelope remains immutable; reprocessing creates a derived item with a new event ID, the same correlation ID, and the original event ID as causation, then resolves that item's tenant server-side.
 
 ## Evidence limits and next gates
 

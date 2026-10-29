@@ -173,6 +173,16 @@ test('every request, success and reusable error example validates against its JS
       const unclassified = schema.examples.find((example) => example.eventType === 'provider.unclassified');
       assert.ok(unclassified, 'inbox schema includes a quarantined unclassified event example');
       assert.equal(validate(unclassified), true, 'unclassified inbox events remain safely representable');
+      const knownRoutedWithoutTenant = structuredClone(schema.examples.find((example) => example.eventType === 'provider.message.received'));
+      knownRoutedWithoutTenant.routingState = 'ROUTED';
+      knownRoutedWithoutTenant.tenantRef = null;
+      assert.equal(validate(knownRoutedWithoutTenant), false, 'routed inbox events must resolve exactly one tenant');
+      const correctlyRouted = structuredClone(knownRoutedWithoutTenant);
+      correctlyRouted.tenantRef = 'tenant_example_01';
+      assert.equal(validate(correctlyRouted), true, 'routed inbox items carry their server-resolved tenant');
+      const pendingWithTenant = structuredClone(schema.examples.find((example) => example.eventType === 'provider.message.received'));
+      pendingWithTenant.tenantRef = 'tenant_example_01';
+      assert.equal(validate(pendingWithTenant), false, 'pending inbox items must not carry a tenant before routing');
       const incorrectlyRouted = structuredClone(unclassified);
       incorrectlyRouted.routingState = 'ROUTED';
       incorrectlyRouted.tenantRef = 'tenant_example_01';
