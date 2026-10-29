@@ -5,7 +5,7 @@ Data do registro: 2026-10-29 (America/Sao_Paulo).
 - Regra fundamental M1–M6 (também em `docs/codex-desktop/execution-contract.md` e `progress-and-handoff.md`): somente uma mensagem explícita de erro por limite de tokens excedido inicia timer de 45 minutos. Salvar handoff, preservar commits/arquivos, retomar a etapa exata e tentar novamente; repetir só os gates afetados. Não iniciar o timer para erro genérico, compactação, timeout ou rate limit com intervalo próprio.
 
 - Base verificada: `develop@733e4a6dcccc93ee58a24958ed9830bfcc878e62`, igual a `origin/develop` no início.
-- Branch de integração: `desktop/milestone-m1`, criada a partir da base acima e atualmente verificada em `ddb92588855f5128f6a173291c581a547e7b5317` (inclui M1.10 por squash).
+- Branch de integração: `desktop/milestone-m1`, criada a partir da base acima. Último squash de pacote: M1.10 em `ddb92588855f5128f6a173291c581a547e7b5317`; estado/head atual da branch está visível no PR consolidado #94.
 - Worktree principal: `C:\Users\user\.codex\worktrees\m1-milestone\ca_meta_app`.
 - M1.01 foi revisado, validado e integrado à branch da milestone por squash como PR #84 (`aa2639a` → `54787a9`); checks `orchestrator` e `desktop-candidate` passaram e revisões funcional/segurança aprovaram. Nenhum issue foi fechado; PRs/branches antigos #80–#82 e `automation/*` / `codex/*` seguem como referências históricas.
 - Nenhum serviço de teste foi iniciado; recursos Docker existentes foram preservados.
@@ -27,7 +27,7 @@ Data do registro: 2026-10-29 (America/Sao_Paulo).
 
 ## Porta de entrega da milestone
 
-Todos os dez pacotes M1 estão integrados por squash à `desktop/milestone-m1`. O PR consolidado [#94](https://github.com/costaapps/ca_meta_app/pull/94) está aberto em draft contra `develop`; ainda aguarda checks/revisão do candidato consolidado e o aceite humano final. Não fazer merge/fechar issues antes do aceite. `develop` ainda não contém esta entrega e nenhum release foi feito.
+Todos os dez pacotes M1 estão integrados por squash à `desktop/milestone-m1`. O PR consolidado [#94](https://github.com/costaapps/ca_meta_app/pull/94) está aberto contra `develop`; consulte nele o head e o estado atual de checks/revisões. Não fazer merge/fechar issues antes do aceite humano. `develop` ainda não contém esta entrega e nenhum release foi feito.
 
 ## Verificação agregada
 
