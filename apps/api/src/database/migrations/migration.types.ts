@@ -8,6 +8,8 @@ export interface DdlStep {
   readonly id: string;
   readonly phase: 'expand' | 'switch' | 'contract';
   readonly sql: string;
+  readonly definitionVersion: string;
+  readonly definition: string;
   readonly verify: (context: MigrationStepContext) => Promise<boolean>;
   /** DDL steps must be safe to retry when verify returns false after a crash. */
   readonly retryWhenAbsent: true;
@@ -16,7 +18,8 @@ export interface DdlStep {
 export interface BackfillStep {
   readonly id: string;
   readonly phase: 'backfill';
-  readonly checksum: string;
+  readonly definitionVersion: string;
+  readonly definition: string;
   readonly batchSize: number;
   readonly runBatch: (
     context: MigrationStepContext,
@@ -28,7 +31,8 @@ export interface BackfillStep {
 export interface ValidationStep {
   readonly id: string;
   readonly phase: 'validate';
-  readonly checksum: string;
+  readonly definitionVersion: string;
+  readonly definition: string;
   readonly validate: (context: MigrationStepContext) => Promise<void>;
 }
 

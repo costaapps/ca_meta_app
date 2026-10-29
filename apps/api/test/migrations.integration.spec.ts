@@ -87,20 +87,24 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
 
     const externalId = '000-123|Zażółć 🧪';
     const rows: Array<[string, string, string, string, string, string, string]> = [];
-    for (let index = 0; index < 205; index += 1) {
+    for (let index = 0; index < 10_000; index += 1) {
+      const tenantId = index < 100 ? tenantA : tenantB;
+      const appId = index < 100 ? appA : appB;
       rows.push([
-        uuid(1000 + index), tenantA, appA,
-        index === 0 ? externalId : `synthetic-${index.toString().padStart(4, '0')}`,
+        uuid(10_000 + index), tenantId, appId,
+        index === 0 ? externalId : `synthetic-${index.toString().padStart(5, '0')}`,
         `legacy name ${index}`, timestamp, timestamp,
       ]);
     }
     rows.push([uuid(3000), tenantB, appB, externalId, 'same external id in another tenant', timestamp, timestamp]);
-    for (const row of rows) {
+    for (let offset = 0; offset < rows.length; offset += 500) {
+      const batch = rows.slice(offset, offset + 500);
+      const valuesSql = batch.map(() => "(?, ?, ?, 'META', 'test', 'PAGE', ?, ?, ?, ?)").join(', ');
       await admin.query(
         `INSERT INTO ca_meta_assets
          (id, tenant_id, app_configuration_id, provider, environment, asset_kind, external_id, display_name, created_at, updated_at)
-         VALUES (?, ?, ?, 'META', 'test', 'PAGE', ?, ?, ?, ?)`,
-        row,
+        VALUES ${valuesSql}`,
+        batch.flatMap((row) => row),
       );
     }
     const longestSupportedExternalId = 'é'.repeat(512);
@@ -119,13 +123,18 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     assert.equal(stepRows[0]?.state, 'STARTED');
     assert.ok(stepRows[0]?.cursor_value, 'first committed batch cursor is persisted');
 
-    // The previous client still writes only the old column while the expanded migration is paused.
+    // This N-1 id sorts below the stored cursor. The expansion trigger protects it while the backfill is paused.
     await admin.query(
       `INSERT INTO ca_meta_assets
        (id, tenant_id, app_configuration_id, provider, environment, asset_kind, external_id, display_name, created_at, updated_at)
        VALUES (?, ?, ?, 'META', 'test', 'PAGE', ?, ?, ?, ?)`,
-      [uuid(4000), tenantA, appA, 'n-1-during-backfill', 'written during partial backfill', timestamp, timestamp],
+      [uuid(9000), tenantA, appA, 'n-1-during-backfill', 'written during partial backfill', timestamp, timestamp],
     );
+    const duringBackfillWrite = await queryRows<{ external_name: string | null }>(admin,
+      'SELECT external_name FROM ca_meta_assets WHERE id = ?', [uuid(9000)],
+    );
+    assert.equal(duringBackfillWrite[0]?.external_name, 'written during partial backfill');
+    assert.ok(String(stepRows[0]?.cursor_value).localeCompare(uuid(9000)) > 0, 'test writer ID is behind the persisted cursor');
 
     await deployMigrations(environment, [additive]);
     await deployMigrations(environment);
@@ -137,14 +146,14 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     const preserved = await queryRows<{ id: string; external_id: string; created_at: string; external_name: string }>(admin,
       `SELECT id, external_id, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s.%f') AS created_at,
               external_name FROM ca_meta_assets WHERE id = ?`,
-      [uuid(1000)],
+      [uuid(10_000)],
     );
-    assert.equal(preserved[0]?.id, uuid(1000));
+    assert.equal(preserved[0]?.id, uuid(10_000));
     assert.equal(preserved[0]?.external_id, externalId);
     assert.equal(preserved[0]?.created_at, timestamp);
     assert.equal(preserved[0]?.external_name, 'legacy name 0');
     const migratedNMinusOne = await queryRows<{ display_name: string; external_name: string | null }>(admin,
-      'SELECT display_name, external_name FROM ca_meta_assets WHERE id = ?', [uuid(4000)],
+      'SELECT display_name, external_name FROM ca_meta_assets WHERE id = ?', [uuid(9000)],
     );
     assert.equal(migratedNMinusOne[0]?.display_name, 'written during partial backfill');
     assert.equal(migratedNMinusOne[0]?.external_name, 'written during partial backfill');
@@ -161,19 +170,48 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
       `INSERT INTO ca_meta_assets
        (id, tenant_id, app_configuration_id, provider, environment, asset_kind, external_id, display_name, created_at, updated_at)
        VALUES (?, ?, ?, 'META', 'test', 'PAGE', ?, ?, ?, ?)`,
-      [uuid(4001), tenantA, appA, 'n-1-write-0007', 'written by old client', timestamp, timestamp],
+      [uuid(30_001), tenantA, appA, 'n-1-write-0007', 'written by old client', timestamp, timestamp],
     );
     const nMinusOne = await queryRows<{ display_name: string; external_name: string | null }>(admin,
-      'SELECT display_name, external_name FROM ca_meta_assets WHERE id = ?', [uuid(4001)],
+      'SELECT display_name, external_name FROM ca_meta_assets WHERE id = ?', [uuid(30_001)],
     );
     assert.equal(nMinusOne[0]?.display_name, 'written by old client');
-    assert.equal(nMinusOne[0]?.external_name, null);
+    assert.equal(nMinusOne[0]?.external_name, 'written by old client');
+    await admin.query('UPDATE ca_meta_assets SET display_name = ? WHERE id = ?', ['updated by N-1 writer', uuid(30_001)]);
+    const updatedNMinusOne = await queryRows<{ display_name: string; external_name: string | null }>(admin,
+      'SELECT display_name, external_name FROM ca_meta_assets WHERE id = ?', [uuid(30_001)],
+    );
+    assert.equal(updatedNMinusOne[0]?.display_name, 'updated by N-1 writer');
+    assert.equal(updatedNMinusOne[0]?.external_name, 'updated by N-1 writer');
 
     // The asset unique identity includes tenant scope; the same provider ID in another tenant survived.
     const duplicateCheck = await queryRows<{ count: string | number }>(admin,
       'SELECT COUNT(*) AS count FROM ca_meta_assets WHERE external_id = ?', [externalId],
     );
     assert.equal(Number(duplicateCheck[0]?.count), 2);
+    const assetCandidateKey = await queryRows<{ name: string }>(admin,
+      `SELECT column_name AS name FROM information_schema.statistics
+       WHERE table_schema = DATABASE() AND table_name = 'ca_meta_assets'
+         AND index_name = 'uq_ca_meta_asset_tenant_id' AND non_unique = 0
+       ORDER BY seq_in_index`,
+    );
+    assert.deepEqual(assetCandidateKey.map((row) => row.name), ['tenant_id', 'id']);
+    const trailingSpaceId = `${externalId} `;
+    await admin.query(
+      `INSERT INTO ca_meta_assets
+       (id, tenant_id, app_configuration_id, provider, environment, asset_kind, external_id, display_name, created_at, updated_at)
+       VALUES (?, ?, ?, 'META', 'test', 'PAGE', ?, 'trailing-space identity', ?, ?)`,
+      [uuid(4004), tenantA, appA, trailingSpaceId, timestamp, timestamp],
+    );
+    const exactIdentityCount = await queryRows<{ count: string | number }>(admin,
+      'SELECT COUNT(*) AS count FROM ca_meta_assets WHERE external_id = ?', [trailingSpaceId],
+    );
+    assert.equal(Number(exactIdentityCount[0]?.count), 1, 'NO PAD binary collation distinguishes an external ID with a trailing space');
+    const preservedTrailingSpace = await queryRows<{ external_id: string; external_name: string | null }>(admin,
+      'SELECT external_id, external_name FROM ca_meta_assets WHERE id = ?', [uuid(4004)],
+    );
+    assert.equal(preservedTrailingSpace[0]?.external_id, trailingSpaceId);
+    assert.equal(preservedTrailingSpace[0]?.external_name, 'trailing-space identity');
     await assert.rejects(
       admin.query(
         `INSERT INTO ca_meta_assets
@@ -202,20 +240,22 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
       (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'ER_NO_REFERENCED_ROW_2',
     );
 
-    const explain = await queryRows<{ key: string | null }>(admin,
-      `EXPLAIN SELECT id FROM ca_meta_assets FORCE INDEX (ix_ca_meta_asset_tenant_kind_created)
-       WHERE tenant_id = ? AND asset_kind = 'PAGE' ORDER BY created_at LIMIT 20`,
-      [tenantA],
-    );
-    assert.equal(explain[0]?.key, 'ix_ca_meta_asset_tenant_kind_created');
-
-    // Session ownership lands in M3; this synthetic fixture checks the accepted tenant/live-session index plan without adding a partial production session table here.
+    // Session ownership lands in M3; synthetic volume checks that tenant-scoped plans use indexes without forcing them.
     const migrationConnection = await createConnection({
       ...connectionOptions,
       user: environment.database.user,
       password: environment.database.password,
     });
     try {
+      await migrationConnection.query('ANALYZE TABLE ca_meta_assets');
+      const explain = await queryRows<{ key: string | null; type: string }>(admin,
+        `EXPLAIN SELECT id FROM ca_meta_assets
+         WHERE tenant_id = ? AND asset_kind = 'PAGE' ORDER BY created_at LIMIT 20`,
+        [tenantA],
+      );
+      assert.equal(explain[0]?.key, 'ix_ca_meta_asset_tenant_kind_created');
+      assert.notEqual(explain[0]?.type, 'ALL', 'synthetic tenant-scoped asset query avoids full table scan');
+
       await migrationConnection.query(`CREATE TABLE IF NOT EXISTS ca_meta_m203_session_fixture (
         id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
         tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -228,12 +268,28 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
         UNIQUE KEY uq_m203_session_secret (secret_hash),
         KEY ix_m203_session_tenant_live (tenant_id, revoked_at, expires_at)
       ) ENGINE=InnoDB`);
-      const sessionExplain = await queryRows<{ key: string | null }>(admin,
-        `EXPLAIN SELECT id FROM ca_meta_m203_session_fixture FORCE INDEX (ix_m203_session_tenant_live)
+      const sessionRows: Array<[string, string, string, string, string, string]> = [];
+      for (let index = 0; index < 10_000; index += 1) {
+        const id = uuid(50_000 + index);
+        sessionRows.push([id, index < 100 ? tenantA : tenantB, id, timestamp, timestamp, '2027-10-29 12:34:56.123456']);
+      }
+      for (let offset = 0; offset < sessionRows.length; offset += 500) {
+        const batch = sessionRows.slice(offset, offset + 500);
+        const valuesSql = batch.map(() => '(?, ?, UNHEX(SHA2(?, 256)), ?, ?, ?)').join(', ');
+        await migrationConnection.query(
+          `INSERT INTO ca_meta_m203_session_fixture (id, tenant_id, secret_hash, issued_at, idle_at, expires_at)
+           VALUES ${valuesSql}`,
+          batch.flatMap((row) => row),
+        );
+      }
+      await migrationConnection.query('ANALYZE TABLE ca_meta_m203_session_fixture');
+      const sessionExplain = await queryRows<{ key: string | null; type: string }>(admin,
+        `EXPLAIN SELECT id FROM ca_meta_m203_session_fixture
          WHERE tenant_id = ? AND revoked_at IS NULL AND expires_at > ? LIMIT 20`,
         [tenantA, timestamp],
       );
       assert.equal(sessionExplain[0]?.key, 'ix_m203_session_tenant_live');
+      assert.notEqual(sessionExplain[0]?.type, 'ALL', 'synthetic tenant-scoped session query avoids full table scan');
     } finally {
       await migrationConnection.end();
     }
@@ -247,7 +303,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
       await runtime.query("SET time_zone = '+00:00'");
       await runtime.query("SET SESSION sql_mode = CONCAT(@@session.sql_mode, ',STRICT_ALL_TABLES')");
       const result = await queryRows<{ count: string | number }>(runtime, 'SELECT COUNT(*) AS count FROM ca_meta_assets');
-      assert.equal(Number(result[0]?.count), 209);
+      assert.equal(Number(result[0]?.count), 10_005);
       await assert.rejects(runtime.query('CREATE TABLE runtime_role_must_not_ddl (id INT PRIMARY KEY)'),
         (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'ER_TABLEACCESS_DENIED_ERROR');
     } finally {

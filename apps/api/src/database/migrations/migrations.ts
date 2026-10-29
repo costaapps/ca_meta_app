@@ -1,10 +1,6 @@
-import { createHash } from 'node:crypto';
 import type { BackfillStep, MigrationStepContext, VersionedMigration } from './migration.types.js';
 import { assertExpectedColumns, tableColumns, tableExists } from './schema-inspection.js';
-
-function sha256(value: string): string {
-  return createHash('sha256').update(value, 'utf8').digest('hex');
-}
+import { migrationChecksum } from './migration-fingerprint.js';
 
 function ddl(
   id: string,
@@ -17,6 +13,8 @@ function ddl(
     id,
     phase,
     sql,
+    definitionVersion: 'v1',
+    definition: JSON.stringify({ table, columns, verifyHelper: assertExpectedColumns.toString() }),
     retryWhenAbsent: true,
     verify: async ({ queryRunner }) => assertExpectedColumns(queryRunner, table, columns),
   };
@@ -44,7 +42,7 @@ const legacyMaps = ddl(
     id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     legacy_database_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    legacy_company_id VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    legacy_company_id VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL,
     environment VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     created_at DATETIME(6) NOT NULL,
     PRIMARY KEY (id),
@@ -64,7 +62,7 @@ const appConfigurations = ddl(
     id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     provider VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    app_external_id VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    app_external_id VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL,
     environment VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     credential_ref VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NULL,
     version BIGINT UNSIGNED NOT NULL DEFAULT 1,
@@ -90,13 +88,14 @@ const assetCreation = ddl(
     provider VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     environment VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     asset_kind VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    external_id VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    external_id VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL,
     display_name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
     version BIGINT UNSIGNED NOT NULL DEFAULT 1,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_ca_meta_asset_identity (tenant_id, app_configuration_id, environment, provider, asset_kind, external_id),
+    UNIQUE KEY uq_ca_meta_asset_tenant_id (tenant_id, id),
     KEY ix_ca_meta_asset_tenant_kind_created (tenant_id, asset_kind, created_at),
     CONSTRAINT fk_ca_meta_asset_app_context FOREIGN KEY (tenant_id, app_configuration_id, provider, environment)
       REFERENCES ca_meta_app_configurations (tenant_id, id, provider, environment) ON UPDATE RESTRICT ON DELETE RESTRICT
@@ -107,6 +106,7 @@ const assetCreation = ddl(
 
 const assets: import('./migration.types.js').DdlStep = {
   ...assetCreation,
+  definition: JSON.stringify({ baseDefinition: assetCreation.definition, verifyHelpers: [tableExists.toString(), tableColumns.toString(), assertExpectedColumns.toString()] }),
   verify: async ({ queryRunner }) => {
     if (!(await tableExists(queryRunner, 'ca_meta_assets'))) return false;
     const actual = await tableColumns(queryRunner, 'ca_meta_assets');
@@ -116,6 +116,15 @@ const assets: import('./migration.types.js').DdlStep = {
     if (!matches(base) && !matches(expanded)) {
       throw new Error(`Migration preflight found an unexpected shape for table ca_meta_assets (${actual.join(',')}).`);
     }
+    const candidateKey = await queryRunner.query(
+      `SELECT column_name AS name FROM information_schema.statistics
+       WHERE table_schema = DATABASE() AND table_name = 'ca_meta_assets'
+         AND index_name = 'uq_ca_meta_asset_tenant_id' AND non_unique = 0
+       ORDER BY seq_in_index`,
+    ) as Array<{ name: string }>;
+    if (candidateKey.map((row) => row.name).join(',') !== 'tenant_id,id') {
+      throw new Error('Migration preflight found a missing or incompatible (tenant_id, id) asset candidate key.');
+    }
     return true;
   },
 };
@@ -123,7 +132,9 @@ const assets: import('./migration.types.js').DdlStep = {
 const addExternalName: import('./migration.types.js').DdlStep = {
   id: 'expand-asset-external-name',
   phase: 'expand',
-  sql: 'ALTER TABLE ca_meta_assets ADD COLUMN external_name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL AFTER display_name',
+  sql: 'ALTER TABLE ca_meta_assets ADD COLUMN external_name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL AFTER display_name, ADD INDEX ix_ca_meta_asset_external_name (external_name)',
+  definitionVersion: 'v1',
+  definition: JSON.stringify({ oldShape: ['id', 'tenant_id', 'app_configuration_id', 'provider', 'environment', 'asset_kind', 'external_id', 'display_name', 'version', 'created_at', 'updated_at'], newShape: ['id', 'tenant_id', 'app_configuration_id', 'provider', 'environment', 'asset_kind', 'external_id', 'display_name', 'external_name', 'version', 'created_at', 'updated_at'], index: ['external_name'], verifyHelpers: [assertExpectedColumns.toString(), tableColumns.toString(), tableExists.toString()] }),
   retryWhenAbsent: true,
   verify: async ({ queryRunner }) => {
     const oldShape = ['id', 'tenant_id', 'app_configuration_id', 'provider', 'environment', 'asset_kind', 'external_id', 'display_name', 'version', 'created_at', 'updated_at'];
@@ -136,21 +147,74 @@ const addExternalName: import('./migration.types.js').DdlStep = {
       await assertExpectedColumns(queryRunner, 'ca_meta_assets', oldShape);
       return false;
     }
-    return assertExpectedColumns(queryRunner, 'ca_meta_assets', newShape);
+    if (!(await assertExpectedColumns(queryRunner, 'ca_meta_assets', newShape))) return false;
+    const indexRows = await queryRunner.query(
+      `SELECT column_name AS name FROM information_schema.statistics
+       WHERE table_schema = DATABASE() AND table_name = 'ca_meta_assets'
+         AND index_name = 'ix_ca_meta_asset_external_name' AND non_unique = 1
+       ORDER BY seq_in_index`,
+    ) as Array<{ name: string }>;
+    if (indexRows.map((row) => row.name).join(',') !== 'external_name') {
+      throw new Error('Migration preflight found a missing or incompatible external-name backfill index.');
+    }
+    return true;
   },
 };
+
+function triggerStep(
+  id: string,
+  event: 'INSERT' | 'UPDATE',
+  statement: string,
+): import('./migration.types.js').DdlStep {
+  const triggerName = `tr_ca_meta_asset_external_name_${event.toLowerCase()}`;
+  const normalize = (value: string) => value.toUpperCase().replace(/[\s`]+/g, '');
+  return {
+    id,
+    phase: 'expand',
+    definitionVersion: 'v1',
+    definition: JSON.stringify({ triggerName, event, statement, normalize: normalize.toString() }),
+    retryWhenAbsent: true,
+    sql: `CREATE TRIGGER ${triggerName} BEFORE ${event} ON ca_meta_assets FOR EACH ROW ${statement}`,
+    verify: async ({ queryRunner }) => {
+      const rows = await queryRunner.query(
+        `SELECT action_timing, event_manipulation, event_object_table, action_statement
+         FROM information_schema.triggers WHERE trigger_schema = DATABASE() AND trigger_name = ?`,
+        [triggerName],
+      ) as Array<{ action_timing: string; event_manipulation: string; event_object_table: string; action_statement: string }>;
+      if (rows.length === 0) return false;
+      const row = rows[0];
+      if (!row || row.action_timing !== 'BEFORE' || row.event_manipulation !== event || row.event_object_table !== 'ca_meta_assets' ||
+        normalize(row.action_statement) !== normalize(statement)) {
+        throw new Error(`Migration preflight found an unexpected shape for trigger ${triggerName}.`);
+      }
+      return true;
+    },
+  };
+}
+
+const syncExternalNameOnInsert = triggerStep(
+  'sync-asset-external-name-insert',
+  'INSERT',
+  'SET NEW.external_name = COALESCE(NEW.external_name, NEW.display_name)',
+);
+
+const syncExternalNameOnUpdate = triggerStep(
+  'sync-asset-external-name-update',
+  'UPDATE',
+  'SET NEW.external_name = IF(NOT (NEW.display_name <=> OLD.display_name) AND (NEW.external_name <=> OLD.external_name), NEW.display_name, NEW.external_name)',
+);
 
 const backfillExternalName: BackfillStep = {
   id: 'backfill-asset-external-name',
   phase: 'backfill',
-  checksum: sha256('m2-03:copy-display-name-to-external-name:v1'),
+  definitionVersion: 'v1',
+  definition: JSON.stringify({ selector: 'external_name IS NULL AND display_name IS NOT NULL', checkpoint: 'diagnostic-only-rescan' }),
   batchSize: 200,
   runBatch: async ({ queryRunner }, cursor, batchSize) => {
+    // Triggers cover writes after expand; repeatedly selecting remaining NULLs also repairs rows written in the DDL-to-trigger gap.
+    void cursor;
     const rows = await queryRunner.query(
-      cursor === null
-        ? `SELECT id FROM ca_meta_assets ORDER BY id LIMIT ${batchSize}`
-        : `SELECT id FROM ca_meta_assets WHERE id > ? ORDER BY id LIMIT ${batchSize}`,
-      cursor === null ? [] : [cursor],
+      `SELECT id FROM ca_meta_assets WHERE external_name IS NULL AND display_name IS NOT NULL ORDER BY id LIMIT ${batchSize}`,
     ) as Array<{ id: string }>;
     if (rows.length === 0) return { nextCursor: cursor, done: true };
     const ids = rows.map((row) => row.id);
@@ -166,10 +230,11 @@ const backfillExternalName: BackfillStep = {
 const validateExternalName = {
   id: 'validate-asset-external-name-backfill',
   phase: 'validate' as const,
-  checksum: sha256('m2-03:external-name-backfill-validation:v1'),
+  definitionVersion: 'v1',
+  definition: JSON.stringify({ predicate: 'NOT (BINARY external_name <=> BINARY display_name)' }),
   validate: async ({ queryRunner }: MigrationStepContext): Promise<void> => {
     const rows = await queryRunner.query(
-      'SELECT COUNT(*) AS `count` FROM ca_meta_assets WHERE external_name IS NOT NULL AND BINARY external_name <> BINARY display_name',
+      'SELECT COUNT(*) AS `count` FROM ca_meta_assets WHERE NOT (BINARY external_name <=> BINARY display_name)',
     ) as Array<{ count: string | number }>;
     if (Number(rows[0]?.count ?? 0) !== 0) throw new Error('Backfilled asset names failed validation.');
   },
@@ -186,21 +251,14 @@ const migrationsWithoutChecksums = [
     id: '202610290002-expand-asset-name',
     schemaVersion: 2,
     minimumSupportedApiVersion: 1,
-    steps: [addExternalName, backfillExternalName, validateExternalName],
+    steps: [addExternalName, syncExternalNameOnInsert, syncExternalNameOnUpdate, backfillExternalName, validateExternalName],
   },
 ] as const;
 
-export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => {
-  const material = migration.steps.map((step) =>
-    'sql' in step
-      ? `${step.id}\n${step.phase}\n${step.sql}`
-      : `${step.id}\n${step.phase}\n${step.checksum}`,
-  ).join('\n---\n');
-  return {
-    ...migration,
-    checksum: sha256(`${migration.id}\n${migration.schemaVersion}\n${material}`),
-  };
-});
+export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
+  ...migration,
+  checksum: migrationChecksum(migration),
+}));
 
 export const DOMAIN_TABLES = [
   'ca_meta_tenants',

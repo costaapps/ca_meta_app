@@ -46,7 +46,7 @@ $apiPassword = New-HexSecret
 $migrationPassword = New-HexSecret
 $sql = @"
 CREATE USER 'ca_meta_migrator'@'%' IDENTIFIED BY '$migrationPassword';
-GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES ON ca_meta_m203.* TO 'ca_meta_migrator'@'%';
+GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES, TRIGGER ON ca_meta_m203.* TO 'ca_meta_migrator'@'%';
 CREATE USER 'ca_meta_api'@'%' IDENTIFIED BY '$apiPassword';
 GRANT SELECT, INSERT, UPDATE, DELETE ON ca_meta_m203.* TO 'ca_meta_api'@'%';
 "@
@@ -74,6 +74,30 @@ try {
   Invoke-Checked -FilePath $npmCommand -ArgumentList @('--workspace=@ca-meta/api', 'run', 'test')
   Invoke-Checked -FilePath $npmCommand -ArgumentList @('--workspace=@ca-meta/api', 'run', 'migrate:deploy')
   Invoke-Checked -FilePath $npmCommand -ArgumentList @('--workspace=@ca-meta/api', 'run', 'migrate:status')
+
+  # Back up the synthetic fixture with a transaction-consistent dump, restore into a fresh database,
+  # then verify exact UTF-8 bytes, DATETIME(6), ledger state, and row counts without logging credentials.
+  $backupPath = Join-Path $tempRoot 'mariadb-synthetic-backup.sql'
+  $dumpOutput = & docker compose -p $composeProject -f $composeFile exec -T -e "MYSQL_PWD=$rootPassword" mariadb mariadb-dump --user=root --single-transaction --quick --hex-blob ca_meta_m203
+  if ($LASTEXITCODE -ne 0) { throw "Synthetic database dump failed with exit code $LASTEXITCODE." }
+  [System.IO.File]::WriteAllText(
+    $backupPath,
+    ([string]::Join([Environment]::NewLine, [string[]]$dumpOutput) + [Environment]::NewLine),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+
+  Invoke-Checked -FilePath 'docker' -ArgumentList @('compose', '-p', $composeProject, '-f', $composeFile, 'exec', '-T', '-e', "MYSQL_PWD=$rootPassword", 'mariadb', 'mariadb', '--user=root', '--execute', 'CREATE DATABASE ca_meta_m203_restore CHARACTER SET utf8mb4 COLLATE utf8mb4_bin')
+  $containerId = (& docker compose -p $composeProject -f $composeFile ps -q mariadb).Trim()
+  if ([string]::IsNullOrWhiteSpace($containerId)) { throw 'Synthetic restore could not find its own MariaDB container.' }
+  Invoke-Checked -FilePath 'docker' -ArgumentList @('cp', $backupPath, "${containerId}:/tmp/m2-03-synthetic-backup.sql")
+  Invoke-Checked -FilePath 'docker' -ArgumentList @('compose', '-p', $composeProject, '-f', $composeFile, 'exec', '-T', '-e', "MYSQL_PWD=$rootPassword", 'mariadb', 'mariadb', '--user=root', '--database=ca_meta_m203_restore', '--execute', 'SOURCE /tmp/m2-03-synthetic-backup.sql')
+  $restoreQuery = "SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_assets),'|',(SELECT COUNT(*) FROM ca_meta_schema_migrations WHERE state='APPLIED'),'|',(SELECT COUNT(*) FROM ca_meta_assets WHERE HEX(external_id)='3030302d3132337c5a61c5bcc3b3c582c48720f09fa7aa'),'|',(SELECT COUNT(*) FROM ca_meta_assets WHERE id='00000000-0000-4000-8000-000000010000' AND DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s.%f')='2026-10-29 12:34:56.123456'),'|',(SELECT COUNT(*) FROM ca_meta_schema_migrations WHERE schema_version IN (1,2)))"
+  $restoreSummary = & docker compose -p $composeProject -f $composeFile exec -T -e "MYSQL_PWD=$rootPassword" mariadb mariadb --user=root --database=ca_meta_m203_restore --batch --skip-column-names --execute $restoreQuery
+  if ($LASTEXITCODE -ne 0) { throw "Synthetic database restore verification failed with exit code $LASTEXITCODE." }
+  if (($restoreSummary -join '').Trim() -ne '10005|2|2|1|2') {
+    throw 'Synthetic database restore did not preserve the expected rows, Unicode IDs, UTC precision, and migration ledger.'
+  }
+  Write-Output 'Synthetic backup/restore verified: 10005 assets, 2 applied versions, UTF-8 external ID bytes, and DATETIME(6) preserved.'
 } finally {
   if (-not $keepEnvironment) {
     & docker compose -p $composeProject -f $composeFile down --volumes --remove-orphans

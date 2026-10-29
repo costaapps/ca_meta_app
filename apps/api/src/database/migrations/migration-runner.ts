@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { DataSource, type QueryRunner } from 'typeorm';
 import type { MigrationEnvironment } from './migration-environment.js';
+import { migrationStepChecksum } from './migration-fingerprint.js';
 import type { MigrationStep, MigrationStepContext, VersionedMigration } from './migration.types.js';
 import { DOMAIN_TABLES, MIGRATIONS } from './migrations.js';
 import { tableExists } from './schema-inspection.js';
@@ -95,7 +96,11 @@ async function assertMigrationGrants(queryRunner: QueryRunner, databaseName: str
       if (privilege) privileges.add(privilege);
     }
   }
-  const required = ['SELECT', 'INSERT', 'UPDATE', 'CREATE', 'ALTER', 'INDEX', 'REFERENCES'];
+  const required = ['SELECT', 'INSERT', 'UPDATE', 'CREATE', 'ALTER', 'INDEX', 'REFERENCES', 'TRIGGER'];
+  const unexpected = [...privileges].filter((privilege) => !required.includes(privilege));
+  if (unexpected.length > 0) {
+    throw new Error('Migration preflight found unexpected database-scoped migration privileges.');
+  }
   if (!hasDatabaseGrant || required.some((privilege) => !privileges.has(privilege))) {
     throw new Error('Migration preflight found insufficient database-scoped migration privileges.');
   }
@@ -148,13 +153,6 @@ async function assertKnownMigrationLedger(queryRunner: QueryRunner): Promise<voi
   }
 }
 
-function stepChecksum(step: MigrationStep): string {
-  const value = 'sql' in step
-    ? `${step.id}\n${step.phase}\n${step.sql}`
-    : `${step.id}\n${step.phase}\n${step.checksum}`;
-  return createHash('sha256').update(value, 'utf8').digest('hex');
-}
-
 async function ensureMigrationRecord(
   queryRunner: QueryRunner,
   migration: VersionedMigration,
@@ -178,7 +176,7 @@ async function ensureStepRecord(
   migrationId: string,
   step: MigrationStep,
 ): Promise<{ checksum: string; state: string; cursor_value: string | null }> {
-  const checksum = stepChecksum(step);
+  const checksum = migrationStepChecksum(step);
   await queryRunner.query(
     `INSERT IGNORE INTO ${MIGRATION_STEP_LEDGER}
      (migration_id, step_id, checksum, state, started_at) VALUES (?, ?, ?, 'STARTED', UTC_TIMESTAMP(6))`,
