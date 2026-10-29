@@ -17,7 +17,7 @@ git diff --check
 Expected final summary:
 
 ```text
-M1.08 synthetic walkthrough: 29/29 checks passed; fixtures only; provider calls=0; production writes=0.
+M1.08 synthetic walkthrough: 31/31 checks passed; fixtures only; provider calls=0; production writes=0.
 ```
 
 The exact count can increase when a new trace check is added. A non-zero process exit code means at least one assertion failed. The script reads `docs/meta-v2/experience/journey-spec.md`, both CSVs, text wireframes, the M1.07 OpenAPI YAML, the inbox/outbox schemas, and `fixtures/walkthrough.json`.
@@ -26,10 +26,10 @@ The exact count can increase when a new trace check is added. A non-zero process
 
 - Four top-level choices map to the five M1.07 `FlowVariant` values; both Instagram variants stay distinct.
 - Four synthetic WhatsApp Coexistence connection references are separate and never replace one another.
-- The current session tenant is the only tenant used by fixture resources; the missing friendly tenant label stays explicit.
+- The current session tenant is the only tenant used by fixture resources; without a safe company label, the switcher is hidden and all writes are blocked.
 - ACTIVE/READY, PARTIAL, REAUTH_REQUIRED, UNKNOWN/stale, DISCONNECTED, authorization states, and the absent webhook/subscription field remain separate.
-- Popup close, server-confirmed cancellation, timeout/UNKNOWN, and cross-tab `CONTEXT_CHANGED` have separate recovery checks.
-- Template creation stays disabled when examples required by the existing UI are not represented by the proposed API request; automation `412` does not overwrite; notification REPLY stays pending and is not repeated automatically.
+- Suite4 preauth precedes ticket exchange in the same browser; cookie/ticket values are absent, and lost responses follow the contract retry boundary. Popup close, server-confirmed cancellation, timeout/UNKNOWN, and cross-tab `CONTEXT_CHANGED` have separate recovery checks.
+- Reauthorization stays disabled while no launch reference is returned; notification loading, empty, and read-error copy are separate checks. Template creation stays disabled when examples required by the existing UI are not represented by the proposed API request; automation `412` does not overwrite; notification REPLY stays pending and is not repeated automatically.
 - Traceability and W3C accessibility references are present.
 
 The fixture's four Coexistence references, masked-number labels, onboarding cases, and job outcomes are synthetic examples only. They do not prove real Meta eligibility, a provider limit, actual grants/subscriptions, account labels, Suite4 session identity, popup support, accessibility conformance, or production behavior.

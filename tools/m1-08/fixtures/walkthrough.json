@@ -22,7 +22,7 @@
     "tenantRef": "tenant_fixture_alpha",
     "tenantContextRef": "context_fixture_alpha_v1",
     "contextVersion": 1,
-    "tenantDisplayName": null
+    "tenantDisplayName": null, "companySwitcherVisible": false, "writeActionsEnabled": false, "writeBlockReason": "tenant_display_name_missing", "blockedTenantWrites": ["company_switch", "onboarding_start", "asset_refresh", "reauthorize", "disconnect", "template_create", "automation_save", "notification_mark_read", "notification_dismiss", "notification_reply"]
   },
   "connections": [
     {
@@ -158,6 +158,7 @@
   "features": {
     "templates": { "status": "PENDING", "currentFormHasLanguage": true, "currentFormHasExamples": true, "contractAcceptsLanguage": true, "contractAcceptsExamples": false, "createEnabled": false },
     "automation": { "staleEtag": true, "automaticOverwrite": false, "baselineFields": ["privateWelcomeMessage", "commentPublicReply", "commentPrivateReply"], "contractFields": ["enabled", "replyText"], "writeEnabled": false },
-    "notifications": { "actionsReturned": ["MARK_READ", "DISMISS", "REPLY"], "currentMessageText": true, "contractSafeSummaryOnly": true, "authorizedMessageContextAvailable": false, "replyEnabled": false, "replyStatus": "PENDING", "automaticRepeat": false }
-  }
+    "notifications": { "actionsReturned": ["MARK_READ", "DISMISS", "REPLY"], "currentMessageText": true, "contractSafeSummaryOnly": true, "authorizedMessageContextAvailable": false, "replyEnabled": false, "replyStatus": "PENDING", "automaticRepeat": false, "stateFixtureChecks": {"loading": "FEATURE-03-LOADING", "empty": "FEATURE-03-EMPTY", "readFailure": "FEATURE-03-ERROR"} }
+  },
+  "suite4Entry": {"operations": ["POST /api/v1/auth/preauth", "POST /api/v1/auth/exchanges"], "preauthResponseStatus": 201, "preauthCookieName": "__Host-meta_preauth", "preauthCookieValueExposed": false, "challengeRefPresent": true, "exchangeRequiresCookieAndChallengeRef": true, "sameBrowserContext": true, "ticketIncludedInFixture": false, "preauthResponseLostRecovery": "fresh_challenge_may_be_started", "exchangeResponseLostRecovery": "fresh_preauth_same_browser", "replayOneUseTicket": false, "replayOneUseChallenge": false, "additionalRetrySemantics": "not_defined"}
 }

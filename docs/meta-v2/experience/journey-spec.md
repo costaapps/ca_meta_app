@@ -11,7 +11,7 @@ Provide a small, recoverable portal for selecting one of four product journeys, 
 
 1. The server session and current membership identify the tenant. A URL parameter, `cUUID`, browser storage value, provider callback, or client-selected company never grants authority.
 2. A connection is ready only when the authoritative server projection says `status=ACTIVE`, `readiness=READY`, the required asset authorization is verified, and the projection is not stale. A provider redirect, callback, HTTP `200`/`202`, or popup `FINISH` alone is not success.
-3. Show the active company context and the time of the last confirmed observation. Do not display an arbitrary tenant UUID as a substitute for a company name. The M1.07 `SessionContext` contains `tenantRef` but no user-facing company label; a safe `tenantDisplayName` (or equivalent authenticated host context) is a contract gate before the final company switcher UX. Until then, show a neutral “Empresa ativa na sessão” label, keep resource reads server scoped, and block a mutation if the displayed context cannot be reconciled.
+3. Show the active company context and the time of the last confirmed observation. Do not display an arbitrary tenant UUID as a substitute for a company name. The M1.07 `SessionContext` contains `tenantRef` but no user-facing company label. Until a safe `tenantDisplayName` (or equivalent authenticated host context) is returned, show “Identidade da empresa não confirmada”, hide/disable the company switcher, and block all tenant-scoped writes. Keep only server-scoped reads available; do not claim that a UUID is an identifiable company.
 4. Connection, asset authorization, provider subscription/webhook, and message-delivery status are separate facts. In particular, `PHONE_NUMBER.status=ACTIVE` does not prove a webhook subscription is active. M1.07 has no typed subscription status in the public connection detail; show it as “Status de eventos não disponível” and do not infer it from a connection or inbox event.
 5. Do not automatically retry an external effect after an ambiguous `UNKNOWN` result. Reconcile through the relevant job/operation/connection read first; a new user action requires an explicit, safe next action from the server.
 6. Never ask the user to paste a permanent Meta token. Secret material, authorization codes, raw webhook payloads, and message bodies do not appear in status summaries or diagnostics.
@@ -47,10 +47,11 @@ The UI derives available choices from `GET /api/v1/integrations/flows` and only 
 
 ### Suite4 / Msg4 entry
 
-1. Accept only the versioned host bootstrap described by the M1.06 proposal: validate exact origin, source, nonce, schema version, and freshness; acknowledge readiness before rendering authenticated resources.
-2. Exchange a short-lived ticket on the server and rotate to the portal session. The browser does not choose a tenant or role. The Suite4 issuer, keys, protocol details, cookie behavior, and real host origin are **Not confirmed** until the M3.02 external integration gate.
-3. Load `GET /api/v1/session`; render active company context and permitted navigation from server session/membership. If session resolution fails, show the recoverable access state and a top-level portal link where the host contract permits it.
-4. A blocked third-party cookie must not be worked around by weakening CSRF or cookie flags. Offer the same authenticated flow at top level.
+1. For `SUITE4_EMBED`, first call `POST /api/v1/auth/preauth` in the target browser with the configured exact Origin and Fetch Metadata. The `201` response sets the host-only `__Host-meta_preauth` cookie (browser-managed; never read or expose its value) and returns `challengeRef`.
+2. Keep the pre-auth cookie and `challengeRef` in that same browser context. The trusted Suite4 handoff supplies a short-lived one-use `ticket`; call `POST /api/v1/auth/exchanges` with that `ticket` and matching `challengeRef`, sending the browser cookie. The exchange requires both the cookie and challenge/ticket pair and rotates to the portal session. The browser does not choose a tenant or role. Suite4 issuer, keys, handoff mechanics, cookie support in the real host, and origin are **Not confirmed** until the M3.02 integration gate.
+3. If the pre-auth response is lost, a fresh challenge may be started; do not reuse a challenge or ticket. If the exchange response is lost, do not replay the one-use ticket: start a fresh pre-auth challenge in the same browser and follow the host handoff again. The contract does not define additional retry semantics; do not invent them.
+4. Load `GET /api/v1/session`; render active company context and permitted navigation from server session/membership. If session resolution fails, show the recoverable access state and a top-level portal link where the host contract permits it.
+5. A blocked third-party cookie must not be worked around by weakening CSRF or cookie flags. Offer the same authenticated flow at top level.
 
 ### Direct portal entry
 
@@ -60,7 +61,7 @@ The UI derives available choices from `GET /api/v1/integrations/flows` and only 
 
 ### Company change, refresh, and concurrent tabs
 
-- Show the active organization label above every resource list and inside connection detail. The server rotates `tenantContextRef`/version on tenant switch. Each tab must refresh its session/context; a stale request displays “A empresa ativa mudou nesta aba. Atualize para continuar.” and runs no mutation.
+- Show the active organization label above every resource list and inside connection detail. The server rotates `tenantContextRef`/version on tenant switch. Each tab must refresh its session/context; a stale request displays “A empresa ativa mudou nesta aba. Atualize para continuar.” and runs no mutation. Until a safe company label is available, omit the switcher and block all writes; this includes onboarding start, connection actions, template/automation writes, notification actions, and company switch.
 - An onboarding or job stays bound to the tenant where it started; switching companies never reassigns it. On return, the portal may show an in-progress item in its original context only when the API returns it under that authenticated context.
 - If the current server session has several memberships but M1.07 does not provide a friendly tenant label, do not present indistinguishable UUIDs as names. The missing label is an explicit spec-to-contract gate.
 
@@ -124,13 +125,14 @@ This is a specification checklist, not a conformance claim. References consulted
 - Status uses words and icons, not color alone. Announce async changes with a restrained `role=status`/polite live region; use `role=alert` for blocking error only. Do not move focus for background polling.
 - Confirm destructive action in a clearly named dialog. State the exact affected connection/resource, the local effect, and the separately confirmed provider effect. Offer Cancel as the safe default.
 - At narrow widths, reflow cards and detail rows without horizontal page scrolling, clipping, or losing actions. Preserve readable order in iframe/embedded width; if embed cannot provide cookie/auth support, offer the approved top-level route.
-- Use at least the current WCAG 2.2 AA color/text contrast requirements, visible keyboard focus, unobscured focus, and target-size checks. No WCAG audit has been run on the current Angular UI, so compliance is **Not confirmed**.
+- Use at least the current WCAG 2.2 AA color/text contrast requirements, visible keyboard focus, unobscured focus, and target-size checks. For target size, specify and verify WCAG 2.2 SC 2.5.8 AA: pointer targets are at least 24×24 CSS px or a formally applicable SC 2.5.8 exception (such as spacing, inline, user-agent control, or essential) is documented and verified. No WCAG audit has been run on the current Angular UI, so compliance is **Not confirmed**.
 
 ## Acceptance traceability
 
 | Issue #18 acceptance | Specification evidence | Local executable walkthrough |
 |---|---|---|
 | Company/resource ownership and status time | Active-context rules, connection/asset details, and explicit missing-label gate above | `CTX-01`, `CONN-01` |
+| Suite4 exchange uses browser-bound preauth before one-use ticket exchange | Suite4 entry sequence and retry/lost-response rules | `ENTRY-01`, `ENTRY-03` |
 | Four Coexistence connections distinguished | WhatsApp Coexistence journey and stable distinct refs | `COEX-01` |
 | loading/empty/error/partial/stale/reauth + recovery | status matrix and wireframes | `STATE-01` through `STATE-08` |
 | Templates/messages/notifications preserved | preservation section + screen/API map | `FEATURE-01` through `FEATURE-03` |

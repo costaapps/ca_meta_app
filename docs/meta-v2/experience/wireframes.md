@@ -6,8 +6,8 @@ These low-fidelity layouts reuse the baseline's centered white panels, restraine
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│ Msg4  > Canais                          Empresa ativa na sessão [trocar] │
-│ Status consultado: 29/10/2026 09:15 BRT       [Atualizar status]       │
+│ Msg4  > Canais              Identidade da empresa não confirmada      │
+│ Alterações indisponíveis até identificar a empresa com segurança.      │
 ├────────────────────────────────────────────────────────────────────────┤
 │ [Resumo]   [Canais]   [Templates]                         [Notificações]│
 │                                                                        │
@@ -15,7 +15,7 @@ These low-fidelity layouts reuse the baseline's centered white panels, restraine
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-The tenant display label is supplied by an authenticated server context; it is **Not confirmed** by the current SessionContext schema. Until that gap is closed, show the neutral label and never expose a UUID as a company name.
+The tenant display label is supplied by an authenticated server context; it is **Not confirmed** by the current SessionContext schema. Until that gap is closed, hide/disable the company switcher, block every tenant-scoped mutation (company switch, onboarding start, refresh job, reauthorization, disconnect, template create, automation save, and notification action), show this identity warning, and keep only server-scoped reads available. Never expose a UUID as a company name.
 
 ## Setup / catalog
 
@@ -26,14 +26,13 @@ The tenant display label is supplied by an authenticated server context; it is *
 ├────────────────────────────────────────────────────────────────────────┤
 │ Inteligência e operação trabalhando juntas [Ver canais conectados]     │
 ├────────────────────────────────────────────────────────────────────────┤
-│ Empresa ativa: [authenticated display name]                            │
+│ Identidade: [nome seguro] ou aviso acima; sem nome, todos os envios    │
 │                                                                        │
 │ ┌WhatsApp API────────┐ ┌WhatsApp + aplicativo┐ ┌Instagram───────┐ ┌Facebook────┐
 │ │ Explicação breve   │ │ Explicação breve    │ │ Login path*   │ │ Explicação │
 │ │ Status/limite claro│ │ Elegibilidade não   │ │ Variante explícita│ │ clara      │
-│ │ [Conectar]         │ │ presumida           │ │ [Conectar]    │ │ [Conectar] │
-│ └───────────────────┘ │ [Conectar]          │ └───────────────┘ └────────────┘
-│                       └──────────────────────┘
+│ │ [Conectar disabled: identifique a empresa com segurança]            │
+│ └───────────────────┘ └──────────────────────┘ └───────────────┘ └────────────┘
 │ *If both Instagram variants are enabled, show an explicit choice before launch.
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -44,7 +43,7 @@ On small/embedded width, the cards stack in that order and buttons remain full-w
 
 ```text
 ┌Canais da empresa ativa─────────────────────────────────────────────────┐
-│ [status da sessão/contexto] [Adicionar conexão]                       │
+│ [status da sessão/contexto] [Adicionar conexão disabled: identidade]  │
 │ Loading: “Carregando conexões...” + skeleton rows; no empty message.    │
 │ Empty: “Nenhuma conexão nesta empresa.” [Escolher um canal]            │
 │ Error: “Não foi possível carregar os canais.” [Tentar novamente]       │
@@ -53,7 +52,7 @@ On small/embedded width, the cards stack in that order and buttons remain full-w
 │ ┌WhatsApp + aplicativo · ref. …01─── PARTIAL · status de 09:15───────┐ │
 │ │ 2 ativos · Número ••• 0101 [only if a safe masked label exists]     │ │
 │ │ Conta: ativo / autorização confirmada                               │ │
-│ │ Eventos: status não disponível      [Detalhes] [Atualizar status]   │ │
+│ │ Eventos: status não disponível      [Detalhes] [Atualizar disabled]│ │
 │ └────────────────────────────────────────────────────────────────────┘ │
 │ ┌WhatsApp + aplicativo · ref. …02─── ATIVO · status de 09:16─────────┐ │
 │ │ …                                                                    │ │
@@ -61,13 +60,13 @@ On small/embedded width, the cards stack in that order and buttons remain full-w
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-Use exact states from `status-copy-matrix.csv`; a banner does not make an asset, connection, and subscription appear to share one state.
+Use exact states from `status-copy-matrix.csv`; a banner does not make an asset, connection, and subscription appear to share one state. All pointer targets must be specified and checked at 24×24 CSS px minimum, or a formally applicable SC 2.5.8 exception (spacing, inline, user-agent control, or essential) must be documented and verified; this wireframe is not a conformance result.
 
 ## Detail, reauthorization and disconnect
 
 ```text
 ┌Detalhe: WhatsApp + aplicativo · ref. …01───────────────────────────────┐
-│ Empresa ativa: [safe display label]                                    │
+│ Empresa: [safe label; otherwise shell warning and no tenant writes]    │
 │ Conexão: Parcial   Prontidão: Parcial   Confirmado em: 29/10 09:15     │
 │                                                                        │
 │ Ativos                                                                 │
@@ -75,7 +74,7 @@ Use exact states from `status-copy-matrix.csv`; a banner does not make an asset,
 │ Eventos         Status não disponível                                 │
 │                                                                        │
 │ [Reautorizar disabled: etapa de autorização não disponível ainda]      │
-│ [Atualizar status] [Desconectar esta conexão]                          │
+│ [Atualizar disabled: solicitação] [Desconectar disabled: identidade] │
 │ Reauth precisa retornar uma referência segura de sessão/abertura.       │
 │ Atualização/desconexão retornam trabalho pendente, não sucesso.         │
 └────────────────────────────────────────────────────────────────────────┘
@@ -89,7 +88,7 @@ Disconnect confirmation:
 │ Isso registra a remoção deste vínculo no Msg4 e inicia uma verificação │
 │ separada de limpeza/revogação no provedor. Outras conexões da empresa   │
 │ permanecem. O resultado externo pode demorar ou precisar de verificação.│
-│ [Cancelar]                                     [Solicitar desconexão] │
+│ [Cancelar]                    [Solicitar desconexão disabled: identidade]│
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -101,7 +100,7 @@ After `202`: replace the submit action with “Solicitação iniciada · verific
 ┌Conectando Instagram · Empresa ativa: [label]───────────────────────────┐
 │ Etapa 1 de N — aguardando autorização                                  │
 │ Uma janela do provedor foi aberta. Conclua a etapa e volte a esta aba. │
-│ [A janela foi fechada? Verificar status]  [Cancelar configuração]      │
+│ [A janela foi fechada? Verificar status] [Cancelar disabled sem identidade]│
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -110,13 +109,13 @@ When the popup closes, focus returns to the opener and the current onboarding ca
 ```text
 Awaiting / Running  → “Aguardando confirmação.” [Verificar status]
 Partial             → “Conexão parcial: [verified safe step summary].” [Ver detalhes]
-Reauth required     → “A autorização precisa ser atualizada.” [Reautorizar]
-Expired / Cancelled → “Esta etapa terminou sem concluir.” [Iniciar novamente]
+Reauth required     → “A autorização precisa ser atualizada.” [Reautorizar disabled: abertura segura indisponível]
+Expired / Cancelled → “Esta etapa terminou sem concluir.” [Iniciar novamente only with safe identity and confirmed no pending effect]
 Unknown / timeout   → “Ainda não foi possível confirmar o resultado.” [Ver status]
 API error           → “O status não carregou; nenhum novo envio foi iniciado.” [Tentar leitura]
 ```
 
-The UI only offers “Iniciar novamente” after a current read proves no previous external effect is unresolved. If `nextAction=RECONCILE` or state is `UNKNOWN`, offer a read/status action instead of replaying the provider action.
+The UI only offers “Iniciar novamente” after a current read proves no previous external effect is unresolved and a safe company identity is displayed. If `nextAction=RECONCILE`, state is `UNKNOWN`, or the company identity is unavailable, offer a read/status action and block the provider action.
 
 ## Templates, automation, notifications
 
@@ -125,6 +124,7 @@ The UI only offers “Iniciar novamente” after a current read proves no previo
 │ Número [selector, explicit label]  Status consultado [time]           │
 │ [approved/pending/rejected/paused/unknown cards]                      │
 │ [Existing form: name, category, language, body, example variables]     │
+│ [Criar disabled: identidade não confirmada ou contrato incompleto]    │
 │ If the API cannot preserve a current field, explain it is unavailable │
 │ and do not silently save a reduced form.                               │
 └────────────────────────────────────────────────────────────────────────┘
@@ -138,7 +138,8 @@ The UI only offers “Iniciar novamente” after a current read proves no previo
 ┌Notificações────────────────────────────────────────────────────────────┐
 │ Atualizado 09:15 [Atualizar]                                           │
 │ Loading / empty / error states remain visible and distinct             │
-│ [safe summary, channel, date, action buttons returned by API]           │
+│ [safe summary, channel, date]                                          │
+│ Mutation actions disabled until safe company identity is available      │
 │ Reply disabled until authorized message context is available            │
 │ If later enabled: “Solicitado · acompanhando entrega” + job/status link │
 └────────────────────────────────────────────────────────────────────────┘

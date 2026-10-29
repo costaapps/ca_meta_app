@@ -97,6 +97,7 @@ check('FLOW-02', () => {
 
 check('FLOW-03', () => {
   const paths = [
+    '/api/v1/auth/preauth',
     '/api/v1/auth/exchanges',
     '/api/v1/auth/magic-links',
     '/api/v1/session',
@@ -107,6 +108,43 @@ check('FLOW-03', () => {
   for (const path of paths) assert.ok(openapi.includes(path), `contract contains ${path}`);
   assert.ok(spec.includes('cUUID') && spec.includes('never grants authority'));
   assert.ok(spec.includes('tenantDisplayName') && spec.includes('Not confirmed'));
+});
+
+check('ENTRY-01', () => {
+  const entry = fixture.suite4Entry;
+  assert.deepEqual(entry.operations, [
+    'POST /api/v1/auth/preauth',
+    'POST /api/v1/auth/exchanges'
+  ], 'preauth must precede ticket exchange');
+  const preauthIndex = openapi.indexOf('/api/v1/auth/preauth:');
+  const exchangeIndex = openapi.indexOf('/api/v1/auth/exchanges:');
+  assert.ok(preauthIndex >= 0 && exchangeIndex > preauthIndex, 'contract declares preauth before exchange');
+  assert.equal(entry.preauthResponseStatus, 201);
+  assert.equal(entry.preauthCookieName, '__Host-meta_preauth');
+  assert.equal(entry.preauthCookieValueExposed, false);
+  assert.equal(entry.challengeRefPresent, true);
+  assert.equal(entry.exchangeRequiresCookieAndChallengeRef, true);
+  assert.equal(entry.sameBrowserContext, true);
+  assert.equal(entry.ticketIncludedInFixture, false);
+  assert.ok(openapi.includes('name: __Host-meta_preauth'));
+  const exchangeContract = openapi.split('/api/v1/auth/exchanges:')[1].split('/api/v1/auth/magic-links:')[0];
+  assert.ok(exchangeContract.includes('- preAuthCookie: []'));
+  assert.ok(exchangeContract.includes('#/components/schemas/PortalEntryExchangeRequest'));
+  const exchangeSchema = openapi.split('    PortalEntryExchangeRequest:')[1].split('    MagicLinkRequest:')[0];
+  assert.ok(exchangeSchema.includes('- ticket') && exchangeSchema.includes('- challengeRef'));
+  assert.ok(mappedTraceIds.has('ENTRY-01'));
+});
+
+check('ENTRY-03', () => {
+  const entry = fixture.suite4Entry;
+  assert.equal(entry.preauthResponseLostRecovery, 'fresh_challenge_may_be_started');
+  assert.equal(entry.exchangeResponseLostRecovery, 'fresh_preauth_same_browser');
+  assert.equal(entry.replayOneUseTicket, false);
+  assert.equal(entry.replayOneUseChallenge, false);
+  assert.equal(entry.additionalRetrySemantics, 'not_defined');
+  assert.ok(openapi.includes('A consumed ticket is never replayed'));
+  assert.ok(spec.includes('If the exchange response is lost, do not replay the one-use ticket'));
+  assert.ok(mappedTraceIds.has('ENTRY-03'));
 });
 
 check('FLOW-04', () => {
@@ -124,13 +162,23 @@ check('CTX-01', () => {
   assert.ok(fixture.session.tenantRef.startsWith('tenant_fixture_'));
   assert.equal(fixture.session.tenantDisplayName, null, 'fixture preserves the missing safe label gap');
   assert.ok(fixture.connections.every((connection) => connection.tenantRef === fixture.session.tenantRef));
-  assert.ok(spec.includes('Empresa ativa na sessão'));
+  assert.equal(fixture.session.companySwitcherVisible, false, 'do not render a switcher without a safe company label');
+  assert.equal(fixture.session.writeActionsEnabled, false, 'block all writes when the company cannot be identified safely');
+  assert.equal(fixture.session.writeBlockReason, 'tenant_display_name_missing');
+  assert.deepEqual(fixture.session.blockedTenantWrites, [
+    'company_switch', 'onboarding_start', 'asset_refresh', 'reauthorize', 'disconnect',
+    'template_create', 'automation_save', 'notification_mark_read', 'notification_dismiss', 'notification_reply'
+  ], 'all tenant-scoped mutation families stay blocked without a safe company label');
+  assert.ok(spec.includes('Identidade da empresa não confirmada'));
+  assert.ok(spec.includes('block all tenant-scoped writes'));
+  assert.doesNotMatch(wireframes, /\[trocar\]/);
+  assert.ok(wireframes.includes('Alterações indisponíveis até identificar a empresa com segurança'));
   assert.ok(spec.includes('Do not display an arbitrary tenant UUID'));
 });
 
 check('CTX-02', () => {
   assert.ok(spec.includes('URL parameter, `cUUID`, browser storage value'));
-  assert.ok(spec.includes('block a mutation'));
+  assert.ok(spec.includes('block all tenant-scoped writes'));
 });
 
 check('COEX-01', () => {
@@ -186,8 +234,14 @@ check('STATE-06', () => {
   assert.equal(fixture.reauthorization.hasLaunchUrl, false);
   assert.equal(fixture.reauthorization.uiActionEnabled, false);
   assert.ok(statusChecks.has('STATE-06'));
+  const reauthState = statusRows.slice(1).find((row) => row[statusIndex.server_state_or_condition] === 'REAUTH_REQUIRED');
+  assert.equal(reauthState[statusIndex.primary_action], 'show disabled explanation until safe onboarding launch ref exists');
+  assert.equal(reauthState[statusIndex.automatic_retry], 'no');
   assert.ok(statusRows.slice(1).some((row) => row[statusIndex.server_state_or_condition] === 'reauth launch reference unavailable'));
   assert.ok(spec.includes('preserve the prior connection while valid'));
+  assert.ok(wireframes.includes('[Reautorizar disabled: etapa de autorização não disponível ainda]'));
+  assert.ok(wireframes.includes('[Reautorizar disabled: abertura segura indisponível]'));
+  assert.ok(mapRows.slice(1).some((row) => row[mapIndex.trace_id] === 'STATE-06' && row[mapIndex.displayed_data_and_user_effect].includes('keep action disabled')));
 });
 
 check('STATE-07', () => {
@@ -281,6 +335,21 @@ check('FEATURE-03', () => {
   assert.equal(fixture.features.notifications.contractSafeSummaryOnly, true);
   assert.equal(fixture.features.notifications.authorizedMessageContextAvailable, false);
   assert.equal(fixture.features.notifications.replyEnabled, false);
+  const notificationStates = statusRows.slice(1).filter((row) => row[statusIndex.domain] === 'notification');
+  const expectedStates = new Map([
+    ['FEATURE-03-LOADING', ['loading', 'info', 'Carregando notificações…']],
+    ['FEATURE-03-EMPTY', ['200 empty', 'info', 'Nenhuma notificação disponível.']],
+    ['FEATURE-03-ERROR', ['read failure', 'error', 'Não foi possível carregar notificações.']]
+  ]);
+  assert.deepEqual(Object.values(fixture.features.notifications.stateFixtureChecks), [...expectedStates.keys()]);
+  for (const [checkId, [condition, severity, copy]] of expectedStates) {
+    const row = notificationStates.find((item) => item[statusIndex.fixture_check] === checkId);
+    assert.ok(row, `${checkId} has a distinct status matrix row`);
+    assert.equal(row[statusIndex.server_state_or_condition], condition);
+    assert.equal(row[statusIndex.severity], severity);
+    assert.equal(row[statusIndex.display_copy_pt_br], copy);
+  }
+  assert.equal(notificationStates.filter((row) => expectedStates.has(row[statusIndex.fixture_check])).length, 3);
   assert.ok(mapRows.slice(1).some((row) => row[mapIndex.api_operation_and_method].includes('actOnNotification POST')));
 });
 
@@ -306,7 +375,7 @@ check('MAP-01', () => {
   assert.ok(mapHeader.includes('server_context_and_authorization_gate'));
   assert.ok(mapHeader.includes('automated_or_manual_check'));
   assert.ok(mapRows.length > 15, 'screen/API/test map covers all portal regions');
-  assert.ok(mappedTraceIds.has('ENTRY-01') && mappedTraceIds.has('FEATURE-03'));
+  assert.ok(mappedTraceIds.has('ENTRY-01') && mappedTraceIds.has('ENTRY-03') && mappedTraceIds.has('FEATURE-03'));
 });
 
 check('A11Y-01/02', () => {
@@ -317,6 +386,13 @@ check('A11Y-01/02', () => {
   ]) assert.ok(spec.includes(source), `${source} is cited`);
   assert.ok(wireframes.includes('[Cancelar]'));
   assert.ok(spec.includes('focus') && spec.includes('Escape'));
+  assert.ok(spec.includes('WCAG 2.2 SC 2.5.8 AA'));
+  assert.ok(spec.includes('24×24 CSS px'));
+  assert.ok(wireframes.includes('24×24 CSS px minimum'));
+  for (const control of ['[Conectar disabled:', '[Adicionar conexão disabled:', '[Atualizar disabled:', '[Desconectar disabled:', '[Solicitar desconexão disabled:', '[Cancelar disabled sem identidade]', 'Mutation actions disabled']) {
+    assert.ok(wireframes.includes(control), `${control} is visibly gated in the no-label wireframe`);
+  }
+  assert.ok(spec.includes('spacing, inline, user-agent control, or essential'));
 });
 
 const failures = checks.filter((item) => item.status === 'FAIL');
