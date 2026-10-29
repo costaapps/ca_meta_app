@@ -28,6 +28,9 @@ services:
       M106_DB_PASSWORD: ${M106_DB_PASSWORD:?Set a disposable M106_DB_PASSWORD for this run}
       M106_DB_NAME: m106_identity
       TZ: UTC
+    volumes:
+      - ../../docs/baseline/endpoint-matrix.csv:/workspace/input/endpoint-matrix.csv:ro
+      - ../../docs/meta-v2/endpoint-security-crosswalk.csv:/workspace/input/endpoint-security-crosswalk.csv:ro
     depends_on:
       db:
         condition: service_healthy

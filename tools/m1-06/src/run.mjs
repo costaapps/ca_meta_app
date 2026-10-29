@@ -13,6 +13,7 @@ import {
   createEmbedChallenge,
   createFakeIssuer,
   createSecurityModel,
+  createTrustedExchangeContext,
   embedCookieFallback,
   issueFakeTicket,
   safeDatabaseConfig,
@@ -22,14 +23,114 @@ import {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const schema = await readFile(path.join(root, 'sql', 'schema.sql'), 'utf8');
+const endpointMatrixText = await readFile('/workspace/input/endpoint-matrix.csv', 'utf8');
+const crosswalkText = await readFile('/workspace/input/endpoint-security-crosswalk.csv', 'utf8');
 const nowMs = Date.parse('2026-10-28T12:00:00.000Z');
 const db = mysql.createPool(safeDatabaseConfig());
 const fakeIssuer = createFakeIssuer();
 const model = createSecurityModel({ pool: db, fakeIssuer, nowMs });
+const topLevelExchangeContext = createTrustedExchangeContext({
+  requestOrigin: APP_ORIGIN,
+  hostOrigin: APP_ORIGIN,
+  entryMode: 'PORTAL_TOP_LEVEL',
+});
+const embeddedExchangeContext = createTrustedExchangeContext({
+  requestOrigin: APP_ORIGIN,
+  hostOrigin: EMBED_ORIGIN,
+  entryMode: 'SUITE4_EMBED',
+});
 const emailHash = (email) => sha256(email.trim().toLowerCase());
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let quoted = false;
+  const source = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (quoted) {
+      if (char === '"' && source[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+    } else if (char === '"' && field.length === 0) {
+      quoted = true;
+    } else if (char === ',') {
+      row.push(field);
+      field = '';
+    } else if (char === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += char;
+    }
+  }
+  if (quoted) throw new Error('Unclosed quote in CSV input');
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  if (rows.length < 2) throw new Error('CSV must have a header and data rows');
+  const [headers, ...data] = rows;
+  if (new Set(headers).size !== headers.length) throw new Error('CSV headers must be unique');
+  return data.map((values, index) => {
+    if (values.length !== headers.length) throw new Error(`CSV row ${index + 1} has ${values.length} fields; expected ${headers.length}`);
+    return Object.fromEntries(headers.map((header, headerIndex) => [header, values[headerIndex]]));
+  });
+}
+
+function verifyEndpointCrosswalk() {
+  const endpoints = parseCsv(endpointMatrixText);
+  const crosswalk = parseCsv(crosswalkText);
+  assert.equal(endpoints.length, 53, 'refresh the expected source row count when endpoint-matrix.csv changes');
+  assert.equal(crosswalk.length, endpoints.length, 'each endpoint matrix row needs one crosswalk row');
+  const dimensionPatterns = {
+    identity: /^I(?:0|1|2|3|4|5|9)$/,
+    tenant: /^T(?:0|1|2|3|4|9)$/,
+    origin_csrf: /^O(?:0|1|2|3|4|5|6|9)$/,
+    role_scope: /^R(?:0|1|2|4|5|6|7|8|9|10)$/,
+    external_side_effect: /^X(?:0|1|2|3|4|5|6|7|8|9|10|11)$/,
+  };
+  const allowedGates = new Set(['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8']);
+  const seen = new Set();
+  const keyFields = ['kind', 'method', 'path_or_symbol', 'source_file', 'source_symbol'];
+  crosswalk.forEach((mapped, index) => {
+    const rowNumber = Number(mapped.matrix_row);
+    assert.equal(rowNumber, index + 1, `crosswalk row ${index + 1} must have its unique source row number`);
+    assert.equal(seen.has(rowNumber), false, `matrix row ${rowNumber} is duplicated`);
+    seen.add(rowNumber);
+    const endpoint = endpoints[rowNumber - 1];
+    for (const field of keyFields) assert.equal(mapped[field], endpoint[field], `matrix row ${rowNumber} identity mismatch at ${field}`);
+    for (const [field, pattern] of Object.entries(dimensionPatterns)) {
+      assert.match(mapped[field], pattern, `matrix row ${rowNumber} needs a valid ${field} mapping`);
+    }
+    assert.ok(mapped.next_gate, `matrix row ${rowNumber} needs a next gate`);
+    for (const gate of mapped.next_gate.split(';')) assert.equal(allowedGates.has(gate), true, `matrix row ${rowNumber} has unknown gate ${gate}`);
+    if (endpoint.kind === 'documentation_drift') {
+      assert.ok(mapped.exception_reason, `matrix row ${rowNumber} needs an explicit drift exception`);
+    } else {
+      assert.equal(mapped.exception_reason, '', `matrix row ${rowNumber} must not have an exception`);
+    }
+  });
+  assert.equal(seen.size, endpoints.length, 'all source rows must be covered exactly once');
+  console.log(`PASS AC00.endpoint-security-crosswalk rows=${seen.size} exact-once=1 exceptions=1`);
+}
 
 async function expectFailure(promise, code) {
   await assert.rejects(promise, (error) => error instanceof SecurityFailure && error.code === code, `expected ${code}`);
+}
+
+async function expectTicketUnused(ticket) {
+  const { jti } = verifyFakeTicket(ticket, fakeIssuer.jwks, nowMs);
+  const [rows] = await db.execute('SELECT jti_hash FROM m106_consumed_ticket WHERE issuer = ? AND jti_hash = ?', [FAKE_ISSUER, sha256(jti)]);
+  assert.equal(rows.length, 0, 'rejected exchange context leaves the ticket unused');
 }
 
 async function record(name, fn) {
@@ -39,7 +140,7 @@ async function record(name, fn) {
 
 async function seed() {
   await db.query(schema);
-  for (const tenant of ['tenant-a', 'tenant-b', 'tenant-c']) {
+  for (const tenant of ['tenant-a', 'tenant-b', 'tenant-c', 'tenant-d']) {
     await db.execute('INSERT INTO m106_tenant (id, status) VALUES (?, \'ACTIVE\')', [tenant]);
   }
   const people = [
@@ -56,6 +157,7 @@ async function seed() {
     ['tenant-a', 'user-owner-01', 'owner', 'owner@fake.invalid'],
     ['tenant-b', 'user-owner-01', 'admin', 'owner-b@fake.invalid'],
     ['tenant-c', 'user-owner-01', 'operator', 'owner-c@fake.invalid'],
+    ['tenant-d', 'user-owner-01', 'owner', 'suspended@fake.invalid'],
     ['tenant-a', 'user-operator-01', 'operator', 'operator@fake.invalid'],
     ['tenant-a', 'user-viewer-01', 'viewer', 'viewer@fake.invalid'],
     ['tenant-a', 'user-revoked-01', 'owner', 'revoked@fake.invalid'],
@@ -72,6 +174,7 @@ async function seed() {
     ['tenant-a', 'asset-a-1', 'Synthetic asset A1'],
     ['tenant-a', 'asset-a-2', 'Synthetic asset A2'],
     ['tenant-b', 'asset-b-1', 'Synthetic asset B1'],
+    ['tenant-d', 'asset-d-1', 'Synthetic asset D1'],
   ]) {
     await db.execute('INSERT INTO m106_asset (tenant_id, id, label) VALUES (?, ?, ?)', [tenant, id, label]);
   }
@@ -82,6 +185,7 @@ let operatorSession;
 let onboarding;
 
 try {
+  verifyEndpointCrosswalk();
   await seed();
 
   await record('AC01.arbitrary-cUUID-no-session-or-cross-tenant-asset', async () => {
@@ -90,7 +194,27 @@ try {
     assert.equal(await db.execute('SELECT COUNT(*) AS total FROM m106_portal_session').then(([rows]) => Number(rows[0].total)), Number(before[0].total));
 
     const ticket = issueFakeTicket(fakeIssuer, { sub: 'user-owner-01', tenant: 'tenant-a', roles: ['owner'] }, { nowMs });
-    ownerSession = await model.exchangeTicket(ticket, nowMs);
+    await expectFailure(model.exchangeTicket(ticket, undefined, nowMs), 'EXCHANGE_CONTEXT_REQUIRED');
+    await expectTicketUnused(ticket);
+    await expectFailure(Promise.resolve().then(() => model.exchangeTicket(ticket, createTrustedExchangeContext({
+      requestOrigin: 'https://attacker.fake.invalid',
+      hostOrigin: APP_ORIGIN,
+      entryMode: 'PORTAL_TOP_LEVEL',
+    }), nowMs)), 'EXCHANGE_ORIGIN_DENIED');
+    await expectTicketUnused(ticket);
+    await expectFailure(Promise.resolve().then(() => model.exchangeTicket(ticket, createTrustedExchangeContext({
+      requestOrigin: APP_ORIGIN,
+      hostOrigin: 'https://suite4.fake.invalid.attacker.test',
+      entryMode: 'SUITE4_EMBED',
+    }), nowMs)), 'EXCHANGE_HOST_ORIGIN_DENIED');
+    await expectTicketUnused(ticket);
+    await expectFailure(Promise.resolve().then(() => model.exchangeTicket(ticket, createTrustedExchangeContext({
+      requestOrigin: APP_ORIGIN,
+      hostOrigin: APP_ORIGIN,
+      entryMode: 'MAGIC_LINK',
+    }), nowMs)), 'EXCHANGE_FLOW_DENIED');
+    await expectTicketUnused(ticket);
+    ownerSession = await model.exchangeTicket(ticket, topLevelExchangeContext, nowMs);
     assert.equal((await model.readAsset({ ...ownerSession, assetId: 'asset-a-1', cUUID: 'tenant-a', at: nowMs })).id, 'asset-a-1');
     await expectFailure(model.readAsset({ ...ownerSession, assetId: 'asset-b-1', cUUID: 'tenant-a', at: nowMs }), 'RESOURCE_NOT_AVAILABLE');
     await expectFailure(model.readAsset({ ...ownerSession, assetId: 'asset-b-1', cUUID: 'tenant-b', at: nowMs }), 'TENANT_CONTEXT_MISMATCH');
@@ -102,7 +226,7 @@ try {
 
   await record('AC02.ticket-profile-signature-rotation-jti-replay-and-revocation', async () => {
     const valid = issueFakeTicket(fakeIssuer, { sub: 'user-operator-01', tenant: 'tenant-a', roles: ['owner'] }, { nowMs });
-    operatorSession = await model.exchangeTicket(valid, nowMs);
+    operatorSession = await model.exchangeTicket(valid, embeddedExchangeContext, nowMs);
     assert.equal(operatorSession.role, 'operator', 'current membership overrides signed role claims');
     assert.equal(verifyFakeTicket(valid, fakeIssuer.jwks, nowMs).aud, 'urn:synthetic:msg4:meta-portal');
 
@@ -141,19 +265,37 @@ try {
 
     const concurrentTicket = issueFakeTicket(fakeIssuer, { sub: 'user-owner-01', tenant: 'tenant-a' }, { nowMs });
     const race = await Promise.allSettled([
-      model.exchangeTicket(concurrentTicket, nowMs),
-      model.exchangeTicket(concurrentTicket, nowMs),
+      model.exchangeTicket(concurrentTicket, topLevelExchangeContext, nowMs),
+      model.exchangeTicket(concurrentTicket, topLevelExchangeContext, nowMs),
     ]);
     assert.equal(race.filter((entry) => entry.status === 'fulfilled').length, 1);
     assert.equal(race.filter((entry) => entry.status === 'rejected' && entry.reason.code === 'TICKET_REPLAY').length, 1);
 
     const revokedTicket = issueFakeTicket(fakeIssuer, { sub: 'user-revoked-01', tenant: 'tenant-a' }, { nowMs });
     await model.revokeMembership('tenant-a', 'user-revoked-01', nowMs);
-    await expectFailure(model.exchangeTicket(revokedTicket, nowMs), 'MEMBERSHIP_INVALID');
+    await expectFailure(model.exchangeTicket(revokedTicket, topLevelExchangeContext, nowMs), 'MEMBERSHIP_INVALID');
     const revokeSessionTicket = issueFakeTicket(fakeIssuer, { sub: 'user-session-revoked-01', tenant: 'tenant-a' }, { nowMs });
-    const revokedSession = await model.exchangeTicket(revokeSessionTicket, nowMs);
+    const revokedSession = await model.exchangeTicket(revokeSessionTicket, topLevelExchangeContext, nowMs);
     await model.revokeMembership('tenant-a', 'user-session-revoked-01', nowMs);
     await expectFailure(model.readAsset({ ...revokedSession, assetId: 'asset-a-1', cUUID: 'tenant-a', at: nowMs }), 'MEMBERSHIP_INVALID');
+
+    const tenantSessionTicket = issueFakeTicket(fakeIssuer, { sub: 'user-owner-01', tenant: 'tenant-d' }, { nowMs });
+    const tenantSession = await model.exchangeTicket(tenantSessionTicket, topLevelExchangeContext, nowMs);
+    await db.execute("UPDATE m106_tenant SET status = 'SUSPENDED' WHERE id = 'tenant-d'");
+    await expectFailure(model.readAsset({ ...tenantSession, assetId: 'asset-d-1', cUUID: 'tenant-d', at: nowMs }), 'TENANT_NOT_ACTIVE');
+    await expectFailure(model.switchTenant({
+      sessionSecret: tenantSession.sessionSecret,
+      expectedContextRef: tenantSession.contextRef,
+      targetTenantId: 'tenant-a',
+      csrfToken: tenantSession.csrfToken,
+      origin: APP_ORIGIN,
+      at: nowMs,
+    }), 'TENANT_NOT_ACTIVE');
+    const suspendedTicket = issueFakeTicket(fakeIssuer, { sub: 'user-owner-01', tenant: 'tenant-d' }, { nowMs });
+    await expectFailure(model.exchangeTicket(suspendedTicket, topLevelExchangeContext, nowMs), 'TENANT_NOT_ACTIVE');
+    await expectTicketUnused(suspendedTicket);
+    const suspendedLink = await model.requestMagicLink('suspended@fake.invalid', 'tenant-d', nowMs, 'suspended-tenant');
+    assert.equal(suspendedLink.localOutboxToken, null, 'a suspended tenant cannot initiate direct access');
 
     await expectFailure(model.startOnboarding({
       sessionSecret: operatorSession.sessionSecret,
@@ -177,11 +319,20 @@ try {
   });
 
   await record('AC03.magic-link-enumeration-scanner-replay-expiry-and-tenant-tampering', async () => {
-    const known = await model.requestMagicLink('owner@fake.invalid', 'tenant-a', nowMs);
-    const unknown = await model.requestMagicLink('not-invited@fake.invalid', 'tenant-a', nowMs);
-    assert.deepEqual(known.publicResponse, unknown.publicResponse, 'known and unknown email response is identical');
+    const quotaBucket = 'synthetic-enumeration-bucket';
+    const known = await model.requestMagicLink('owner@fake.invalid', 'tenant-a', nowMs, quotaBucket);
+    const unknown = await model.requestMagicLink('not-invited@fake.invalid', 'tenant-a', nowMs, quotaBucket);
+    assert.deepEqual(known.publicResponse, unknown.publicResponse, 'known and unknown email status/body is identical');
     assert.equal(known.localOutboxToken === null, false, 'test-only outbox contains the fake delivery token');
     assert.equal(unknown.localOutboxToken, null);
+    const lastAllowed = await model.requestMagicLink('owner@fake.invalid', 'tenant-a', nowMs, quotaBucket);
+    const rateLimited = await model.requestMagicLink('not-invited@fake.invalid', 'tenant-a', nowMs, quotaBucket);
+    assert.equal(lastAllowed.rateLimited, false);
+    assert.equal(rateLimited.rateLimited, true);
+    assert.equal(rateLimited.localOutboxToken, null);
+    assert.deepEqual(rateLimited.publicResponse, known.publicResponse, 'synthetic quota does not reveal whether the address is known');
+    const nextWindow = await model.requestMagicLink('owner@fake.invalid', 'tenant-a', nowMs + 60 * 1000, quotaBucket);
+    assert.equal(nextWindow.rateLimited, false, 'the synthetic one-minute quota window resets');
 
     const getPreview = await model.previewMagicLink(known.localOutboxToken, 'GET', nowMs);
     const headPreview = await model.previewMagicLink(known.localOutboxToken, 'HEAD', nowMs);
@@ -203,7 +354,7 @@ try {
     assert.equal(linkedSession.tenantId, 'tenant-a', 'tenant is loaded from the link record');
     await expectFailure(model.consumeMagicLink({ token: known.localOutboxToken, method: 'POST', origin: APP_ORIGIN, secFetchSite: 'same-origin', at: nowMs }), 'LINK_UNAVAILABLE');
 
-    const concurrentLink = await model.requestMagicLink('viewer@fake.invalid', 'tenant-a', nowMs);
+    const concurrentLink = await model.requestMagicLink('viewer@fake.invalid', 'tenant-a', nowMs, 'synthetic-concurrent-link');
     const linkRace = await Promise.allSettled([
       model.consumeMagicLink({ token: concurrentLink.localOutboxToken, method: 'POST', origin: APP_ORIGIN, secFetchSite: 'same-origin', at: nowMs }),
       model.consumeMagicLink({ token: concurrentLink.localOutboxToken, method: 'POST', origin: APP_ORIGIN, secFetchSite: 'same-origin', at: nowMs }),
@@ -211,7 +362,7 @@ try {
     assert.equal(linkRace.filter((entry) => entry.status === 'fulfilled').length, 1);
     assert.equal(linkRace.filter((entry) => entry.status === 'rejected' && entry.reason.code === 'LINK_UNAVAILABLE').length, 1);
 
-    const expiring = await model.requestMagicLink('operator@fake.invalid', 'tenant-a', nowMs);
+    const expiring = await model.requestMagicLink('operator@fake.invalid', 'tenant-a', nowMs, 'synthetic-expiring-link');
     assert.equal((await model.previewMagicLink(expiring.localOutboxToken, 'GET', nowMs + 11 * 60 * 1000)).status, 404);
     await expectFailure(model.consumeMagicLink({ token: expiring.localOutboxToken, method: 'POST', origin: APP_ORIGIN, secFetchSite: 'same-origin', at: nowMs + 11 * 60 * 1000 }), 'LINK_UNAVAILABLE');
   });

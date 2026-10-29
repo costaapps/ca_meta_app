@@ -18,8 +18,15 @@ export const CLOCK_SKEW_SECONDS = 5;
 const SESSION_IDLE_MS = 30 * 60 * 1000;
 const SESSION_ABSOLUTE_MS = 8 * 60 * 60 * 1000;
 const MAGIC_LINK_TTL_MS = 10 * 60 * 1000;
+const MAGIC_LINK_RATE_LIMIT = 3;
+const MAGIC_LINK_RATE_WINDOW_MS = 60 * 1000;
 const EMBED_NONCE_TTL_MS = 60 * 1000;
 const ALLOWED_ROLES = new Set(['owner', 'admin', 'operator', 'viewer']);
+const EXCHANGE_ENTRY_MODES = new Map([
+  ['PORTAL_TOP_LEVEL', APP_ORIGIN],
+  ['SUITE4_EMBED', EMBED_ORIGIN],
+]);
+const trustedExchangeContexts = new WeakSet();
 const ROLE_OPERATIONS = new Map([
   ['owner', new Set(['CONNECT', 'DISCONNECT', 'EVENT_RESEND'])],
   ['admin', new Set(['CONNECT', 'DISCONNECT', 'EVENT_RESEND'])],
@@ -33,6 +40,20 @@ export class SecurityFailure extends Error {
     this.name = 'SecurityFailure';
     this.code = code;
   }
+}
+
+export function createTrustedExchangeContext({ requestOrigin, hostOrigin, entryMode }) {
+  if (requestOrigin !== APP_ORIGIN) reject('EXCHANGE_ORIGIN_DENIED');
+  const expectedHostOrigin = EXCHANGE_ENTRY_MODES.get(entryMode);
+  if (!expectedHostOrigin) reject('EXCHANGE_FLOW_DENIED');
+  if (hostOrigin !== expectedHostOrigin) reject('EXCHANGE_HOST_ORIGIN_DENIED');
+  const context = Object.freeze({ requestOrigin, hostOrigin, entryMode });
+  trustedExchangeContexts.add(context);
+  return context;
+}
+
+function assertTrustedExchangeContext(context) {
+  if (!context || !trustedExchangeContexts.has(context)) reject('EXCHANGE_CONTEXT_REQUIRED');
 }
 
 function reject(code) {
@@ -103,6 +124,7 @@ export function issueFakeTicket(issuer, overrides = {}, options = {}) {
   const claims = {
     iss: FAKE_ISSUER,
     aud: FAKE_AUDIENCE,
+    purpose: 'META_PORTAL_ENTRY',
     sub: 'user-owner-01',
     tenant: 'tenant-a',
     roles: ['owner'],
@@ -160,6 +182,7 @@ export function verifyFakeTicket(token, trustedJwks, nowMs = Date.parse('2026-10
   if (!claims || typeof claims !== 'object' || Array.isArray(claims)) reject('TICKET_CLAIMS_INVALID');
   if (claims.iss !== FAKE_ISSUER) reject('TICKET_ISSUER_INVALID');
   if (claims.aud !== FAKE_AUDIENCE) reject('TICKET_AUDIENCE_INVALID');
+  if (claims.purpose !== 'META_PORTAL_ENTRY') reject('TICKET_PURPOSE_INVALID');
   if (claims.ver !== 1) reject('TICKET_VERSION_INVALID');
   if (typeof claims.sub !== 'string' || claims.sub.length < 1 || claims.sub.length > 128) reject('TICKET_SUBJECT_INVALID');
   if (typeof claims.tenant !== 'string' || claims.tenant.length < 1 || claims.tenant.length > 48) reject('TICKET_TENANT_INVALID');
@@ -198,13 +221,15 @@ function assertSessionLive(row, nowMs) {
 
 async function activeMembership(conn, tenantId, issuer, subject, lock = false) {
   const [rows] = await conn.execute(
-    `SELECT m.role_name, m.status, p.status AS principal_status
+    `SELECT m.role_name, m.status, p.status AS principal_status, t.status AS tenant_status
      FROM m106_membership m
      JOIN m106_principal p ON p.issuer = m.issuer AND p.subject = m.subject
+     JOIN m106_tenant t ON t.id = m.tenant_id
      WHERE m.tenant_id = ? AND m.issuer = ? AND m.subject = ?${lock ? ' FOR UPDATE' : ''}`,
     [tenantId, issuer, subject],
   );
   if (!rows[0] || rows[0].status !== 'ACTIVE' || rows[0].principal_status !== 'ACTIVE') reject('MEMBERSHIP_INVALID');
+  if (rows[0].tenant_status !== 'ACTIVE') reject('TENANT_NOT_ACTIVE');
   return rows[0];
 }
 
@@ -238,7 +263,11 @@ function isDuplicateKey(error) {
 }
 
 export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
-  async function exchangeTicket(token, at = nowMs) {
+  const magicLinkBuckets = new Map();
+
+  async function exchangeTicket(token, exchangeContext, at = nowMs) {
+    // Validate server-derived Origin/host/flow context before JWT work or any jti/session write.
+    assertTrustedExchangeContext(exchangeContext);
     const claims = verifyFakeTicket(token, fakeIssuer.jwks, at);
     const conn = await pool.getConnection();
     try {
@@ -362,19 +391,34 @@ export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
     }
   }
 
-  async function requestMagicLink(email, tenantId, at = nowMs) {
+  async function requestMagicLink(email, tenantId, at = nowMs, rateLimitBucket) {
     const emailHash = sha256(String(email).trim().toLowerCase());
-    const [members] = await pool.execute(
-      `SELECT m.issuer, m.subject FROM m106_membership m
-       JOIN m106_principal p ON p.issuer = m.issuer AND p.subject = m.subject
-       WHERE m.tenant_id = ? AND m.email_hash = ? AND m.status = 'ACTIVE' AND p.status = 'ACTIVE' LIMIT 1`,
-      [tenantId, emailHash],
-    );
     const publicResponse = {
       status: 202,
       body: { message: 'Se a identidade estiver elegível, enviaremos um link de acesso.' },
     };
-    if (!members[0]) return { publicResponse, localOutboxToken: null };
+    if (typeof rateLimitBucket !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(rateLimitBucket)) {
+      reject('RATE_LIMIT_CONTEXT_REQUIRED');
+    }
+    const bucketKey = sha256(rateLimitBucket);
+    let bucket = magicLinkBuckets.get(bucketKey);
+    if (!bucket || at < bucket.windowStartedAt || at - bucket.windowStartedAt >= MAGIC_LINK_RATE_WINDOW_MS) {
+      bucket = { windowStartedAt: at, count: 0 };
+    }
+    const permitted = bucket.count < MAGIC_LINK_RATE_LIMIT;
+    bucket.count += 1;
+    magicLinkBuckets.set(bucketKey, bucket);
+    if (!permitted) return { publicResponse, localOutboxToken: null, rateLimited: true };
+
+    const [members] = await pool.execute(
+      `SELECT m.issuer, m.subject FROM m106_membership m
+       JOIN m106_principal p ON p.issuer = m.issuer AND p.subject = m.subject
+       JOIN m106_tenant t ON t.id = m.tenant_id
+       WHERE m.tenant_id = ? AND m.email_hash = ? AND m.status = 'ACTIVE'
+         AND p.status = 'ACTIVE' AND t.status = 'ACTIVE' LIMIT 1`,
+      [tenantId, emailHash],
+    );
+    if (!members[0]) return { publicResponse, localOutboxToken: null, rateLimited: false };
     const token = randomSecret();
     await pool.execute(
       `INSERT INTO m106_magic_link (token_hash, purpose, tenant_id, issuer, subject, issued_at, expires_at, consumed_at)
@@ -382,7 +426,7 @@ export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
       [sha256(token), tenantId, members[0].issuer, members[0].subject, sqlTime(at), sqlTime(at + MAGIC_LINK_TTL_MS)],
     );
     // This value models a test-only local outbox. It is never part of publicResponse or a real delivery adapter.
-    return { publicResponse, localOutboxToken: token };
+    return { publicResponse, localOutboxToken: token, rateLimited: false };
   }
 
   async function previewMagicLink(token, method = 'GET', at = nowMs) {
