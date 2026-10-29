@@ -248,13 +248,16 @@ export class DurableJobStore implements JobStore {
     // A locked persistent cursor serializes each lane's turn across workers; the candidate query
     // runs only after acquiring that lock, so it cannot reuse a stale dispatch snapshot.
     for (const lane of lanePriority) {
+      // Keep duplicate-key initialization outside the locking transaction: concurrent
+      // INSERT IGNORE statements can otherwise hold shared duplicate-key locks that both
+      // workers then try to upgrade with the cursor's SELECT ... FOR UPDATE.
+      await dataSource.query(
+        `INSERT IGNORE INTO ca_meta_job_lane_dispatch (lane, last_tenant_id, updated_at)
+         VALUES (?, NULL, UTC_TIMESTAMP(6))`,
+        [lane],
+      );
       // Read-committed counts refresh after the tenant lock without waiting on heartbeat row writes.
       const claimed = await dataSource.transaction('READ COMMITTED', async (manager) => {
-        await manager.query(
-          `INSERT IGNORE INTO ca_meta_job_lane_dispatch (lane, last_tenant_id, updated_at)
-           VALUES (?, NULL, UTC_TIMESTAMP(6))`,
-          [lane],
-        );
         const dispatchRows = await manager.query(
           'SELECT last_tenant_id FROM ca_meta_job_lane_dispatch WHERE lane = ? FOR UPDATE',
           [lane],
