@@ -5,8 +5,8 @@ Milestone branch: `desktop/milestone-m2`, initially created at that SHA.
 
 | Package / issue | Stage | Candidate | Latest evidence | Package PR | Next action |
 |---|---|---|---|---|---|
-| M2.01 / #20 | Implementing | `desktop/m2-01` from `af941f29e1b0862f46f299eb08ae544d1af1f04a` | Baseline on Node 24.22.2/npm 11.19.1: clean `npm ci` PASS (501 packages; 46 inherited audit findings), `npm run build` PASS, `npm test -- --watch=false` PASS (2 files / 5 tests). | none | preserve Angular baseline in apps/web; candidate checks pending |
-| M2.02 / #21 | Waiting on M2.01 | pending | M1.07/#17 is included in develop | none | implement Nest boundary and safe config |
+| M2.01 / #20 | Reviewed and validated; package PR pending | source candidate `069b057721f4748bcae9ebfb92c621eaed5ad747`; `desktop/m2-01` | Node 24.22.2/npm 11.19.1. Clean `npm ci` passed for unchanged manifests/lock (504 packages; 46 inherited audit findings). Build 372.81 kB; 5/5 tests; typecheck; lint/self-tests; bundle scan; dev/static route smokes; `git diff --check` all PASS. Functional review PASS; security review PASS with documented heuristic limits. | none | publish package branch and open PR to desktop/milestone-m2 |
+| M2.02 / #21 | Waiting for M2.01 package integration | pending | M1.07/#17 is included in develop | none | implement Nest boundary and safe config |
 | M2.03 / #22 | Waiting on M2.02 | pending | M1.02/#11 and M1.05/#14 are included in develop | none | MariaDB migrations and recovery harness |
 | M2.04 / #23 | Waiting on M2.02 | pending | M1.07/#17 is included in develop | none | canonical OpenAPI compatibility |
 | M2.05 / #24 | Waiting on M2.03 | pending | M1.05/#14 and M1.09/#16 are included in develop | none | durable outbox/inbox/worker tests |
