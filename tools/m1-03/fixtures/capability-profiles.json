@@ -1,0 +1,43 @@
+{
+  "notice": "Synthetic offline fixtures. Identifiers ending in fixture are not Meta API or Embedded Signup versions.",
+  "profiles": {
+    "app-dev-fixture": {
+      "app_id": "synthetic-app-dev",
+      "environment": "development",
+      "graph_api_version": "graph-fixture-a",
+      "embedded_signup_version": "signup-fixture-a",
+      "flows": {
+        "FACEBOOK": {"auth_variants": ["FACEBOOK_LOGIN_FOR_BUSINESS"], "capabilities": ["ASSET_DISCOVERY", "READ_STATUS", "SUBSCRIBE_WEBHOOKS"]},
+        "INSTAGRAM": {"auth_variants": ["FACEBOOK_LOGIN_FOR_BUSINESS", "INSTAGRAM_LOGIN"], "capabilities": ["ASSET_DISCOVERY", "READ_STATUS", "SUBSCRIBE_WEBHOOKS"]},
+        "WHATSAPP_EXCLUSIVE": {"auth_variants": ["WHATSAPP_EMBEDDED_SIGNUP"], "capabilities": ["ASSET_DISCOVERY", "READ_STATUS", "SUBSCRIBE_WEBHOOKS", "SEND_MESSAGE", "MANAGE_TEMPLATES", "PHONE_REGISTRATION_CONVENTIONAL"]},
+        "WHATSAPP_COEXISTENCE": {"auth_variants": ["WHATSAPP_BUSINESS_APP_ONBOARDING"], "capabilities": ["ASSET_DISCOVERY", "READ_STATUS", "SUBSCRIBE_WEBHOOKS", "SEND_MESSAGE", "MANAGE_TEMPLATES", "PHONE_REGISTRATION_CONVENTIONAL"]}
+      }
+    },
+    "app-live-fixture": {
+      "app_id": "synthetic-app-live",
+      "environment": "live",
+      "graph_api_version": "graph-fixture-b",
+      "embedded_signup_version": "signup-fixture-b",
+      "flows": {
+        "FACEBOOK": {"auth_variants": ["FACEBOOK_LOGIN_FOR_BUSINESS"], "capabilities": ["ASSET_DISCOVERY"]},
+        "INSTAGRAM": {"auth_variants": ["FACEBOOK_LOGIN_FOR_BUSINESS"], "capabilities": ["ASSET_DISCOVERY"]},
+        "WHATSAPP_EXCLUSIVE": {"auth_variants": ["WHATSAPP_EMBEDDED_SIGNUP"], "capabilities": ["ASSET_DISCOVERY"]},
+        "WHATSAPP_COEXISTENCE": {"auth_variants": ["WHATSAPP_BUSINESS_APP_ONBOARDING"], "capabilities": ["ASSET_DISCOVERY"]}
+      }
+    }
+  },
+  "cases": [
+    {"name":"select Facebook profile in development","expect":"accept","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","flow":"FACEBOOK","auth_variant":"FACEBOOK_LOGIN_FOR_BUSINESS","operation":"ASSET_DISCOVERY"},"selected":{"app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","flow":"FACEBOOK","operation":"ASSET_DISCOVERY"}},
+    {"name":"select Instagram via Facebook Login profile","expect":"accept","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","flow":"INSTAGRAM","auth_variant":"FACEBOOK_LOGIN_FOR_BUSINESS","operation":"ASSET_DISCOVERY"},"selected":{"app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","flow":"INSTAGRAM","operation":"ASSET_DISCOVERY"}},
+    {"name":"keep optional Instagram Login variant separate","expect":"accept","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","flow":"INSTAGRAM","auth_variant":"INSTAGRAM_LOGIN","operation":"ASSET_DISCOVERY"},"selected":{"app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","flow":"INSTAGRAM","operation":"ASSET_DISCOVERY"}},
+    {"name":"select WhatsApp exclusive with its own signup version","expect":"accept","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","embedded_signup_version":"signup-fixture-a","flow":"WHATSAPP_EXCLUSIVE","auth_variant":"WHATSAPP_EMBEDDED_SIGNUP","operation":"SEND_MESSAGE"},"selected":{"app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","flow":"WHATSAPP_EXCLUSIVE","operation":"SEND_MESSAGE","embedded_signup_version":"signup-fixture-a"}},
+    {"name":"select WhatsApp Coexistence capability profile","expect":"accept","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","embedded_signup_version":"signup-fixture-a","flow":"WHATSAPP_COEXISTENCE","auth_variant":"WHATSAPP_BUSINESS_APP_ONBOARDING","operation":"SUBSCRIBE_WEBHOOKS"},"selected":{"app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","flow":"WHATSAPP_COEXISTENCE","operation":"SUBSCRIBE_WEBHOOKS","embedded_signup_version":"signup-fixture-a"}},
+    {"name":"reject different app identity","expect":"reject","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-live","environment":"development","graph_api_version":"graph-fixture-a","flow":"FACEBOOK","auth_variant":"FACEBOOK_LOGIN_FOR_BUSINESS","operation":"ASSET_DISCOVERY"}},
+    {"name":"reject environment mismatch","expect":"reject","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-dev","environment":"live","graph_api_version":"graph-fixture-a","flow":"FACEBOOK","auth_variant":"FACEBOOK_LOGIN_FOR_BUSINESS","operation":"ASSET_DISCOVERY"}},
+    {"name":"reject version mismatch for selected app","expect":"reject","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-b","flow":"FACEBOOK","auth_variant":"FACEBOOK_LOGIN_FOR_BUSINESS","operation":"ASSET_DISCOVERY"}},
+    {"name":"reject Coexistence conventional registration operation","expect":"reject","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","embedded_signup_version":"signup-fixture-a","flow":"WHATSAPP_COEXISTENCE","auth_variant":"WHATSAPP_BUSINESS_APP_ONBOARDING","operation":"PHONE_REGISTRATION_CONVENTIONAL"}},
+    {"name":"reject operation absent from capability profile","expect":"reject","request":{"profile_id":"app-live-fixture","app_id":"synthetic-app-live","environment":"live","graph_api_version":"graph-fixture-b","flow":"FACEBOOK","auth_variant":"FACEBOOK_LOGIN_FOR_BUSINESS","operation":"SEND_MESSAGE"}},
+    {"name":"reject missing WhatsApp signup version","expect":"reject","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","flow":"WHATSAPP_EXCLUSIVE","auth_variant":"WHATSAPP_EMBEDDED_SIGNUP","operation":"ASSET_DISCOVERY"}},
+    {"name":"reject direct Instagram variant on Facebook flow","expect":"reject","request":{"profile_id":"app-dev-fixture","app_id":"synthetic-app-dev","environment":"development","graph_api_version":"graph-fixture-a","flow":"FACEBOOK","auth_variant":"INSTAGRAM_LOGIN","operation":"ASSET_DISCOVERY"}}
+  ]
+}
