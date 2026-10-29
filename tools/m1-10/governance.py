@@ -157,8 +157,14 @@ def check_trace_rows(
         if row["delivery_status"] == "ACCEPTED_ON_MILESTONE":
             if row["package_pr"] in TRACE_SENTINELS or row["release_evidence"] != "NOT_RELEASED":
                 raise GovernanceError(f"Milestone acceptance must link a package PR and keep release pending: {package}")
-        elif row["delivery_status"] in {"PLANNED", "IN_PROGRESS"} and row["package_pr"] != "NOT_CREATED":
-            raise GovernanceError(f"Undelivered package cannot claim a package PR: {package}")
+        elif row["delivery_status"] == "PLANNED":
+            if row["package_pr"] != "NOT_CREATED" or row["release_evidence"] != "NOT_RELEASED":
+                raise GovernanceError(f"Planned package cannot claim a package PR or release: {package}")
+        elif row["delivery_status"] == "IN_PROGRESS":
+            if row["package_pr"] != "NOT_CREATED" and not row["package_pr"].startswith("https://"):
+                raise GovernanceError(f"In-progress package must use NOT_CREATED or a package PR URL: {package}")
+            if row["release_evidence"] != "NOT_RELEASED":
+                raise GovernanceError(f"In-progress package cannot claim release evidence: {package}")
         elif row["delivery_status"] not in {"PLANNED", "IN_PROGRESS"}:
             raise GovernanceError(f"Unknown delivery status for {package}: {row['delivery_status']}")
 

@@ -12,7 +12,7 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 
 from governance import GovernanceError, broken_local_links, check_catalog_consistency, check_trace_rows, dependency_waves  # noqa: E402
-from traceability import TRACE_FIELDS  # noqa: E402
+from traceability import TRACE_FIELDS, read_json  # noqa: E402
 
 
 CASES = json.loads((HERE / "fixtures/governance-cases.json").read_text(encoding="utf-8"))
@@ -102,6 +102,30 @@ class TraceabilityTests(unittest.TestCase):
     def test_success_fixture_traces_issue_spec_contract_test_pr_release(self) -> None:
         self.assertEqual(set(self.row), set(TRACE_FIELDS))
         self.check()
+
+    def test_in_progress_package_can_link_open_package_pr(self) -> None:
+        mapping = dict(self.mapping, package_pr="https://github.com/costaapps/ca_meta_app/pull/999")
+        row = trace_row(self.source, dict(mapping, delivery_status="IN_PROGRESS"))
+        self.package_map = {"M1.08": dict(mapping, delivery_status="IN_PROGRESS")}
+        self.check(row)
+
+    def test_planned_package_cannot_link_package_pr(self) -> None:
+        mapping = dict(
+            self.mapping,
+            package_pr="https://github.com/costaapps/ca_meta_app/pull/999",
+            delivery_status="PLANNED",
+        )
+        row = trace_row(self.source, mapping)
+        self.package_map = {"M1.08": mapping}
+        with self.assertRaisesRegex(GovernanceError, "Planned package cannot claim"):
+            self.check(row)
+
+    def test_current_m1_10_pr_is_tracked_as_in_progress(self) -> None:
+        package_map = read_json(HERE / "traceability-map.json")
+        mapping = package_map["M1.10"]
+        self.assertEqual(mapping["package_pr"], "https://github.com/costaapps/ca_meta_app/pull/93")
+        self.assertEqual(mapping["delivery_status"], "IN_PROGRESS")
+        self.assertEqual(mapping["release_evidence"], "NOT_RELEASED")
 
     def test_missing_issue_spec_identity_fails(self) -> None:
         source = dict(self.source, requirement_id="M1.09.AC01")
