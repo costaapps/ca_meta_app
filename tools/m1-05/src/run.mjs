@@ -40,11 +40,18 @@ function record(name, fn) {
 
 const AUDIT_DIFF_FIELDS = new Set(['before', 'after', 'status', 'policyVersion', 'version', 'reasonCode']);
 const AUDIT_SAFE_STATES = new Set([
-  'CREATED', 'AWAITING_PROVIDER', 'CODE_RECEIVED', 'EXCHANGING', 'ASSETS_VERIFIED',
-  'PROVISIONING', 'READY', 'PARTIAL', 'CANCELLED', 'EXPIRED', 'FAILED', 'VERIFIED',
-  'REVOKED', 'ACTIVE', 'REAUTH_REQUIRED', 'UNKNOWN', 'STALE', 'MISSING', 'TOMBSTONED',
+  'CREATED', 'AWAITING_PROVIDER', 'CODE_RECEIVED', 'EXCHANGING', 'ASSETS_VERIFIED', 'PROVISIONING',
+  'READY', 'PARTIAL', 'CANCELLED', 'EXPIRED', 'FAILED', 'PENDING', 'RUNNING', 'SUCCEEDED',
+  'RETRY_PENDING', 'SKIPPED', 'DEAD_LETTER', 'ACTIVE', 'REAUTH_REQUIRED', 'REVOKED', 'UNKNOWN',
+  'VALID', 'EXPIRING', 'ACTION_REQUIRED', 'INACTIVE', 'STALE', 'VERIFIED', 'MISSING',
+  'ON', 'OFF', 'APPLYING', 'DESIRED', 'ROUTED', 'QUARANTINED', 'REJECTED', 'PROCESSED', 'CURRENT',
+  'TOMBSTONED',
 ]);
 const AUDIT_SAFE_REASONS = new Set(['CAPABILITY_MISSING', 'EVIDENCE_STALE', 'ROUTE_CONFLICT', 'REAUTH_REQUIRED']);
+const AUDIT_ACTORS = new Set(['synthetic:worker', 'synthetic:operator']);
+const AUDIT_ACTIONS = new Set(['ONBOARDING_RECOVERY_STARTED', 'ASSET_GRANT_REVOKED']);
+const AUDIT_TARGETS = new Set(['synthetic:onboarding-number-03', 'synthetic:number-01']);
+const AUDIT_RETENTION_CLASSES = new Set(['synthetic:short-retention']);
 
 function validateAuditDiff(diff) {
   if (!diff || typeof diff !== 'object' || Array.isArray(diff)) throw new Error('Unsafe audit diff: object required');
@@ -63,7 +70,15 @@ function validateAuditDiff(diff) {
   return Object.fromEntries(entries);
 }
 
+function validateAuditEventMetadata({ actorRef, action, targetRef, retentionClass }) {
+  if (!AUDIT_ACTORS.has(actorRef)) throw new Error('Unsafe audit event: actorRef is not allowlisted');
+  if (!AUDIT_ACTIONS.has(action)) throw new Error('Unsafe audit event: action is not allowlisted');
+  if (!AUDIT_TARGETS.has(targetRef)) throw new Error('Unsafe audit event: targetRef is not allowlisted');
+  if (!AUDIT_RETENTION_CLASSES.has(retentionClass)) throw new Error('Unsafe audit event: retentionClass is not allowlisted');
+}
+
 async function insertAuditEvent(db, { id, tenantId, actorRef, action, targetRef, correlationId, safeDiff, createdAt, retentionClass }) {
+  validateAuditEventMetadata({ actorRef, action, targetRef, retentionClass });
   const validatedDiff = validateAuditDiff(safeDiff);
   return db.execute(
     `INSERT INTO m105_audit_event (id, tenant_id, actor_ref, action, target_ref, correlation_id, safe_diff, created_at, retention_class, record_version)
@@ -730,12 +745,34 @@ try {
   await record('AC05.audit-redaction', async () => {
     const tenantId = tenants.get('synthetic:tenant-one-waba');
     const marker = 'M105_SECRET_MARKER_MUST_NOT_APPEAR';
+    for (const state of ['VALID', 'EXPIRING', 'ACTION_REQUIRED', 'INACTIVE']) {
+      assert.deepEqual(validateAuditDiff({ before: state }), { before: state }, `${state} is a documented audit state`);
+    }
     assert.throws(
       () => validateAuditDiff({ before: 'VERIFIED', after: 'REVOKED', accessToken: marker }),
       /not allowlisted/,
       'secret-bearing diff fields are rejected before database insertion',
     );
     assert.throws(() => validateAuditDiff({ before: marker }), /invalid before/, 'free-form secret-like status values are rejected');
+    const safeAuditFields = {
+      actorRef: 'synthetic:operator',
+      action: 'ASSET_GRANT_REVOKED',
+      targetRef: 'synthetic:number-01',
+      retentionClass: 'synthetic:short-retention',
+    };
+    assert.doesNotThrow(() => validateAuditEventMetadata(safeAuditFields));
+    for (const [field, value] of [
+      ['actorRef', marker],
+      ['action', 'FREE_FORM_ACTION'],
+      ['targetRef', marker],
+      ['retentionClass', marker],
+    ]) {
+      assert.throws(
+        () => validateAuditEventMetadata({ ...safeAuditFields, [field]: value }),
+        /not allowlisted/,
+        `${field} rejects a free-form reference/value before SQL`,
+      );
+    }
     await insertAuditEvent(db, {
       id: uuid('synthetic:audit-revoke'),
       tenantId,
