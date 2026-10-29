@@ -27,7 +27,15 @@ Data do registro: 2026-10-29 (America/Sao_Paulo).
 
 ## Porta de entrega da milestone
 
-Todos os dez pacotes M1 estão integrados por squash à `desktop/milestone-m1`. Próximo passo: preparar e validar o PR consolidado para `develop`; aguardar o aceite humano final antes de qualquer merge/fechamento de issue. `develop` ainda não contém esta entrega e nenhum release foi feito.
+Todos os dez pacotes M1 estão integrados por squash à `desktop/milestone-m1`. O PR consolidado [#94](https://github.com/costaapps/ca_meta_app/pull/94) está aberto em draft contra `develop`; ainda aguarda checks/revisão do candidato consolidado e o aceite humano final. Não fazer merge/fechar issues antes do aceite. `develop` ainda não contém esta entrega e nenhum release foi feito.
+
+## Verificação agregada
+
+- Ambiente no worktree de integração: Windows PowerShell 7.6.5, Node 22.17.0/npm 10.9.2 e Python 3.13.7.
+- `npm ci`: sucesso, 505 pacotes instalados; npm reportou 46 advisory findings (1 low, 11 moderate, 30 high, 4 critical). Nenhuma correção automática foi aplicada.
+- `npm run build`: sucesso; `npm test -- --watch=false`: sucesso, 2 arquivos/5 testes.
+- M1.10: 17/17 testes de governança; checker PASS (66 pacotes, 330 critérios, 7 specs, 19 Markdown); traceability atual; diff check PASS.
+- Os validadores/PoCs específicos dos pacotes foram executados nos ambientes descartáveis e SHAs indicados na tabela; nenhum serviço de produção ou credencial real foi usado.
 
 ## Recursos e processos
 
