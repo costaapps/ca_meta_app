@@ -35,6 +35,15 @@ The new error codes are additive against the frozen proposed v1 baseline accordi
 `@pb33f/openapi-changes` checker. Existing API version and baseline are unchanged. The breaking
 sensitivity fixture proves route removal still fails the gate.
 
+## Public error surface
+
+`INTERNAL_SCOPE_DENIED` describes an internal service identity failing its tenant/asset/operation
+scope check. It remains in the canonical contract and error catalog for the internal service route,
+but is excluded from the published OpenAPI, error catalog, generated TypeScript, error-code and
+policy constants, and runtime validator. The `@ca-meta/contracts` and M1.07 public-client generators
+apply the same exclusion and test that the canonical sources retain the code while public artifacts
+do not. The canonical contract and frozen baseline are unchanged.
+
 ## Limits
 
 These decisions implement local API/client behavior and fixtures only. They do not establish

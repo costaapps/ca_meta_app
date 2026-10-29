@@ -1,5 +1,5 @@
 # Generated public OpenAPI from docs/meta-v2/contracts/openapi.yaml.
-# Internal-only operations, schemas, and security schemes are excluded.
+# Internal-only operations, schemas, security schemes, and error codes are excluded.
 openapi: 3.1.0
 jsonSchemaDialect: https://spec.openapis.org/oas/3.1/dialect/base
 info:
@@ -2004,7 +2004,6 @@ components:
             - DEPENDENCY_UNAVAILABLE
             - META_UNAVAILABLE
             - PROVIDER_REJECTED
-            - INTERNAL_SCOPE_DENIED
             - INTERNAL_ERROR
         safeMessage:
           type: string

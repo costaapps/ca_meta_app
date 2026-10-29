@@ -8,8 +8,9 @@ type PublicReadDtoSecretKey = Extract<
 >;
 type ReadDtosHaveNoSecretFields = Expect<PublicReadDtoSecretKey extends never ? true : false>;
 type InternalRouteIsNotPublic = Expect<'/internal/v1/assets/{assetId}/operations' extends keyof paths ? false : true>;
+type InternalErrorIsNotPublic = Expect<'INTERNAL_SCOPE_DENIED' extends components['schemas']['ErrorEnvelope']['code'] ? false : true>;
 
-const checkTypeConstraints: [ReadDtosHaveNoSecretFields, InternalRouteIsNotPublic] = [true, true];
+const checkTypeConstraints: [ReadDtosHaveNoSecretFields, InternalRouteIsNotPublic, InternalErrorIsNotPublic] = [true, true, true];
 void checkTypeConstraints;
 
 const api = createMetaApiClient('https://api.example.invalid');

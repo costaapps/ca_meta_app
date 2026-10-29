@@ -6,9 +6,11 @@ import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
+import { ERROR_CODES } from '../src/generated/error-codes.mjs';
+import { ERROR_POLICIES } from '../src/generated/error-policies.mjs';
 import runtime from '../src/runtime.cjs';
 
-const { validateErrorEnvelope } = runtime;
+const { isErrorCode, validateErrorEnvelope } = runtime;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../../..');
@@ -16,9 +18,18 @@ const packageRoot = path.join(root, 'packages/contracts');
 const canonicalRoot = path.join(root, 'docs/meta-v2/contracts');
 const contract = YAML.parse(await readFile(path.join(canonicalRoot, 'openapi.yaml'), 'utf8'));
 
-test('published catalog and event schema copies match canonical sources', async () => {
+test('published error catalog excludes internal codes and event schema copies match canonical sources', async () => {
+  const canonicalCatalog = await readFile(path.join(canonicalRoot, 'error-catalog.md'), 'utf8');
+  const publicCatalog = await readFile(path.join(packageRoot, 'error-catalog.md'), 'utf8');
+  const expectedPublicCatalog = canonicalCatalog.split(/\r?\n/).filter((line) => {
+    const code = line.match(/^\|\s*`([^`]+)`\s*\|/)?.[1];
+    return code !== 'INTERNAL_SCOPE_DENIED';
+  }).join('\n');
+  assert.match(canonicalCatalog, /`INTERNAL_SCOPE_DENIED`/);
+  assert.doesNotMatch(publicCatalog, /INTERNAL_SCOPE_DENIED/);
+  assert.equal(publicCatalog, expectedPublicCatalog, 'public catalog should differ only by internal-code rows');
+
   for (const file of [
-    'error-catalog.md',
     'events/inbox-event.schema.json',
     'events/outbox-event.schema.json',
   ]) {
@@ -28,6 +39,29 @@ test('published catalog and event schema copies match canonical sources', async 
       `${file} is stale; regenerate @ca-meta/contracts`,
     );
   }
+});
+
+test('public OpenAPI, generated types, constants, policy and runtime schema omit internal-only errors', async () => {
+  const publicDocument = YAML.parse(await readFile(path.join(packageRoot, 'openapi.yaml'), 'utf8'));
+  const canonicalCodes = contract.components.schemas.ErrorEnvelope.properties.code.enum;
+  const publicCodes = publicDocument.components.schemas.ErrorEnvelope.properties.code.enum;
+  const runtimeSchemas = JSON.parse(await readFile(path.join(packageRoot, 'src/generated/runtime-schemas.json'), 'utf8'));
+  const generatedTypes = await readFile(path.join(packageRoot, 'src/generated/openapi.d.ts'), 'utf8');
+
+  assert.ok(canonicalCodes.includes('INTERNAL_SCOPE_DENIED'));
+  assert.ok(!publicCodes.includes('INTERNAL_SCOPE_DENIED'));
+  assert.ok(!ERROR_CODES.includes('INTERNAL_SCOPE_DENIED'));
+  assert.ok(!Object.hasOwn(ERROR_POLICIES, 'INTERNAL_SCOPE_DENIED'));
+  assert.ok(!runtimeSchemas.ErrorEnvelope.properties.code.enum.includes('INTERNAL_SCOPE_DENIED'));
+  assert.doesNotMatch(generatedTypes, /INTERNAL_SCOPE_DENIED/);
+  assert.equal(isErrorCode('INTERNAL_SCOPE_DENIED'), false);
+  assert.equal(validateErrorEnvelope({
+    code: 'INTERNAL_SCOPE_DENIED',
+    safeMessage: 'Internal authorization is unavailable.',
+    requestId: 'req_internal_scope',
+    retryable: false,
+    action: 'CONTACT_ADMIN',
+  }), false);
 });
 
 test('every documented ErrorEnvelope example validates and fixed code policies hold', () => {

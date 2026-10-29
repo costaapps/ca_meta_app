@@ -17,6 +17,7 @@ test('runtime validator accepts canonical error and health responses', () => {
 
 test('runtime validator rejects unknown codes, extra data, and unsafe retry policy', () => {
   assert.equal(validateErrorEnvelope({ ...base, code: 'FUTURE_ERROR' }), false);
+  assert.equal(validateErrorEnvelope({ ...base, code: 'INTERNAL_SCOPE_DENIED' }), false);
   assert.equal(validateErrorEnvelope({ ...base, retryable: true }), false);
   assert.equal(validateErrorEnvelope({ ...base, diagnostics: 'should not cross the boundary' }), false);
   assert.equal(validateHealthStatus({ status: 'not-ok' }), false);

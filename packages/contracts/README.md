@@ -3,10 +3,10 @@
 `docs/meta-v2/contracts/` is the canonical HTTP and event contract. This workspace generates its
 public OpenAPI types, stable error-code/action/policy constants, and runtime JSON Schema validators
 from that source. The package's `openapi.yaml` is a deterministic public export: internal-only
-operations, request schemas, and security schemes remain in the canonical source but are omitted
-from the package artifact. The error catalog and M1.07 inbox/outbox schemas are copied from their
-canonical sources. Never add server-only persistence models, credentials, or internal service
-authorization types to this public surface.
+operations, request schemas, security schemes, and error codes remain in the canonical source but
+are omitted from the package artifacts. The error catalog is filtered to public codes; M1.07
+inbox/outbox schemas are copied from their canonical sources. Never add server-only persistence
+models, credentials, or internal service authorization types to this public surface.
 
 ## Setup and checks
 
@@ -29,8 +29,8 @@ evidence.
 
 ## Sanitized export verification
 
-Validation snapshot for the public OpenAPI export correction, recorded 2026-10-29 on Windows
-PowerShell with Node.js `v22.17.0` and npm `10.9.2`:
+Validation snapshot for public-export filtering, recorded 2026-10-29 on Windows PowerShell with
+Node.js `v24.22.2` and npm `11.19.1`:
 
 | Command | Exit |
 | --- | ---: |
@@ -38,12 +38,16 @@ PowerShell with Node.js `v22.17.0` and npm `10.9.2`:
 | `npm run check:generated --workspace=@ca-meta/contracts` | 0 |
 | `npm run test:determinism --workspace=@ca-meta/contracts` | 0 |
 | `npm test --workspace=@ca-meta/contracts` | 0 |
-| `npx --no-install redocly lint --config packages/contracts/scripts/redocly.yaml packages/contracts/openapi.yaml` | 0 |
+| `npm run generate:client --prefix tools/m1-07` | 0 |
+| `npm test --prefix tools/m1-07` | 0 |
+| `npm exec -- redocly lint --config packages/contracts/scripts/redocly.yaml packages/contracts/openapi.yaml` | 0 |
 | `npm pack --dry-run --workspace=@ca-meta/contracts` | 0 |
 | `git diff --check` and `git show --check HEAD` | 0 |
 
-The package test runs stale-generation, canonical lint, frozen-baseline compatibility, breaking-check
-sensitivity, deterministic export, contract and runtime fixture validation, and TypeScript checks.
-This local snapshot used Node.js 22 rather than the repository's prescribed 24.22.2. The root
-`npm ci` and integrated workspace matrix are deferred until the M2.03 squash is incorporated and the
-root lockfile is reconciled; rerun the integrated matrix on the final milestone head.
+The determinism and contract tests assert that the canonical OpenAPI and catalog retain internal-only
+codes while the public OpenAPI, error catalog, TypeScript types, runtime constants, policies, and
+validators omit them. The M1.07 public-client generator and typecheck apply the same exclusion. The
+package test also runs stale-generation, canonical lint, frozen-baseline compatibility, breaking-check
+sensitivity, contract and runtime fixture validation, and TypeScript checks. The root `npm ci` and
+integrated workspace matrix are deferred until the M2.03 squash is incorporated and the root lockfile
+is reconciled; rerun the integrated matrix on the final milestone head.

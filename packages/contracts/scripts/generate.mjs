@@ -9,6 +9,7 @@ const packageRoot = path.resolve(here, '..');
 const root = path.resolve(packageRoot, '../..');
 const contractRoot = path.join(root, 'docs/meta-v2/contracts');
 const contractPath = path.join(contractRoot, 'openapi.yaml');
+const internalOnlyErrorCodes = new Set(['INTERNAL_SCOPE_DENIED']);
 const outputArgument = process.argv.find((argument) => argument.startsWith('--out-dir='));
 const outputRoot = outputArgument
   ? path.resolve(process.cwd(), outputArgument.slice('--out-dir='.length))
@@ -28,6 +29,28 @@ for (const [target, source] of sources) {
 
 const document = YAML.parse(await readFile(contractPath, 'utf8'));
 const publicDocument = structuredClone(document);
+const canonicalErrorCodes = document.components?.schemas?.ErrorEnvelope?.properties?.code?.enum;
+if (!Array.isArray(canonicalErrorCodes)
+  || [...internalOnlyErrorCodes].some((code) => !canonicalErrorCodes.includes(code))) {
+  throw new Error('Canonical OpenAPI must declare all configured internal-only error codes.');
+}
+
+publicDocument.components.schemas.ErrorEnvelope.properties.code.enum =
+  publicDocument.components.schemas.ErrorEnvelope.properties.code.enum
+    .filter((code) => !internalOnlyErrorCodes.has(code));
+for (const code of internalOnlyErrorCodes) {
+  delete publicDocument.components.schemas.ErrorEnvelope['x-error-policy-by-code']?.[code];
+}
+
+const publicErrorCatalog = artifacts.get('error-catalog.md')
+  .split(/\r?\n/)
+  .filter((line) => {
+    const rowCode = line.match(/^\|\s*`([^`]+)`\s*\|/)?.[1];
+    return !internalOnlyErrorCodes.has(rowCode);
+  })
+  .join('\n');
+artifacts.set('error-catalog.md', publicErrorCatalog);
+
 const httpMethods = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
 for (const [route, item] of Object.entries(publicDocument.paths ?? {})) {
   for (const method of Object.keys(item)) {
@@ -46,7 +69,7 @@ for (const name of Object.keys(publicDocument.components.schemas ?? {})) {
 
 const publicOpenApiHeader = [
   '# Generated public OpenAPI from docs/meta-v2/contracts/openapi.yaml.',
-  '# Internal-only operations, schemas, and security schemes are excluded.',
+  '# Internal-only operations, schemas, security schemes, and error codes are excluded.',
 ].join('\n');
 artifacts.set('openapi.yaml', `${publicOpenApiHeader}\n${YAML.stringify(publicDocument)}`);
 
@@ -57,7 +80,7 @@ artifacts.set(
   `/* Generated from docs/meta-v2/contracts/openapi.yaml. Do not edit by hand. */\n${generatedSource}`,
 );
 
-const schemas = document.components?.schemas ?? {};
+const schemas = publicDocument.components?.schemas ?? {};
 const errorCodes = schemas.ErrorEnvelope?.properties?.code?.enum;
 const errorActions = schemas.ErrorAction?.enum;
 if (!Array.isArray(errorCodes) || !Array.isArray(errorActions)) {

@@ -9,7 +9,19 @@ const root = path.resolve(here, '../../..');
 const contractPath = path.join(root, 'docs/meta-v2/contracts/openapi.yaml');
 const outputPath = path.resolve(here, '../src/generated/openapi.d.ts');
 const checkOnly = process.argv.includes('--check');
+const internalOnlyErrorCodes = new Set(['INTERNAL_SCOPE_DENIED']);
 const document = YAML.parse(await readFile(contractPath, 'utf8'));
+
+const canonicalErrorCodes = document.components?.schemas?.ErrorEnvelope?.properties?.code?.enum;
+if (!Array.isArray(canonicalErrorCodes)
+  || [...internalOnlyErrorCodes].some((code) => !canonicalErrorCodes.includes(code))) {
+  throw new Error('Canonical OpenAPI must declare all configured internal-only error codes.');
+}
+document.components.schemas.ErrorEnvelope.properties.code.enum = canonicalErrorCodes
+  .filter((code) => !internalOnlyErrorCodes.has(code));
+for (const code of internalOnlyErrorCodes) {
+  delete document.components.schemas.ErrorEnvelope['x-error-policy-by-code']?.[code];
+}
 
 for (const [route, item] of Object.entries(document.paths ?? {})) {
   for (const method of Object.keys(item)) {
@@ -34,5 +46,5 @@ if (checkOnly) {
 } else {
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, output, 'utf8');
-  console.log(`Wrote ${path.relative(root, outputPath)} without internal-only operations.`);
+  console.log(`Wrote ${path.relative(root, outputPath)} without internal-only operations or error codes.`);
 }

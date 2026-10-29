@@ -42,8 +42,10 @@ test('generation is deterministic in two isolated output directories', async () 
     assert.deepEqual(await digestTree(first), await digestTree(second));
 
     const canonicalDocument = YAML.parse(await readFile(canonicalOpenApi, 'utf8'));
+    const canonicalErrorCodes = canonicalDocument.components.schemas.ErrorEnvelope.properties.code.enum;
     const generatedPublicOpenApi = await readFile(path.join(first, 'openapi.yaml'), 'utf8');
     const publicDocument = YAML.parse(generatedPublicOpenApi);
+    const publicErrorCodes = publicDocument.components.schemas.ErrorEnvelope.properties.code.enum;
     const internalRoute = '/internal/v1/assets/{assetId}/operations';
 
     assert.ok(canonicalDocument.paths[internalRoute], 'canonical source retains the internal operation');
@@ -51,16 +53,42 @@ test('generation is deterministic in two isolated output directories', async () 
       'canonical source retains the internal request schema');
     assert.ok(canonicalDocument.components.securitySchemes.internalServiceAuth,
       'canonical source retains the internal service security scheme');
+    assert.ok(canonicalErrorCodes.includes('INTERNAL_SCOPE_DENIED'),
+      'canonical source retains the internal-only error code');
     assert.ok(!Object.keys(publicDocument.paths).some((route) => route.startsWith('/internal/')),
       'published OpenAPI must exclude internal routes');
     assert.ok(!Object.keys(publicDocument.components.schemas).some((name) => /^Internal/.test(name)),
       'published OpenAPI must exclude internal schemas');
     assert.ok(!Object.hasOwn(publicDocument.components.securitySchemes, 'internalServiceAuth'),
       'published OpenAPI must exclude the internal service security scheme');
+    assert.ok(!publicErrorCodes.includes('INTERNAL_SCOPE_DENIED'),
+      'published OpenAPI must exclude the internal-only error code');
     assert.doesNotMatch(generatedPublicOpenApi, /InternalAssetOperationRequest|internalServiceAuth|\/internal\//,
       'the published artifact must not retain internal component references');
+    assert.doesNotMatch(generatedPublicOpenApi, /INTERNAL_SCOPE_DENIED/,
+      'the published OpenAPI must not retain the internal-only error code');
+    const canonicalCatalog = await readFile(path.join(root, 'docs/meta-v2/contracts/error-catalog.md'), 'utf8');
+    const generatedCatalog = await readFile(path.join(first, 'error-catalog.md'), 'utf8');
+    const generatedTypes = await readFile(path.join(first, 'src/generated/openapi.d.ts'), 'utf8');
+    const generatedErrorCodes = await readFile(path.join(first, 'src/generated/error-codes.mjs'), 'utf8');
+    const generatedErrorPolicies = await readFile(path.join(first, 'src/generated/error-policies.mjs'), 'utf8');
+    const generatedRuntimeSchemas = JSON.parse(await readFile(path.join(first, 'src/generated/runtime-schemas.json'), 'utf8'));
+    assert.match(canonicalCatalog, /`INTERNAL_SCOPE_DENIED`/,
+      'canonical catalog retains the internal-only error row');
+    assert.doesNotMatch(generatedCatalog, /INTERNAL_SCOPE_DENIED/,
+      'published error catalog excludes the internal-only error');
+    assert.doesNotMatch(generatedTypes, /INTERNAL_SCOPE_DENIED/,
+      'published TypeScript types exclude the internal-only error');
+    assert.doesNotMatch(generatedErrorCodes, /INTERNAL_SCOPE_DENIED/,
+      'published error constants exclude the internal-only error');
+    assert.doesNotMatch(generatedErrorPolicies, /INTERNAL_SCOPE_DENIED/,
+      'published error policies exclude the internal-only error');
+    assert.ok(!generatedRuntimeSchemas.ErrorEnvelope.properties.code.enum.includes('INTERNAL_SCOPE_DENIED'),
+      'published runtime validation excludes the internal-only error');
     assert.equal(generatedPublicOpenApi, await readFile(path.join(packageRoot, 'openapi.yaml'), 'utf8'),
       'the checked-in package artifact must match deterministic public generation');
+    assert.equal(generatedCatalog, await readFile(path.join(packageRoot, 'error-catalog.md'), 'utf8'),
+      'the checked-in error catalog must match deterministic public generation');
     assert.equal(createHash('sha256').update(await readFile(canonicalOpenApi)).digest('hex'), canonicalBefore,
       'generation must leave the canonical OpenAPI source unchanged');
   } finally {

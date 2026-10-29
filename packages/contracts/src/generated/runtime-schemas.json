@@ -57,7 +57,6 @@
           "DEPENDENCY_UNAVAILABLE",
           "META_UNAVAILABLE",
           "PROVIDER_REJECTED",
-          "INTERNAL_SCOPE_DENIED",
           "INTERNAL_ERROR"
         ]
       },
