@@ -7,6 +7,7 @@ import {
   APP_ORIGIN,
   EMBED_ORIGIN,
   FAKE_ISSUER,
+  SAME_SITE_MUTATION_ORIGIN,
   SecurityFailure,
   acceptEmbedBootstrap,
   authorizeAndAudit,
@@ -374,6 +375,50 @@ try {
     const crossTenantBSession = await model.exchangeTicket(crossTenantBEntry.ticket, crossTenantBEntry.context, nowMs);
     await model.revokeMembership('tenant-a', 'user-cross-tenant-revocation-01', nowMs);
     await expectFailure(model.readAsset({ ...crossTenantASession, assetId: 'asset-a-1', cUUID: 'tenant-a', at: nowMs }), 'MEMBERSHIP_INVALID');
+    const [onboardingsBeforeRevokedWrite] = await db.execute('SELECT COUNT(*) AS total FROM m106_onboarding');
+    await expectFailure(model.startOnboarding({
+      sessionSecret: crossTenantASession.sessionSecret,
+      contextRef: crossTenantASession.contextRef,
+      csrfToken: crossTenantASession.csrfToken,
+      origin: APP_ORIGIN,
+      secFetchSite: 'same-origin',
+      id: 'revoked-membership-write-denied',
+      at: nowMs,
+    }), 'MEMBERSHIP_INVALID');
+    const [onboardingsAfterRevokedWrite] = await db.execute('SELECT COUNT(*) AS total FROM m106_onboarding');
+    assert.equal(Number(onboardingsAfterRevokedWrite[0].total), Number(onboardingsBeforeRevokedWrite[0].total), 'revoked membership cannot write in tenant A');
+    await expectFailure(model.switchTenant({
+      sessionSecret: crossTenantASession.sessionSecret,
+      expectedContextRef: crossTenantASession.contextRef,
+      targetTenantId: 'tenant-c',
+      csrfToken: crossTenantASession.csrfToken,
+      origin: APP_ORIGIN,
+      secFetchSite: 'same-origin',
+      at: nowMs,
+    }), 'MEMBERSHIP_INVALID');
+    await expectFailure(model.readAsset({ ...crossTenantASession, assetId: 'asset-a-1', cUUID: 'tenant-a', at: nowMs }), 'MEMBERSHIP_INVALID');
+    const recoveredCrossTenantSession = await model.switchTenant({
+      sessionSecret: crossTenantASession.sessionSecret,
+      expectedContextRef: crossTenantASession.contextRef,
+      targetTenantId: 'tenant-b',
+      csrfToken: crossTenantASession.csrfToken,
+      origin: APP_ORIGIN,
+      secFetchSite: 'same-origin',
+      at: nowMs,
+    });
+    assert.equal(recoveredCrossTenantSession.tenantId, 'tenant-b');
+    assert.notEqual(recoveredCrossTenantSession.contextRef, crossTenantASession.contextRef, 'recovery rotates contextRef');
+    assert.equal((await model.readAsset({ ...recoveredCrossTenantSession, assetId: 'asset-b-1', cUUID: 'tenant-b', at: nowMs })).id, 'asset-b-1');
+    await expectFailure(model.switchTenant({
+      sessionSecret: recoveredCrossTenantSession.sessionSecret,
+      expectedContextRef: crossTenantASession.contextRef,
+      targetTenantId: 'tenant-b',
+      csrfToken: recoveredCrossTenantSession.csrfToken,
+      origin: APP_ORIGIN,
+      secFetchSite: 'same-origin',
+      at: nowMs,
+    }), 'CONTEXT_CHANGED');
+    await expectFailure(model.readAsset({ ...recoveredCrossTenantSession, assetId: 'asset-a-1', cUUID: 'tenant-a', at: nowMs }), 'TENANT_CONTEXT_MISMATCH');
     assert.equal((await model.readAsset({ ...crossTenantBSession, assetId: 'asset-b-1', cUUID: 'tenant-b', at: nowMs })).id, 'asset-b-1', 'revoking tenant A membership preserves tenant B access');
 
     const tenantSessionEntry = await issueBrowserTicket({ sub: 'user-owner-01', tenant: 'tenant-d' });
@@ -386,14 +431,16 @@ try {
       targetTenantId: 'tenant-d',
       csrfToken: tenantSession.csrfToken,
       origin: APP_ORIGIN,
+      secFetchSite: 'same-origin',
       at: nowMs,
-    }), 'TENANT_NOT_ACTIVE');
+    }), 'RECOVERY_TARGET_MUST_DIFFER');
     tenantSession = await model.switchTenant({
       sessionSecret: tenantSession.sessionSecret,
       expectedContextRef: tenantSession.contextRef,
       targetTenantId: 'tenant-a',
       csrfToken: tenantSession.csrfToken,
       origin: APP_ORIGIN,
+      secFetchSite: 'same-origin',
       at: nowMs,
     });
     assert.equal(tenantSession.tenantId, 'tenant-a', 'suspended tenant permits only recovery to a different active membership');
@@ -410,6 +457,7 @@ try {
       contextRef: operatorSession.contextRef,
       csrfToken: operatorSession.csrfToken,
       origin: 'https://attacker.fake.invalid',
+      secFetchSite: 'cross-site',
       id: 'onboarding-csrf-origin-denied',
       at: nowMs,
     }), 'ORIGIN_DENIED');
@@ -418,9 +466,58 @@ try {
       contextRef: operatorSession.contextRef,
       csrfToken: 'csrf-token-from-another-session',
       origin: APP_ORIGIN,
+      secFetchSite: 'same-origin',
       id: 'onboarding-csrf-token-denied',
       at: nowMs,
     }), 'CSRF_DENIED');
+    for (const [index, secFetchSite] of ['cross-site', 'none', undefined, 'invalid'].entries()) {
+      await expectFailure(model.startOnboarding({
+        sessionSecret: operatorSession.sessionSecret,
+        contextRef: operatorSession.contextRef,
+        csrfToken: operatorSession.csrfToken,
+        origin: APP_ORIGIN,
+        secFetchSite,
+        id: `onboarding-fetch-site-denied-${index}`,
+        at: nowMs,
+      }), 'FETCH_METADATA_DENIED');
+    }
+    await expectFailure(model.startOnboarding({
+      sessionSecret: operatorSession.sessionSecret,
+      contextRef: operatorSession.contextRef,
+      csrfToken: 'csrf-from-other-session',
+      origin: SAME_SITE_MUTATION_ORIGIN,
+      secFetchSite: 'same-site',
+      id: 'onboarding-same-site-csrf-denied',
+      at: nowMs,
+    }), 'CSRF_DENIED');
+    await expectFailure(model.startOnboarding({
+      sessionSecret: operatorSession.sessionSecret,
+      contextRef: operatorSession.contextRef,
+      csrfToken: operatorSession.csrfToken,
+      origin: APP_ORIGIN,
+      secFetchSite: 'same-site',
+      id: 'onboarding-fetch-site-mismatch-denied',
+      at: nowMs,
+    }), 'FETCH_METADATA_DENIED');
+    await expectFailure(model.startOnboarding({
+      sessionSecret: operatorSession.sessionSecret,
+      contextRef: operatorSession.contextRef,
+      csrfToken: operatorSession.csrfToken,
+      origin: SAME_SITE_MUTATION_ORIGIN,
+      secFetchSite: 'same-origin',
+      id: 'onboarding-same-site-origin-mismatch-denied',
+      at: nowMs,
+    }), 'FETCH_METADATA_DENIED');
+    const sameSiteOnboarding = await model.startOnboarding({
+      sessionSecret: operatorSession.sessionSecret,
+      contextRef: operatorSession.contextRef,
+      csrfToken: operatorSession.csrfToken,
+      origin: SAME_SITE_MUTATION_ORIGIN,
+      secFetchSite: 'same-site',
+      id: 'onboarding-same-site-allowed',
+      at: nowMs,
+    });
+    assert.equal(sameSiteOnboarding.tenantId, 'tenant-a', 'configured same-site origin is allowed only with same-site metadata and CSRF');
     await expectFailure(model.readAsset({ ...ownerSession, assetId: 'asset-a-1', cUUID: 'tenant-a', at: nowMs + 31 * 60 * 1000 }), 'SESSION_EXPIRED');
     const count = await db.execute('SELECT COUNT(*) AS total FROM m106_portal_session');
     assert.ok(Number(count[0][0].total) >= 3);
@@ -481,6 +578,7 @@ try {
       contextRef: ownerSession.contextRef,
       csrfToken: ownerSession.csrfToken,
       origin: APP_ORIGIN,
+      secFetchSite: 'same-origin',
       id: 'onboarding-bound-to-tenant-a',
       at: nowMs,
     });
@@ -493,6 +591,7 @@ try {
         targetTenantId: 'tenant-b',
         csrfToken: ownerSession.csrfToken,
         origin: APP_ORIGIN,
+        secFetchSite: 'same-origin',
         at: nowMs,
       }),
       model.switchTenant({
@@ -501,6 +600,7 @@ try {
         targetTenantId: 'tenant-c',
         csrfToken: ownerSession.csrfToken,
         origin: APP_ORIGIN,
+        secFetchSite: 'same-origin',
         at: nowMs,
       }),
     ]);

@@ -12,6 +12,7 @@ export const FAKE_ISSUER = 'https://issuer.fake.invalid';
 export const FAKE_AUDIENCE = 'urn:synthetic:msg4:meta-portal';
 export const APP_ORIGIN = 'https://portal.fake.invalid';
 export const EMBED_ORIGIN = 'https://suite4.fake.invalid';
+export const SAME_SITE_MUTATION_ORIGIN = 'https://workspace.fake.invalid';
 export const MAX_TICKET_TTL_SECONDS = 60;
 export const CLOCK_SKEW_SECONDS = 5;
 
@@ -26,6 +27,10 @@ const ALLOWED_ROLES = new Set(['owner', 'admin', 'operator', 'viewer']);
 const EXCHANGE_ENTRY_MODES = new Map([
   ['PORTAL_TOP_LEVEL', APP_ORIGIN],
   ['SUITE4_EMBED', EMBED_ORIGIN],
+]);
+const MUTATION_FETCH_SITE_BY_ORIGIN = new Map([
+  [APP_ORIGIN, 'same-origin'],
+  [SAME_SITE_MUTATION_ORIGIN, 'same-site'],
 ]);
 const trustedExchangeContexts = new WeakSet();
 const ROLE_OPERATIONS = new Map([
@@ -219,8 +224,10 @@ function preAuthCookieFor(secret) {
   return `__Host-meta_pre_auth=${secret}; Path=/; Secure; HttpOnly; SameSite=Lax`;
 }
 
-function assertMutation({ origin, csrfToken, csrfHash }) {
-  if (origin !== APP_ORIGIN) reject('ORIGIN_DENIED');
+function assertMutation({ origin, csrfToken, csrfHash, secFetchSite }) {
+  const expectedFetchSite = MUTATION_FETCH_SITE_BY_ORIGIN.get(origin);
+  if (!expectedFetchSite) reject('ORIGIN_DENIED');
+  if (secFetchSite !== expectedFetchSite) reject('FETCH_METADATA_DENIED');
   if (!equalHash(csrfHash, csrfToken)) reject('CSRF_DENIED');
 }
 
@@ -368,12 +375,12 @@ export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
     return rows[0];
   }
 
-  async function startOnboarding({ sessionSecret, contextRef, csrfToken, origin, id, at = nowMs }) {
+  async function startOnboarding({ sessionSecret, contextRef, csrfToken, origin, secFetchSite, id, at = nowMs }) {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
       const { row, membership } = await lockLiveSession(conn, sessionSecret, at);
-      assertMutation({ origin, csrfToken, csrfHash: row.csrf_hash });
+      assertMutation({ origin, csrfToken, csrfHash: row.csrf_hash, secFetchSite });
       if (!equalHash(row.context_ref_hash, contextRef)) reject('CONTEXT_CHANGED');
       const role = membership.role_name.toLowerCase();
       if (!ROLE_OPERATIONS.get(role)?.has('CONNECT')) reject('AUTHZ_DENIED');
@@ -401,7 +408,7 @@ export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
     }
   }
 
-  async function switchTenant({ sessionSecret, expectedContextRef, targetTenantId, csrfToken, origin, at = nowMs }) {
+  async function switchTenant({ sessionSecret, expectedContextRef, targetTenantId, csrfToken, origin, secFetchSite, at = nowMs }) {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -414,13 +421,24 @@ export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
       );
       const row = sessions[0];
       assertSessionLive(row, at);
-      assertMutation({ origin, csrfToken, csrfHash: row.csrf_hash });
+      assertMutation({ origin, csrfToken, csrfHash: row.csrf_hash, secFetchSite });
       if (!equalHash(row.context_ref_hash, expectedContextRef)) reject('CONTEXT_CHANGED');
-      // A suspended tenant grants no resource access, but an existing session can recover
-      // by switching to a different active tenant where this principal still has membership.
-      if (row.current_tenant_status === 'ACTIVE') {
+      const [sourceMemberships] = await conn.execute(
+        `SELECT m.status AS membership_status, p.status AS principal_status
+         FROM m106_membership m
+         JOIN m106_principal p ON p.issuer = m.issuer AND p.subject = m.subject
+         WHERE m.tenant_id = ? AND m.issuer = ? AND m.subject = ? FOR UPDATE`,
+        [row.tenant_id, row.issuer, row.subject],
+      );
+      const sourceMembership = sourceMemberships[0];
+      const recovery = row.current_tenant_status === 'SUSPENDED'
+        || (sourceMembership?.membership_status === 'REVOKED' && sourceMembership.principal_status === 'ACTIVE');
+      // A suspended tenant or revoked source membership grants no resource access,
+      // but a live session may recover to a different active membership.
+      if (!recovery) {
         await activeMembership(conn, row.tenant_id, row.issuer, row.subject, true);
       }
+      if (recovery && targetTenantId === row.tenant_id) reject('RECOVERY_TARGET_MUST_DIFFER');
       const membership = await activeMembership(conn, targetTenantId, row.issuer, row.subject, true);
       const nextContextRef = randomSecret();
       const nextVersion = Number(row.context_version) + 1;
@@ -432,8 +450,8 @@ export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
       );
       await conn.execute(
         `INSERT INTO m106_audit (tenant_id, actor_ref, operation, target_ref, outcome, created_at)
-         VALUES (?, ?, 'TENANT_SWITCH', ?, 'ALLOWED', ?)`,
-        [targetTenantId, row.subject, targetTenantId, sqlTime(at)],
+         VALUES (?, ?, ?, ?, 'ALLOWED', ?)`,
+        [targetTenantId, row.subject, recovery ? 'TENANT_RECOVERY' : 'TENANT_SWITCH', targetTenantId, sqlTime(at)],
       );
       await conn.commit();
       return { sessionSecret, csrfToken, contextRef: nextContextRef, tenantId: targetTenantId, role: membership.role_name.toLowerCase() };
