@@ -55,6 +55,11 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   ]);
   assert.ok(DURABLE_WORK_MIGRATION.steps.some((step) => step.id === 'replay-audit-no-update'));
   assert.ok(DURABLE_WORK_MIGRATION.steps.some((step) => step.id === 'replay-audit-no-delete'));
+  const laneDispatchStep = DURABLE_WORK_MIGRATION.steps.find((step) => step.id === 'create-job-lane-dispatch');
+  assert.ok(laneDispatchStep);
+  assert.deepEqual(JSON.parse(laneDispatchStep.definition).indexes, [
+    { name: 'PRIMARY', columns: ['lane'], unique: true },
+  ]);
   assert.ok(DURABLE_WORK_MIGRATION.steps[0]?.definition.includes('ix_ca_meta_job_ambiguous_expired'));
   assert.ok(DURABLE_WORK_MIGRATION.steps[0]?.definition.includes('ix_ca_meta_job_tenant_resource_active'));
 });

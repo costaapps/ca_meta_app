@@ -244,39 +244,55 @@ export class DurableJobStore implements JobStore {
     const lanePriority: readonly JobLane[] = ['WEBHOOK_URGENT', 'ONBOARDING', 'HISTORICAL_PROJECTION'];
     const typePlaceholders = supported.map(() => '?').join(', ');
 
-    // Query each lane in priority order so a large historical backlog is never scanned to
-    // discover an urgent webhook. Within a lane, tenants retain least-active fairness.
+    // Keep lane priority independent so historical work is not scanned to discover urgent jobs.
+    // A locked persistent cursor serializes each lane's turn across workers; the candidate query
+    // runs only after acquiring that lock, so it cannot reuse a stale dispatch snapshot.
     for (const lane of lanePriority) {
-      const candidates = await dataSource.query(
-        `SELECT ready.tenant_id,
-                (SELECT COUNT(*) FROM ca_meta_jobs active
-                 WHERE active.tenant_id = ready.tenant_id AND active.status = 'RUNNING'
-                   AND active.lease_expires_at > UTC_TIMESTAMP(6)) AS active_count,
-                ready.ready_at
-         FROM (
-           SELECT tenant_id, MIN(COALESCE(lease_expires_at, next_run_at)) AS ready_at
-           FROM ca_meta_jobs
-           WHERE lane = ? AND job_type IN (${typePlaceholders}) AND NOT EXISTS (
-             SELECT 1 FROM ca_meta_jobs active
-             WHERE active.tenant_id = ca_meta_jobs.tenant_id
-               AND active.resource_scope_ref = ca_meta_jobs.resource_scope_ref
-               AND active.status = 'RUNNING' AND active.lease_expires_at > UTC_TIMESTAMP(6)
-           ) AND (
-             (status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)) OR
-             (status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6))
-           )
-           GROUP BY tenant_id
-         ) ready ORDER BY active_count, ready.ready_at, ready.tenant_id LIMIT 64`,
-        [lane, ...supported],
-      ) as Array<{ tenant_id: string }>;
+      const claimed = await dataSource.transaction(async (manager) => {
+        await manager.query(
+          `INSERT IGNORE INTO ca_meta_job_lane_dispatch (lane, last_tenant_id, updated_at)
+           VALUES (?, NULL, UTC_TIMESTAMP(6))`,
+          [lane],
+        );
+        const dispatchRows = await manager.query(
+          'SELECT last_tenant_id FROM ca_meta_job_lane_dispatch WHERE lane = ? FOR UPDATE',
+          [lane],
+        ) as Array<{ last_tenant_id: string | null }>;
+        const dispatch = dispatchRows[0];
+        if (!dispatch) throw new Error('Job lane dispatch cursor could not be locked.');
 
-      for (const candidate of candidates) {
-        const claimed = await dataSource.transaction(async (manager) => {
+        // The due-job predicate keeps this lookup on lane/status/due indexes and excludes
+        // terminal history. Only the compact per-lane cursor is persistent fairness state.
+        const candidates = await manager.query(
+          `SELECT ready.tenant_id
+           FROM (
+             SELECT tenant_id
+             FROM ca_meta_jobs
+             WHERE lane = ? AND job_type IN (${typePlaceholders}) AND NOT EXISTS (
+               SELECT 1 FROM ca_meta_jobs active
+               WHERE active.tenant_id = ca_meta_jobs.tenant_id
+                 AND active.resource_scope_ref = ca_meta_jobs.resource_scope_ref
+                 AND active.status = 'RUNNING' AND active.lease_expires_at > UTC_TIMESTAMP(6)
+             ) AND (
+               (status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)) OR
+               (status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6))
+             )
+             GROUP BY tenant_id
+           ) ready
+           WHERE (SELECT COUNT(*) FROM ca_meta_jobs active_tenant
+                  WHERE active_tenant.tenant_id = ready.tenant_id AND active_tenant.status = 'RUNNING'
+                    AND active_tenant.lease_expires_at > UTC_TIMESTAMP(6)) < ?
+           ORDER BY CASE WHEN ? IS NULL OR ready.tenant_id > ? THEN 0 ELSE 1 END, ready.tenant_id
+           LIMIT 64`,
+          [lane, ...supported, MAX_ACTIVE_JOBS_PER_TENANT, dispatch.last_tenant_id, dispatch.last_tenant_id],
+        ) as Array<{ tenant_id: string }>;
+
+        for (const candidate of candidates) {
           const tenants = await manager.query(
             'SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE',
             [candidate.tenant_id],
           ) as Array<{ id: string }>;
-          if (tenants.length !== 1) return null;
+          if (tenants.length !== 1) continue;
 
           const rows = await manager.query(
             `SELECT id, tenant_id, job_type, schema_version, lane, effect_mode, resource_scope_ref, idempotency_key,
@@ -299,32 +315,34 @@ export class DurableJobStore implements JobStore {
             [candidate.tenant_id, lane, ...supported],
           ) as JobRow[];
           const row = rows[0];
-          if (!row) return null;
+          if (!row) continue;
 
           const activeRows = await manager.query(
-            `SELECT COUNT(*) AS count FROM ca_meta_jobs
-             WHERE tenant_id = ? AND status = 'RUNNING' AND lease_expires_at > UTC_TIMESTAMP(6)`,
+            `SELECT id FROM ca_meta_jobs
+             WHERE tenant_id = ? AND status = 'RUNNING' AND lease_expires_at > UTC_TIMESTAMP(6)
+             LIMIT ${MAX_ACTIVE_JOBS_PER_TENANT} FOR UPDATE`,
             [candidate.tenant_id],
-          ) as Array<{ count: string | number }>;
-          if (Number(activeRows[0]?.count ?? 0) >= MAX_ACTIVE_JOBS_PER_TENANT) return null;
+          ) as Array<{ id: string }>;
+          if (activeRows.length >= MAX_ACTIVE_JOBS_PER_TENANT) continue;
 
           const resourceRows = await manager.query(
-            `SELECT COUNT(*) AS count FROM ca_meta_jobs
+            `SELECT id FROM ca_meta_jobs
              WHERE tenant_id = ? AND resource_scope_ref = ? AND status = 'RUNNING'
-               AND lease_expires_at > UTC_TIMESTAMP(6)`,
+               AND lease_expires_at > UTC_TIMESTAMP(6)
+             LIMIT 1 FOR UPDATE`,
             [candidate.tenant_id, row.resource_scope_ref],
-          ) as Array<{ count: string | number }>;
-          if (Number(resourceRows[0]?.count ?? 0) > 0) return null;
+          ) as Array<{ id: string }>;
+          if (resourceRows.length > 0) continue;
 
           const type = row.job_type;
           if (!isJobType(type)) {
             await this.deadLetterLocked(manager, row, 'UNSUPPORTED_JOB_TYPE');
-            return null;
+            continue;
           }
           const policy = JOB_POLICIES[type];
           if (row.effect_mode !== policy.effectMode || row.lane !== policy.lane) {
             await this.deadLetterLocked(manager, row, 'UNSUPPORTED_JOB_TYPE');
-            return null;
+            continue;
           }
 
           const attempt = Number(row.attempt);
@@ -332,18 +350,18 @@ export class DurableJobStore implements JobStore {
           const budgetElapsed = Number(row.budget_elapsed_ms ?? 0);
           if (attempt >= Number(row.max_attempts)) {
             await this.deadLetterLocked(manager, row, 'ATTEMPTS_EXHAUSTED');
-            return null;
+            continue;
           }
           if (budgetStartedAt && budgetElapsed >= policy.maxElapsedMs) {
             await this.deadLetterLocked(manager, row, 'ATTEMPT_BUDGET_EXHAUSTED');
-            return null;
+            continue;
           }
 
           if (row.claim_token) {
             const delayMs = retryDelayMs(policy, Math.max(1, attempt), this.random);
             if (budgetStartedAt && budgetElapsed + delayMs >= policy.maxElapsedMs) {
               await this.deadLetterLocked(manager, row, 'ATTEMPT_BUDGET_EXHAUSTED');
-              return null;
+              continue;
             }
             await manager.query(
               `UPDATE ca_meta_job_attempts
@@ -362,7 +380,7 @@ export class DurableJobStore implements JobStore {
                WHERE id = ? AND tenant_id = ?`,
               [row.id, row.tenant_id],
             );
-            return null;
+            continue;
           }
 
           const claimToken = randomUUID();
@@ -383,11 +401,18 @@ export class DurableJobStore implements JobStore {
              VALUES (?, ?, ?, ?, ?, 'RUNNING', UTC_TIMESTAMP(6))`,
             [randomUUID(), row.tenant_id, row.id, nextAttempt, workerRef],
           );
+          await manager.query(
+            `UPDATE ca_meta_job_lane_dispatch
+             SET last_tenant_id = ?, updated_at = UTC_TIMESTAMP(6)
+             WHERE lane = ?`,
+            [row.tenant_id, lane],
+          );
           const updated = { ...row, claim_token: claimToken, attempt: nextAttempt };
           return this.toClaimedJob(updated, type, workerRef, budgetStartedAt ?? new Date().toISOString());
-        });
-        if (claimed) return claimed;
-      }
+        }
+        return null;
+      });
+      if (claimed) return claimed;
     }
     return null;
   }

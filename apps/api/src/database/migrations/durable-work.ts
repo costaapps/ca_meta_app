@@ -327,6 +327,20 @@ const createReplayAudit = tableStep(
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
 );
 
+const createJobLaneDispatch = tableStep(
+  'create-job-lane-dispatch',
+  'ca_meta_job_lane_dispatch',
+  ['lane', 'last_tenant_id', 'updated_at'],
+  [{ name: 'PRIMARY', columns: ['lane'], unique: true }],
+  `CREATE TABLE IF NOT EXISTS ca_meta_job_lane_dispatch (
+    lane VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    last_tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    updated_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (lane),
+    CONSTRAINT ck_ca_meta_job_lane_dispatch_lane CHECK (lane IN ('WEBHOOK_URGENT', 'ONBOARDING', 'HISTORICAL_PROJECTION'))
+  ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
+);
+
 const migrationWithoutChecksum: DurableMigration = {
   id: '202610290003-durable-work-inbox-outbox',
   schemaVersion: 3,
@@ -340,6 +354,7 @@ const migrationWithoutChecksum: DurableMigration = {
     createReplayAudit,
     immutableAuditTrigger('replay-audit-no-update', 'UPDATE'),
     immutableAuditTrigger('replay-audit-no-delete', 'DELETE'),
+    createJobLaneDispatch,
   ],
 };
 
@@ -352,6 +367,7 @@ export const DURABLE_WORK_TABLES = [
   'ca_meta_inbox_events',
   'ca_meta_job_dead_letters',
   'ca_meta_replay_audit',
+  'ca_meta_job_lane_dispatch',
 ] as const;
 
 export async function verifyDurableWorkTables(queryRunner: QueryRunner): Promise<void> {

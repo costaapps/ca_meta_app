@@ -107,6 +107,8 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
   const tenantWorker = uuid();
   const tenantCap = uuid();
   const tenantConcurrent = uuid();
+  const tenantFairA = '00000000-0000-4000-8000-000000000102';
+  const tenantFairB = '00000000-0000-4000-8000-000000000101';
   const appConfig = uuid();
   const replayAppConfig = uuid();
   const timestamp = '2026-10-29 12:00:00.000000';
@@ -118,8 +120,8 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     await dataSource.query("SET time_zone = '+00:00'");
     await dataSource.query(
       `INSERT INTO ca_meta_tenants (id, created_at, updated_at)
-       VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)`,
-      [tenantA, timestamp, timestamp, tenantB, timestamp, timestamp, tenantReplay, timestamp, timestamp, tenantWorker, timestamp, timestamp, tenantCap, timestamp, timestamp, tenantConcurrent, timestamp, timestamp],
+       VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)`,
+      [tenantA, timestamp, timestamp, tenantB, timestamp, timestamp, tenantReplay, timestamp, timestamp, tenantWorker, timestamp, timestamp, tenantCap, timestamp, timestamp, tenantConcurrent, timestamp, timestamp, tenantFairA, timestamp, timestamp, tenantFairB, timestamp, timestamp],
     );
     await dataSource.query(
       `INSERT INTO ca_meta_app_configurations
@@ -745,6 +747,80 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     assert.deepEqual(new Set(urgentJobs.map((job) => job?.id)), new Set(urgentClaims.map((job) => job.id)));
     assert.ok(urgentClaimLatencyMs < 2_000, `two urgent claims over ${highHistoryCount} queued historical jobs took ${urgentClaimLatencyMs.toFixed(1)}ms`);
     for (const claim of urgentJobs) assert.equal(await jobs.finish(claim!, { kind: 'SUCCEEDED' }), true);
+
+    // A tenant with an older ready backlog gets one turn; the next tenant in the lane is re-read
+    // after finish, and concurrent workers serialize against the same fresh cursor.
+    await dataSource.query(
+      `INSERT IGNORE INTO ca_meta_job_lane_dispatch (lane, last_tenant_id, updated_at)
+       VALUES ('WEBHOOK_URGENT', ?, UTC_TIMESTAMP(6))`,
+      [tenantFairB],
+    );
+    await dataSource.query(
+      `UPDATE ca_meta_job_lane_dispatch SET last_tenant_id = ?, updated_at = UTC_TIMESTAMP(6)
+       WHERE lane = 'WEBHOOK_URGENT'`,
+      [tenantFairB],
+    );
+    const fairnessAFirst = await jobs.enqueue({
+      tenantId: tenantFairA, type: 'INBOX_PROCESS', idempotencyKey: 'fairness-a-first',
+      correlationId: 'fairness-a-first', resourceScopeRef: `fairness-a-first-${uuid()}`, payload: inboxPayload(),
+    });
+    const fairnessABacklog = await jobs.enqueue({
+      tenantId: tenantFairA, type: 'INBOX_PROCESS', idempotencyKey: 'fairness-a-backlog',
+      correlationId: 'fairness-a-backlog', resourceScopeRef: `fairness-a-backlog-${uuid()}`, payload: inboxPayload(),
+    });
+    const fairnessBFirst = await jobs.enqueue({
+      tenantId: tenantFairB, type: 'INBOX_PROCESS', idempotencyKey: 'fairness-b-first',
+      correlationId: 'fairness-b-first', resourceScopeRef: `fairness-b-first-${uuid()}`, payload: inboxPayload(),
+    });
+    await dataSource.query(
+      `UPDATE ca_meta_jobs SET next_run_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 30 SECOND) WHERE id = ?`,
+      [fairnessAFirst.id],
+    );
+    await dataSource.query(
+      `UPDATE ca_meta_jobs SET next_run_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 20 SECOND) WHERE id = ?`,
+      [fairnessABacklog.id],
+    );
+    await dataSource.query(
+      `UPDATE ca_meta_jobs SET next_run_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 10 SECOND) WHERE id = ?`,
+      [fairnessBFirst.id],
+    );
+    const firstFairnessClaim = await jobs.claimNext('fairness-sequential-a', 300_000, ['INBOX_PROCESS']);
+    assert.equal(firstFairnessClaim?.id, fairnessAFirst.id);
+    assert.equal(await jobs.finish(firstFairnessClaim!, { kind: 'SUCCEEDED' }), true);
+    const remainingFairnessABacklog = await dataSource.query(
+      `SELECT COUNT(*) AS count FROM ca_meta_jobs WHERE tenant_id = ? AND status = 'QUEUED'`,
+      [tenantFairA],
+    ) as Array<{ count: string | number }>;
+    assert.equal(Number(remainingFairnessABacklog[0]?.count), 1);
+    const secondFairnessClaim = await jobs.claimNext('fairness-sequential-b', 300_000, ['INBOX_PROCESS']);
+    assert.equal(secondFairnessClaim?.id, fairnessBFirst.id, 'B gets the next lane turn while A still has ready backlog');
+    assert.equal(await jobs.finish(secondFairnessClaim!, { kind: 'SUCCEEDED' }), true);
+
+    const fairnessARaceBacklog = await jobs.enqueue({
+      tenantId: tenantFairA, type: 'INBOX_PROCESS', idempotencyKey: 'fairness-a-race-backlog',
+      correlationId: 'fairness-a-race-backlog', resourceScopeRef: `fairness-a-race-backlog-${uuid()}`, payload: inboxPayload(),
+    });
+    const fairnessBRace = await jobs.enqueue({
+      tenantId: tenantFairB, type: 'INBOX_PROCESS', idempotencyKey: 'fairness-b-race',
+      correlationId: 'fairness-b-race', resourceScopeRef: `fairness-b-race-${uuid()}`, payload: inboxPayload(),
+    });
+    const concurrentFairnessClaims = await Promise.all([
+      jobs.claimNext('fairness-race-worker-a', 300_000, ['INBOX_PROCESS']),
+      jobs.claimNext('fairness-race-worker-b', 300_000, ['INBOX_PROCESS']),
+    ]);
+    assert.deepEqual(
+      new Set(concurrentFairnessClaims.map((claim) => claim?.tenantId)),
+      new Set([tenantFairA, tenantFairB]),
+      'serialized concurrent workers re-read and advance the cursor instead of reusing A as the next turn',
+    );
+    assert.deepEqual(
+      new Set(concurrentFairnessClaims.map((claim) => claim?.id)),
+      new Set([fairnessBRace.id, fairnessABacklog.id]),
+    );
+    for (const claim of concurrentFairnessClaims) assert.equal(await jobs.finish(claim!, { kind: 'SUCCEEDED' }), true);
+    const remainingFairnessClaim = await jobs.claimNext('fairness-race-drain', 300_000, ['INBOX_PROCESS']);
+    assert.equal(remainingFairnessClaim?.id, fairnessARaceBacklog.id);
+    assert.equal(await jobs.finish(remainingFairnessClaim!, { kind: 'SUCCEEDED' }), true);
 
     // No FORCE INDEX: the ambiguous-expiry sweep uses its dedicated index on a synthetic mixed state set.
     const bulkRows: unknown[][] = [];
