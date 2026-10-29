@@ -12,6 +12,9 @@ $apiNodeModulesVolume = "m202-sigterm-api-$runId"
 $createdVolumes = [System.Collections.Generic.List[string]]::new()
 $exitCode = 1
 
+Write-Output "M2.02 isolated signal-drain run: $runId"
+Write-Output "Dependency volumes: $rootNodeModulesVolume, $apiNodeModulesVolume"
+
 try {
   $nodeImageInfo = & docker run --rm $NodeImage node --version
   if ($LASTEXITCODE -ne 0 -or $nodeImageInfo.Trim() -ne 'v24.22.2') {
@@ -61,7 +64,7 @@ finally {
   foreach ($volume in $createdVolumes) {
     & docker volume rm $volume | Out-Null
     if ($LASTEXITCODE -ne 0) {
-      Write-Warning 'Could not clean an isolated signal-drain dependency volume.'
+      Write-Warning "Could not remove isolated dependency volume $volume"
       $exitCode = 1
     }
   }
