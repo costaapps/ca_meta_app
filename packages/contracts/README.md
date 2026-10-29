@@ -19,9 +19,10 @@ Run `npm test --workspace=@ca-meta/contracts` for stale generation, Redocly, fro
 compatibility, breaking-check sensitivity, deterministic generation, documented error examples,
 event fixtures, credential/tenant-field scans, runtime validation, and TypeScript consumer checks.
 The determinism test writes two uniquely named directories under the OS temporary directory and
-removes only its own temporary root in `finally`. API and Angular consumers are separately checked
-with `npm test --workspace=@ca-meta/api`, `npm run typecheck --workspace=@ca-meta/web`, and
-`npm test --workspace=@ca-meta/web`.
+removes only its own temporary root in `finally`. Generated-text checks ignore CRLF versus LF during
+comparison but still reject content changes; the determinism test exercises both cases. API and
+Angular consumers are separately checked with `npm test --workspace=@ca-meta/api`,
+`npm run typecheck --workspace=@ca-meta/web`, and `npm test --workspace=@ca-meta/web`.
 
 `fixtures/errors/` and `fixtures/events/` contain synthetic examples only. Event fixture payloads
 are validated against the canonical M1.07 JSON Schemas. They are not Meta payloads or deployment

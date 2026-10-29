@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import YAML from 'yaml';
+import { generatedTextMatches } from '../../../tools/shared/generated-text.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../../..');
@@ -33,13 +34,34 @@ test('generation is deterministic in two isolated output directories', async () 
   const tempRoot = await mkdtemp(path.join(tempBase, 'ca-meta-contracts-'));
   const first = path.join(tempRoot, 'first');
   const second = path.join(tempRoot, 'second');
+  const newlineProbe = path.join(tempRoot, 'newline-probe');
   const canonicalBefore = createHash('sha256').update(await readFile(canonicalOpenApi)).digest('hex');
   try {
-    for (const output of [first, second]) {
+    for (const output of [first, second, newlineProbe]) {
       const result = spawnSync(process.execPath, [generator, `--out-dir=${output}`], { cwd: root, encoding: 'utf8' });
       assert.equal(result.status, 0, result.stderr || result.stdout);
     }
     assert.deepEqual(await digestTree(first), await digestTree(second));
+
+    const catalogProbe = path.join(newlineProbe, 'error-catalog.md');
+    const generatedCatalogProbe = await readFile(catalogProbe, 'utf8');
+    const crlfCatalogProbe = generatedCatalogProbe.replace(/\n/g, '\r\n');
+    await writeFile(catalogProbe, crlfCatalogProbe, 'utf8');
+    const crlfCheck = spawnSync(process.execPath, [generator, '--check', `--out-dir=${newlineProbe}`], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    assert.equal(crlfCheck.status, 0, crlfCheck.stderr || crlfCheck.stdout,
+      'generated checks must accept an otherwise identical CRLF checkout');
+
+    const semanticMutation = crlfCatalogProbe.replace('M1.07 — safe API error catalog', 'M1.07 — altered API error catalog');
+    assert.notEqual(semanticMutation, crlfCatalogProbe, 'semantic-mutation probe must change generated content');
+    await writeFile(catalogProbe, semanticMutation, 'utf8');
+    const semanticCheck = spawnSync(process.execPath, [generator, '--check', `--out-dir=${newlineProbe}`], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    assert.notEqual(semanticCheck.status, 0, 'generated checks must still reject semantic changes');
 
     const canonicalDocument = YAML.parse(await readFile(canonicalOpenApi, 'utf8'));
     const canonicalErrorCodes = canonicalDocument.components.schemas.ErrorEnvelope.properties.code.enum;
@@ -85,9 +107,9 @@ test('generation is deterministic in two isolated output directories', async () 
       'published error policies exclude the internal-only error');
     assert.ok(!generatedRuntimeSchemas.ErrorEnvelope.properties.code.enum.includes('INTERNAL_SCOPE_DENIED'),
       'published runtime validation excludes the internal-only error');
-    assert.equal(generatedPublicOpenApi, await readFile(path.join(packageRoot, 'openapi.yaml'), 'utf8'),
+    assert.ok(generatedTextMatches(generatedPublicOpenApi, await readFile(path.join(packageRoot, 'openapi.yaml'), 'utf8')),
       'the checked-in package artifact must match deterministic public generation');
-    assert.equal(generatedCatalog, await readFile(path.join(packageRoot, 'error-catalog.md'), 'utf8'),
+    assert.ok(generatedTextMatches(generatedCatalog, await readFile(path.join(packageRoot, 'error-catalog.md'), 'utf8')),
       'the checked-in error catalog must match deterministic public generation');
     assert.equal(createHash('sha256').update(await readFile(canonicalOpenApi)).digest('hex'), canonicalBefore,
       'generation must leave the canonical OpenAPI source unchanged');

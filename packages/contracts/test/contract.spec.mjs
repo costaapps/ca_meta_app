@@ -8,6 +8,7 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 import { ERROR_CODES } from '../src/generated/error-codes.mjs';
 import { ERROR_POLICIES } from '../src/generated/error-policies.mjs';
+import { generatedTextMatches } from '../../../tools/shared/generated-text.mjs';
 import runtime from '../src/runtime.cjs';
 
 const { isErrorCode, validateErrorEnvelope } = runtime;
@@ -27,17 +28,17 @@ test('published error catalog excludes internal codes and event schema copies ma
   }).join('\n');
   assert.match(canonicalCatalog, /`INTERNAL_SCOPE_DENIED`/);
   assert.doesNotMatch(publicCatalog, /INTERNAL_SCOPE_DENIED/);
-  assert.equal(publicCatalog, expectedPublicCatalog, 'public catalog should differ only by internal-code rows');
+  assert.ok(generatedTextMatches(publicCatalog, expectedPublicCatalog),
+    'public catalog should differ only by internal-code rows');
 
   for (const file of [
     'events/inbox-event.schema.json',
     'events/outbox-event.schema.json',
   ]) {
-    assert.equal(
+    assert.ok(generatedTextMatches(
       await readFile(path.join(packageRoot, file), 'utf8'),
       await readFile(path.join(canonicalRoot, file), 'utf8'),
-      `${file} is stale; regenerate @ca-meta/contracts`,
-    );
+    ), `${file} is stale; regenerate @ca-meta/contracts`);
   }
 });
 

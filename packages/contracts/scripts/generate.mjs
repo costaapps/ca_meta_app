@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import openapiTS, { astToString } from 'openapi-typescript';
 import YAML from 'yaml';
+import { generatedTextMatches } from '../../../tools/shared/generated-text.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(here, '..');
@@ -129,7 +130,7 @@ for (const [relativePath, contents] of artifacts) {
     } catch {
       throw new Error(`Generated contract artifact is missing: ${relativePath}. Run npm run generate.`);
     }
-    if (current !== contents) {
+    if (!generatedTextMatches(current, contents)) {
       throw new Error(`Generated contract artifact is stale: ${relativePath}. Run npm run generate.`);
     }
   } else {
