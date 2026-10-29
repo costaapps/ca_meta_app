@@ -34,9 +34,9 @@ def mapping(row: dict[str, str]) -> tuple[str, str, str, str, str]:
             return "listNotifications", "GET /api/v1/notifications", "preserve-safe-notification-list", "M2 portal consumer", "Message content is omitted from notification/event projections."
         if path == "/notifications/action":
             return "actOnNotification", "POST /api/v1/notifications/{notificationId}/actions", "replace-with-typed-async-action", "M2/M4 external-effect evidence", "Ambiguous sends become UNKNOWN; no exactly-once claim."
-        if path == "/whatsapp/templates":
+        if path == "/whatsapp/templates" and row["method"] == "GET":
             return "listTemplates", "GET /api/v1/whatsapp/accounts/{assetId}/templates", "preserve-with-scoped-grant", "M3.08 credential/grant verification", "Provider grant selection and actual template state Not confirmed."
-        if path == "/whatsapp/templates":
+        if path == "/whatsapp/templates" and row["method"] == "POST":
             return "createTemplate", "POST /api/v1/whatsapp/accounts/{assetId}/templates", "replace-with-async-provider-job", "M3.08 authorized provider scenario", "Provider review and idempotency semantics Not confirmed."
     if kind == "php_router_result":
         return "unmatched-route", "(404 RESOURCE_NOT_AVAILABLE)", "preserve-safe-404", "M2 routing tests", "Source file default response is not evidence of deployed rewrite behavior."
@@ -78,9 +78,9 @@ def mapping(row: dict[str, str]) -> tuple[str, str, str, str, str]:
             return "listConnections", "GET /api/v1/connections", "preserve-with-tenant-scoped-projection", "M2 web consumer integration", "Angular runtime remains unchanged in M1.07."
         if path == "/save_auto_reply":
             return "replaceAutomationConfig", "PUT /api/v1/assets/{assetId}/automation-config", "replace-with-versioned-contract", "M2 web consumer integration", "Angular runtime remains unchanged in M1.07."
-        if path == "/whatsapp/templates":
+        if path == "/whatsapp/templates" and row["method"] == "GET":
             return "listTemplates", "GET /api/v1/whatsapp/accounts/{assetId}/templates", "preserve-with-scoped-grant", "M2/M3 web integration", "Angular runtime remains unchanged in M1.07."
-        if path == "/whatsapp/templates":
+        if path == "/whatsapp/templates" and row["method"] == "POST":
             return "createTemplate", "POST /api/v1/whatsapp/accounts/{assetId}/templates", "replace-with-async-provider-job", "M2/M3 web integration", "Angular runtime remains unchanged in M1.07."
         if path == "/notifications":
             return "listNotifications", "GET /api/v1/notifications", "preserve-safe-notification-list", "M2 web consumer integration", "Angular runtime remains unchanged in M1.07."

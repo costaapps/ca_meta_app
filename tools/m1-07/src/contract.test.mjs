@@ -222,6 +222,22 @@ test('compatibility matrix accounts for every sanitized baseline row exactly onc
   const drift = matrix.find((row) => row.compatibility_policy === 'exclude-not-confirmed');
   assert.ok(drift);
   assert.match(drift.evidence_limit, /Not confirmed/);
+
+  const templateRows = matrix.filter((row) => row.source_path_or_symbol === '/whatsapp/templates');
+  assert.ok(templateRows.length > 0, 'baseline includes WhatsApp template operations');
+  for (const row of templateRows) {
+    const expected = row.source_method === 'GET'
+      ? ['listTemplates', 'GET /api/v1/whatsapp/accounts/{assetId}/templates']
+      : row.source_method === 'POST'
+        ? ['createTemplate', 'POST /api/v1/whatsapp/accounts/{assetId}/templates']
+        : null;
+    assert.ok(expected, `unexpected method for ${row.source_kind} ${row.source_path_or_symbol}: ${row.source_method}`);
+    assert.deepEqual(
+      [row.v1_operation, row.v1_target],
+      expected,
+      `${row.source_kind} ${row.source_method} ${row.source_path_or_symbol} must map by HTTP method`,
+    );
+  }
 });
 
 test('contract has bounded pagination, ETag preconditions and 202 Location for accepted jobs', () => {
