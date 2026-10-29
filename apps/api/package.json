@@ -10,6 +10,7 @@
     "test": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/test/*.spec.js"
   },
   "dependencies": {
+    "@ca-meta/contracts": "0.0.0",
     "@nestjs/common": "12.3.2",
     "@nestjs/core": "12.3.2",
     "@nestjs/platform-express": "12.3.2",

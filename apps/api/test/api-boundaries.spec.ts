@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import { IsString, MaxLength } from 'class-validator';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { connect as netConnect } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { request as httpRequest } from 'node:http';
 import { fork } from 'node:child_process';
@@ -187,6 +188,32 @@ function rawGet(
   });
 }
 
+function rawGetWithoutHostHttp10(url: string): Promise<{
+  readonly status: number;
+  readonly headers: Record<string, string>;
+  readonly body: string;
+}> {
+  const target = new URL(url);
+  return new Promise((resolve, reject) => {
+    const socket = netConnect(Number(target.port), target.hostname);
+    let raw = '';
+    socket.setEncoding('utf8');
+    socket.on('connect', () => socket.write(`GET ${target.pathname} HTTP/1.0\r\nConnection: close\r\n\r\n`));
+    socket.on('data', (chunk: string) => { raw += chunk; });
+    socket.once('error', reject);
+    socket.once('end', () => {
+      const [head = '', body = ''] = raw.split('\r\n\r\n', 2);
+      const lines = head.split('\r\n');
+      const status = Number(/^HTTP\/\d\.\d ([0-9]{3})/.exec(lines.shift() ?? '')?.[1] ?? 0);
+      const headers = Object.fromEntries(lines.flatMap((line) => {
+        const separator = line.indexOf(':');
+        return separator < 0 ? [] : [[line.slice(0, separator).toLowerCase(), line.slice(separator + 1).trim()]];
+      }));
+      resolve({ status, headers, body });
+    });
+  });
+}
+
 const childMessageHistory = new WeakMap<
   import('node:child_process').ChildProcess,
   Record<string, unknown>[]
@@ -361,10 +388,10 @@ test('Host validation allows exact configured hosts and rejects absent or unknow
   assert.deepEqual(JSON.parse(valid.body), { status: 'ok' });
 
   const unknown = await rawGet(`${context.baseUrl}/health`, `unconfigured.example:${port}`);
-  assert.equal(unknown.status, 400);
+  if (unknown.status !== 403) assert.fail(JSON.stringify({ status: unknown.status, headers: unknown.headers, body: unknown.body }));
   const unknownBody = JSON.parse(unknown.body) as Record<string, unknown>;
   assert.deepEqual(unknownBody, {
-    code: 'ORIGIN_NOT_ALLOWED',
+    code: 'HOST_NOT_ALLOWED',
     safeMessage: 'This request host is not allowed.',
     requestId: unknown.headers['x-request-id'],
     retryable: false,
@@ -372,21 +399,30 @@ test('Host validation allows exact configured hosts and rejects absent or unknow
   });
 
   const absent = await rawGet(`${context.baseUrl}/health`, undefined);
+  // Node rejects a missing Host on HTTP/1.1 before the request reaches Express middleware.
   assert.equal(absent.status, 400);
+
+  const legacyWithoutHost = await rawGetWithoutHostHttp10(`${context.baseUrl}/health`);
+  assert.equal(legacyWithoutHost.status, 403);
+  const noHostBody = JSON.parse(legacyWithoutHost.body) as Record<string, unknown>;
+  assert.equal(noHostBody.code, 'HOST_NOT_ALLOWED');
+  assert.equal(noHostBody.requestId, legacyWithoutHost.headers['x-request-id']);
 });
 
 test('the private route is denied and request IDs are returned in headers and error envelopes', async (t) => {
   const context = await startBoundaryApp();
   t.after(() => context.app.close());
 
+  const suppliedId = 'a0b1c2d3-e4f5-4678-9abc-def012345678';
   const response = await fetch(`${context.baseUrl}/api/v1/probe/private`, {
-    headers: { 'X-Request-Id': 'malformed-request-id' },
+    headers: { 'X-Request-Id': suppliedId },
   });
   assert.equal(response.status, 401);
   const body = await response.json() as Record<string, unknown>;
   assert.equal(body.code, 'AUTH_REQUIRED');
   assert.equal(body.requestId, response.headers.get('x-request-id'));
-  assert.match(String(body.requestId), /^[0-9a-f]{8}-[0-9a-f-]{27}$/i);
+  assert.match(String(body.requestId), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  assert.notEqual(body.requestId, suppliedId);
   assert.deepEqual(Object.keys(body).sort(), ['action', 'code', 'requestId', 'retryable', 'safeMessage']);
   const requestLog = context.logger.records.find((record) => record.event === 'http.request');
   assert.equal(requestLog?.requestId, response.headers.get('x-request-id'));
@@ -441,9 +477,16 @@ test('internal errors are sanitized and logs correlate without raw errors or req
   const response = await fetch(`${context.baseUrl}/api/v1/probe/failure`);
   assert.equal(response.status, 500);
   const body = await response.text();
-  assert.match(body, /DEPENDENCY_UNAVAILABLE/);
+  assert.match(body, /INTERNAL_ERROR/);
   assert.doesNotMatch(body, /synthetic-marker-password|synthetic database diagnostic/);
   assert.equal(JSON.parse(body).requestId, response.headers.get('x-request-id'));
+  assert.deepEqual(JSON.parse(body), {
+    code: 'INTERNAL_ERROR',
+    safeMessage: 'The service could not complete this request.',
+    requestId: response.headers.get('x-request-id'),
+    retryable: false,
+    action: 'CONTACT_ADMIN',
+  });
 
   await new Promise((resolve) => setTimeout(resolve, 0));
   const serializedLogs = JSON.stringify(context.logger.records);

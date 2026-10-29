@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { errorEnvelope } from './error-envelope.js';
+import type { ErrorAction, ErrorCode } from './error-envelope.js';
 import { STRUCTURED_LOGGER, type StructuredLogger } from './request-context.js';
 
 @Catch()
@@ -39,10 +40,10 @@ export class SafeExceptionFilter implements ExceptionFilter {
   }
 
   private safeDetails(status: number): {
-    code: 'AUTH_REQUIRED' | 'ACCESS_DENIED' | 'RESOURCE_NOT_AVAILABLE' | 'VALIDATION_FAILED' | 'PAYLOAD_TOO_LARGE' | 'DEPENDENCY_UNAVAILABLE';
+    code: ErrorCode;
     safeMessage: string;
     retryable: boolean;
-    action: 'SIGN_IN' | 'CONTACT_ADMIN' | 'REFRESH' | 'FIX_REQUEST' | 'REDUCE_REQUEST' | 'RELOAD_PORTAL' | 'CHECK_STATUS';
+    action: ErrorAction;
   } {
     if (status === HttpStatus.UNAUTHORIZED) {
       return { code: 'AUTH_REQUIRED', safeMessage: 'Authentication is required.', retryable: false, action: 'SIGN_IN' };
@@ -62,6 +63,6 @@ export class SafeExceptionFilter implements ExceptionFilter {
     if (status === HttpStatus.SERVICE_UNAVAILABLE) {
       return { code: 'DEPENDENCY_UNAVAILABLE', safeMessage: 'The operation could not be confirmed yet.', retryable: true, action: 'CHECK_STATUS' };
     }
-    return { code: 'DEPENDENCY_UNAVAILABLE', safeMessage: 'The service is temporarily unavailable.', retryable: true, action: 'RELOAD_PORTAL' };
+    return { code: 'INTERNAL_ERROR', safeMessage: 'The service could not complete this request.', retryable: false, action: 'CONTACT_ADMIN' };
   }
 }

@@ -1,0 +1,22 @@
+{
+  "eventId": "outbox_example_01",
+  "tenantRef": "tenant_example_01",
+  "schemaVersion": 1,
+  "eventType": "reply.requested",
+  "aggregateRef": "operation_example_01",
+  "aggregateVersion": 1,
+  "actor": {
+    "kind": "USER",
+    "ref": "principal_example_01"
+  },
+  "correlationId": "corr_example_02",
+  "causationId": "request_example_01",
+  "createdAt": "2026-10-29T12:03:00Z",
+  "enqueuedAt": "2026-10-29T12:03:00Z",
+  "data": {
+    "kind": "REPLY_REQUESTED",
+    "assetRef": "asset_example_01",
+    "messageRef": "message_example_01",
+    "operationRef": "operation_example_01"
+  }
+}

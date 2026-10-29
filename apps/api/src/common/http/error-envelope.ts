@@ -1,28 +1,6 @@
-export type ErrorCode =
-  | 'AUTH_REQUIRED'
-  | 'ACCESS_DENIED'
-  | 'RESOURCE_NOT_AVAILABLE'
-  | 'ORIGIN_NOT_ALLOWED'
-  | 'VALIDATION_FAILED'
-  | 'PAYLOAD_TOO_LARGE'
-  | 'DEPENDENCY_UNAVAILABLE';
-
-export type ErrorAction =
-  | 'SIGN_IN'
-  | 'FIX_REQUEST'
-  | 'CONTACT_ADMIN'
-  | 'REFRESH'
-  | 'REDUCE_REQUEST'
-  | 'RELOAD_PORTAL'
-  | 'CHECK_STATUS';
-
-export interface ErrorEnvelope {
-  readonly code: ErrorCode;
-  readonly safeMessage: string;
-  readonly requestId: string;
-  readonly retryable: boolean;
-  readonly action: ErrorAction;
-}
+import type { ErrorAction, ErrorCode, ErrorEnvelope } from '@ca-meta/contracts';
+import { validateErrorEnvelope } from '@ca-meta/contracts/runtime';
+export type { ErrorAction, ErrorCode, ErrorEnvelope } from '@ca-meta/contracts';
 
 export function errorEnvelope(
   code: ErrorCode,
@@ -31,5 +9,9 @@ export function errorEnvelope(
   retryable: boolean,
   action: ErrorAction,
 ): ErrorEnvelope {
-  return { code, safeMessage, requestId, retryable, action };
+  const envelope: ErrorEnvelope = { code, safeMessage, requestId, retryable, action };
+  if (!validateErrorEnvelope(envelope)) {
+    throw new Error('Server generated an ErrorEnvelope that does not match the public contract.');
+  }
+  return envelope;
 }

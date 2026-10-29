@@ -55,9 +55,9 @@ export function allowedHostMiddleware(allowedHosts: readonly string[]): RequestH
       next();
       return;
     }
-    response.status(400).json(
+    response.status(403).json(
       errorEnvelope(
-        'ORIGIN_NOT_ALLOWED',
+        'HOST_NOT_ALLOWED',
         'This request host is not allowed.',
         request.requestId ?? 'unknown',
         false,
