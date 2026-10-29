@@ -1,0 +1,5 @@
+extends:
+  - recommended
+rules:
+  # The repository license is not confirmed, so the contract intentionally makes no license assertion.
+  info-license: off

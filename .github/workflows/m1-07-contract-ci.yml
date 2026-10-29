@@ -1,0 +1,45 @@
+name: M1.07 API contract
+
+on:
+  pull_request:
+    branches: [develop, 'desktop/milestone-*']
+    paths:
+      - 'docs/meta-v2/contracts/openapi.yaml'
+      - 'docs/meta-v2/contracts/openapi-v1.baseline.yaml'
+      - 'docs/meta-v2/contracts/events/**'
+      - 'docs/meta-v2/contracts/error-catalog.md'
+      - 'docs/meta-v2/contracts/compatibility*'
+      - 'docs/meta-v2/contracts/standards.md'
+      - 'tools/m1-07/**'
+      - '.github/workflows/m1-07-contract-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m1-07-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: m1-07-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout candidate without persistent credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: tools/m1-07/package-lock.json
+      - name: Install isolated contract toolchain
+        working-directory: tools/m1-07
+        run: npm ci
+      - name: Validate contract, compatibility and executable fixtures
+        working-directory: tools/m1-07
+        run: npm test

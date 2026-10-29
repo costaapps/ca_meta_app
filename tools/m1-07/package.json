@@ -1,0 +1,36 @@
+{
+  "name": "@msg4/m1-07-api-contract",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=22.12.0 <25",
+    "npm": ">=10 <12"
+  },
+  "scripts": {
+    "generate:client": "node scripts/generate-client.mjs",
+    "generate:compatibility": "python scripts/generate-compatibility.py",
+    "generate": "npm run generate:client && npm run generate:compatibility",
+    "lint": "redocly lint --config redocly.yaml ../../docs/meta-v2/contracts/openapi.yaml",
+    "check:breaking": "node scripts/check-breaking.mjs",
+    "test:breaking-sensitivity": "node scripts/test-breaking-check.mjs",
+    "test:contract": "node --test src/contract.test.mjs",
+    "test:behavior": "node --test src/behavior.test.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run lint && npm run check:breaking && npm run test:breaking-sensitivity && npm run test:contract && npm run test:behavior && npm run typecheck",
+    "clean": "node scripts/clean.mjs"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "openapi-fetch": "0.17.0",
+    "openapi-typescript": "7.13.0",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@pb33f/openapi-changes": "0.2.13",
+    "@redocly/cli": "2.72.0",
+    "typescript": "5.9.3"
+  }
+}

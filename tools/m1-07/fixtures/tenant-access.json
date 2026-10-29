@@ -1,0 +1,8 @@
+{
+  "description": "Synthetic cross-tenant access cases with safe 401/403/404 outcomes.",
+  "resource": { "id": "asset_example_02", "tenantRef": "tenant_example_02" },
+  "missingResource": { "id": "asset_missing_example", "tenantRef": null },
+  "sessionA": { "tenantRef": "tenant_example_01", "roles": ["operator"] },
+  "viewerSessionA": { "tenantRef": "tenant_example_01", "roles": ["viewer"] },
+  "requiredRole": "operator"
+}
