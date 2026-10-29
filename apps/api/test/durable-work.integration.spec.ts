@@ -337,6 +337,12 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     assert.ok(cappedClaimIds.every((id) => id !== undefined && cappedJobs.some((job) => job.id === id)));
     assert.equal(await jobs.claimNext('tenant-cap-worker-5', 300_000, ['OUTBOX_DELIVER']), null);
     for (const job of cappedClaims) assert.equal(await jobs.finish(job!, { kind: 'SUCCEEDED' }), true);
+    const claimedCapJobIds = new Set(cappedClaimIds);
+    const remainingCappedJob = cappedJobs.find((job) => !claimedCapJobIds.has(job.id));
+    assert.ok(remainingCappedJob, 'one queued job remains after the first four claims');
+    const releasedTenantCapClaim = await jobs.claimNext('tenant-cap-worker-after-release', 300_000, ['OUTBOX_DELIVER']);
+    assert.equal(releasedTenantCapClaim?.id, remainingCappedJob.id, 'a finished lease releases the tenant cap for the remaining job');
+    assert.equal(await jobs.finish(releasedTenantCapClaim!, { kind: 'SUCCEEDED' }), true);
 
     // A real child claims and exits without ACK; a replacement reclaims only after lease expiry and retry delay.
     const crashJob = await jobs.enqueue({
