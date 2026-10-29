@@ -3,6 +3,7 @@
 # Compiled output
 /dist
 **/dist
+**/dist-test
 /tmp
 /out-tsc
 **/out-tsc

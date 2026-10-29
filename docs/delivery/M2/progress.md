@@ -6,7 +6,7 @@ Milestone branch: `desktop/milestone-m2`, initially created at that SHA.
 | Package / issue | Stage | Candidate | Latest evidence | Package PR | Next action |
 |---|---|---|---|---|---|
 | M2.01 / #20 | Accepted in `desktop/milestone-m2` | source candidate `069b057721f4748bcae9ebfb92c621eaed5ad747`; PR head `957d00dfbf0113a41a5642282baf293532b29648` | PR #95 merged by squash as `45d32ca7f6b4ad004b52d6f675644139e17c10ca`. Checks: `desktop-candidate`, baseline, planning audit, and orchestrator success; structure skipped by workflow condition. Node 24.22.2/npm 11.19.1; clean install on unchanged lock; build 372.81 kB; 5/5 tests; typecheck/lint/bundle/routes PASS. Functional/security reviews PASS. | [#95](https://github.com/costaapps/ca_meta_app/pull/95), squash `45d32ca` | continue with M2.02; keep issue open until consolidated acceptance in develop |
-| M2.02 / #21 | Ready | pending | M2.01/#20 is squash-integrated; M1.07/#17 is included in develop | none | implement Nest boundary and safe config |
+| M2.02 / #21 | Functional/security review and isolated validation PASS; ready for package PR | code candidate `05a837d96593999b14d8fdf9c4292d95d2aa237e`; package head `e5c6f8ab744acaf6754bf267b74aa2021ffc6f94` on `desktop/m2-02`, parent `930cfc0bc3627dfb5b50e4c104ddc65b496ef1e2` | Linux 21/21 without skips; Windows CI, build, typecheck, lint, route/bundle scans, API production audit, MariaDB readiness PASS; functional/security reviews PASS. Advisories and owners below. | pending | push and open package PR to `desktop/milestone-m2`; keep #21 open until consolidated acceptance in develop |
 | M2.03 / #22 | Waiting on M2.02 | pending | M1.02/#11 and M1.05/#14 are included in develop | none | MariaDB migrations and recovery harness |
 | M2.04 / #23 | Waiting on M2.02 | pending | M1.07/#17 is included in develop | none | canonical OpenAPI compatibility |
 | M2.05 / #24 | Waiting on M2.03 | pending | M1.05/#14 and M1.09/#16 are included in develop | none | durable outbox/inbox/worker tests |
@@ -16,6 +16,30 @@ Milestone branch: `desktop/milestone-m2`, initially created at that SHA.
 | M2.09 / #33 | Waiting on M2.07/#29 and M2.08/#30 | pending | no Docker Hub publication authorized/configured | none | immutable release and rollback pipeline; distinguish local build from publication |
 | M2.10 / #36 | Waiting on M2.09/#33 | pending | staging host, domain, DNS/TLS and authorized Meta resources Not confirmed | none | staging preparation; keep external gates open |
 
+### M2.02 / #21 package evidence
+
+The first checkpoint and matrix below are historical evidence from the `5283cf8` review cycle; the final P1 follow-up and exact review/validation evidence are in the current section below.
+
+Runtime and test candidate commit: 5283cf85e015a67f430bb2ea8a7720da1fab7d91 on desktop/m2-02, based on 0812c20ba125071ee6351de7687a5302b83339bd. It follows the earlier M2.02 package candidate documented above. The security review finding was that response close could release a request lease while an async handler continued after a client abort. RequestDrain now tracks transport and handler completion independently; SIGTERM waits until a Promise resolves or the Observable cleanup explicitly acknowledges cancellation. The ack is rejected before signal.aborted. Tests also prove a response may finish before handler work, without releasing the lease. RxJS unsubscribe/finalize is not treated as work completion; Observable cleanup must explicitly acknowledge after cancellation.
+
+The contract decision remains unchanged in OpenAPI: GET /health and /ready only. Both return HTTP 200 with {"status":"ok"} on success; /ready returns HTTP 503 with the canonical Unavailable ErrorEnvelope on DB failure. The exact requestId/code/action fields and the consumer gate for any aliases are recorded in decisions.md. No OpenAPI file was changed.
+
+Environment: Windows PowerShell, explicit Node 24.22.2 at C:/Users/user/AppData/Local/Codex/runtimes/node-v24.22.2, npm 11.19.1. The clean-install and root checks ran against the complete working-tree snapshot later committed as 5283cf85e015a67f430bb2ea8a7720da1fab7d91; at execution time Git HEAD was its parent 0812c20ba125071ee6351de7687a5302b83339bd with those changes in the working tree. The exact evidence is:
+
+- npm ci: exit 0; 639 packages added, 643 audited. npm reported 40 advisories (1 low, 10 moderate, 26 high, 3 critical), five install scripts awaiting allowScripts, and one TAR_ENTRY_ERROR lstat warning for node_modules/zod/v4; installation completed. No audit fix was applied.
+- npm run build: exit 0 for API and Angular; initial Angular bundle 372.81 kB.
+- npm run typecheck: exit 0 for API source/tests and Angular.
+- npm test -- --watch=false: exit 0; API 14 passed, 0 failed, four POSIX SIGTERM subprocess cases explicitly skipped on Windows; Angular 5/5 passed. The workflow's appended flag did not break node --test.
+- npm run lint: exit 0; web boundary scanner inspected 16 source files.
+- npm run smoke:routes: exit 0 for /setup, /channels, and /templates.
+- npm run check:web-bundle: exit 0; four browser files passed.
+- npm audit --workspace=@ca-meta/api --omit=dev: exit 0; zero production API vulnerabilities.
+
+The MariaDB integration harness ran after the runtime fix, using isolated Compose project m202-api-ready-a674e72b7dc3426aaa8df63cc52eddb9. It exited 0: invalid startup settings logged field names only; /ready returned 200, then the exact 503 Unavailable ErrorEnvelope during DB outage; /health stayed 200; MariaDB health became healthy and /ready recovered to 200. The harness removed only that UUID project's container/network/volumes and temporary log directory. Follow-up inspection found no project container, network, or volume. The unrelated db-migrations-mariadb-1 remained Exited (0) 3 months ago.
+
+The Linux runner was updated only to print its synthetic run UUID and exact temporary volume names. It pins node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c, performs npm ci in a network-enabled container, then tests in a separate --network none container. Final run tools/m2-02/run-sigterm-drain-linux.ps1 exited 0: 18 passed, 0 failed, 0 skipped. It covered both Connection: close/keep-alive full response drain; client-aborted Promise handler; response-finished handler still running; and Observable unsubscribe with pre-abort ack rejected and post-cleanup ack accepted. Run UUID cc466ae24e434b31ab9dd222411339c5 used volumes m202-sigterm-root-cc466ae24e434b31ab9dd222411339c5 and m202-sigterm-api-cc466ae24e434b31ab9dd222411339c5; both were absent after cleanup. The isolated install audited 239 packages and reported two development advisories (1 moderate, 1 high); no audit fix was applied.
+
+git diff --check and the staged/code-commit diff checks passed. apps/api/dist-test and other build outputs are ignored; no generated artifacts are tracked. Historical checkpoint status: no package push/PR existed and independent re-review was pending at that time; the current status and exact SHA appear in the P1 follow-up section below. Do not treat local evidence as deployment, production credential, migration, provider, or Meta verification.
 ## Environment
 
 - Windows PowerShell checkout; GitHub connector is authenticated and reports push/admin access. `gh` CLI is not installed.
@@ -27,3 +51,24 @@ Milestone branch: `desktop/milestone-m2`, initially created at that SHA.
 ## Acceptance boundaries
 
 M1 is integrated at `develop@2f0944d` via merged consolidated PR #94. This permits M2 implementation; M1's external Meta, Suite4, deployment and production gates remain Not confirmed. M2.09 publication and M2.10 real staging checks are not complete without the respective external permissions and evidence.
+
+### P1 functional-review follow-up — Observable cancellation
+
+The independent functional review found that RequestDrainInterceptor could treat a complete/error emitted by RxJS takeUntil(signal) as handler completion while asynchronous cleanup was still running. Code commit 05a837d96593999b14d8fdf9c4292d95d2aa237e is based on 80548645b562147abb713cbff9751349f1d857b0; it changes apps/api/src/common/http/request-drain.interceptor.ts, apps/api/src/common/http/request-drain.ts, apps/api/test/api-boundaries.spec.ts, apps/api/test/fixtures/sigterm-drain-child.ts, apps/api/README.md, and tools/m2-02/run-sigterm-drain-linux.ps1.
+
+The interceptor reads design:returntype metadata from the controller prototype and method name. An Observable route that completes/errors after abort keeps its lease until acknowledgeCancellation() succeeds after cleanup. Promise completion after client abort and synchronous Object/void handlers (including /health) settle normally. Missing return-type metadata fails closed; Promise<Observable<...>>, type-erased Observable, and dynamic handlers must use @RequireCancellationAcknowledgement(). Reflect.hasMetadata distinguishes an explicitly emitted void return type from missing metadata. RxJS unsubscribe/finalize are not cleanup proof.
+
+Final evidence on the code snapshot at 05a837d96593999b14d8fdf9c4292d95d2aa237e:
+
+- Fail-first regression on the pre-fix candidate reproduced the P1: takeUntil completion after abort allowed drain/app close before cleanup acknowledgement.
+- tools/m2-02/run-sigterm-drain-linux.ps1 -TestName 'Observable takeUntil completion': exit 0, 1/1 pass, run UUID 5ad920ccd2954e22be339d38818f9eb9. Both UUID dependency volumes were removed.
+- tools/m2-02/run-sigterm-drain-linux.ps1: exit 0, 21/21 pass, 0 failed, 0 skipped, pinned Node 24.22.2 image. Final UUID be0e6eb71da741c1891425d352967261; volumes m202-sigterm-root-be0e6eb71da741c1891425d352967261 and m202-sigterm-api-be0e6eb71da741c1891425d352967261 were absent after cleanup. The isolated npm ci added 237 packages/audited 239 and reported 2 development advisories (1 moderate, 1 high); no dependency change or audit fix was made.
+- Windows npm test -- --watch=false: exit 0; API 16 passed, 0 failed, 5 POSIX subprocess cases skipped on Windows; Angular 5/5 passed. Linux ran all process cases without skips.
+- npm run typecheck: exit 0 for API source/tests and Angular.
+- npm run build: exit 0; Angular initial bundle 372.81 kB.
+- npm run lint: exit 0; the web boundary scanner inspected 16 source files.
+- npm audit --workspace=@ca-meta/api --omit=dev: exit 0; 0 production API vulnerabilities. The package lock did not change.
+- tools/m2-02/run-mariadb-readiness.ps1: exit 0 under isolated project m202-api-ready-6701c8cd145f46ae8bcdc5b85a23162e. Invalid settings logged field names only; /ready returned 200, then canonical 503 Unavailable during DB outage, then 200 after recovery; /health stayed 200 while MariaDB was stopped. Project container/network/volumes were absent afterward. Existing db-migrations-mariadb-1 remained Exited (0) 3 months ago.
+- git diff --check: exit 0. No production, migration, Meta, or shared staging operation occurred.
+
+The Windows-only skips are covered by the pinned Linux runner. Independent functional and security reviews both PASS on package head `e5c6f8ab744acaf6754bf267b74aa2021ffc6f94`; isolated validation also PASSes on that exact SHA. Reviewers found no blocking defect. Track these advisories before dependent scopes consume the API: (1) request IDs supplied by direct clients can intentionally collide in log grouping; resolve the trust/correlation policy in M2.04 before business routes; (2) `ORIGIN_NOT_ALLOWED` is currently used for a Host rejection although M1.07 defines it for Origin/Fetch Metadata, and generic HTTP 500 currently uses retryable `DEPENDENCY_UNAVAILABLE`; M2.04 must resolve both against the catalog/OpenAPI and update API/client tests in the same reviewed scope; (3) drain has no deadline, so M2.06/M2.07 must align handler limits and the container stop grace period. These are non-blocking for this API-only package, which has no business routes or external effects. No package push or PR exists yet; next action is push and open the package PR. Keep #21 open until consolidated acceptance in develop.
