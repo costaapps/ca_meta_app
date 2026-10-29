@@ -1,0 +1,16 @@
+{
+  "description": "A successful redirect/HTTP response is not readiness evidence; only a server status query can establish READY.",
+  "providerHttpStatus": 200,
+  "browserRedirectStatus": 303,
+  "beforeStatusQuery": null,
+  "inProgressStatusQuery": {
+    "status": "PROVISIONING",
+    "readiness": "UNKNOWN",
+    "requiredEvidenceCurrent": false
+  },
+  "readyStatusQuery": {
+    "status": "READY",
+    "readiness": "READY",
+    "requiredEvidenceCurrent": true
+  }
+}

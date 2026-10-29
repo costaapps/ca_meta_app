@@ -18,7 +18,10 @@ O resultado desejado é um portal recorrente de gerenciamento de conexões Meta 
 | [07 · Aceite e governança](07-acceptance-risk-and-governance.md) | Qual sequência, responsáveis funcionais, riscos e provas de 100%? |
 | [08 · Project e provisionamento](08-project-configuration.md) | Como organizar campos, visões, issues, hierarquia e dependências? |
 | [Catálogo navegável](work-packages.md) | Onde está cada um dos 66 pacotes e seu vínculo no GitHub? |
-| [OpenAPI proposto](contracts/openapi.proposed.json) e [schema de evento](contracts/internal-event.proposed.schema.json) | Qual rascunho contratual pode iniciar a ratificação da M1.07? |
+| [OpenAPI 3.1 canônico](contracts/openapi.yaml), [eventos inbox/outbox](contracts/events/) e [catálogo seguro de erros](contracts/error-catalog.md) | Qual contrato M1.07 deve orientar consumidores e validações? |
+| [Matriz de compatibilidade](contracts/compatibility.md) | Como cada linha da baseline mapeia para uma operação proposta ou uma exceção explícita? |
+| [Formatos e validadores](contracts/standards.md) | Quais formatos e fontes primárias sustentam os arquivos de contrato? |
+| [JSON OpenAPI legado](contracts/openapi.proposed.json) e [evento genérico legado](contracts/internal-event.proposed.schema.json) | Artefatos históricos do planejador; não são fonte de verdade para consumidores M1.07. |
 | [Matriz de aceite](acceptance-matrix.csv) | Quais 330 critérios ligam requisitos, issues e validações planejadas? |
 
 ## Etapas de implantação
