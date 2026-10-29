@@ -1,0 +1,70 @@
+{
+  "fixtureVersion": 1,
+  "notice": "Synthetic relationship fixtures only. No Meta call, grant, eligibility, endpoint behavior, or Coexistence approval is asserted.",
+  "provider": "synthetic:meta",
+  "appConfig": {
+    "id": "synthetic:app-config-m1-05",
+    "environment": "synthetic:test",
+    "flowVariant": "WHATSAPP_COEXISTENCE",
+    "authVariant": "synthetic:coexistence-auth-variant",
+    "graphVersion": "synthetic:graph-version-unknown",
+    "signupVersion": "synthetic:signup-version-unknown",
+    "capabilitiesVersion": 1
+  },
+  "scenarios": [
+    {
+      "id": "one_waba_four_numbers",
+      "tenantId": "synthetic:tenant-one-waba",
+      "wabas": [
+        {
+          "id": "synthetic:waba-one",
+          "externalId": "90071992547409931234567890123456789001",
+          "numbers": [
+            { "id": "synthetic:number-01", "externalId": "90071992547409931234567890123456789101" },
+            { "id": "synthetic:number-02", "externalId": "90071992547409931234567890123456789102" },
+            { "id": "synthetic:number-03", "externalId": "90071992547409931234567890123456789103" },
+            { "id": "synthetic:number-04", "externalId": "90071992547409931234567890123456789104" }
+          ],
+          "authorizations": [
+            { "id": "synthetic:auth-one-number-01", "credentialId": "synthetic:credential-one-number-01", "numberIds": ["synthetic:number-01"] },
+            { "id": "synthetic:auth-one-number-02", "credentialId": "synthetic:credential-one-number-02", "numberIds": ["synthetic:number-02"] },
+            { "id": "synthetic:auth-one-number-03-initial", "credentialId": "synthetic:credential-one-number-03-initial", "numberIds": ["synthetic:number-03"] },
+            { "id": "synthetic:auth-one-number-04", "credentialId": "synthetic:credential-one-number-04", "numberIds": ["synthetic:number-04"] },
+            { "id": "synthetic:auth-one-reauth-number-03", "credentialId": "synthetic:credential-one-reauth-number-03", "numberIds": ["synthetic:number-03"], "successorOf": "synthetic:auth-one-number-03-initial" }
+          ]
+        }
+      ],
+      "assertions": ["four original onboarding sessions preserve their individual asset grants", "reauth adds a new auth and credential for number-03", "existing grants are preserved until explicitly revoked"]
+    },
+    {
+      "id": "two_wabas_two_plus_two",
+      "tenantId": "synthetic:tenant-two-waba",
+      "wabas": [
+        {
+          "id": "synthetic:waba-two-a",
+          "externalId": "90071992547409931234567890123456789201",
+          "numbers": [
+            { "id": "synthetic:number-11", "externalId": "90071992547409931234567890123456789311" },
+            { "id": "synthetic:number-12", "externalId": "90071992547409931234567890123456789312" }
+          ],
+          "authorizations": [
+            { "id": "synthetic:auth-two-a", "credentialId": "synthetic:credential-two-a", "numberIds": ["synthetic:number-11", "synthetic:number-12"] }
+          ]
+        },
+        {
+          "id": "synthetic:waba-two-b",
+          "externalId": "90071992547409931234567890123456789202",
+          "numbers": [
+            { "id": "synthetic:number-13", "externalId": "90071992547409931234567890123456789313" },
+            { "id": "synthetic:number-14", "externalId": "90071992547409931234567890123456789314" }
+          ],
+          "authorizations": [
+            { "id": "synthetic:auth-two-b", "credentialId": "synthetic:credential-two-b", "numberIds": ["synthetic:number-13", "synthetic:number-14"] },
+            { "id": "synthetic:auth-two-b-reauth-number-13", "credentialId": "synthetic:credential-two-b-reauth-number-13", "numberIds": ["synthetic:number-13"], "successorOf": "synthetic:auth-two-b" }
+          ]
+        }
+      ],
+      "assertions": ["separate WABAs keep separate auth and credential relationships", "reauth of number-13 leaves other three numbers linked", "the same app config does not imply one global credential"]
+    }
+  ]
+}

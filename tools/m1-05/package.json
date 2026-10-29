@@ -1,0 +1,16 @@
+{
+  "name": "@m1-05/domain-poc",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.19.1",
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
+  "scripts": {
+    "test": "node src/run.mjs"
+  },
+  "dependencies": {
+    "mysql2": "3.24.6"
+  }
+}
