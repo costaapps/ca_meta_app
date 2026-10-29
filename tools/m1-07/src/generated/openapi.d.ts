@@ -51,7 +51,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Request a sign-in link
-         * @description Public and rate-limited. The response is uniform for known and unknown identities. The server sends only to an already invited identity and does not create a membership. No address is reflected in the response.
+         * @description Public and rate-limited. The response is uniform for known and unknown identities. The server sends only to an already invited identity and does not create a membership. No address or delivery status is reflected in the response. Email enqueue is deduplicated by the rate-limit bucket and request fingerprint.
          */
         readonly post: operations["requestMagicLink"];
         readonly delete?: never;
@@ -316,7 +316,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Start reauthorization without prematurely revoking the current grant
-         * @description Creates a new onboarding session for the selected connection. The prior grant remains usable while verified and eligible under the current policy; grant rotation is explicit.
+         * @description Creates a new local onboarding session for the selected connection. Provider authorization starts only after the user follows its launch URL; this request changes no provider state. The prior grant remains usable while verified and eligible under current policy; rotation is explicit.
          */
         readonly post: operations["createReauthorization"];
         readonly delete?: never;

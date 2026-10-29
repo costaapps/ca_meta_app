@@ -213,7 +213,8 @@ paths:
       summary: Request a sign-in link
       description: Public and rate-limited. The response is uniform for known and unknown identities. The
         server sends only to an already invited identity and does not create a membership. No
-        address is reflected in the response.
+        address or delivery status is reflected in the response. Email enqueue is deduplicated by the
+        rate-limit bucket and request fingerprint.
       security: []
       parameters:
         - $ref: "#/components/parameters/Origin"
@@ -251,9 +252,12 @@ paths:
         "429": *a7
         "503": *a8
         default: *a9
-      x-external-effect: May enqueue an email to an already invited identity.
+      x-external-effect: May enqueue one email delivery to an already invited identity. The enqueue is
+        deduplicated by the rate-limit bucket and request fingerprint; no membership is created.
       x-idempotency-scope: Rate-limit bucket plus request fingerprint; no membership side effect.
-      x-retry-policy: Uniform 202 response. Delivery state is not disclosed.
+      x-retry-policy: At most one automatic email delivery attempt and zero automatic retries or resends.
+        A new explicit user request is rate-limited and receives the same uniform response; delivery
+        outcome is not disclosed. Provider delivery receipts/idempotency are Not confirmed.
   /api/v1/auth/magic-links/consume:
     post:
       operationId: consumeMagicLink
@@ -936,8 +940,10 @@ paths:
       tags:
         - Connections
       summary: Start reauthorization without prematurely revoking the current grant
-      description: Creates a new onboarding session for the selected connection. The prior grant remains
-        usable while verified and eligible under the current policy; grant rotation is explicit.
+      description: Creates a new local onboarding session for the selected connection. Provider
+        authorization starts only after the user follows its launch URL; this request changes no provider
+        state. The prior grant remains usable while verified and eligible under current policy; rotation
+        is explicit.
       security: *a10
       parameters: *a23
       responses:
@@ -967,9 +973,12 @@ paths:
         "429": *a19
         "503": *a20
         default: *a21
-      x-external-effect: Starts provider authorization and follow-up grant reconciliation.
+      x-external-effect: Creates local onboarding and launch state; provider authorization and follow-up
+        grant reconciliation occur in later user/callback steps.
       x-idempotency-scope: tenant + operation + Idempotency-Key and request payload hash.
-      x-retry-policy: A prior grant is not discarded on an ambiguous reauthorization outcome.
+      x-retry-policy: This local creation may be retried only with the same Idempotency-Key and body, which
+        returns the recorded job. Provider authorization/callback are separate single-use steps; never
+        discard the prior grant on an ambiguous result.
   /api/v1/assets:
     get:
       operationId: listAssets

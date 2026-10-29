@@ -333,13 +333,16 @@ test('proposed payload and retry bounds are explicit and UNKNOWN external writes
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.maxAutomaticRetries, 0);
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.onAmbiguousOutcome, 'UNKNOWN');
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.messageSend, 'no automatic retry');
-  for (const id of ['disconnectConnection', 'submitProviderAuthorizationCode', 'sendReply', 'createTemplate', 'actOnNotification']) {
+  for (const id of ['requestMagicLink', 'disconnectConnection', 'submitProviderAuthorizationCode', 'sendReply', 'createTemplate', 'actOnNotification']) {
     const operation = operationList().find(({ operation: candidate }) => candidate.operationId === id)?.operation;
     assert.ok(operation, `missing externally visible operation ${id}`);
     const policy = operation['x-retry-policy'].toLowerCase();
     assert.match(policy, /one automatic|at most one automatic/, `${id} includes one initial automatic attempt`);
     assert.match(policy, /zero automatic retries|no automatic retry|do not automatically retry/, `${id} forbids automatic retries`);
   }
+  const reauthorization = operationList().find(({ operation }) => operation.operationId === 'createReauthorization').operation;
+  assert.match(reauthorization.description, /changes no provider state/i);
+  assert.match(reauthorization['x-retry-policy'], /same Idempotency-Key and body/i);
   const sendReply = operationList().find(({ operation }) => operation.operationId === 'sendReply').operation;
   assert.match(sendReply['x-retry-policy'], /UNKNOWN/);
   assert.match(sendReply['x-retry-policy'], /No blind retry/);
