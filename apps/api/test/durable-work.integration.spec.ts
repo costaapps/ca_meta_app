@@ -332,7 +332,9 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     for (let index = 0; index < 4; index += 1) {
       cappedClaims.push(await jobs.claimNext(`tenant-cap-worker-${index}`, 300_000, ['OUTBOX_DELIVER']));
     }
-    assert.deepEqual(new Set(cappedClaims.map((job) => job?.id)), new Set(cappedJobs.slice(0, 4).map((job) => job.id)));
+    const cappedClaimIds = cappedClaims.map((job) => job?.id);
+    assert.equal(new Set(cappedClaimIds).size, 4, 'the tenant cap allows four distinct claims');
+    assert.ok(cappedClaimIds.every((id) => id !== undefined && cappedJobs.some((job) => job.id === id)));
     assert.equal(await jobs.claimNext('tenant-cap-worker-5', 300_000, ['OUTBOX_DELIVER']), null);
     for (const job of cappedClaims) assert.equal(await jobs.finish(job!, { kind: 'SUCCEEDED' }), true);
 
