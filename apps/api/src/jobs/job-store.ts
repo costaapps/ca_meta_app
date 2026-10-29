@@ -549,9 +549,9 @@ export class DurableJobStore implements JobStore {
         if (tenants.length !== 1) return;
         const rows = await manager.query(
           `SELECT id, job_type, payload_json, attempt FROM ca_meta_jobs
-           WHERE id = ? AND status = 'RUNNING' AND effect_mode = 'AMBIGUOUS'
+           WHERE id = ? AND tenant_id = ? AND status = 'RUNNING' AND effect_mode = 'AMBIGUOUS'
              AND lease_expires_at <= UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE SKIP LOCKED`,
-          [stale.id],
+          [stale.id, stale.tenant_id],
         ) as Array<{ id: string; job_type: string; payload_json: string | JobPayload; attempt: number | string }>;
         const row = rows[0];
         if (!row) return;
@@ -560,8 +560,8 @@ export class DurableJobStore implements JobStore {
            SET status = 'UNKNOWN', lease_owner = NULL, claim_token = NULL, lease_expires_at = NULL,
                last_safe_error_code = 'LEASE_EXPIRED', last_safe_error_action = 'CHECK_STATUS',
                completed_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6)
-           WHERE id = ?`,
-          [row.id],
+           WHERE id = ? AND tenant_id = ?`,
+          [row.id, stale.tenant_id],
         );
         if (row.job_type === 'OUTBOX_DELIVER') {
           const payload = parseJobPayload('OUTBOX_DELIVER', parsePayload(row.payload_json));
