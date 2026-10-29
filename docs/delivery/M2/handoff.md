@@ -9,7 +9,9 @@
 
 ## Current stage
 
-M2.01/#20 is accepted in the milestone branch. Package PR #95 head `957d00dfbf0113a41a5642282baf293532b29648` was squash-integrated as `45d32ca7f6b4ad004b52d6f675644139e17c10ca`. GitHub checks `desktop-candidate`, baseline, plan, and orchestrator succeeded; structure was skipped by its branch condition. Its local matrix and independent reviews are recorded in `progress.md`; the issue stays open until the consolidated PR is accepted in develop. The current first eligible package is M2.02/#21, whose prerequisites are integrated.
+M2.01/#20 is accepted in the milestone branch. Package PR #95 head `957d00dfbf0113a41a5642282baf293532b29648` was squash-integrated as `45d32ca7f6b4ad004b52d6f675644139e17c10ca`. GitHub checks `desktop-candidate`, baseline, plan, and orchestrator succeeded; structure was skipped by its branch condition. Its local matrix and independent reviews are recorded in `progress.md`; the issue stays open until the consolidated PR is accepted in develop.
+
+M2.02/#21 package PR #96 head `868634a7749fa8ba3eb229670fd4384b60f87650` was squash-integrated as `398ab42cd00b4fc181f9c49e7b4eebd6e48f88a9`. `orchestrator` and `desktop-candidate` succeeded; functional/security reviews and isolated validation passed. The issue stays open until the consolidated PR is accepted in develop. M2.03/#22 and M2.04/#23 are now the first eligible packages and may proceed in parallel.
 
 Historical M2.02/#21 checkpoint, superseded by the current P1 follow-up below: source candidate 5283cf85e015a67f430bb2ea8a7720da1fab7d91 was locally committed on desktop/m2-02, based on 0812c20ba125071ee6351de7687a5302b83339bd. It fixed the earlier security review finding where a response close could release the drain lease while async handler work continued. The final implementation and evidence are recorded below.
 
@@ -32,7 +34,7 @@ Final checks on the code snapshot 05a837d96593999b14d8fdf9c4292d95d2aa237e:
 - npm audit --workspace=@ca-meta/api --omit=dev — 0 production vulnerabilities; package lock unchanged. Isolated npm ci reported 2 development advisories (1 moderate, 1 high).
 - git diff --check — exit 0.
 
-The Windows skips are specifically covered on Linux. Independent functional review, security review, and isolated validation all PASS on package head `e5c6f8ab744acaf6754bf267b74aa2021ffc6f94`; implementation is code commit `05a837d96593999b14d8fdf9c4292d95d2aa237e`, and the remaining package-head delta is documentation-only. The package is ready to push and open as a PR to `desktop/milestone-m2`; no push or PR exists yet. Keep #21 open until the consolidated PR is accepted in develop.
+The Windows skips are specifically covered on Linux. Independent functional review, security review, and isolated validation all PASS on package head `e5c6f8ab744acaf6754bf267b74aa2021ffc6f94`; implementation is code commit `05a837d96593999b14d8fdf9c4292d95d2aa237e`, and the remaining package-head delta is documentation-only. Package PR #96 was squash-integrated as `398ab42cd00b4fc181f9c49e7b4eebd6e48f88a9` into `desktop/milestone-m2`. Keep #21 open until the consolidated PR is accepted in develop.
 
 Non-blocking advisories and owners: direct clients can intentionally reuse a valid UUID v4 `X-Request-Id` and create ambiguous log grouping; M2.04 must resolve the trust/correlation policy before business routes. `ORIGIN_NOT_ALLOWED` currently represents a rejected Host although M1.07 defines it for Origin/Fetch Metadata; generic HTTP 500 currently uses retryable `DEPENDENCY_UNAVAILABLE`. M2.04 must align both with the error catalog/OpenAPI and update consumers/tests in the same reviewed contract scope. The request drain has no deadline and can wait until an external forced kill; M2.06/M2.07 must align handler duration limits and the container stop grace period. No M2.02 business route, Meta effect, production credential, migration, or staging operation is present or claimed.
 ## Environment and limits
