@@ -39,7 +39,7 @@ Retomar lendo o handoff e verificando GitHub/Git atuais. Não executar instalaç
 
 ## Regra fundamental para limite de tokens excedido
 
-Somente uma mensagem de erro explícita informando que o limite de tokens foi excedido dispara esta recuperação: registrar a etapa exata e os gates concluídos no handoff, preservar arquivos e commits, iniciar um timer de 45 minutos e, ao terminar, retomar do ponto registrado. Repetir somente os gates afetados e preservar evidências ainda válidas para o mesmo SHA/ambiente. Compactação de contexto, timeout, erro genérico, falha de ferramenta/transporte ou outro rate limit — inclusive HTTP 429 ou intervalo diferente — não dispara o timer de 45 minutos; seguir o intervalo específico do erro de rate limit.
+Somente uma mensagem explícita de erro informando que o limite de tokens foi excedido dispara esta recuperação. Registrar no handoff a etapa exata e os gates concluídos; preservar arquivos e commits; iniciar um timer de 45 minutos; ao terminar, retomar do handoff e tentar novamente a etapa interrompida. Reavaliar o estado real, repetir somente os gates afetados e preservar evidências ainda válidas para o mesmo SHA/ambiente. Compactação de contexto, timeout, erro genérico, falha de ferramenta/transporte, HTTP 429 ou qualquer outro rate limit não dispara o timer de 45 minutos; seguir o intervalo específico informado para outro rate limit.
 
 ## Pedido externo agrupado
 

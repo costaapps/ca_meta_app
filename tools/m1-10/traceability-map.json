@@ -77,7 +77,7 @@
     "test_path": "tools/m1-10/test_governance.py",
     "package_pr": "https://github.com/costaapps/ca_meta_app/pull/93",
     "release_evidence": "NOT_RELEASED",
-    "delivery_status": "IN_PROGRESS"
+    "delivery_status": "ACCEPTED_ON_MILESTONE"
   },
   "M2.01": {"spec_path": "NOT_YET_AUTHORED", "contract_path": "NOT_YET_AUTHORED", "test_path": "NOT_YET_AUTHORED", "package_pr": "NOT_CREATED", "release_evidence": "NOT_RELEASED", "delivery_status": "PLANNED"},
   "M2.02": {"spec_path": "NOT_YET_AUTHORED", "contract_path": "NOT_YET_AUTHORED", "test_path": "NOT_YET_AUTHORED", "package_pr": "NOT_CREATED", "release_evidence": "NOT_RELEASED", "delivery_status": "PLANNED"},

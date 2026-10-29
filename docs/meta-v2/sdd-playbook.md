@@ -47,7 +47,7 @@ For M1.07, `docs/meta-v2/contracts/openapi.yaml` is the canonical proposed HTTP 
 
 ## Requirement traceability
 
-`traceability.csv` carries every current acceptance-matrix requirement through issue, spec, contract, test, package PR, and release evidence. `matrix_evidence_status` preserves the planning matrix value; `delivery_status` records the observed package state separately. M1.01–M1.09 have verified package PRs merged into the milestone branch; release remains `NOT_RELEASED` until final M1 acceptance and integration into `develop`. M1.10 is `IN_PROGRESS`; package PR [#93](https://github.com/costaapps/ca_meta_app/pull/93) is open as a draft and awaits independent validation, functional/security reviews, and GitHub checks. An open PR does not mean milestone acceptance. M2–M6 remain `PLANNED`. Unstarted packages use explicit `NOT_YET_AUTHORED`/`NOT_CREATED` markers; never fabricate a spec, test, PR, tag, release, owner, or date.
+`traceability.csv` carries every current acceptance-matrix requirement through issue, spec, contract, test, package PR, and release evidence. `matrix_evidence_status` preserves the planning matrix value; `delivery_status` records the observed package state separately. M1.01–M1.10 have verified package PRs merged into the milestone branch; final M1 acceptance and integration into `develop` remain pending human acceptance, so release evidence stays `NOT_RELEASED`. M1.10 package PR [#93](https://github.com/costaapps/ca_meta_app/pull/93) was squash-integrated at `ddb92588855f5128f6a173291c581a547e7b5317`. M2–M6 remain `PLANNED`. Unstarted packages use explicit `NOT_YET_AUTHORED`/`NOT_CREATED` markers; never fabricate a spec, test, PR, tag, release, owner, or date.
 
 ## Security and change checklist
 

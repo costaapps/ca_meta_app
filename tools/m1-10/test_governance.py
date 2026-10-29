@@ -127,11 +127,11 @@ class TraceabilityTests(unittest.TestCase):
         with self.assertRaisesRegex(GovernanceError, "Planned package cannot claim"):
             self.check(row)
 
-    def test_current_m1_10_pr_is_tracked_as_in_progress(self) -> None:
+    def test_current_m1_10_pr_is_accepted_on_milestone(self) -> None:
         package_map = read_json(HERE / "traceability-map.json")
         mapping = package_map["M1.10"]
         self.assertEqual(mapping["package_pr"], "https://github.com/costaapps/ca_meta_app/pull/93")
-        self.assertEqual(mapping["delivery_status"], "IN_PROGRESS")
+        self.assertEqual(mapping["delivery_status"], "ACCEPTED_ON_MILESTONE")
         self.assertEqual(mapping["release_evidence"], "NOT_RELEASED")
 
     def test_missing_issue_spec_identity_fails(self) -> None:
