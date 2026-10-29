@@ -2,9 +2,11 @@
 
 `docs/meta-v2/contracts/` is the canonical HTTP and event contract. This workspace generates its
 public OpenAPI types, stable error-code/action/policy constants, and runtime JSON Schema validators
-from that source. It copies the OpenAPI, error catalog, and M1.07 inbox/outbox schemas for package
-consumers. Never add server-only persistence models, credentials, or internal service authorization
-types to this public surface.
+from that source. The package's `openapi.yaml` is a deterministic public export: internal-only
+operations, request schemas, and security schemes remain in the canonical source but are omitted
+from the package artifact. The error catalog and M1.07 inbox/outbox schemas are copied from their
+canonical sources. Never add server-only persistence models, credentials, or internal service
+authorization types to this public surface.
 
 ## Setup and checks
 

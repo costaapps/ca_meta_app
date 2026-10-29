@@ -16,7 +16,6 @@ const outputRoot = outputArgument
 const checkOnly = process.argv.includes('--check');
 
 const sources = new Map([
-  ['openapi.yaml', 'openapi.yaml'],
   ['error-catalog.md', 'error-catalog.md'],
   ['events/inbox-event.schema.json', 'events/inbox-event.schema.json'],
   ['events/outbox-event.schema.json', 'events/outbox-event.schema.json'],
@@ -27,17 +26,29 @@ for (const [target, source] of sources) {
   artifacts.set(target, await readFile(path.join(contractRoot, source), 'utf8'));
 }
 
-const document = YAML.parse(artifacts.get('openapi.yaml'));
+const document = YAML.parse(await readFile(contractPath, 'utf8'));
 const publicDocument = structuredClone(document);
 const httpMethods = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
 for (const [route, item] of Object.entries(publicDocument.paths ?? {})) {
   for (const method of Object.keys(item)) {
-    if (httpMethods.has(method) && item[method].tags?.includes('Internal Operations')) delete item[method];
+    if (httpMethods.has(method) && (route.startsWith('/internal/') || item[method].tags?.includes('Internal Operations'))) {
+      delete item[method];
+    }
   }
   if (!Object.keys(item).some((key) => httpMethods.has(key))) delete publicDocument.paths[route];
 }
-delete publicDocument.components.securitySchemes.internalServiceAuth;
-delete publicDocument.components.schemas.InternalAssetOperationRequest;
+for (const name of Object.keys(publicDocument.components.securitySchemes ?? {})) {
+  if (/^internal/i.test(name)) delete publicDocument.components.securitySchemes[name];
+}
+for (const name of Object.keys(publicDocument.components.schemas ?? {})) {
+  if (/^Internal/.test(name)) delete publicDocument.components.schemas[name];
+}
+
+const publicOpenApiHeader = [
+  '# Generated public OpenAPI from docs/meta-v2/contracts/openapi.yaml.',
+  '# Internal-only operations, schemas, and security schemes are excluded.',
+].join('\n');
+artifacts.set('openapi.yaml', `${publicOpenApiHeader}\n${YAML.stringify(publicDocument)}`);
 
 const generatedTypes = await openapiTS(publicDocument, { cwd: path.dirname(contractPath), immutable: true });
 const generatedSource = typeof generatedTypes === 'string' ? generatedTypes : astToString(generatedTypes);

@@ -16,9 +16,8 @@ const packageRoot = path.join(root, 'packages/contracts');
 const canonicalRoot = path.join(root, 'docs/meta-v2/contracts');
 const contract = YAML.parse(await readFile(path.join(canonicalRoot, 'openapi.yaml'), 'utf8'));
 
-test('published contract copies match canonical OpenAPI, catalog and event schemas', async () => {
+test('published catalog and event schema copies match canonical sources', async () => {
   for (const file of [
-    'openapi.yaml',
     'error-catalog.md',
     'events/inbox-event.schema.json',
     'events/outbox-event.schema.json',
