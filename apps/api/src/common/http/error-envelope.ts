@@ -2,6 +2,7 @@ export type ErrorCode =
   | 'AUTH_REQUIRED'
   | 'ACCESS_DENIED'
   | 'RESOURCE_NOT_AVAILABLE'
+  | 'ORIGIN_NOT_ALLOWED'
   | 'VALIDATION_FAILED'
   | 'PAYLOAD_TOO_LARGE'
   | 'DEPENDENCY_UNAVAILABLE';
@@ -12,7 +13,8 @@ export type ErrorAction =
   | 'CONTACT_ADMIN'
   | 'REFRESH'
   | 'REDUCE_REQUEST'
-  | 'RELOAD_PORTAL';
+  | 'RELOAD_PORTAL'
+  | 'CHECK_STATUS';
 
 export interface ErrorEnvelope {
   readonly code: ErrorCode;

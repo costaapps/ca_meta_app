@@ -42,7 +42,7 @@ export class SafeExceptionFilter implements ExceptionFilter {
     code: 'AUTH_REQUIRED' | 'ACCESS_DENIED' | 'RESOURCE_NOT_AVAILABLE' | 'VALIDATION_FAILED' | 'PAYLOAD_TOO_LARGE' | 'DEPENDENCY_UNAVAILABLE';
     safeMessage: string;
     retryable: boolean;
-    action: 'SIGN_IN' | 'CONTACT_ADMIN' | 'REFRESH' | 'FIX_REQUEST' | 'REDUCE_REQUEST' | 'RELOAD_PORTAL';
+    action: 'SIGN_IN' | 'CONTACT_ADMIN' | 'REFRESH' | 'FIX_REQUEST' | 'REDUCE_REQUEST' | 'RELOAD_PORTAL' | 'CHECK_STATUS';
   } {
     if (status === HttpStatus.UNAUTHORIZED) {
       return { code: 'AUTH_REQUIRED', safeMessage: 'Authentication is required.', retryable: false, action: 'SIGN_IN' };
@@ -60,7 +60,7 @@ export class SafeExceptionFilter implements ExceptionFilter {
       return { code: 'PAYLOAD_TOO_LARGE', safeMessage: 'The submitted content is too large.', retryable: false, action: 'REDUCE_REQUEST' };
     }
     if (status === HttpStatus.SERVICE_UNAVAILABLE) {
-      return { code: 'DEPENDENCY_UNAVAILABLE', safeMessage: 'The service is temporarily unavailable.', retryable: true, action: 'RELOAD_PORTAL' };
+      return { code: 'DEPENDENCY_UNAVAILABLE', safeMessage: 'The operation could not be confirmed yet.', retryable: true, action: 'CHECK_STATUS' };
     }
     return { code: 'DEPENDENCY_UNAVAILABLE', safeMessage: 'The service is temporarily unavailable.', retryable: true, action: 'RELOAD_PORTAL' };
   }

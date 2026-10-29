@@ -5,7 +5,11 @@ import { IsString, MaxLength } from 'class-validator';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
+import { request as httpRequest } from 'node:http';
+import { fork } from 'node:child_process';
+import { join } from 'node:path';
 import { ApiModule } from '../src/app.module.js';
+import { GracefulExpressAdapter } from '../src/http/graceful-express-adapter.js';
 import { DATABASE_READINESS_PORT, type DatabaseReadinessPort } from '../src/database/database-readiness.port.js';
 import type { ApiEnvironment } from '../src/config/environment.js';
 import { STRUCTURED_LOGGER, type StructuredLogRecord, type StructuredLogger } from '../src/common/http/request-context.js';
@@ -49,8 +53,11 @@ class FakeMonotonicClock implements MonotonicClock {
   private tick = 0;
 
   now(): number {
-    this.tick += 7;
     return this.tick;
+  }
+
+  advance(milliseconds: number): void {
+    this.tick += milliseconds;
   }
 }
 
@@ -71,9 +78,30 @@ class CapturingLogger implements StructuredLogger {
 class FakeDatabaseReadiness implements DatabaseReadinessPort {
   available = false;
   checks = 0;
+  private nextGate: {
+    readonly started: Promise<void>;
+    readonly signalStarted: () => void;
+    readonly waiting: Promise<void>;
+    readonly release: () => void;
+  } | undefined;
+
+  blockNextCheck(): { readonly started: Promise<void>; readonly release: () => void } {
+    let signalStarted!: () => void;
+    const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    this.nextGate = { started, signalStarted, waiting, release };
+    return { started, release };
+  }
 
   async check(): Promise<void> {
     this.checks += 1;
+    const gate = this.nextGate;
+    if (gate) {
+      this.nextGate = undefined;
+      gate.signalStarted();
+      await gate.waiting;
+    }
     if (!this.available) throw new Error('synthetic database diagnostic secret');
   }
 }
@@ -112,6 +140,7 @@ const TEST_ENVIRONMENT: ApiEnvironment = {
   nodeEnv: 'test',
   port: 0,
   bindAddress: '127.0.0.1',
+  allowedHosts: ['127.0.0.1', 'localhost'],
   trustedProxyCidrs: false,
   database: {
     host: '127.0.0.1',
@@ -122,6 +151,64 @@ const TEST_ENVIRONMENT: ApiEnvironment = {
     connectTimeoutMs: 250,
   },
 };
+
+function rawGet(
+  url: string,
+  host: string | undefined,
+): Promise<{ readonly status: number; readonly headers: import('node:http').IncomingHttpHeaders; readonly body: string }> {
+  const target = new URL(url);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      hostname: target.hostname,
+      port: Number(target.port),
+      path: target.pathname,
+      method: 'GET',
+      setHost: false,
+      headers: host === undefined ? { connection: 'close' } : { host, connection: 'close' },
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      response.on('end', () => resolve({
+        status: response.statusCode ?? 0,
+        headers: response.headers,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
+    });
+    request.once('error', reject);
+    request.end();
+  });
+}
+
+function waitForChildMessage(
+  child: import('node:child_process').ChildProcess,
+  type: string,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const finish = (error?: Error, entry?: Record<string, unknown>): void => {
+      clearTimeout(timeout);
+      child.off('message', onMessage);
+      child.off('exit', onExit);
+      if (error) reject(error);
+      else resolve(entry ?? {});
+    };
+    const timeout = setTimeout(
+      () => finish(new Error('Timed out waiting for child message ' + type + '.')),
+      10_000,
+    );
+    const onMessage = (message: unknown): void => {
+      if (typeof message === 'object' && message !== null && 'type' in message) {
+        const entry = message as Record<string, unknown>;
+        if (entry.type === type) finish(undefined, entry);
+        else if (entry.type === 'startup-failed') finish(new Error('Signal-drain child failed to start.'));
+      }
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      finish(new Error('Signal-drain child exited before ' + type + ': ' + (code ?? signal) + '.'));
+    };
+    child.on('message', onMessage);
+    child.once('exit', onExit);
+  });
+}
 
 async function startBoundaryApp(): Promise<{
   readonly baseUrl: string;
@@ -148,7 +235,7 @@ async function startBoundaryApp(): Promise<{
     .useValue(clock)
     .compile();
 
-  const app = module.createNestApplication({ bodyParser: false });
+  const app = module.createNestApplication(new GracefulExpressAdapter(), { bodyParser: false });
   configureHttpBoundaries(app, TEST_ENVIRONMENT);
   await app.init();
   await app.listen(0, TEST_ENVIRONMENT.bindAddress);
@@ -162,6 +249,7 @@ test('configuration validation requires typed fields, reports names only, and re
     NODE_ENV: 'test',
     API_PORT: '0',
     API_BIND_ADDRESS: '127.0.0.1',
+    API_ALLOWED_HOSTS: '127.0.0.1,localhost',
     API_TRUSTED_PROXIES: 'none',
     API_DATABASE_HOST: '127.0.0.1',
     API_DATABASE_PORT: '3306',
@@ -176,7 +264,9 @@ test('configuration validation requires typed fields, reports names only, and re
     assert.equal(parsed.port, 0);
     assert.equal(parsed.database.host, '127.0.0.1');
     assert.equal(parsed.trustedProxyCidrs, false);
+    assert.deepEqual(parsed.allowedHosts, ['127.0.0.1', 'localhost']);
     assert.equal(parsed.database.password, 'synthetic-marker-value');
+    assert.equal(validateEnvironment({ ...valid, API_DATABASE_PASSWORD: '  preserved password  ' }).database.password, '  preserved password  ');
   });
 
   await t.test('reports absent and malformed field names without values', () => {
@@ -194,9 +284,16 @@ test('configuration validation requires typed fields, reports names only, and re
     );
   });
 
-  await t.test('requires a loopback DB and valid explicit proxy ranges in test', () => {
+  await t.test('requires a loopback DB, exact Host allowlist, and specific proxy ranges in test', () => {
     assert.throws(() => validateEnvironment({ ...valid, API_DATABASE_HOST: 'db.prod.example' }));
     assert.throws(() => validateEnvironment({ ...valid, API_TRUSTED_PROXIES: '0.0.0.0/99' }));
+    for (const wildcard of ['0.0.0.0/0', '::/0', '0:0:0:0:0:0:0:0/0', '::ffff:0:0/96', '0:0:0:0:0:ffff:0:0/96', '*']) {
+      assert.throws(() => validateEnvironment({ ...valid, API_TRUSTED_PROXIES: wildcard }), /API_TRUSTED_PROXIES/);
+    }
+    assert.deepEqual(validateEnvironment({ ...valid, API_TRUSTED_PROXIES: '10.12.0.0/16,2001:db8:1::/64' }).trustedProxyCidrs, ['10.12.0.0/16', '2001:db8:1::/64']);
+    assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_HOSTS: '' }), /API_ALLOWED_HOSTS/);
+    assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_HOSTS: '*.example.test' }), /API_ALLOWED_HOSTS/);
+    assert.throws(() => validateEnvironment({ ...valid, API_DATABASE_PASSWORD: '   ' }), /API_DATABASE_PASSWORD/);
   });
 });
 
@@ -216,6 +313,30 @@ test('health paths follow the canonical contract and liveness is independent of 
   assert.equal(legacyReadyAlias.status, 404);
 });
 
+test('Host validation allows exact configured hosts and rejects absent or unknown hosts', async (t) => {
+  const context = await startBoundaryApp();
+  t.after(() => context.app.close());
+  const port = new URL(context.baseUrl).port;
+
+  const valid = await rawGet(`${context.baseUrl}/health`, `LOCALHOST.:${port}`);
+  assert.equal(valid.status, 200);
+  assert.deepEqual(JSON.parse(valid.body), { status: 'ok' });
+
+  const unknown = await rawGet(`${context.baseUrl}/health`, `unconfigured.example:${port}`);
+  assert.equal(unknown.status, 400);
+  const unknownBody = JSON.parse(unknown.body) as Record<string, unknown>;
+  assert.deepEqual(unknownBody, {
+    code: 'ORIGIN_NOT_ALLOWED',
+    safeMessage: 'This request host is not allowed.',
+    requestId: unknown.headers['x-request-id'],
+    retryable: false,
+    action: 'CONTACT_ADMIN',
+  });
+
+  const absent = await rawGet(`${context.baseUrl}/health`, undefined);
+  assert.equal(absent.status, 400);
+});
+
 test('the private route is denied and request IDs are returned in headers and error envelopes', async (t) => {
   const context = await startBoundaryApp();
   t.after(() => context.app.close());
@@ -231,7 +352,7 @@ test('the private route is denied and request IDs are returned in headers and er
   assert.deepEqual(Object.keys(body).sort(), ['action', 'code', 'requestId', 'retryable', 'safeMessage']);
   const requestLog = context.logger.records.find((record) => record.event === 'http.request');
   assert.equal(requestLog?.requestId, response.headers.get('x-request-id'));
-  assert.equal(requestLog?.durationMs, 7);
+  assert.equal(requestLog?.durationMs, 0);
 });
 
 test('strict DTO validation rejects extra fields, malformed JSON, and oversized bodies safely', async (t) => {
@@ -292,21 +413,73 @@ test('internal errors are sanitized and logs correlate without raw errors or req
   assert.ok(context.logger.records.some((record) => record.requestId === response.headers.get('x-request-id')));
 });
 
-test('readiness reports only status while MariaDB is down and recovers when it is up', async (t) => {
+test('readiness uses the canonical Unavailable ErrorEnvelope while MariaDB is down and recovers when it is up', async (t) => {
   const context = await startBoundaryApp();
   t.after(() => context.app.close());
 
-  const down = await fetch(`${context.baseUrl}/ready`);
+  const down = await fetch(context.baseUrl + '/ready');
   assert.equal(down.status, 503);
-  assert.deepEqual(await down.json(), { status: 'unavailable' });
+  const downBody = await down.json() as Record<string, unknown>;
+  assert.deepEqual(Object.keys(downBody).sort(), ['action', 'code', 'requestId', 'retryable', 'safeMessage']);
+  assert.deepEqual(downBody, {
+    code: 'DEPENDENCY_UNAVAILABLE',
+    safeMessage: 'The operation could not be confirmed yet.',
+    requestId: down.headers.get('x-request-id'),
+    retryable: true,
+    action: 'CHECK_STATUS',
+  });
   assert.equal(context.database.checks, 1);
 
   context.database.available = true;
-  const up = await fetch(`${context.baseUrl}/ready`);
+  context.clock.advance(250);
+  const up = await fetch(context.baseUrl + '/ready');
   assert.equal(up.status, 200);
   assert.deepEqual(await up.json(), { status: 'ok' });
   assert.equal(context.database.checks, 2);
   assert.doesNotMatch(JSON.stringify(context.logger.records), /synthetic database diagnostic/);
+});
+
+test('readiness coalesces a simultaneous burst and recovers after its short cache expires', async (t) => {
+  const context = await startBoundaryApp();
+  t.after(() => context.app.close());
+
+  const gate = context.database.blockNextCheck();
+  const requests = Array.from({ length: 16 }, () => fetch(`${context.baseUrl}/ready`));
+  await gate.started;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(context.database.checks, 1);
+  gate.release();
+
+  const responses = await Promise.all(requests);
+  assert.ok(responses.every((response) => response.status === 503));
+  for (const response of responses) {
+    const body = await response.json() as Record<string, unknown>;
+    assert.equal(body.code, 'DEPENDENCY_UNAVAILABLE');
+    assert.equal(body.action, 'CHECK_STATUS');
+    assert.equal(body.requestId, response.headers.get('x-request-id'));
+  }
+  assert.equal(context.database.checks, 1);
+
+  context.database.available = true;
+  context.clock.advance(250);
+  const recovered = await fetch(`${context.baseUrl}/ready`);
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(await recovered.json(), { status: 'ok' });
+  assert.equal(context.database.checks, 2);
+});
+
+test('MariaDB ping deadline destroys a stalled probe connection', async () => {
+  const { MysqlReadinessAdapter } = await import('../src/database/mysql-readiness.adapter.js');
+  let destroyCount = 0;
+  const adapter = new MysqlReadinessAdapter(
+    { ...TEST_ENVIRONMENT.database, connectTimeoutMs: 25 },
+    async () => ({
+      ping: () => new Promise<void>(() => undefined),
+      destroy: () => { destroyCount += 1; },
+    }),
+  );
+  await assert.rejects(adapter.check(), /Readiness ping deadline exceeded/);
+  assert.equal(destroyCount, 1);
 });
 
 test('graceful close drains an in-flight request and stops accepting new requests', async (t) => {
@@ -327,4 +500,80 @@ test('graceful close drains an in-flight request and stops accepting new request
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { completed: true });
   await closing;
+});
+
+
+test('graceful Express adapter closes safely before the server starts listening', async () => {
+  const adapter = new GracefulExpressAdapter();
+  await adapter.close();
+});
+
+async function assertSubprocessShutdownDrain(connection: 'close' | 'keep-alive'): Promise<void> {
+  const child = fork(join(__dirname, 'fixtures', 'sigterm-drain-child.js'), [], {
+    execPath: process.execPath,
+    execArgv: [],
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  });
+  let stderr = '';
+  child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+  let childExited: { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined;
+  const exited = new Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null }>((resolve) => {
+    child.once('exit', (code, signal) => {
+      childExited = { code, signal };
+      resolve(childExited);
+    });
+  });
+
+  try {
+    const listening = await waitForChildMessage(child, 'listening');
+    const port = Number(listening.port);
+    const response = fetch(
+      'http://127.0.0.1:' + port + '/api/v1/probe/in-flight',
+      { headers: { host: '127.0.0.1:' + port, connection } },
+    );
+    await waitForChildMessage(child, 'request-started');
+
+    child.kill('SIGTERM');
+    const signalMessage = await waitForChildMessage(child, 'signal-received');
+    assert.equal(signalMessage.signal, 'SIGTERM');
+    assert.equal(childExited, undefined, 'the child must remain alive while the handler is pending');
+    const rejectedWhileDraining = await rawGet(
+      'http://127.0.0.1:' + port + '/api/v1/probe/private',
+      '127.0.0.1:' + port,
+    );
+    assert.equal(rejectedWhileDraining.status, 503);
+    const rejectedBody = JSON.parse(rejectedWhileDraining.body) as Record<string, unknown>;
+    assert.equal(rejectedBody.code, 'DEPENDENCY_UNAVAILABLE');
+    assert.equal(rejectedBody.action, 'CHECK_STATUS');
+    assert.equal(rejectedBody.requestId, rejectedWhileDraining.headers['x-request-id']);
+    child.send({ type: 'release' });
+    await waitForChildMessage(child, 'release-received');
+    await waitForChildMessage(child, 'handler-released');
+    await waitForChildMessage(child, 'response-finished');
+
+    const completed = await response;
+    assert.equal(completed.status, 200);
+    assert.deepEqual(await completed.json(), { started: true, completed: true });
+    child.disconnect();
+    const result = await exited;
+    assert.equal(result.code, 0, stderr);
+  } finally {
+    if (child.connected) {
+      try { child.send({ type: 'release' }); } catch {}
+      child.disconnect();
+    }
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    }
+  }
+}
+
+test('SIGTERM in a subprocess drains the response fully with both connection policies', {
+  skip: process.platform === 'win32'
+    ? 'Windows Node 24 SIGINT raises ECONNRESET for this child-process shutdown; run the POSIX SIGTERM test with tools/m2-02/run-sigterm-drain-linux.ps1.'
+    : false,
+}, async () => {
+  await assertSubprocessShutdownDrain('close');
+  await assertSubprocessShutdownDrain('keep-alive');
 });

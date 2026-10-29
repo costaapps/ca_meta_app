@@ -27,7 +27,7 @@ $composeStarted = $false
 $exitCode = 1
 $savedEnvironment = @{}
 $environmentNames = @(
-  'NODE_ENV', 'API_PORT', 'API_BIND_ADDRESS', 'API_TRUSTED_PROXIES',
+  'NODE_ENV', 'API_PORT', 'API_BIND_ADDRESS', 'API_ALLOWED_HOSTS', 'API_TRUSTED_PROXIES',
   'API_DATABASE_HOST', 'API_DATABASE_PORT', 'API_DATABASE_NAME', 'API_DATABASE_USER',
   'API_DATABASE_PASSWORD', 'API_DATABASE_CONNECT_TIMEOUT_MS',
   'M2_02_DB_ROOT_PASSWORD', 'M2_02_DB_NAME', 'M2_02_DB_USER', 'M2_02_DB_PASSWORD',
@@ -47,8 +47,12 @@ function Get-ReadyResponse([string] $Url) {
     $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
     $status = [int] $response.StatusCode
     $parsed = $body | ConvertFrom-Json -ErrorAction Stop
-    $bodyStatus = if ($null -ne $parsed.status) { [string] $parsed.status } else { 'missing' }
-    return @{ Kind = 'http'; Status = $status; BodyStatus = $bodyStatus; Body = $parsed }
+    $bodyStatus = 'missing'
+    $bodyCode = 'missing'
+    if ($null -ne $parsed.PSObject.Properties['status']) { $bodyStatus = [string] $parsed.status }
+    if ($null -ne $parsed.PSObject.Properties['code']) { $bodyCode = [string] $parsed.code }
+    $requestId = $response.Headers.GetValues('X-Request-Id') | Select-Object -First 1
+    return @{ Kind = 'http'; Status = $status; BodyStatus = $bodyStatus; BodyCode = $bodyCode; Body = $parsed; RequestId = [string] $requestId }
   }
   catch [System.Threading.Tasks.TaskCanceledException] {
     return @{ Kind = 'timeout' }
@@ -71,15 +75,27 @@ function Wait-Ready([string] $Url, [int] $ExpectedStatus, [int] $TimeoutSeconds)
   while ([DateTime]::UtcNow -lt $deadline) {
     $result = Get-ReadyResponse $Url
     if ($result.Kind -eq 'http') {
-      $lastStatus = "HTTP $($result.Status) body.status=$($result.BodyStatus)"
+      $lastStatus = "HTTP $($result.Status) body.status=$($result.BodyStatus) body.code=$($result.BodyCode)"
     }
     else {
       $lastStatus = [string] $result.Kind
     }
     if ($result.Kind -eq 'http' -and $result.Status -eq $ExpectedStatus) {
-      if ($ExpectedStatus -eq 200 -and $result.BodyStatus -ne 'ok') { throw 'Readiness body mismatch.' }
-      if ($ExpectedStatus -eq 503 -and $result.BodyStatus -ne 'unavailable') { throw 'Readiness body mismatch.' }
-      if (@($result.Body.PSObject.Properties.Name).Count -ne 1) { throw 'Readiness exposed unexpected fields.' }
+      if ($ExpectedStatus -eq 200) {
+        if ($result.BodyStatus -ne 'ok' -or @($result.Body.PSObject.Properties.Name).Count -ne 1) { throw 'Readiness success body mismatch.' }
+      }
+      if ($ExpectedStatus -eq 503) {
+        $properties = @($result.Body.PSObject.Properties.Name | Sort-Object)
+        if (($properties -join ',') -ne 'action,code,requestId,retryable,safeMessage' -or
+            $result.Body.code -ne 'DEPENDENCY_UNAVAILABLE' -or
+            $result.Body.safeMessage -ne 'The operation could not be confirmed yet.' -or
+            $result.Body.retryable -ne $true -or
+            $result.Body.action -ne 'CHECK_STATUS' -or
+            $result.Body.requestId -ne $result.RequestId -or
+            $result.Body.requestId -notmatch '^[0-9a-f-]{36}$') {
+          throw 'Readiness unavailable error envelope mismatch.'
+        }
+      }
       return $lastStatus
     }
     Start-Sleep -Milliseconds 250
@@ -89,7 +105,7 @@ function Wait-Ready([string] $Url, [int] $ExpectedStatus, [int] $TimeoutSeconds)
 }
 
 function Get-DatabaseHealth {
-  $containerId = (& docker compose --project-name $projectName --file $composeFile ps --quiet db).Trim()
+  $containerId = (& docker compose --project-name $projectName --file $composeFile ps --all --quiet db).Trim()
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) { return 'missing' }
   $health = (& docker inspect --format '{{.State.Health.Status}}' $containerId).Trim()
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($health)) { return 'unknown' }
@@ -139,6 +155,7 @@ try {
   $env:NODE_ENV = 'test'
   $env:API_PORT = '0'
   $env:API_BIND_ADDRESS = '127.0.0.1'
+  $env:API_ALLOWED_HOSTS = '127.0.0.1,localhost'
   $env:API_TRUSTED_PROXIES = 'none'
   $env:API_DATABASE_HOST = '127.0.0.1'
   $env:API_DATABASE_PORT = '1'
@@ -196,7 +213,7 @@ try {
   $readyAfterRestart = Wait-Ready $readyUrl 200 30
 
   Write-Output 'M2.02 startup configuration PASS: invalid settings exited with field names only.'
-  Write-Output "M2.02 MariaDB readiness PASS: initial $readyInitially; outage $readyDuringOutage; /health 200 while DB was stopped; MariaDB health $databaseHealthAfterRestart; recovered $readyAfterRestart."
+  Write-Output "M2.02 MariaDB readiness PASS: initial $readyInitially; outage $readyDuringOutage with the canonical Unavailable ErrorEnvelope; /health 200 while DB was stopped; MariaDB health $databaseHealthAfterRestart; recovered $readyAfterRestart."
   $exitCode = 0
 }
 catch {
@@ -206,8 +223,18 @@ catch {
 finally {
   if ($null -ne $httpClient) { $httpClient.Dispose() }
   if ($null -ne $apiProcess -and -not $apiProcess.HasExited) {
-    Stop-Process -Id $apiProcess.Id -Force -ErrorAction SilentlyContinue
-    $apiProcess.WaitForExit(5000) | Out-Null
+    if ($exitCode -eq 0) {
+      $signal = if ($IsWindows) { 'SIGINT' } else { 'SIGTERM' }
+      & $NodeExe -e "process.kill($($apiProcess.Id), '$signal')"
+      if ($LASTEXITCODE -ne 0 -or -not $apiProcess.WaitForExit(10000)) {
+        Write-Error 'The API did not complete graceful shutdown after the successful readiness checks.'
+        $exitCode = 1
+      }
+    }
+    else {
+      Stop-Process -Id $apiProcess.Id -Force -ErrorAction SilentlyContinue
+      $apiProcess.WaitForExit(5000) | Out-Null
+    }
   }
   if ($composeStarted) {
     & docker compose --project-name $projectName --file $composeFile down --volumes --remove-orphans
