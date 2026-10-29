@@ -248,7 +248,8 @@ export class DurableJobStore implements JobStore {
     // A locked persistent cursor serializes each lane's turn across workers; the candidate query
     // runs only after acquiring that lock, so it cannot reuse a stale dispatch snapshot.
     for (const lane of lanePriority) {
-      const claimed = await dataSource.transaction(async (manager) => {
+      // Read-committed counts refresh after the tenant lock without waiting on heartbeat row writes.
+      const claimed = await dataSource.transaction('READ COMMITTED', async (manager) => {
         await manager.query(
           `INSERT IGNORE INTO ca_meta_job_lane_dispatch (lane, last_tenant_id, updated_at)
            VALUES (?, NULL, UTC_TIMESTAMP(6))`,
@@ -289,7 +290,7 @@ export class DurableJobStore implements JobStore {
 
         for (const candidate of candidates) {
           const tenants = await manager.query(
-            'SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE',
+            'SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE SKIP LOCKED',
             [candidate.tenant_id],
           ) as Array<{ id: string }>;
           if (tenants.length !== 1) continue;
@@ -318,21 +319,19 @@ export class DurableJobStore implements JobStore {
           if (!row) continue;
 
           const activeRows = await manager.query(
-            `SELECT id FROM ca_meta_jobs
-             WHERE tenant_id = ? AND status = 'RUNNING' AND lease_expires_at > UTC_TIMESTAMP(6)
-             LIMIT ${MAX_ACTIVE_JOBS_PER_TENANT} FOR UPDATE`,
+            `SELECT COUNT(*) AS count FROM ca_meta_jobs
+             WHERE tenant_id = ? AND status = 'RUNNING' AND lease_expires_at > UTC_TIMESTAMP(6)`,
             [candidate.tenant_id],
-          ) as Array<{ id: string }>;
-          if (activeRows.length >= MAX_ACTIVE_JOBS_PER_TENANT) continue;
+          ) as Array<{ count: string | number }>;
+          if (Number(activeRows[0]?.count ?? 0) >= MAX_ACTIVE_JOBS_PER_TENANT) continue;
 
           const resourceRows = await manager.query(
-            `SELECT id FROM ca_meta_jobs
+            `SELECT COUNT(*) AS count FROM ca_meta_jobs
              WHERE tenant_id = ? AND resource_scope_ref = ? AND status = 'RUNNING'
-               AND lease_expires_at > UTC_TIMESTAMP(6)
-             LIMIT 1 FOR UPDATE`,
+               AND lease_expires_at > UTC_TIMESTAMP(6)`,
             [candidate.tenant_id, row.resource_scope_ref],
-          ) as Array<{ id: string }>;
-          if (resourceRows.length > 0) continue;
+          ) as Array<{ count: string | number }>;
+          if (Number(resourceRows[0]?.count ?? 0) > 0) continue;
 
           const type = row.job_type;
           if (!isJobType(type)) {

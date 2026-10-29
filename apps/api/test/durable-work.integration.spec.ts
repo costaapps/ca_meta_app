@@ -8,7 +8,7 @@ import { deployMigrations } from '../src/database/migrations/migration-runner.js
 import { readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
 import { validateEnvironment } from '../src/config/environment.js';
 import { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
-import { DurableJobStore, type JobOutcome } from '../src/jobs/job-store.js';
+import { DurableJobStore, type ClaimedJob, type JobOutcome } from '../src/jobs/job-store.js';
 import { InboxService } from '../src/inbox/inbox-service.js';
 import { OutboxService } from '../src/outbox/outbox-service.js';
 import {
@@ -821,6 +821,73 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     const remainingFairnessClaim = await jobs.claimNext('fairness-race-drain', 300_000, ['INBOX_PROCESS']);
     assert.equal(remainingFairnessClaim?.id, fairnessARaceBacklog.id);
     assert.equal(await jobs.finish(remainingFairnessClaim!, { kind: 'SUCCEEDED' }), true);
+
+    // A locked tenant is skipped while the lane cursor remains held; B must claim before A unlocks.
+    await dataSource.query(
+      `UPDATE ca_meta_job_lane_dispatch SET last_tenant_id = ?, updated_at = UTC_TIMESTAMP(6)
+       WHERE lane = 'WEBHOOK_URGENT'`,
+      [tenantFairB],
+    );
+    const fairnessABlocked = await jobs.enqueue({
+      tenantId: tenantFairA, type: 'INBOX_PROCESS', idempotencyKey: 'fairness-a-locked',
+      correlationId: 'fairness-a-locked', resourceScopeRef: `fairness-a-locked-${uuid()}`, payload: inboxPayload(),
+    });
+    const fairnessBAvailable = await jobs.enqueue({
+      tenantId: tenantFairB, type: 'INBOX_PROCESS', idempotencyKey: 'fairness-b-unblocked',
+      correlationId: 'fairness-b-unblocked', resourceScopeRef: `fairness-b-unblocked-${uuid()}`, payload: inboxPayload(),
+    });
+    await dataSource.query(
+      `UPDATE ca_meta_jobs SET next_run_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 5 SECOND) WHERE id = ?`,
+      [fairnessABlocked.id],
+    );
+    const tenantBlocker = dataSource.createQueryRunner();
+    let blockedTenantClaim: Promise<ClaimedJob | null> | undefined;
+    let blockedClaimFinished = false;
+    let tenantBlockerConnected = false;
+    try {
+      await tenantBlocker.connect();
+      tenantBlockerConnected = true;
+      await tenantBlocker.startTransaction();
+      const lockedTenantRows = await tenantBlocker.query(
+        'SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE',
+        [tenantFairA],
+      ) as Array<{ id: string }>;
+      assert.equal(lockedTenantRows[0]?.id, tenantFairA);
+
+      blockedTenantClaim = jobs.claimNext('fairness-skip-locked-worker', 300_000, ['INBOX_PROCESS']);
+      let watchdog: NodeJS.Timeout | undefined;
+      let settlement: { kind: 'settled'; claim: ClaimedJob | null } | { kind: 'timeout' };
+      try {
+        settlement = await Promise.race([
+          blockedTenantClaim.then((claim) => ({ kind: 'settled' as const, claim })),
+          new Promise<{ kind: 'timeout' }>((resolve) => {
+            watchdog = setTimeout(() => resolve({ kind: 'timeout' }), 2_000);
+          }),
+        ]);
+      } finally {
+        if (watchdog) clearTimeout(watchdog);
+      }
+      if (settlement.kind === 'timeout') assert.fail('claim waited on tenant A instead of skipping to B');
+      assert.equal(settlement.claim?.id, fairnessBAvailable.id);
+      assert.equal(tenantBlocker.isTransactionActive, true, 'tenant A remains locked until after B is claimed');
+      assert.equal(await jobs.finish(settlement.claim!, { kind: 'SUCCEEDED' }), true);
+      blockedClaimFinished = true;
+    } finally {
+      try {
+        if (tenantBlockerConnected && tenantBlocker.isTransactionActive) await tenantBlocker.rollbackTransaction();
+      } finally {
+        if (tenantBlockerConnected && !tenantBlocker.isReleased) await tenantBlocker.release();
+      }
+      if (blockedTenantClaim) {
+        const eventualClaim = await blockedTenantClaim;
+        if (eventualClaim && !blockedClaimFinished) {
+          await jobs.finish(eventualClaim, { kind: 'SUCCEEDED' });
+        }
+      }
+    }
+    const fairnessAAfterUnlock = await jobs.claimNext('fairness-after-unlock-worker', 300_000, ['INBOX_PROCESS']);
+    assert.equal(fairnessAAfterUnlock?.id, fairnessABlocked.id);
+    assert.equal(await jobs.finish(fairnessAAfterUnlock!, { kind: 'SUCCEEDED' }), true);
 
     // No FORCE INDEX: the ambiguous-expiry sweep uses its dedicated index on a synthetic mixed state set.
     const bulkRows: unknown[][] = [];
