@@ -1,0 +1,147 @@
+{
+  "fixtureClass": "synthetic-only",
+  "sourceVersion": "synthetic-snapshot-v1",
+  "projectionVersion": "synthetic-projection-v1",
+  "fixtureNote": "All identifiers and observations below are invented; no provider or production data is represented.",
+  "tenantMappings": [
+    {
+      "tenantId": "tenant-syn-01",
+      "legacyDatabaseId": "db-syn-01",
+      "legacyCompanyId": "company-syn-01"
+    },
+    {
+      "tenantId": "tenant-syn-02",
+      "legacyDatabaseId": "db-syn-01",
+      "legacyCompanyId": "company-syn-02"
+    },
+    {
+      "tenantId": "tenant-syn-03",
+      "legacyDatabaseId": "db-syn-02",
+      "legacyCompanyId": "company-syn-03"
+    },
+    {
+      "tenantId": "tenant-syn-04a",
+      "legacyDatabaseId": "db-syn-03",
+      "legacyCompanyId": "company-syn-04"
+    },
+    {
+      "tenantId": "tenant-syn-04b",
+      "legacyDatabaseId": "db-syn-03",
+      "legacyCompanyId": "company-syn-04",
+      "syntheticLastLoginAt": "2030-01-01T00:00:00Z"
+    }
+  ],
+  "records": [
+    {
+      "sourceRowId": "synthetic-row-01",
+      "legacyDatabaseId": "db-syn-01",
+      "legacyCompanyId": "company-syn-01",
+      "type": "FACEBOOK",
+      "externalId": "synthetic-shared-page",
+      "credentialExpiryObservations": [
+        {
+          "legacyField": "ExpiresUserAccessTokenAt",
+          "legacyValue": "2030-01-01T00:00:00Z",
+          "providerObservation": {
+            "status": "known",
+            "expiresAt": "2030-01-01T00:00:00Z",
+            "evidence": "synthetic-provider-response-in-fixture"
+          }
+        }
+      ]
+    },
+    {
+      "sourceRowId": "synthetic-row-02",
+      "legacyDatabaseId": "db-syn-01",
+      "legacyCompanyId": "company-syn-02",
+      "type": "FACEBOOK",
+      "externalId": "synthetic-shared-page",
+      "credentialExpiryObservations": [
+        {
+          "legacyField": "ExpiresPageAccessTokenAt",
+          "legacyValue": "Never",
+          "providerObservation": {
+            "status": "unknown",
+            "evidence": "legacy-sentinel-only-no-independent-provider-evidence"
+          }
+        }
+      ]
+    },
+    {
+      "sourceRowId": "synthetic-row-03",
+      "legacyDatabaseId": "db-syn-02",
+      "legacyCompanyId": "company-syn-03",
+      "type": "WHATSAPP",
+      "externalId": "synthetic-waba",
+      "credentialExpiryObservations": [
+        {
+          "legacyField": "ExpiresPageAccessTokenAt",
+          "legacyValue": "Never",
+          "providerObservation": {
+            "status": "no_deadline_returned",
+            "expiresAt": null,
+            "providerFieldPresent": false,
+            "evidence": "synthetic-provider-response-explicitly-omitted-expiry"
+          }
+        }
+      ]
+    },
+    {
+      "sourceRowId": "synthetic-row-04",
+      "legacyDatabaseId": "db-syn-03",
+      "legacyCompanyId": "company-syn-04",
+      "type": "INSTAGRAM",
+      "externalId": "synthetic-ambiguous-asset"
+    },
+    {
+      "sourceRowId": "synthetic-row-05a",
+      "legacyDatabaseId": "db-syn-01",
+      "legacyCompanyId": "company-syn-01",
+      "type": "INSTAGRAM",
+      "externalId": "synthetic-duplicate-asset",
+      "parentChannelId": "synthetic-parent-a"
+    },
+    {
+      "sourceRowId": "synthetic-row-05b",
+      "legacyDatabaseId": "db-syn-01",
+      "legacyCompanyId": "company-syn-01",
+      "type": "INSTAGRAM",
+      "externalId": "synthetic-duplicate-asset",
+      "parentChannelId": "synthetic-parent-b"
+    },
+    {
+      "sourceRowId": "synthetic-row-06",
+      "legacyDatabaseId": "db-syn-99",
+      "legacyCompanyId": "company-syn-99",
+      "type": "FACEBOOK",
+      "externalId": "synthetic-orphan-asset"
+    },
+    {
+      "sourceRowId": "synthetic-row-07",
+      "legacyDatabaseId": "db-syn-02",
+      "legacyCompanyId": "company-syn-03",
+      "type": "WHATSAPP_PHONE",
+      "externalId": "synthetic-phone-missing-parent",
+      "parentSourceRowId": "synthetic-parent-absent",
+      "expectedParentType": "WHATSAPP"
+    },
+    {
+      "sourceRowId": "synthetic-row-08",
+      "legacyDatabaseId": "db-syn-02",
+      "legacyCompanyId": "company-syn-03",
+      "type": "WHATSAPP_PHONE",
+      "externalId": "synthetic-phone-cross-tenant-parent",
+      "parentSourceRowId": "synthetic-row-01",
+      "expectedParentType": "WHATSAPP"
+    },
+    {
+      "sourceRowId": "synthetic-row-09",
+      "legacyDatabaseId": "db-syn-01",
+      "legacyCompanyId": "company-syn-01",
+      "type": "WHATSAPP_PHONE",
+      "externalId": "synthetic-phone-wrong-parent-type",
+      "parentSourceRowId": "synthetic-row-01",
+      "expectedParentType": "WHATSAPP"
+    }
+  ]
+}
