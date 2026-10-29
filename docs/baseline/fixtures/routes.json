@@ -1,0 +1,91 @@
+{
+  "description": "Synthetic, non-secret path/method fixtures for source-level route tracing.",
+  "requests": [
+    {
+      "id": "whatsapp-login-url",
+      "kind": "whatsapp_router",
+      "method": "GET",
+      "path": "/meta/auth/login-url?company_uuid=fixture-company-a",
+      "source_handler": "getLoginUrl"
+    },
+    {
+      "id": "whatsapp-facebook-callback",
+      "kind": "whatsapp_router",
+      "method": "GET",
+      "path": "/meta/auth/facebook/callback?code=fixture-code&state=fixture-state",
+      "source_handler": "facebookCallback"
+    },
+    {
+      "id": "whatsapp-channels-list",
+      "kind": "whatsapp_router",
+      "method": "GET",
+      "path": "/meta/auth/channels?company_uuid=fixture-company-a",
+      "source_handler": "getChannels"
+    },
+    {
+      "id": "whatsapp-save-auto-reply",
+      "kind": "whatsapp_router",
+      "method": "POST",
+      "path": "/meta/auth/save_auto_reply",
+      "source_handler": "saveAutoReply"
+    },
+    {
+      "id": "whatsapp-notifications-list",
+      "kind": "whatsapp_router",
+      "method": "GET",
+      "path": "/meta/auth/notifications?company_uuid=fixture-company-a",
+      "source_handler": "getNotifications"
+    },
+    {
+      "id": "whatsapp-notification-action",
+      "kind": "whatsapp_router",
+      "method": "POST",
+      "path": "/meta/auth/notifications/action",
+      "source_handler": "actionNotification"
+    },
+    {
+      "id": "whatsapp-templates-list",
+      "kind": "whatsapp_router",
+      "method": "GET",
+      "path": "/meta/auth/whatsapp/templates?company_uuid=fixture-company-a&phone_number_id=fixture-phone-1",
+      "source_handler": "getWhatsappTemplates"
+    },
+    {
+      "id": "whatsapp-templates-create",
+      "kind": "whatsapp_router",
+      "method": "POST",
+      "path": "/meta/auth/whatsapp/templates",
+      "source_handler": "createWhatsappTemplate"
+    },
+    {
+      "id": "whatsapp-direct-entry-from-angular",
+      "kind": "whatsapp_unmatched_direct_file",
+      "method": "GET",
+      "path": "/meta/auth/connect_whatsapp.php?company_uuid=fixture-company-a"
+    },
+    {
+      "id": "facebook-direct-entry-from-angular",
+      "kind": "direct_php_entrypoint",
+      "method": "GET",
+      "path": "/meta/auth/connect_facebook.php?company_uuid=fixture-company-a",
+      "source_file": "backend/connect_facebook.php",
+      "required_symbol": "meta_build_login_url"
+    },
+    {
+      "id": "instagram-direct-entry-from-angular",
+      "kind": "direct_php_entrypoint",
+      "method": "GET",
+      "path": "/meta/auth/connect_instagram.php?company_uuid=fixture-company-a",
+      "source_file": "backend/connect_instagram.php",
+      "required_symbol": "meta_build_login_url"
+    },
+    {
+      "id": "whatsapp-options-preflight",
+      "kind": "whatsapp_preflight",
+      "method": "OPTIONS",
+      "path": "/meta/auth/channels",
+      "source_handler": "preflight",
+      "source_status": 200
+    }
+  ]
+}
