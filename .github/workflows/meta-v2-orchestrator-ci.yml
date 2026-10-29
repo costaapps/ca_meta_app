@@ -2,7 +2,7 @@ name: Meta v2 - orchestrator
 
 on:
   pull_request:
-    branches: [develop, 'automation/milestone-*']
+    branches: [develop, 'automation/milestone-*', 'desktop/milestone-*']
   push:
     branches: [develop, 'automation/**', 'feat/codex-*']
     paths:

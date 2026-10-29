@@ -61,3 +61,8 @@ For more information on using the Angular CLI, including detailed command refere
 
 Para configurar os agentes, validar o ambiente e executar o planejamento por dependências, consulte [o guia de execução](docs/execution/README.md). Os PRs de pacote são integrados exclusivamente por squash; o PR consolidado de cada Milestone aguarda aceite humano.
 
+
+
+## Execução por milestone no Codex Desktop
+
+[Kit completo: configuração, prompts M1–M6, agentes, validação e fluxo de PRs](docs/codex-desktop/README.md). O controlador Python anterior não é necessário para esse fluxo.
