@@ -103,6 +103,13 @@ class TraceabilityTests(unittest.TestCase):
         self.assertEqual(set(self.row), set(TRACE_FIELDS))
         self.check()
 
+    def test_milestone_acceptance_rejects_non_pr_value(self) -> None:
+        mapping = dict(self.mapping, package_pr="not-a-pr")
+        row = trace_row(self.source, mapping)
+        self.package_map = {"M1.08": mapping}
+        with self.assertRaisesRegex(GovernanceError, "Milestone acceptance must link a valid package PR"):
+            self.check(row)
+
     def test_in_progress_package_can_link_open_package_pr(self) -> None:
         mapping = dict(self.mapping, package_pr="https://github.com/costaapps/ca_meta_app/pull/999")
         row = trace_row(self.source, dict(mapping, delivery_status="IN_PROGRESS"))

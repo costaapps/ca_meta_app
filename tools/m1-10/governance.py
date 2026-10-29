@@ -13,6 +13,7 @@ from traceability import TRACE_FIELDS
 PACKAGE_RE = re.compile(r"^M[1-6]\.\d{2}$")
 REQUIREMENT_RE = re.compile(r"^(M[1-6]\.\d{2})\.AC\d{2,}$")
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+PACKAGE_PR_RE = re.compile(r"https://github\.com/costaapps/ca_meta_app/pull/\d+")
 TRACE_SENTINELS = {
     "NOT_YET_AUTHORED",
     "NOT_CREATED",
@@ -148,15 +149,13 @@ def check_trace_rows(
             value = row[field]
             if value not in TRACE_SENTINELS and not (root / value).is_file():
                 raise GovernanceError(f"Missing {field} target for {package}: {value}")
-        if row["package_pr"].startswith("https://") and not re.fullmatch(
-            r"https://github\.com/costaapps/ca_meta_app/pull/\d+", row["package_pr"]
-        ):
+        if row["package_pr"].startswith("https://") and not PACKAGE_PR_RE.fullmatch(row["package_pr"]):
             raise GovernanceError(f"Unexpected package PR URL for {package}")
         if row["matrix_evidence_status"] != source["evidence_status"]:
             raise GovernanceError(f"Acceptance matrix status drift for {requirement_id}")
         if row["delivery_status"] == "ACCEPTED_ON_MILESTONE":
-            if row["package_pr"] in TRACE_SENTINELS or row["release_evidence"] != "NOT_RELEASED":
-                raise GovernanceError(f"Milestone acceptance must link a package PR and keep release pending: {package}")
+            if not PACKAGE_PR_RE.fullmatch(row["package_pr"]) or row["release_evidence"] != "NOT_RELEASED":
+                raise GovernanceError(f"Milestone acceptance must link a valid package PR and keep release pending: {package}")
         elif row["delivery_status"] == "PLANNED":
             if row["package_pr"] != "NOT_CREATED" or row["release_evidence"] != "NOT_RELEASED":
                 raise GovernanceError(f"Planned package cannot claim a package PR or release: {package}")
