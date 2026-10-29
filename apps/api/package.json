@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node dist/main.js",
     "build": "nest build",
+    "migrate:deploy": "node dist/database/migrations/cli.js deploy",
+    "migrate:status": "node dist/database/migrations/cli.js status",
     "typecheck": "tsc --noEmit -p tsconfig.build.json && tsc --noEmit -p tsconfig.test.json",
     "test": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/test/*.spec.js"
   },
@@ -18,7 +20,8 @@
     "express": "5.3.0",
     "mysql2": "3.24.6",
     "reflect-metadata": "0.2.2",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "typeorm": "1.1.2"
   },
   "devDependencies": {
     "@nestjs/cli": "12.0.11",
