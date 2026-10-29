@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:costaapps:meta-v2:outbox-event:v1",
+  "title": "Meta Platform v2 outbox event envelope",
+  "description": "Proposed tenant-scoped internal command/event envelope written atomically with local state. Contains operation references and status metadata, not message text or provider payloads.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "tenantRef",
+    "schemaVersion",
+    "eventType",
+    "aggregateRef",
+    "aggregateVersion",
+    "actor",
+    "correlationId",
+    "causationId",
+    "createdAt",
+    "enqueuedAt",
+    "data"
+  ],
+  "properties": {
+    "eventId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "tenantRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "schemaVersion": { "const": 1 },
+    "eventType": {
+      "type": "string",
+      "enum": ["onboarding.changed", "connection.changed", "asset.refresh.requested", "reply.requested", "notification.changed", "template.creation.requested"]
+    },
+    "aggregateRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "aggregateVersion": { "type": "integer", "minimum": 1 },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["USER", "SERVICE", "SYSTEM"] },
+        "ref": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "correlationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "causationId": { "type": ["string", "null"], "maxLength": 128 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "enqueuedAt": { "type": "string", "format": "date-time" },
+    "data": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "onboardingRef", "status"],
+          "properties": {
+            "kind": { "const": "ONBOARDING_CHANGED" },
+            "onboardingRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "status": { "type": "string", "enum": ["AWAITING_PROVIDER", "PROVISIONING", "READY", "PARTIAL", "FAILED", "UNKNOWN"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "connectionRef", "status", "observedAt"],
+          "properties": {
+            "kind": { "const": "CONNECTION_CHANGED" },
+            "connectionRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "status": { "type": "string", "enum": ["ACTIVE", "PARTIAL", "REAUTH_REQUIRED", "UNKNOWN", "DISCONNECTED"] },
+            "observedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "assetRef", "operationRef"],
+          "properties": {
+            "kind": { "const": "ASSET_REFRESH_REQUESTED" },
+            "assetRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "operationRef": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "assetRef", "messageRef", "operationRef"],
+          "properties": {
+            "kind": { "const": "REPLY_REQUESTED" },
+            "assetRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "messageRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "operationRef": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "notificationRef", "status"],
+          "properties": {
+            "kind": { "const": "NOTIFICATION_CHANGED" },
+            "notificationRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "status": { "type": "string", "enum": ["UNREAD", "READ", "DISMISSED"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "accountAssetRef", "templateRef", "operationRef"],
+          "properties": {
+            "kind": { "const": "TEMPLATE_CREATION_REQUESTED" },
+            "accountAssetRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "templateRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "operationRef": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "eventType": { "const": "onboarding.changed" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "ONBOARDING_CHANGED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "connection.changed" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "CONNECTION_CHANGED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "asset.refresh.requested" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "ASSET_REFRESH_REQUESTED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "reply.requested" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "REPLY_REQUESTED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "notification.changed" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "NOTIFICATION_CHANGED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "template.creation.requested" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "TEMPLATE_CREATION_REQUESTED" } } } } }
+    }
+  ],
+  "examples": [
+    {
+      "eventId": "outbox_example_01",
+      "tenantRef": "tenant_example_01",
+      "schemaVersion": 1,
+      "eventType": "reply.requested",
+      "aggregateRef": "operation_example_01",
+      "aggregateVersion": 1,
+      "actor": { "kind": "USER", "ref": "principal_example_01" },
+      "correlationId": "corr_example_02",
+      "causationId": "request_example_01",
+      "createdAt": "2026-10-29T12:03:00Z",
+      "enqueuedAt": "2026-10-29T12:03:00Z",
+      "data": { "kind": "REPLY_REQUESTED", "assetRef": "asset_example_01", "messageRef": "message_example_01", "operationRef": "operation_example_01" }
+    }
+  ]
+}

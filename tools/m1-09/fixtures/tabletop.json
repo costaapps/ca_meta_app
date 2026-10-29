@@ -1,0 +1,77 @@
+{
+  "case": "synthetic-api-cutover-with-pending-webhook-and-rollback",
+  "synthetic_only": true,
+  "resource": {
+    "environment": "isolated",
+    "tenant": "tenant-synthetic-1",
+    "channel": "WhatsApp",
+    "aggregate": "asset-synthetic-1",
+    "app_config_ref": "app-config-synthetic-1",
+    "app_config_version": "synthetic-v7",
+    "credential_ref": "credential-ref-synthetic-9",
+    "credential_version": "synthetic-v3",
+    "operation": "webhook-processing",
+    "owner_before": "legacy",
+    "owner_after_cutover": "new",
+    "owner_after_rollback": "legacy"
+  },
+  "fences": [41, 42, 43],
+  "active_legacy_leases_at_cutover": 0,
+  "old_writer_fenced_before_new_write": true,
+  "writers_by_phase": {
+    "baseline": ["legacy"],
+    "cutover": ["new"],
+    "rollback": ["legacy"]
+  },
+  "exclusive_writer_by_composite_key": [
+    {
+      "phase": "baseline",
+      "key": ["isolated", "tenant-synthetic-1", "WhatsApp", "asset-synthetic-1", "app-config-synthetic-1", "synthetic-v7", "credential-ref-synthetic-9", "synthetic-v3", "webhook-processing"],
+      "authorized_writers": ["legacy"]
+    },
+    {
+      "phase": "cutover",
+      "key": ["isolated", "tenant-synthetic-1", "WhatsApp", "asset-synthetic-1", "app-config-synthetic-1", "synthetic-v7", "credential-ref-synthetic-9", "synthetic-v3", "webhook-processing"],
+      "authorized_writers": ["new"]
+    },
+    {
+      "phase": "rollback",
+      "key": ["isolated", "tenant-synthetic-1", "WhatsApp", "asset-synthetic-1", "app-config-synthetic-1", "synthetic-v7", "credential-ref-synthetic-9", "synthetic-v3", "webhook-processing"],
+      "authorized_writers": ["legacy"]
+    }
+  ],
+  "flags": {
+    "shadow_read": true,
+    "shadow_send": false,
+    "new_write_enabled_only_after_fence": true
+  },
+  "webhooks": [
+    {
+      "event_id": "evt-syn-101",
+      "item_key": "item-1",
+      "durably_inboxed_before_ack": true,
+      "state_at_cutover": "PENDING",
+      "state_after_rollback": "PENDING",
+      "delivery_attempts": 1,
+      "duplicate_business_effects": 0,
+      "external_effect_reversed_by_rollback": false
+    },
+    {
+      "event_id": "evt-syn-102",
+      "item_key": "item-1",
+      "durably_inboxed_before_ack": true,
+      "state_at_cutover": "UNKNOWN",
+      "state_after_rollback": "QUARANTINED_FOR_RECONCILIATION",
+      "delivery_attempts": 1,
+      "duplicate_business_effects": 0,
+      "external_effect_reversed_by_rollback": false
+    }
+  ],
+  "expected": {
+    "no_ack_without_durable_inbox": true,
+    "no_two_business_writers": true,
+    "no_blind_retry_of_unknown_external_effect": true,
+    "pending_event_preserved": true,
+    "external_effects_are_not_reversed_by_rollback": true
+  }
+}

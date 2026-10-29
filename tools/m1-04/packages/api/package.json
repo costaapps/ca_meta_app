@@ -1,0 +1,26 @@
+{
+  "name": "@m1-04/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/platform-express": "12.3.2",
+    "@nestjs/typeorm": "12.0.2",
+    "mysql2": "3.24.6",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "typeorm": "1.1.2"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "12.0.11",
+    "@nestjs/schematics": "12.0.12",
+    "@types/node": "24.19.2",
+    "typescript": "6.0.3"
+  },
+  "scripts": {
+    "build": "nest build",
+    "check": "node -e \"const assert=require('node:assert/strict'); const ts=require('typescript'); assert.equal(ts.version,'6.0.3'); console.log('api toolchain OK: Nest 12 / TypeScript '+ts.version)\" && nest build"
+  }
+}

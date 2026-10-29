@@ -1,0 +1,164 @@
+{
+  "fixtureOnly": true,
+  "providerCalls": 0,
+  "productionWrites": 0,
+  "secretsIncluded": false,
+  "contractBase": "083f918deefc3b783da7076d46f3647473889234",
+  "flowVariants": [
+    "FACEBOOK_LOGIN",
+    "INSTAGRAM_VIA_FACEBOOK_LOGIN",
+    "INSTAGRAM_LOGIN",
+    "WHATSAPP_CLOUD_API",
+    "WHATSAPP_COEXISTENCE"
+  ],
+  "choices": [
+    { "id": "WHATSAPP_API", "variants": ["WHATSAPP_CLOUD_API"] },
+    { "id": "WHATSAPP_APP", "variants": ["WHATSAPP_COEXISTENCE"] },
+    { "id": "INSTAGRAM", "variants": ["INSTAGRAM_LOGIN", "INSTAGRAM_VIA_FACEBOOK_LOGIN"] },
+    { "id": "FACEBOOK", "variants": ["FACEBOOK_LOGIN"] }
+  ],
+  "session": {
+    "principalRef": "principal_fixture_operator",
+    "tenantRef": "tenant_fixture_alpha",
+    "tenantContextRef": "context_fixture_alpha_v1",
+    "contextVersion": 1,
+    "tenantDisplayName": null, "companySwitcherVisible": false, "writeActionsEnabled": false, "writeBlockReason": "tenant_display_name_missing", "blockedTenantWrites": ["company_switch", "onboarding_start", "asset_refresh", "reauthorize", "disconnect", "template_create", "automation_save", "notification_mark_read", "notification_dismiss", "notification_reply"]
+  },
+  "connections": [
+    {
+      "id": "conn_fixture_wa_api_01",
+      "tenantRef": "tenant_fixture_alpha",
+      "flowVariant": "WHATSAPP_CLOUD_API",
+      "status": "ACTIVE",
+      "readiness": "READY",
+      "observedAt": "2026-10-29T12:00:00Z",
+      "stale": false,
+      "assetCount": 1,
+      "assets": [
+        { "id": "asset_fixture_wa_api_01", "kind": "PHONE_NUMBER", "status": "ACTIVE", "authorizationStatus": "VERIFIED", "observedAt": "2026-10-29T12:00:00Z" }
+      ],
+      "subscriptionStatus": null
+    },
+    {
+      "id": "conn_fixture_coex_01",
+      "tenantRef": "tenant_fixture_alpha",
+      "flowVariant": "WHATSAPP_COEXISTENCE",
+      "status": "PARTIAL",
+      "readiness": "PARTIAL",
+      "observedAt": "2026-10-29T12:01:00Z",
+      "stale": false,
+      "assetCount": 1,
+      "assetLabel": "Número de teste ••• 0101",
+      "assets": [
+        { "id": "asset_fixture_coex_01", "kind": "PHONE_NUMBER", "status": "ACTIVE", "authorizationStatus": "VERIFIED", "observedAt": "2026-10-29T12:01:00Z" }
+      ],
+      "subscriptionStatus": null
+    },
+    {
+      "id": "conn_fixture_coex_02",
+      "tenantRef": "tenant_fixture_alpha",
+      "flowVariant": "WHATSAPP_COEXISTENCE",
+      "status": "ACTIVE",
+      "readiness": "READY",
+      "observedAt": "2026-10-29T12:02:00Z",
+      "stale": false,
+      "assetCount": 1,
+      "assetLabel": "Número de teste ••• 0102",
+      "assets": [
+        { "id": "asset_fixture_coex_02", "kind": "PHONE_NUMBER", "status": "ACTIVE", "authorizationStatus": "VERIFIED", "observedAt": "2026-10-29T12:02:00Z" }
+      ],
+      "subscriptionStatus": null
+    },
+    {
+      "id": "conn_fixture_coex_03",
+      "tenantRef": "tenant_fixture_alpha",
+      "flowVariant": "WHATSAPP_COEXISTENCE",
+      "status": "REAUTH_REQUIRED",
+      "readiness": "PARTIAL",
+      "observedAt": "2026-10-29T12:03:00Z",
+      "stale": false,
+      "assetCount": 1,
+      "assetLabel": "Número de teste ••• 0103",
+      "assets": [
+        { "id": "asset_fixture_coex_03", "kind": "PHONE_NUMBER", "status": "ACTIVE", "authorizationStatus": "REVOKED", "observedAt": "2026-10-29T12:03:00Z" }
+      ],
+      "subscriptionStatus": null
+    },
+    {
+      "id": "conn_fixture_coex_04",
+      "tenantRef": "tenant_fixture_alpha",
+      "flowVariant": "WHATSAPP_COEXISTENCE",
+      "status": "UNKNOWN",
+      "readiness": "UNKNOWN",
+      "observedAt": "2026-10-29T11:45:00Z",
+      "stale": true,
+      "assetCount": 1,
+      "assetLabel": "Número de teste ••• 0104",
+      "assets": [
+        { "id": "asset_fixture_coex_04", "kind": "PHONE_NUMBER", "status": "UNKNOWN", "authorizationStatus": "UNKNOWN", "observedAt": "2026-10-29T11:45:00Z" }
+      ],
+      "subscriptionStatus": null
+    },
+    {
+      "id": "conn_fixture_ig_via_fb_01",
+      "tenantRef": "tenant_fixture_alpha",
+      "flowVariant": "INSTAGRAM_VIA_FACEBOOK_LOGIN",
+      "status": "ACTIVE",
+      "readiness": "READY",
+      "observedAt": "2026-10-29T12:04:00Z",
+      "stale": false,
+      "assetCount": 1,
+      "assets": [
+        { "id": "asset_fixture_ig_01", "kind": "INSTAGRAM_ACCOUNT", "status": "ACTIVE", "authorizationStatus": "VERIFIED", "observedAt": "2026-10-29T12:04:00Z" }
+      ],
+      "subscriptionStatus": null
+    },
+    {
+      "id": "conn_fixture_ig_login_01",
+      "tenantRef": "tenant_fixture_alpha",
+      "flowVariant": "INSTAGRAM_LOGIN",
+      "status": "PARTIAL",
+      "readiness": "PARTIAL",
+      "observedAt": "2026-10-29T12:05:00Z",
+      "stale": false,
+      "assetCount": 1,
+      "assets": [
+        { "id": "asset_fixture_ig_02", "kind": "INSTAGRAM_ACCOUNT", "status": "UNKNOWN", "authorizationStatus": "UNKNOWN", "observedAt": "2026-10-29T12:05:00Z" }
+      ],
+      "subscriptionStatus": null
+    },
+    {
+      "id": "conn_fixture_fb_01",
+      "tenantRef": "tenant_fixture_alpha",
+      "flowVariant": "FACEBOOK_LOGIN",
+      "status": "DISCONNECTED",
+      "readiness": "PARTIAL",
+      "observedAt": "2026-10-29T12:06:00Z",
+      "stale": false,
+      "assetCount": 1,
+      "assets": [
+        { "id": "asset_fixture_fb_01", "kind": "PAGE", "status": "INACTIVE", "authorizationStatus": "REVOKED", "observedAt": "2026-10-29T12:06:00Z" }
+      ],
+      "subscriptionStatus": null
+    }
+  ],
+  "coexistenceAdditions": [
+    { "step": 1, "createdConnectionRef": "conn_fixture_coex_01", "connectionRefsAfterAdd": ["conn_fixture_coex_01"] },
+    { "step": 2, "createdConnectionRef": "conn_fixture_coex_02", "connectionRefsAfterAdd": ["conn_fixture_coex_01", "conn_fixture_coex_02"] },
+    { "step": 3, "createdConnectionRef": "conn_fixture_coex_03", "connectionRefsAfterAdd": ["conn_fixture_coex_01", "conn_fixture_coex_02", "conn_fixture_coex_03"] },
+    { "step": 4, "createdConnectionRef": "conn_fixture_coex_04", "connectionRefsAfterAdd": ["conn_fixture_coex_01", "conn_fixture_coex_02", "conn_fixture_coex_03", "conn_fixture_coex_04"] }
+  ],
+  "reauthorization": { "responseStatus": 202, "hasOnboardingRef": false, "hasLaunchUrl": false, "uiActionEnabled": false },
+  "onboardingCases": [
+    { "id": "REC-01", "case": "popup_closed", "status": "AWAITING_PROVIDER", "nextAction": "CHECK_STATUS", "providerCodeVisible": false },
+    { "id": "REC-02", "case": "user_cancelled", "status": "CANCELLED", "nextAction": "NONE", "providerCodeVisible": false },
+    { "id": "REC-03", "case": "timeout_outcome_unknown", "jobStatus": "UNKNOWN", "nextAction": "CHECK_STATUS", "automaticExternalRetry": false },
+    { "id": "REC-04", "case": "company_switched_in_other_tab", "errorCode": "CONTEXT_CHANGED", "writeAllowed": false, "originalTenantRef": "tenant_fixture_alpha" }
+  ],
+  "features": {
+    "templates": { "status": "PENDING", "currentFormHasLanguage": true, "currentFormHasExamples": true, "contractAcceptsLanguage": true, "contractAcceptsExamples": false, "createEnabled": false },
+    "automation": { "staleEtag": true, "automaticOverwrite": false, "baselineFields": ["privateWelcomeMessage", "commentPublicReply", "commentPrivateReply"], "contractFields": ["enabled", "replyText"], "writeEnabled": false },
+    "notifications": { "actionsReturned": ["MARK_READ", "DISMISS", "REPLY"], "currentMessageText": true, "contractSafeSummaryOnly": true, "authorizedMessageContextAvailable": false, "replyEnabled": false, "replyStatus": "PENDING", "automaticRepeat": false, "stateFixtureChecks": {"loading": "FEATURE-03-LOADING", "empty": "FEATURE-03-EMPTY", "readFailure": "FEATURE-03-ERROR"} }
+  },
+  "suite4Entry": {"operations": ["POST /api/v1/auth/preauth", "POST /api/v1/auth/exchanges"], "preauthResponseStatus": 201, "preauthCookieName": "__Host-meta_preauth", "preauthCookieValueExposed": false, "challengeRefPresent": true, "exchangeRequiresCookieAndChallengeRef": true, "sameBrowserContext": true, "ticketIncludedInFixture": false, "preauthResponseLostRecovery": "fresh_challenge_may_be_started", "exchangeResponseLostRecovery": "fresh_preauth_same_browser", "replayOneUseTicket": false, "replayOneUseChallenge": false, "additionalRetrySemantics": "not_defined"}
+}

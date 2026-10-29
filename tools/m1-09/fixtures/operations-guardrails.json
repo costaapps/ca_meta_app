@@ -1,0 +1,114 @@
+{
+  "synthetic_only": true,
+  "meta_quota_gate": {
+    "verification_status": "NOT_CONFIRMED",
+    "numeric_provider_limits_invented": false,
+    "flows": [
+      "Facebook",
+      "Instagram",
+      "WhatsApp-exclusive",
+      "Coexistence"
+    ],
+    "required_evidence": [
+      "official-current-documentation",
+      "per-config-credential-endpoint-account-scope",
+      "sandbox-observed-quota-headers-and-errors",
+      "webhook-ack-and-redelivery-contract",
+      "pricing-unit-and-effective-date"
+    ]
+  },
+  "scale_triggers": {
+    "worker_utilization_to_review": 0.7,
+    "consecutive_five_minute_windows": 2,
+    "minimum_effective_capacity_to_arrival_ratio": 1.5,
+    "one_worker_unavailable_required": true,
+    "queue_freeze_oldest_age_seconds": 60,
+    "queue_abort_oldest_age_seconds": 300,
+    "queue_abort_consecutive_one_minute_samples": 2,
+    "maximum_drain_seconds": 600,
+    "db_connection_review_fraction": 0.7,
+    "db_connection_abort_fraction": 0.85
+  },
+  "tenant_limits": {
+    "general_api_requests_per_second": 10,
+    "general_api_burst_requests": 20,
+    "general_api_max_concurrent_requests": 16,
+    "background_jobs_max_concurrent": 4,
+    "waiting_jobs_max": 1000,
+    "outbound_sends_per_second": 2,
+    "outbound_send_burst": 5,
+    "template_operations_per_second": 1,
+    "template_operations_burst": 5,
+    "history_max_items": 10000,
+    "history_max_bytes": 1073741824,
+    "history_max_age_days": 30,
+    "provider_quota_substitute": false
+  },
+  "rollout_abort": {
+    "api_5xx_fraction_over_five_minutes": 0.02,
+    "api_p95_latency_seconds": 1.0,
+    "api_p95_consecutive_five_minute_windows": 3,
+    "webhook_durable_ack_p99_seconds": 3.0,
+    "webhook_p99_consecutive_five_minute_windows": 2,
+    "db_connection_fraction": 0.85,
+    "db_connection_window_seconds": 60,
+    "provider_throttle_fraction_over_five_minutes": 0.05,
+    "immediate_abort_on_cross_tenant_or_secret_or_double_writer_or_ack_loss": true
+  },
+  "maintenance_policy": {
+    "preapproved_scope_and_start_end_required": true,
+    "named_authorized_owner_input": "NOT_CONFIRMED",
+    "contract_notice_lead_time": "NOT_CONFIRMED",
+    "customer_time_zone_and_allowed_window": "NOT_CONFIRMED",
+    "exclude_from_availability_without_contract_clause": false,
+    "webhook_success_ack_requires_durable_inbox": true
+  },
+  "reauthorization_time_budget": {
+    "status": "PROPOSED",
+    "indicator": "accepted_callback_to_connection_readiness_projection_confirmed_seconds",
+    "target_percentile": "p95",
+    "target_seconds": 120,
+    "window_seconds": 900,
+    "population": "durably accepted valid reauthorization callbacks by flow and rollout cohort",
+    "over_budget_pending_counts_as_breach": true,
+    "minimum_sample_count": "NOT_CONFIRMED",
+    "measurement_source_fields": [
+      "callback_accepted_at",
+      "projection_confirmed_at",
+      "opaque_correlation_id",
+      "applied_projection_version"
+    ],
+    "confirmed_outcomes": ["READY", "PARTIAL", "FAILED"],
+    "pre_callback_user_or_meta_wait": "UNBOUNDED_NOT_CONFIRMED",
+    "provider_wait_after_callback": "included in server interval; provider-specific bound NOT_CONFIRMED",
+    "end_to_end_production_guarantee": false,
+    "load_validation_required_before_production": true,
+    "actions_on_breach": [
+      "freeze-cohort-expansion",
+      "inspect-saga-queue-provider-duration-and-projection-checkpoint",
+      "preserve-recoverable-state",
+      "do-not-assert-READY-before-projection-confirmed",
+      "resume-only-after-load-validation-and-approval"
+    ]
+  },
+  "writer_key_fields": [
+    "environment",
+    "tenant",
+    "channel",
+    "aggregate_or_operation",
+    "app_config_ref",
+    "app_config_version",
+    "credential_ref",
+    "credential_version"
+  ],
+  "migration_phase_writer_invariant": [
+    {"phase": "baseline", "exactly_one_owner_per_composite_key": true},
+    {"phase": "isolated-platform", "exactly_one_owner_per_composite_key": true},
+    {"phase": "prepared-import", "exactly_one_owner_per_composite_key": true},
+    {"phase": "shadow-read", "exactly_one_owner_per_composite_key": true},
+    {"phase": "tenant-channel-pilot", "exactly_one_owner_per_composite_key": true},
+    {"phase": "cohort-expansion", "exactly_one_owner_per_composite_key": true},
+    {"phase": "final-cutover", "exactly_one_owner_per_composite_key": true},
+    {"phase": "retirement", "exactly_one_owner_per_composite_key": true}
+  ]
+}

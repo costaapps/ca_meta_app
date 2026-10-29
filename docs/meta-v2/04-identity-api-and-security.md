@@ -75,7 +75,7 @@ Os paths são contrato inicial para ratificação em OpenAPI. Segurança de toda
 
 Rotas de portal/Meta são relativas a `/api/v1`; relay `/internal/v1` e health possuem prefixos próprios no ingress. IDs públicos são internos opacos; uso de external ID legado exige compatibilidade explicitamente autorizada.
 
-[OpenAPI proposto](contracts/openapi.proposed.json) materializa o contrato inicial, com schemas públicos, CSRF/sessão, IDs, callbacks, webhook, relay e operações assíncronas. As referências e a geração determinística são checadas no validador do plano. A semântica externa, limites por canal e callbacks de exclusão/revogação precisam de ratificação M1.03/M1.07; não é uma API já implementada nem certificado de conformidade com a Meta.
+[OpenAPI 3.1 canônico da M1.07](contracts/openapi.yaml) materializa o contrato proposto, com schemas públicos, CSRF/sessão, IDs, callbacks, webhook, relay e operações assíncronas. O contrato e seus exemplos são validados em `tools/m1-07/`; o JSON `contracts/openapi.proposed.json` e o envelope genérico `contracts/internal-event.proposed.schema.json` permanecem artefatos históricos do planejador, não fontes de verdade para consumidores. A semântica externa, limites por canal e callbacks de exclusão/revogação precisam de ratificação autorizada; não é uma API já implementada nem certificado de conformidade com a Meta.
 
 ### Exemplos de contrato público
 

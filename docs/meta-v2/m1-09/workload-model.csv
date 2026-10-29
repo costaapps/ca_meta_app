@@ -1,0 +1,4 @@
+scenario,classification,companies_count,assets_per_company,assets_total,history_opt_in_companies,history_items_per_opt_in_company_per_day,history_bytes_per_item,history_retention_days,history_storage_bytes_estimate,api_requests_per_second,webhook_events_per_second,outbound_send_operations_per_second,template_operations_per_second,worker_event_arrival_per_second
+nominal,synthetic-only,10,3,30,2,100,2048,30,12288000,10,5,1,0.2,5
+burst-3x,synthetic-only,30,3,90,6,100,2048,30,36864000,30,15,3,0.6,15
+growth-10x,synthetic-only,100,3,300,20,100,2048,30,122880000,100,50,10,2,50

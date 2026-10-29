@@ -14,11 +14,17 @@ O resultado desejado é um portal recorrente de gerenciamento de conexões Meta 
 | [04 · Identidade, API e segurança](04-identity-api-and-security.md) | Como entrar, autorizar ações e proteger callbacks/segredos? |
 | [05 · Quatro fluxos Meta](05-meta-flows-and-webhooks.md) | Como cada login conclui, assina eventos e recupera falhas? |
 | [06 · Entrega e migração](06-delivery-migration-and-operations.md) | Como desenvolver, empacotar, publicar, migrar, operar e voltar? |
+| [M1.09 · SLO](m1-09/nfr.md), [carga](m1-09/workload-model.csv), [capacidade](m1-09/capacity-model.csv), [controles operacionais](m1-09/capacity-controls.md), [retenção](m1-09/retention-policy.md), [transição/tabletop](m1-09/transition-strategy.md), [budget](m1-09/cost-budget.csv), [riscos](m1-09/risk-register.md) | Quais hipóteses operacionais observar, dimensionar cenários sintéticos, definir gates de custo, reter dados e transicionar com um writer? |
 | [07 · Aceite e governança](07-acceptance-risk-and-governance.md) | Qual sequência, responsáveis funcionais, riscos e provas de 100%? |
 | [08 · Project e provisionamento](08-project-configuration.md) | Como organizar campos, visões, issues, hierarquia e dependências? |
 | [Catálogo navegável](work-packages.md) | Onde está cada um dos 66 pacotes e seu vínculo no GitHub? |
-| [OpenAPI proposto](contracts/openapi.proposed.json) e [schema de evento](contracts/internal-event.proposed.schema.json) | Qual rascunho contratual pode iniciar a ratificação da M1.07? |
+| [OpenAPI 3.1 canônico](contracts/openapi.yaml), [eventos inbox/outbox](contracts/events/) e [catálogo seguro de erros](contracts/error-catalog.md) | Qual contrato M1.07 deve orientar consumidores e validações? |
+| [Matriz de compatibilidade](contracts/compatibility.md) | Como cada linha da baseline mapeia para uma operação proposta ou uma exceção explícita? |
+| [Formatos e validadores](contracts/standards.md) | Quais formatos e fontes primárias sustentam os arquivos de contrato? |
+| [JSON OpenAPI legado](contracts/openapi.proposed.json) e [evento genérico legado](contracts/internal-event.proposed.schema.json) | Artefatos históricos do planejador; não são fonte de verdade para consumidores M1.07. |
 | [Matriz de aceite](acceptance-matrix.csv) | Quais 330 critérios ligam requisitos, issues e validações planejadas? |
+| [Especificações de feature](specs/README.md), [playbook SDD](sdd-playbook.md), [ADR template](adr-template.md), [issue template](../../.github/ISSUE_TEMPLATE/work-package.md) e [PR template](../../.github/PULL_REQUEST_TEMPLATE.md) | Como manter estado, Ready/Done, segurança, bloqueios e decisões verificáveis? |
+| [Rastreabilidade executável](traceability.csv), [responsabilidade funcional](responsibility-matrix.csv) e [validator M1.10](../../tools/m1-10/README.md) | Como verificar dependências, artefatos, PRs de milestone e gates de release sem escrever nos geradores `.planning`? |
 
 ## Etapas de implantação
 
@@ -45,14 +51,14 @@ Há 66 pacotes, seis epics de gate e uma issue índice. Os pacotes contêm passo
 
 ## Como começar a execução
 
-1. Abrir a issue índice e a epic M1; iniciar `M1.01`, que não tem dependências anteriores.
-2. Obter inventário sanitizado do PHP/rewrite operacional, DDL dos bancos e contrato de identidade Suite4. As lacunas têm pacotes e gates definidos.
-3. Confirmar em fonte primária e Sandbox as versões/permissões de cada fluxo. Parte da documentação Meta retornou 429 durante o planejamento e foi marcada como não validada.
-4. Ratificar ADRs, contratos e metas; designar pessoas e estimar capacidade antes de fixar datas.
+1. Abrir a issue índice e a epic M1; conferir a onda/estado da issue em `traceability.csv` e a dependência atual antes de escolher trabalho.
+2. Reusar o inventário sanitizado e o contrato de identidade propostos; solicitar evidência operacional de PHP/rewrite, DDL e Suite4 somente para os cenários que dependem dela.
+3. Confirmar em fonte primária e Sandbox as versões/permissões de cada fluxo. Conteúdo Meta inacessível ou retornando 429 continua sem validação; siga seu gate específico sem bloquear trabalho independente.
+4. Manter contratos e ADRs na fonte canônica; designar função responsável, não nomes ou datas sem acordo real.
 5. Construir em fatias revisáveis, mantendo um escritor por função durante a transição e evidências por critério de aceite.
 
 ## O que está entregue neste planejamento
 
 Documentação aprofundada, backlog detalhado, milestones nativas e catálogo de dependências. Scripts de manutenção do plano ficam em `.planning/`: renderização determinística, validação, sincronização de relações e provisionamento do Project quando houver autenticação organizacional apropriada. O estado efetivamente publicado e os runs de verificação são registrados na issue índice e no documento 08.
 
-As issues de implantação continuam abertas. Não foram criados prazos, assignees, aprovações Meta ou promessas de capacidade sem evidência. Pontos relativos iniciais servem para refinar estimativas; não equivalem a dias de trabalho.
+Issues de implantação ficam abertas enquanto aceitas apenas na branch de milestone; fechar exige integração final verificada e aceite humano. O estado por pacote está na matriz de rastreabilidade e deve ser relido contra o GitHub antes de atualizar. Não foram criados prazos, assignees, aprovações Meta ou promessas de capacidade sem evidência. Pontos relativos iniciais servem para refinar estimativas; não equivalem a dias de trabalho.

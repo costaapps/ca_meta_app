@@ -1,0 +1,46 @@
+{
+  "graphs": {
+    "valid": {
+      "tasks": [
+        {"key": "M1.01", "deps": []},
+        {"key": "M1.02", "deps": ["M1.01"]},
+        {"key": "M1.03", "deps": []}
+      ],
+      "manifest_dependencies": {
+        "M1.01": [],
+        "M1.02": ["M1.01"],
+        "M1.03": []
+      },
+      "waves": [["M1.01", "M1.03"], ["M1.02"]]
+    },
+    "cycle": {
+      "tasks": [
+        {"key": "M1.01", "deps": ["M1.02"]},
+        {"key": "M1.02", "deps": ["M1.01"]}
+      ]
+    },
+    "missing_dependency": {
+      "tasks": [{"key": "M1.01", "deps": ["M1.99"]}]
+    },
+    "drifted_waves": [["M1.01"], ["M1.02", "M1.03"]]
+  },
+  "trace": {
+    "source": {
+      "requirement_id": "M1.08.AC01",
+      "package": "M1.08",
+      "issue_url": "https://github.com/costaapps/ca_meta_app/issues/18",
+      "milestone": "M1",
+      "acceptance": "Fixture acceptance criterion.",
+      "planned_validation": "Fixture validation plan.",
+      "evidence_status": "PLANNED"
+    },
+    "mapping": {
+      "spec_path": "fixtures/artifact.md",
+      "contract_path": "fixtures/artifact.md",
+      "test_path": "fixtures/artifact.md",
+      "package_pr": "https://github.com/costaapps/ca_meta_app/pull/92",
+      "release_evidence": "NOT_RELEASED",
+      "delivery_status": "ACCEPTED_ON_MILESTONE"
+    }
+  }
+}

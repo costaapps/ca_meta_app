@@ -1,64 +1,22 @@
-# Git Workflow
+# Git workflow context — reconciled 2026-10-29
 
-## Current Repository Reality
-- Remote configured locally:
-  - `origin https://github.com/costaapps/msg4_Meta_Application.git`
-- Active branch during documentation work:
-  - `feat/separating-meta-app-connections`
-- `backend/` is present locally but currently untracked.
+This page is historical context for repository hygiene, not a live branch or release ledger. The active Desktop rules are in [AGENTS.md](../../../AGENTS.md), the [execution contract](../../../docs/codex-desktop/execution-contract.md), and the [SDD playbook](../../../docs/meta-v2/sdd-playbook.md).
 
-Evidence:
-- `git remote -v`
-- `git branch -vv`
-- `git status --short --branch`
+## Earlier snapshot and corrections
 
-## `.gitignore`
-- Existing ignore rules cover build artifacts, caches, Node modules, and VS Code noise.
-- It did not previously protect the local PHP files in `backend/`.
-- This phase should add ignores for:
-  - `backend/connect.php`
-  - `backend/connect_old.php`
+Older notes recorded `feat/separating-meta-app-connections`, a different remote name, an untracked `backend/`, feature-by-topic branch examples, and a rule that no commit or PR could occur without another approval. Those statements describe an earlier documentation checkout and do not govern the Desktop milestone workflow.
 
-Reason:
-- These files are operationally relevant for analysis but should not be committed automatically.
+The M1 baseline inventory reviewed four PHP files that are versioned in the repository: `backend/connect_whatsapp.php`, `connect_facebook.php`, `connect_instagram.php`, and `meta_auth_helper.php`. It explicitly does not establish which source is deployed behind `msg4.app/meta/auth`, how Hostinger rewrites requests, or what other consumers use. Local `backend/connect.php` and `backend/connect_old.php` remain sensitive references and must not be opened, copied, committed, or rewritten. See [the baseline inventory](../../../docs/baseline/inventory.md) and [baseline evidence](../../../docs/meta-v2/01-baseline-evidence.md).
 
-## Local-Only Files
-- Treat `backend/connect.php` and `backend/connect_old.php` as local sensitive references.
-- Document behavior, not raw secrets.
-- Do not add them, commit them, or rewrite them without explicit approval.
+## Current Desktop branch and review discipline
 
-## Commit Discipline
-- Keep commits small and intention-revealing.
-- Separate documentation, test repair, and feature work into different commits when implementation begins.
-- In this phase, no commit, push, merge, or PR creation should occur without explicit user approval.
+- Verify `develop` and record its exact SHA before beginning a new milestone. Start `desktop/milestone-mN` from that SHA and give each work package its own `desktop/mN-XX` branch/worktree.
+- Package PRs target the milestone branch and merge only by squash after applicable checks/reviews. The final milestone PR targets `develop` and needs human acceptance; accepted-on-milestone is not a release or issue closure.
+- Use configured Git identity. Do not force-push, bypass protections, fabricate approval, or discard uncommitted work.
+- The principal coordinates native subagents, environment, evidence, tests, integration and user updates. One writer owns each worktree; review and validation use the exact candidate SHA.
 
-## Commit Message Style
-- Conventional Commits are appropriate and match the repo history reasonably well.
-- Recommended examples:
-  - `docs(agent): add progressive project context`
-  - `test(channels): rewrite stale Angular 21 specs`
-  - `feat(auth): split facebook and instagram flows`
+## Releases and local references
 
-## Pull Requests
-- PRs should call out:
-  - affected Meta product surface
-  - tenant and token implications
-  - validation run results
-  - any backend dependency or local-only assumption
+A planned branch, tag, generated image or milestone PR does not prove deployment. No release version is assigned by the planning docs; release tags follow an approved release artifact and environment. Real deployment, data migration, credential import, messages, production subscription changes, and PHP retirement stay behind explicit gates.
 
-## Releases And Rollback
-- No release automation is visible in this repo.
-- Rollback strategy should remain branch/tag based at the Git level and deployment-system based outside this repo.
-- Future auth-flow separation should avoid bundling unrelated UI refactors in the same release slice.
-
-## Documentation Expectations
-- Any change to routes, backend contracts, auth flow, or tenant propagation should update:
-  - `AGENTS.md` only if index-level guidance changes
-  - the relevant file under `docs/agent-context/`
-
-## Branching Guidance For Next Phases
-- Prefer feature branches by problem area:
-  - `feat/facebook-auth-split`
-  - `feat/whatsapp-embedded-signup`
-  - `fix/test-suite-angular21`
-  - `docs/backend-contracts`
+`connect.php` and `connect_old.php` are excluded from implementation evidence. Document versioned source behavior separately from operational behavior; mark the latter **Not confirmed** until verified through an authorized, sanitized source.

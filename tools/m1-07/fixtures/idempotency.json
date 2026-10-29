@@ -1,0 +1,11 @@
+{
+  "description": "Synthetic tenant+operation idempotency scenarios; no provider is called.",
+  "tenantRef": "tenant_example_01",
+  "otherTenantRef": "tenant_example_02",
+  "operation": "sendReply",
+  "otherOperation": "createTemplate",
+  "idempotencyKey": "idem_fixture_key_0123456789",
+  "samePayload": { "messageRef": "message_example_01", "text": "Synthetic reply text." },
+  "samePayloadReordered": { "text": "Synthetic reply text.", "messageRef": "message_example_01" },
+  "differentPayload": { "messageRef": "message_example_01", "text": "Different synthetic reply." }
+}

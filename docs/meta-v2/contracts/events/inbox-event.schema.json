@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:costaapps:meta-v2:inbox-event:v1",
+  "title": "Meta Platform v2 inbox event envelope",
+  "description": "Proposed normalized metadata for one provider item, not a raw multi-item delivery. Tenant routing is resolved per item. Provider payload bytes remain in a protected, short-retention store referenced only by an opaque handle. This is not the external Meta webhook schema, which is Not confirmed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "schemaVersion",
+    "eventType",
+    "appConfigRef",
+    "tenantRef",
+    "actor",
+    "correlationId",
+    "causationId",
+    "aggregateVersion",
+    "occurredAt",
+    "receivedAt",
+    "protectedPayloadRef",
+    "safeMetadata",
+    "routingState"
+  ],
+  "properties": {
+    "eventId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "schemaVersion": { "const": 1 },
+    "eventType": {
+      "type": "string",
+      "enum": ["provider.message.received", "provider.asset.changed", "provider.authorization.changed", "provider.subscription.changed", "provider.callback.received", "provider.unclassified"]
+    },
+    "appConfigRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "tenantRef": {
+      "description": "Null until server-side routing resolves a tenant. Never sourced from company_uuid or an untrusted webhook field.",
+      "type": ["string", "null"],
+      "maxLength": 128
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["PROVIDER", "SYSTEM", "SERVICE"] },
+        "ref": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "correlationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "causationId": { "type": ["string", "null"], "maxLength": 128 },
+    "aggregateRef": { "type": ["string", "null"], "maxLength": 128 },
+    "aggregateVersion": { "type": "integer", "minimum": 0 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "receivedAt": { "type": "string", "format": "date-time" },
+    "protectedPayloadRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Opaque ACL-checked handle, not payload bytes, message text, token, or credential."
+    },
+    "routingState": { "type": "string", "enum": ["PENDING", "ROUTED", "QUARANTINED", "REJECTED"] },
+    "safeMetadata": {
+      "description": "Allowlisted references and status metadata only; never message bodies, attachments, tokens, or raw provider fields.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "assetRef", "messageRef", "channel"],
+          "properties": {
+            "kind": { "const": "MESSAGE_RECEIVED" },
+            "assetRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "messageRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "channel": { "type": "string", "enum": ["WHATSAPP", "INSTAGRAM", "FACEBOOK"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "assetRef", "observedStatus"],
+          "properties": {
+            "kind": { "const": "ASSET_CHANGED" },
+            "assetRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "observedStatus": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "UNKNOWN", "STALE"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "authorizationRef", "observedStatus"],
+          "properties": {
+            "kind": { "const": "AUTHORIZATION_CHANGED" },
+            "authorizationRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "observedStatus": { "type": "string", "enum": ["ACTIVE", "REAUTH_REQUIRED", "REVOKED", "UNKNOWN"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "subscriptionRef", "observedStatus"],
+          "properties": {
+            "kind": { "const": "SUBSCRIPTION_CHANGED" },
+            "subscriptionRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "observedStatus": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "EXPIRED", "UNKNOWN"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "callbackRef"],
+          "properties": {
+            "kind": { "const": "CALLBACK_RECEIVED" },
+            "callbackRef": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "eventRef", "reason"],
+          "properties": {
+            "kind": { "const": "UNCLASSIFIED" },
+            "eventRef": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Opaque reference to the protected provider event." },
+            "reason": { "type": "string", "enum": ["UNMAPPED_EVENT_TYPE", "UNSUPPORTED_SCHEMA_VERSION", "INVALID_ENVELOPE"] }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "eventType": { "const": "provider.message.received" } }, "required": ["eventType"] },
+      "then": { "properties": { "safeMetadata": { "properties": { "kind": { "const": "MESSAGE_RECEIVED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "provider.asset.changed" } }, "required": ["eventType"] },
+      "then": { "properties": { "safeMetadata": { "properties": { "kind": { "const": "ASSET_CHANGED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "provider.authorization.changed" } }, "required": ["eventType"] },
+      "then": { "properties": { "safeMetadata": { "properties": { "kind": { "const": "AUTHORIZATION_CHANGED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "provider.subscription.changed" } }, "required": ["eventType"] },
+      "then": { "properties": { "safeMetadata": { "properties": { "kind": { "const": "SUBSCRIPTION_CHANGED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "provider.callback.received" } }, "required": ["eventType"] },
+      "then": { "properties": { "safeMetadata": { "properties": { "kind": { "const": "CALLBACK_RECEIVED" } } } } }
+    },
+    {
+      "if": { "properties": { "routingState": { "const": "ROUTED" } }, "required": ["routingState"] },
+      "then": { "properties": { "tenantRef": { "type": "string", "minLength": 1, "maxLength": 128 } } }
+    },
+    {
+      "if": { "properties": { "routingState": { "enum": ["PENDING", "QUARANTINED", "REJECTED"] } }, "required": ["routingState"] },
+      "then": { "properties": { "tenantRef": { "const": null } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "provider.unclassified" } }, "required": ["eventType"] },
+      "then": {
+        "required": ["routingState"],
+        "properties": {
+          "tenantRef": { "const": null },
+          "routingState": { "const": "QUARANTINED" },
+          "safeMetadata": { "properties": { "kind": { "const": "UNCLASSIFIED" } } }
+        }
+      }
+    }
+  ],
+  "examples": [
+    {
+      "eventId": "inbox_example_01",
+      "schemaVersion": 1,
+      "eventType": "provider.message.received",
+      "appConfigRef": "appcfg_example_01",
+      "tenantRef": null,
+      "actor": { "kind": "PROVIDER", "ref": "provider_example_01" },
+      "correlationId": "corr_example_01",
+      "causationId": null,
+      "aggregateRef": null,
+      "aggregateVersion": 0,
+      "occurredAt": "2026-10-29T11:58:00Z",
+      "receivedAt": "2026-10-29T11:58:01Z",
+      "protectedPayloadRef": "payloadref_example_01",
+      "routingState": "PENDING",
+      "safeMetadata": { "kind": "MESSAGE_RECEIVED", "assetRef": "asset_external_ref_example_01", "messageRef": "message_external_ref_example_01", "channel": "WHATSAPP" }
+    },
+    {
+      "eventId": "inbox_unclassified_example_01",
+      "schemaVersion": 1,
+      "eventType": "provider.unclassified",
+      "appConfigRef": "appcfg_example_01",
+      "tenantRef": null,
+      "actor": { "kind": "PROVIDER", "ref": "provider_example_01" },
+      "correlationId": "corr_example_03",
+      "causationId": null,
+      "aggregateRef": null,
+      "aggregateVersion": 0,
+      "occurredAt": "2026-10-29T12:08:00Z",
+      "receivedAt": "2026-10-29T12:08:01Z",
+      "protectedPayloadRef": "payloadref_example_02",
+      "routingState": "QUARANTINED",
+      "safeMetadata": { "kind": "UNCLASSIFIED", "eventRef": "payloadref_example_02", "reason": "UNMAPPED_EVENT_TYPE" }
+    }
+  ]
+}

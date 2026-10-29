@@ -1,5 +1,7 @@
 # Domínio, dados, credenciais e projeções
 
+O refinamento executável da M1.05 está em [modelo, invariantes e dicionário](m1-05-domain-model.md), [estados e cenários Given/When/Then](m1-05-state-machines.md) e no [harness sintético MariaDB](../../tools/m1-05/README.md). Os novos exemplos detalham o modelo existente neste documento; não alteram contratos propostos pela M1.07.
+
 O modelo distingue cinco conceitos: empresa autorizada, processo de conexão, autorização Meta, credencial e ativo. Um token pode conceder acesso a diversos ativos; um ativo pode ter autorizações sucessivas ou concorrentes. O sistema não cria a regra fictícia de um token exclusivo por número.
 
 ## Invariantes
@@ -97,7 +99,7 @@ Entrada do serviço interno: `tenantId`, `appConfigId`, `environment`, `provider
 6. Obter segredo no processo servidor pelo cofre e executar operação tipada; registrar handle/versão/razão sem valor.
 7. Invalidar caches por revisão de autorização, token version e revogação; jobs atrasados revalidam elegibilidade antes de efeito externo.
 
-Exemplo obrigatório de teste: quatro números, dois alvos ancestrais, três concessões e uma reautorização parcial. Envio N1 não pode usar um token só porque foi o último salvo; template da conta de N3 deve escolher grant correspondente. Revogar uma autorização afeta seus grants e pode preservar uma alternativa legítima já comprovada.
+Os cenários sintéticos obrigatórios de quatro números em um e dois WABAs, concessões vinculadas a cada número/WABA, reautorização parcial, revogação e seleção de grant estão detalhados e executados em [`tools/m1-05/fixtures/coexistence-scenarios.json`](../../tools/m1-05/fixtures/coexistence-scenarios.json). Eles demonstram relações e política local; não declaram elegibilidade, escopo concedido, endpoint ou comportamento real da Meta.
 
 ## Cofre e ciclo de token
 

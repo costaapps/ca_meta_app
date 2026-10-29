@@ -37,6 +37,10 @@ Registrar:
 
 Retomar lendo o handoff e verificando GitHub/Git atuais. Não executar instalação ou implementação novamente só porque a janela mudou. Se as permissões do novo chat forem diferentes, testar o acesso sem expor credenciais e adaptar a execução. O histórico do Desktop e os relatórios ajudam a memória, mas os efeitos remotos precisam de releitura.
 
+## Regra fundamental para limite de tokens excedido
+
+Somente uma mensagem explícita de erro informando que o limite de tokens foi excedido dispara esta recuperação. Registrar no handoff a etapa exata e os gates concluídos; preservar arquivos e commits; iniciar um timer de 45 minutos; ao terminar, retomar do handoff e tentar novamente a etapa interrompida. Reavaliar o estado real, repetir somente os gates afetados e preservar evidências ainda válidas para o mesmo SHA/ambiente. Compactação de contexto, timeout, erro genérico, falha de ferramenta/transporte, HTTP 429 ou qualquer outro rate limit não dispara o timer de 45 minutos; seguir o intervalo específico informado para outro rate limit.
+
 ## Pedido externo agrupado
 
 Quando realmente necessário: `Recurso ausente → cenário dependente → ação mínima do responsável → trabalho já concluído → evidência esperada`. Pedir apenas aquilo que o agente não consegue obter/criar legitimamente. Não pedir acesso à produção para testar um schema sintético. Não pedir Sandbox para ler documentação. Não apresentar faltas externas como aprovação automática.
