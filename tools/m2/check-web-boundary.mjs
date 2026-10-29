@@ -10,7 +10,7 @@ const requireFromWeb = createRequire(path.join(webRoot, 'package.json'));
 const ts = requireFromWeb('typescript');
 const forbiddenPackage = /^(?:@nestjs(?:\/|$)|typeorm(?:\/|$)|mysql2(?:\/|$)|mariadb(?:\/|$)|bcrypt(?:\/|$)|argon2(?:\/|$)|crypto(?:\/|$)|crypto-js(?:\/|$))/;
 const nodeBuiltins = new Set(builtinModules.map((name) => name.replace(/^node:/, '')));
-const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.mjs']);
+const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 const issues = [];
 let sourceFiles = 0;
 
@@ -32,24 +32,33 @@ function inspectSpecifier(specifier, relativePath) {
   }
 }
 
-function inspectCall(node, relativePath) {
+function isRequireReference(expression) {
+  return (ts.isIdentifier(expression) && expression.text === 'require')
+    || (ts.isPropertyAccessExpression(expression)
+      && ts.isIdentifier(expression.expression)
+      && expression.expression.text === 'module'
+      && expression.name.text === 'require');
+}
+
+function inspectCall(node, relativePath, requireAliases) {
   if (!ts.isCallExpression(node)) {
     return;
   }
 
   const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
   const isRequireCall = ts.isIdentifier(node.expression) && node.expression.text === 'require';
-  const isModuleRequireCall = ts.isPropertyAccessExpression(node.expression)
-    && ts.isIdentifier(node.expression.expression)
-    && node.expression.expression.text === 'module'
-    && node.expression.name.text === 'require';
-  if (!isDynamicImport && !isRequireCall && !isModuleRequireCall) {
+  const isModuleRequireCall = isRequireReference(node.expression) && !isRequireCall;
+  const isAliasedRequireCall = ts.isIdentifier(node.expression) && requireAliases.has(node.expression.text);
+  if (!isDynamicImport && !isRequireCall && !isModuleRequireCall && !isAliasedRequireCall) {
     return;
   }
 
   const argument = node.arguments[0];
   if (!argument || !ts.isStringLiteralLike(argument)) {
-    const callName = isDynamicImport ? 'dynamic import' : isModuleRequireCall ? 'module.require' : 'require';
+    const callName = isDynamicImport ? 'dynamic import'
+      : isModuleRequireCall ? 'module.require'
+        : isAliasedRequireCall ? 'aliased require'
+          : 'require';
     issues.push(`${relativePath}: non-literal ${callName} cannot be checked against the web boundary`);
     return;
   }
@@ -60,12 +69,25 @@ function inspectSource(content, filePath, relativePath) {
   const extension = path.extname(filePath);
   const scriptKind = extension === '.tsx' ? ts.ScriptKind.TSX
     : extension === '.jsx' ? ts.ScriptKind.JSX
-      : extension === '.js' || extension === '.mjs' ? ts.ScriptKind.JS
+      : extension === '.js' || extension === '.mjs' || extension === '.cjs' ? ts.ScriptKind.JS
         : ts.ScriptKind.TS;
   const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true, scriptKind);
+  const requireAliases = new Set();
 
   for (const diagnostic of sourceFile.parseDiagnostics) {
     issues.push(`${relativePath}: TypeScript parser could not inspect source (code ${diagnostic.code})`);
+  }
+
+  function collectRequireAliases(node) {
+    if (ts.isVariableDeclaration(node)
+      && ts.isIdentifier(node.name)
+      && node.initializer
+      && isRequireReference(node.initializer)
+      && ts.isVariableDeclarationList(node.parent)
+      && (node.parent.flags & ts.NodeFlags.Const) !== 0) {
+      requireAliases.add(node.name.text);
+    }
+    ts.forEachChild(node, collectRequireAliases);
   }
 
   function visit(node) {
@@ -80,10 +102,11 @@ function inspectSource(content, filePath, relativePath) {
       && ts.isStringLiteralLike(node.moduleReference.expression)) {
       inspectSpecifier(node.moduleReference.expression.text, relativePath);
     }
-    inspectCall(node, relativePath);
+    inspectCall(node, relativePath, requireAliases);
     ts.forEachChild(node, visit);
   }
 
+  collectRequireAliases(sourceFile);
   visit(sourceFile);
 }
 
@@ -94,6 +117,10 @@ function runSelfTest() {
   inspectSource(`
     import 'node:fs/promises';
     const fromRequire = require('crypto');
+    const load = require;
+    const fromAlias = load('node:path');
+    const loadModule = module.require;
+    const fromModuleAlias = loadModule('node:fs');
     const dynamic = import(runtimeSpecifier);
     import './app.routes';
   `, filePath, relativePath);
@@ -101,13 +128,31 @@ function runSelfTest() {
   const expectedFindings = [
     'forbidden server/runtime import "node:fs/promises"',
     'forbidden server/runtime import "crypto"',
+    'forbidden server/runtime import "node:path"',
+    'forbidden server/runtime import "node:fs"',
     'non-literal dynamic import',
   ];
   const missingFindings = expectedFindings.filter((expected) => !findings.some((finding) => finding.includes(expected)));
   const rejectedSameAppImport = findings.some((finding) => finding.includes('relative import escapes')
     && finding.includes('"./app.routes"'));
-  if (missingFindings.length > 0 || rejectedSameAppImport) {
-    const problems = [...missingFindings, ...(rejectedSameAppImport ? ['same-app relative import was rejected'] : [])];
+  const extensionChecks = [
+    { extension: '.cjs', content: "require('node:tls');", expected: 'node:tls' },
+    { extension: '.jsx', content: "import 'node:fs';", expected: 'node:fs' },
+  ];
+  const extensionFindings = extensionChecks.map(({ extension, content }) => {
+    const extensionPath = `apps/web/src/__m2_boundary_self_test__${extension}`;
+    const extensionCheckpoint = issues.length;
+    inspectSource(content, path.join(repositoryRoot, ...extensionPath.split('/')), extensionPath);
+    return issues.splice(extensionCheckpoint);
+  }).flat();
+  const missingExtensions = extensionChecks.filter(({ extension, expected }) =>
+    !sourceExtensions.has(extension) || !extensionFindings.some((finding) => finding.includes(expected)));
+  if (missingFindings.length > 0 || rejectedSameAppImport || missingExtensions.length > 0) {
+    const problems = [
+      ...missingFindings,
+      ...(rejectedSameAppImport ? ['same-app relative import was rejected'] : []),
+      ...missingExtensions.map(({ extension }) => `source extension ${extension} was not inspected`),
+    ];
     issues.push(`Web boundary self-test failed: ${problems.join('; ')}`);
   }
 }

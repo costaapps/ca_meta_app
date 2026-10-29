@@ -34,9 +34,11 @@ npm run smoke:routes
 ```
 
 The aggregate commands run the scripts declared by each present workspace. Later API and contract
-packages add their own scripts without changing the root command surface. `lint` currently checks
-the web import/dependency boundary; formatting and broader quality checks are added with the
-delivery pipeline scope.
+packages add their own scripts without changing the root command surface. `lint` runs a static
+heuristic over web imports, common loading calls, and declared dependencies. It recognizes simple
+`const` aliases of `require` and rejects non-literal dynamic imports, but does not fully resolve
+complex alias-based loading; it is not a complete security analysis. M2.08 adds the broader CI and
+security validation profile.
 
 The Angular project configuration and its TypeScript configs are in `apps/web/`. From the web
 workspace, `npm run build`, `npm test`, `npm run typecheck`, and `npm start` address that app alone.
