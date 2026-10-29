@@ -179,10 +179,33 @@ function rawGet(
   });
 }
 
+const childMessageHistory = new WeakMap<
+  import('node:child_process').ChildProcess,
+  Record<string, unknown>[]
+>();
+const childMessageCursor = new WeakMap<import('node:child_process').ChildProcess, number>();
+
 function waitForChildMessage(
   child: import('node:child_process').ChildProcess,
   type: string,
+  timeoutMs = 10_000,
 ): Promise<Record<string, unknown>> {
+  let history = childMessageHistory.get(child);
+  if (!history) {
+    history = [];
+    childMessageHistory.set(child, history);
+    child.on('message', (message: unknown) => {
+      if (typeof message === 'object' && message !== null && 'type' in message) {
+        history?.push(message as Record<string, unknown>);
+      }
+    });
+  }
+  const cursor = childMessageCursor.get(child) ?? 0;
+  const cachedIndex = history.findIndex((entry, index) => index >= cursor && entry.type === type);
+  if (cachedIndex >= 0) {
+    childMessageCursor.set(child, cachedIndex + 1);
+    return Promise.resolve(history[cachedIndex]);
+  }
   return new Promise((resolve, reject) => {
     const finish = (error?: Error, entry?: Record<string, unknown>): void => {
       clearTimeout(timeout);
@@ -192,14 +215,22 @@ function waitForChildMessage(
       else resolve(entry ?? {});
     };
     const timeout = setTimeout(
-      () => finish(new Error('Timed out waiting for child message ' + type + '.')),
-      10_000,
+      () => finish(new Error(
+        'Timed out waiting for child message ' + type + '; observed: ' +
+        (history?.map((entry) => String(entry.type)).join(', ') || 'none') + '.',
+      )),
+      timeoutMs,
     );
     const onMessage = (message: unknown): void => {
       if (typeof message === 'object' && message !== null && 'type' in message) {
         const entry = message as Record<string, unknown>;
-        if (entry.type === type) finish(undefined, entry);
-        else if (entry.type === 'startup-failed') finish(new Error('Signal-drain child failed to start.'));
+        if (entry.type === type) {
+          const matchedIndex = history?.findIndex((candidate, index) => index >= cursor && candidate.type === type) ?? -1;
+          if (matchedIndex >= 0) childMessageCursor.set(child, matchedIndex + 1);
+          finish(undefined, entry);
+        } else if (entry.type === 'startup-failed') {
+          finish(new Error('Signal-drain child failed to start.'));
+        }
       }
     };
     const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
@@ -209,7 +240,6 @@ function waitForChildMessage(
     child.once('exit', onExit);
   });
 }
-
 async function startBoundaryApp(): Promise<{
   readonly baseUrl: string;
   readonly app: INestApplication;
@@ -525,7 +555,7 @@ async function assertSubprocessShutdownDrain(connection: 'close' | 'keep-alive')
   });
 
   try {
-    const listening = await waitForChildMessage(child, 'listening');
+    const listening = await waitForChildMessage(child, 'listening', 5_000);
     const port = Number(listening.port);
     const response = fetch(
       'http://127.0.0.1:' + port + '/api/v1/probe/in-flight',
@@ -548,12 +578,15 @@ async function assertSubprocessShutdownDrain(connection: 'close' | 'keep-alive')
     assert.equal(rejectedBody.requestId, rejectedWhileDraining.headers['x-request-id']);
     child.send({ type: 'release' });
     await waitForChildMessage(child, 'release-received');
-    await waitForChildMessage(child, 'handler-released');
+    await waitForChildMessage(child, 'handler-released', 5_000);
     await waitForChildMessage(child, 'response-finished');
 
     const completed = await response;
     assert.equal(completed.status, 200);
     assert.deepEqual(await completed.json(), { started: true, completed: true });
+    await waitForChildMessage(child, 'drain-wait-finished', 5_000);
+    await waitForChildMessage(child, 'server-closed', 5_000);
+    await waitForChildMessage(child, 'app-close-finished', 5_000);
     child.disconnect();
     const result = await exited;
     assert.equal(result.code, 0, stderr);
@@ -564,7 +597,11 @@ async function assertSubprocessShutdownDrain(connection: 'close' | 'keep-alive')
     }
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGTERM');
-      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
+      const stoppedGracefully = await waitForChildExitWithin(exited, 2000);
+      if (!stoppedGracefully && child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+        await waitForChildExitWithin(exited, 2000);
+      }
     }
   }
 }
@@ -576,4 +613,293 @@ test('SIGTERM in a subprocess drains the response fully with both connection pol
 }, async () => {
   await assertSubprocessShutdownDrain('close');
   await assertSubprocessShutdownDrain('keep-alive');
+});
+
+type ChildExit = { readonly code: number | null; readonly signal: NodeJS.Signals | null };
+
+async function waitForChildExitWithin(exited: Promise<ChildExit>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const outcome = await Promise.race([
+    exited.then(() => 'exited' as const),
+    new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), timeoutMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return outcome === 'exited';
+}
+
+async function waitForChildExit(
+  exited: Promise<ChildExit>,
+  timeoutMs: number,
+  child?: import('node:child_process').ChildProcess,
+): Promise<ChildExit> {
+  let timer: NodeJS.Timeout | undefined;
+  const result = await Promise.race([
+    exited,
+    new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), timeoutMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  if (!result) {
+    const observed = child ? (childMessageHistory.get(child)?.map((entry) => String(entry.type)).join(', ') || 'none') : 'not captured';
+    throw new Error('Timed out waiting for subprocess exit; observed: ' + observed + '.');
+  }
+  return result;
+}
+
+function abortRequestAfterFirstChunk(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let receivedChunk = false;
+    let settled = false;
+    const request = httpRequest(url, (response) => {
+      response.on('error', () => undefined);
+      response.once('data', () => {
+        receivedChunk = true;
+        settled = true;
+        request.destroy();
+        response.destroy();
+        resolve();
+      });
+    });
+    const deadline = setTimeout(() => {
+      request.destroy();
+      if (!settled) reject(new Error('Timed out waiting for the in-flight response chunk.'));
+    }, 3000);
+    request.once('error', (error) => {
+      if (receivedChunk || settled) resolve();
+      else reject(error);
+    });
+    request.once('close', () => clearTimeout(deadline));
+    request.end();
+  });
+}
+
+function openRequestUntilAborted(url: string): import('node:http').ClientRequest {
+  const request = httpRequest(url, (response) => {
+    response.on('error', () => undefined);
+    response.resume();
+  });
+  request.on('error', () => undefined);
+  request.end();
+  return request;
+}
+
+async function assertAbortedClientWaitsForHandler(): Promise<void> {
+  const child = fork(join(__dirname, 'fixtures', 'sigterm-drain-child.js'), [], {
+    execPath: process.execPath,
+    execArgv: [],
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  });
+  let stderr = '';
+  let childExited: ChildExit | undefined;
+  let handlerReleased = false;
+  const exited = new Promise<ChildExit>((resolve) => {
+    child.once('exit', (code, signal) => {
+      childExited = { code, signal };
+      resolve(childExited);
+    });
+  });
+  child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+  child.on('message', (message: unknown) => {
+    if (typeof message === 'object' && message !== null && 'type' in message &&
+        (message as Record<string, unknown>).type === 'handler-released') {
+      handlerReleased = true;
+    }
+  });
+
+  try {
+    const listening = await waitForChildMessage(child, 'listening', 5_000);
+    const port = Number(listening.port);
+    const disconnected = waitForChildMessage(child, 'response-closed', 5_000);
+    await abortRequestAfterFirstChunk('http://127.0.0.1:' + port + '/api/v1/probe/in-flight');
+    const disconnectMessage = await disconnected;
+    assert.equal(disconnectMessage.writableFinished, false);
+
+    const signalReceived = waitForChildMessage(child, 'signal-received', 5_000);
+    child.kill('SIGTERM');
+    const signalMessage = await signalReceived;
+    assert.equal(signalMessage.signal, 'SIGTERM');
+    assert.equal(await waitForChildExitWithin(exited, 100), false);
+    assert.equal(childExited, undefined, 'the process must wait for the disconnected handler');
+    assert.equal(handlerReleased, false);
+
+    const releaseReceived = waitForChildMessage(child, 'release-received', 5_000);
+    child.send({ type: 'release' });
+    await releaseReceived;
+    await waitForChildMessage(child, 'handler-released', 5_000);
+    await waitForChildMessage(child, 'drain-wait-finished', 5_000);
+    await waitForChildMessage(child, 'server-closed', 5_000);
+    await waitForChildMessage(child, 'app-close-finished', 5_000);
+    child.disconnect();
+    const result = await waitForChildExit(exited, 5000, child);
+    assert.equal(result.code, 0, stderr);
+  } finally {
+    if (child.connected) {
+      try { child.send({ type: 'release' }); } catch {}
+    }
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      const stoppedGracefully = await waitForChildExitWithin(exited, 2000);
+      if (!stoppedGracefully && child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+        await waitForChildExitWithin(exited, 2000);
+      }
+    }
+    if (child.connected) child.disconnect();
+  }
+}
+
+async function assertObservableCancellationWaitsForAcknowledgement(): Promise<void> {
+  const child = fork(join(__dirname, 'fixtures', 'sigterm-drain-child.js'), [], {
+    execPath: process.execPath,
+    execArgv: [],
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  });
+  let stderr = '';
+  let childExited: ChildExit | undefined;
+  let cancellationAcknowledged = false;
+  const exited = new Promise<ChildExit>((resolve) => {
+    child.once('exit', (code, signal) => {
+      childExited = { code, signal };
+      resolve(childExited);
+    });
+  });
+  child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+  child.on('message', (message: unknown) => {
+    if (typeof message === 'object' && message !== null && 'type' in message &&
+        (message as Record<string, unknown>).type === 'observable-cancel-ack') {
+      cancellationAcknowledged = true;
+    }
+  });
+
+  let request: import('node:http').ClientRequest | undefined;
+  try {
+    const listening = await waitForChildMessage(child, 'listening', 5_000);
+    const port = Number(listening.port);
+    const disconnected = waitForChildMessage(child, 'response-closed', 5_000);
+    request = openRequestUntilAborted('http://127.0.0.1:' + port + '/api/v1/probe/observable-cancel');
+    await waitForChildMessage(child, 'observable-started', 5_000);
+    const earlyAck = await waitForChildMessage(child, 'observable-early-ack', 5_000);
+    assert.equal(earlyAck.accepted, false, 'acknowledgement before signal.aborted must be rejected');
+    request.destroy();
+    await waitForChildMessage(child, 'observable-unsubscribed', 5_000);
+    const disconnectMessage = await disconnected;
+    assert.equal(disconnectMessage.writableFinished, false);
+
+    const signalReceived = waitForChildMessage(child, 'signal-received', 5_000);
+    child.kill('SIGTERM');
+    const signalMessage = await signalReceived;
+    assert.equal(signalMessage.signal, 'SIGTERM');
+    assert.equal(await waitForChildExitWithin(exited, 50), false);
+    assert.equal(cancellationAcknowledged, false, 'RxJS unsubscribe is not cancellation acknowledgement');
+
+    await waitForChildMessage(child, 'observable-cancel-ack', 5_000);
+    cancellationAcknowledged = true;
+    assert.equal(childExited, undefined);
+    await waitForChildMessage(child, 'drain-wait-finished', 5_000);
+    await waitForChildMessage(child, 'server-closed', 5_000);
+    await waitForChildMessage(child, 'app-close-finished', 5_000);
+    child.disconnect();
+    const result = await waitForChildExit(exited, 5000, child);
+    assert.equal(result.code, 0, stderr);
+  } finally {
+    request?.destroy();
+    if (child.connected) child.disconnect();
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      const stoppedGracefully = await waitForChildExitWithin(exited, 2000);
+      if (!stoppedGracefully && child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+        await waitForChildExitWithin(exited, 2000);
+      }
+    }
+  }
+}
+
+test('SIGTERM waits for a Promise handler after the client aborts its response', {
+  skip: process.platform === 'win32'
+    ? 'Windows skips this POSIX SIGTERM subprocess case; run it with tools/m2-02/run-sigterm-drain-linux.ps1.'
+    : false,
+}, async () => {
+  await assertAbortedClientWaitsForHandler();
+});
+
+async function assertResponseSentBeforeHandlerCompletes(): Promise<void> {
+  const child = fork(join(__dirname, 'fixtures', 'sigterm-drain-child.js'), [], {
+    execPath: process.execPath,
+    execArgv: [],
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  });
+  let stderr = '';
+  let childExited: ChildExit | undefined;
+  const exited = new Promise<ChildExit>((resolve) => {
+    child.once('exit', (code, signal) => {
+      childExited = { code, signal };
+      resolve(childExited);
+    });
+  });
+  child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+
+  try {
+    const listening = await waitForChildMessage(child, 'listening', 5_000);
+    const port = Number(listening.port);
+    const responseFinished = waitForChildMessage(child, 'response-finished', 5_000);
+    const responseClosed = waitForChildMessage(child, 'response-closed', 5_000);
+    const response = await rawGet(
+      'http://127.0.0.1:' + port + '/api/v1/probe/response-before-handler',
+      '127.0.0.1:' + port,
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(JSON.parse(response.body), { completed: false });
+    await responseFinished;
+    const closed = await responseClosed;
+    assert.equal(closed.writableFinished, true);
+
+    const signalReceived = waitForChildMessage(child, 'signal-received', 5_000);
+    child.kill('SIGTERM');
+    assert.equal((await signalReceived).signal, 'SIGTERM');
+    assert.equal(await waitForChildExitWithin(exited, 100), false);
+    assert.equal(childExited, undefined, 'a finished response does not settle a pending handler');
+
+    const releaseReceived = waitForChildMessage(child, 'release-received', 5_000);
+    child.send({ type: 'release' });
+    await releaseReceived;
+    await waitForChildMessage(child, 'handler-released', 5_000);
+    await waitForChildMessage(child, 'drain-wait-finished', 5_000);
+    await waitForChildMessage(child, 'server-closed', 5_000);
+    await waitForChildMessage(child, 'app-close-finished', 5_000);
+    child.disconnect();
+    const result = await waitForChildExit(exited, 5000, child);
+    assert.equal(result.code, 0, stderr);
+  } finally {
+    if (child.connected) {
+      try { child.send({ type: 'release' }); } catch {}
+    }
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      const stoppedGracefully = await waitForChildExitWithin(exited, 2000);
+      if (!stoppedGracefully && child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+        await waitForChildExitWithin(exited, 2000);
+      }
+    }
+    if (child.connected) child.disconnect();
+  }
+}
+
+test('SIGTERM waits for a handler after the response finishes and the client closes', {
+  skip: process.platform === 'win32'
+    ? 'Windows skips this POSIX SIGTERM subprocess case; run it with tools/m2-02/run-sigterm-drain-linux.ps1.'
+    : false,
+}, async () => {
+  await assertResponseSentBeforeHandlerCompletes();
+});
+test('SIGTERM waits for explicit acknowledgement after an Observable disconnect unsubscribe', {
+  skip: process.platform === 'win32'
+    ? 'Windows skips this POSIX SIGTERM subprocess case; run it with tools/m2-02/run-sigterm-drain-linux.ps1.'
+    : false,
+}, async () => {
+  await assertObservableCancellationWaitsForAcknowledgement();
 });

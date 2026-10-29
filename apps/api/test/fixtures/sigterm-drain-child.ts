@@ -1,17 +1,24 @@
 import 'reflect-metadata';
-import { Controller, Get, Inject, Res } from '@nestjs/common';
+import { Controller, Get, Inject, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { Observable } from 'rxjs';
 import { Test } from '@nestjs/testing';
 import type { ApiEnvironment } from '../../src/config/environment.js';
 import { ApiModule } from '../../src/app.module.js';
 import { GracefulExpressAdapter } from '../../src/http/graceful-express-adapter.js';
 import { DATABASE_READINESS_PORT, type DatabaseReadinessPort } from '../../src/database/database-readiness.port.js';
-import { REQUEST_DRAIN, type RequestDrain } from '../../src/common/http/request-drain.js';
+import { REQUEST_DRAIN, type RequestDrain, getRequestWorkContext } from '../../src/common/http/request-drain.js';
 import { PublicRoute } from '../../src/common/security/public-route.decorator.js';
 import { configureHttpBoundaries } from '../../src/http-boundaries.js';
 import { registerGracefulShutdown } from '../../src/main.js';
 
 const DRAIN_STATE = Symbol('DRAIN_STATE');
-const ipc = process as NodeJS.Process & { send(message: unknown): boolean };
+const ipc = process as NodeJS.Process & { send(message: unknown): boolean; connected: boolean };
+
+function notifyParent(message: unknown): void {
+  if (!ipc.connected) return;
+  try { ipc.send(message); } catch { /* The fixture may already be disconnecting. */ }
+}
 
 class DrainState {
   private releaseWait!: () => void;
@@ -32,14 +39,45 @@ class DrainController {
 
   @Get('/probe/in-flight')
   @PublicRoute()
-  async inFlight(@Res() response: import('express').Response): Promise<void> {
+  async inFlight(@Res() response: Response): Promise<void> {
     response.status(200);
     response.setHeader('Content-Type', 'application/json');
     response.write('{"started":true,');
-    ipc.send({ type: 'request-started' });
+    notifyParent({ type: 'request-started' });
     await this.state.waitForRelease();
-    ipc.send({ type: 'handler-released' });
-    response.end('"completed":true}');
+    notifyParent({ type: 'handler-released' });
+    if (!response.destroyed) response.end('"completed":true}');
+  }
+
+  @Get('/probe/response-before-handler')
+  @PublicRoute()
+  async responseBeforeHandler(@Res() response: Response): Promise<void> {
+    response.status(200).json({ completed: false });
+    await this.state.waitForRelease();
+    notifyParent({ type: 'handler-released' });
+  }
+
+  @Get('/probe/observable-cancel')
+  @PublicRoute()
+  observableCancel(@Req() request: Request): Observable<never> {
+    return new Observable<never>(() => {
+      const work = getRequestWorkContext(request);
+      notifyParent({ type: 'observable-started' });
+      const acceptedEarlyAck = work?.acknowledgeCancellation() ?? false;
+      notifyParent({ type: 'observable-early-ack', accepted: acceptedEarlyAck });
+      return () => {
+        notifyParent({ type: 'observable-unsubscribed' });
+        const acknowledgeAfterCleanup = (): void => {
+          const cleanup = setTimeout(() => {
+            const acknowledged = work?.acknowledgeCancellation() ?? false;
+            notifyParent({ type: acknowledged ? 'observable-cancel-ack' : 'observable-cancel-ack-rejected' });
+          }, 250);
+          cleanup.ref();
+        };
+        if (work?.signal.aborted) acknowledgeAfterCleanup();
+        else work?.signal.addEventListener('abort', acknowledgeAfterCleanup, { once: true });
+      };
+    });
   }
 }
 
@@ -70,28 +108,46 @@ async function main(): Promise<void> {
     .useValue({ check: async () => undefined } satisfies DatabaseReadinessPort)
     .compile();
   const app = module.createNestApplication(new GracefulExpressAdapter(), { bodyParser: false });
-  app.use((_request: unknown, response: import('express').Response, next: () => void) => {
-    response.once('finish', () => ipc.send({ type: 'response-finished' }));
+  app.use((_request: unknown, response: Response, next: () => void) => {
+    response.once('finish', () => notifyParent({ type: 'response-finished' }));
+    response.once('close', () => notifyParent({
+      type: 'response-closed',
+      writableFinished: response.writableFinished,
+    }));
     next();
   });
   configureHttpBoundaries(app, environment);
   const server = app.getHttpServer() as import('node:http').Server;
-  registerGracefulShutdown(app, app.get<RequestDrain>(REQUEST_DRAIN), server);
+  const drain = app.get<RequestDrain>(REQUEST_DRAIN);
+  const waitForActiveRequests = drain.waitForActiveRequests.bind(drain);
+  drain.waitForActiveRequests = async (): Promise<void> => {
+    notifyParent({ type: 'drain-wait-started' });
+    await waitForActiveRequests();
+    notifyParent({ type: 'drain-wait-finished' });
+  };
+  server.once('close', () => notifyParent({ type: 'server-closed' }));
+  const closeApplication = app.close.bind(app);
+  app.close = async (): Promise<void> => {
+    notifyParent({ type: 'app-close-started' });
+    await closeApplication();
+    notifyParent({ type: 'app-close-finished' });
+  };
+  registerGracefulShutdown(app, drain, server);
   process.on('message', (message: unknown) => {
     if (typeof message === 'object' && message !== null && 'type' in message && message.type === 'release') {
-      ipc.send({ type: 'release-received' });
+      notifyParent({ type: 'release-received' });
       state.release();
     }
   });
-  process.on('SIGTERM', () => ipc.send({ type: 'signal-received', signal: 'SIGTERM' }));
-  process.on('SIGINT', () => ipc.send({ type: 'signal-received', signal: 'SIGINT' }));
+  process.on('SIGTERM', () => notifyParent({ type: 'signal-received', signal: 'SIGTERM' }));
+  process.on('SIGINT', () => notifyParent({ type: 'signal-received', signal: 'SIGINT' }));
   await app.init();
   await app.listen(0, environment.bindAddress);
   const address = app.getHttpServer().address() as { readonly port: number };
-  ipc.send({ type: 'listening', port: address.port });
+  notifyParent({ type: 'listening', port: address.port });
 }
 
 void main().catch(() => {
-  ipc.send({ type: 'startup-failed' });
+  notifyParent({ type: 'startup-failed' });
   process.exitCode = 1;
 });

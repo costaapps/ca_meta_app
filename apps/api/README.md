@@ -79,8 +79,18 @@ both available and unavailable results.
 JSON and form bodies are limited to 65,536 bytes. DTO validation rejects unknown fields. HTTP
 headers, request, keep-alive timeouts are fixed in the bootstrap. On SIGTERM or SIGINT, the API
 stops admitting requests, returns a safe 503 envelope to new requests while draining, waits for
-active response streams to finish, then closes the listener. GracefulExpressAdapter uses
-server.close() without destroying open sockets.
+both response transport and handler work to settle, then closes the listener. A client disconnect
+or an already-finished response does not release a still-running handler. GracefulExpressAdapter
+uses server.close() without destroying open sockets.
+
+Promise handlers remain leased until their Promise resolves or rejects, even after a client
+disconnect. Observable handlers must treat RxJS unsubscribe as a transport event, not proof that
+work has stopped: use `getRequestWorkContext(request).signal` to cancel and clean up, then call
+`acknowledgeCancellation()` after cleanup finishes. The method returns false before the signal is
+aborted and does not release a lease in that case. Do not use RxJS `finalize` as completion proof;
+it also runs during unsubscribe. If a handler keeps running, shutdown waits and emits a
+`api.shutdown_waiting` warning with the number of active handlers every 30 seconds. The warning
+timer is referenced so the process stays alive until the handler settles or acknowledges cleanup.
 
 The in-memory close test runs on the host OS. The POSIX SIGTERM subprocess test runs in an isolated
 Linux container. Windows skips only that POSIX subprocess case; the isolated runner executes it with
