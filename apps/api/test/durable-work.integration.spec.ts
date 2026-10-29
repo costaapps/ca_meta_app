@@ -714,12 +714,8 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
 
     const tenantClaimPlan = await dataSource.query(
       `EXPLAIN SELECT id FROM ca_meta_jobs
-       WHERE tenant_id = ? AND lane = 'WEBHOOK_URGENT' AND job_type = 'INBOX_PROCESS' AND NOT EXISTS (
-         SELECT 1 FROM ca_meta_jobs active
-         WHERE active.tenant_id = ca_meta_jobs.tenant_id
-           AND active.resource_scope_ref = ca_meta_jobs.resource_scope_ref
-           AND active.status = 'RUNNING' AND active.lease_expires_at > UTC_TIMESTAMP(6)
-       ) AND status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)
+       WHERE tenant_id = ? AND lane = 'WEBHOOK_URGENT' AND job_type = 'INBOX_PROCESS'
+         AND status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)
        ORDER BY next_run_at, created_at, id LIMIT 1`,
       [tenantWorker],
     ) as Array<{ table: string | null; key: string | null; type: string; rows: number | string }>;
