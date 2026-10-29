@@ -34,7 +34,7 @@ The wire shape is `ErrorEnvelope` in [`openapi.yaml`](openapi.yaml): stable `cod
 | `PROVIDER_REJECTED` | 422 | Provider rejected an operation after response normalization | `REAUTHORIZE` | Do not retry unchanged input indefinitely. Raw provider details remain restricted. |
 | `INTERNAL_SCOPE_DENIED` | 403 | Internal service identity lacks required tenant/asset/operation scope | `CONTACT_ADMIN` | Correct service authorization; never broaden to arbitrary Graph/API access. |
 
-The `safeMessage` field is selected from a fixed, allowlisted localization template for its error code; it never interpolates request values, raw provider text, secrets, or diagnostics. It is not a diagnostic. `requestId` is a correlation handle, not an authorization token. Detailed provider diagnostics belong in access-controlled logs with field allowlists and redaction. Error codes are versioned API behavior; changing a code or status mapping is a reviewed contract change.
+The `safeMessage` field is selected from a fixed, allowlisted localization template for its error code; it never interpolates request values, raw provider text, secrets, or diagnostics. `x-error-policy-by-code` in the `ErrorEnvelope` schema pins the non-retryable/action pair for `OUTCOME_UNKNOWN` and `IDEMPOTENCY_KEY_REUSED`; the harness rejects contradictory envelopes. The message is not a diagnostic. `requestId` is a correlation handle, not an authorization token. Detailed provider diagnostics belong in access-controlled logs with field allowlists and redaction. Error codes are versioned API behavior; changing a code or status mapping is a reviewed contract change.
 
 ## Limits and asynchronous effects
 

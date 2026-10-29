@@ -633,6 +633,7 @@ export interface components {
         readonly ErrorEnvelope: {
             /** @enum {string} */
             readonly code: "AUTH_REQUIRED" | "MEMBERSHIP_REVOKED" | "ACCESS_DENIED" | "RESOURCE_NOT_AVAILABLE" | "STATE_INVALID" | "ONBOARDING_EXPIRED" | "FLOW_UNAVAILABLE" | "FLOW_NOT_ELIGIBLE" | "ASSET_GRANT_MISSING" | "ASSET_CONFLICT" | "META_PERMISSION_REQUIRED" | "META_REAUTH_REQUIRED" | "META_RATE_LIMITED" | "SUBSCRIPTION_PENDING" | "OUTCOME_UNKNOWN" | "VERSION_CONFLICT" | "IDEMPOTENCY_KEY_REUSED" | "CONTEXT_CHANGED" | "ORIGIN_NOT_ALLOWED" | "CSRF_INVALID" | "VALIDATION_FAILED" | "PAYLOAD_TOO_LARGE" | "RATE_LIMITED" | "DEPENDENCY_UNAVAILABLE" | "META_UNAVAILABLE" | "PROVIDER_REJECTED" | "INTERNAL_SCOPE_DENIED";
+            /** @description Fixed, allowlisted localization template selected by error code. Never interpolate raw provider detail, request values, secrets, or diagnostic text. */
             readonly safeMessage: string;
             readonly requestId: string;
             readonly retryable: boolean;
@@ -918,7 +919,7 @@ export interface components {
         readonly WebhookChallengeResponse: {
             readonly challenge: string;
         };
-        /** @description Raw, signature-verified provider JSON body. Exact Meta webhook schema is Not confirmed; ingress validates signature and size, then stores protected bytes. Do not use this schema as an internal event or public read DTO. */
+        /** @description Raw, signature-verified provider JSON body. This schema asserts only an object shape and a maximum property count; it is not closed or a field-level provider schema. Exact Meta webhook fields are Not confirmed. Ingress validates signature and size, then stores protected bytes. Do not use this schema as an internal event or public read DTO. */
         readonly ProviderWebhookEnvelope: {
             readonly [key: string]: unknown;
         };

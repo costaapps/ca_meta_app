@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import csv
+import io
 from pathlib import Path
+import sys
 
 ROOT = Path(__file__).resolve().parents[3]
 BASELINE = ROOT / "docs" / "baseline" / "endpoint-matrix.csv"
@@ -107,24 +109,34 @@ fieldnames = [
     "next_gate",
     "evidence_limit",
 ]
-OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-with OUTPUT.open("w", encoding="utf-8", newline="") as handle:
-    writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
-    writer.writeheader()
-    for index, row in enumerate(rows, start=1):
-        operation, target, policy, gate, limit = mapping(row)
-        writer.writerow({
-            "matrix_row": index,
-            "source_kind": row["kind"],
-            "source_method": row["method"],
-            "source_path_or_symbol": row["path_or_symbol"],
-            "source_file": row["source_file"],
-            "source_symbol": row["source_symbol"],
-            "v1_operation": operation,
-            "v1_target": target,
-            "compatibility_policy": policy,
-            "next_gate": gate,
-            "evidence_limit": limit,
-        })
+buffer = io.StringIO(newline="")
+writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
+writer.writeheader()
+for index, row in enumerate(rows, start=1):
+    operation, target, policy, gate, limit = mapping(row)
+    writer.writerow({
+        "matrix_row": index,
+        "source_kind": row["kind"],
+        "source_method": row["method"],
+        "source_path_or_symbol": row["path_or_symbol"],
+        "source_file": row["source_file"],
+        "source_symbol": row["source_symbol"],
+        "v1_operation": operation,
+        "v1_target": target,
+        "compatibility_policy": policy,
+        "next_gate": gate,
+        "evidence_limit": limit,
+    })
 
-print(f"Wrote {len(rows)} compatibility rows from {BASELINE.relative_to(ROOT)}")
+generated = buffer.getvalue()
+if "--check" in sys.argv[1:]:
+    with OUTPUT.open(encoding="utf-8", newline="") as handle:
+        current = handle.read()
+    if current != generated:
+        raise SystemExit(f"Generated compatibility matrix is stale: run npm run generate ({OUTPUT.relative_to(ROOT)}).")
+    print(f"Verified {len(rows)} compatibility rows match {BASELINE.relative_to(ROOT)}")
+else:
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    with OUTPUT.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(generated)
+    print(f"Wrote {len(rows)} compatibility rows from {BASELINE.relative_to(ROOT)}")

@@ -18,14 +18,15 @@
     "occurredAt",
     "receivedAt",
     "protectedPayloadRef",
-    "safeMetadata"
+    "safeMetadata",
+    "routingState"
   ],
   "properties": {
     "eventId": { "type": "string", "minLength": 1, "maxLength": 128 },
     "schemaVersion": { "const": 1 },
     "eventType": {
       "type": "string",
-      "enum": ["provider.message.received", "provider.asset.changed", "provider.authorization.changed", "provider.subscription.changed", "provider.callback.received"]
+      "enum": ["provider.message.received", "provider.asset.changed", "provider.authorization.changed", "provider.subscription.changed", "provider.callback.received", "provider.unclassified"]
     },
     "appConfigRef": { "type": "string", "minLength": 1, "maxLength": 128 },
     "tenantRef": {
@@ -107,6 +108,16 @@
             "kind": { "const": "CALLBACK_RECEIVED" },
             "callbackRef": { "type": "string", "minLength": 1, "maxLength": 128 }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "eventRef", "reason"],
+          "properties": {
+            "kind": { "const": "UNCLASSIFIED" },
+            "eventRef": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Opaque reference to the protected provider event." },
+            "reason": { "type": "string", "enum": ["UNMAPPED_EVENT_TYPE", "UNSUPPORTED_SCHEMA_VERSION", "INVALID_ENVELOPE"] }
+          }
         }
       ]
     }
@@ -131,6 +142,21 @@
     {
       "if": { "properties": { "eventType": { "const": "provider.callback.received" } }, "required": ["eventType"] },
       "then": { "properties": { "safeMetadata": { "properties": { "kind": { "const": "CALLBACK_RECEIVED" } } } } }
+    },
+    {
+      "if": { "properties": { "routingState": { "const": "ROUTED" } }, "required": ["routingState"] },
+      "then": { "properties": { "tenantRef": { "type": "string", "minLength": 1, "maxLength": 128 } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "provider.unclassified" } }, "required": ["eventType"] },
+      "then": {
+        "required": ["routingState"],
+        "properties": {
+          "tenantRef": { "const": null },
+          "routingState": { "const": "QUARANTINED" },
+          "safeMetadata": { "properties": { "kind": { "const": "UNCLASSIFIED" } } }
+        }
+      }
     }
   ],
   "examples": [
@@ -150,6 +176,23 @@
       "protectedPayloadRef": "payloadref_example_01",
       "routingState": "PENDING",
       "safeMetadata": { "kind": "MESSAGE_RECEIVED", "assetRef": "asset_external_ref_example_01", "messageRef": "message_external_ref_example_01", "channel": "WHATSAPP" }
+    },
+    {
+      "eventId": "inbox_unclassified_example_01",
+      "schemaVersion": 1,
+      "eventType": "provider.unclassified",
+      "appConfigRef": "appcfg_example_01",
+      "tenantRef": null,
+      "actor": { "kind": "PROVIDER", "ref": "provider_example_01" },
+      "correlationId": "corr_example_03",
+      "causationId": null,
+      "aggregateRef": null,
+      "aggregateVersion": 0,
+      "occurredAt": "2026-10-29T12:08:00Z",
+      "receivedAt": "2026-10-29T12:08:01Z",
+      "protectedPayloadRef": "payloadref_example_02",
+      "routingState": "QUARANTINED",
+      "safeMetadata": { "kind": "UNCLASSIFIED", "eventRef": "payloadref_example_02", "reason": "UNMAPPED_EVENT_TYPE" }
     }
   ]
 }

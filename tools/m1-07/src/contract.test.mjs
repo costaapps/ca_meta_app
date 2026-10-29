@@ -150,7 +150,7 @@ test('every request, success and reusable error example validates against its JS
     assert.ok(Array.isArray(schema.examples) && schema.examples.length > 0, `${path.basename(eventPath)} needs a sanitized example`);
     const payloadSchema = schema.$id.endsWith(':inbox-event:v1') ? schema.properties.safeMetadata : schema.properties.data;
     const payloadKinds = payloadSchema.oneOf.map((variant) => variant.properties.kind.const).sort();
-    const eventTypeKinds = schema.allOf.map((rule) => {
+    const eventTypeKinds = schema.allOf.filter((rule) => rule.if.properties.eventType).map((rule) => {
       const eventType = rule.if.properties.eventType.const;
       const kind = rule.then.properties[schema.$id.endsWith(':inbox-event:v1') ? 'safeMetadata' : 'data'].properties.kind.const;
       assert.ok(schema.properties.eventType.enum.includes(eventType), `${eventType} is listed in eventType`);
@@ -169,6 +169,15 @@ test('every request, success and reusable error example validates against its JS
     if (schema.$id.endsWith(':inbox-event:v1')) mismatched.eventType = 'provider.authorization.changed';
     else mismatched.eventType = 'onboarding.changed';
     assert.equal(validate(mismatched), false, `${path.basename(eventPath)} must reject eventType/kind mismatches`);
+    if (schema.$id.endsWith(':inbox-event:v1')) {
+      const unclassified = schema.examples.find((example) => example.eventType === 'provider.unclassified');
+      assert.ok(unclassified, 'inbox schema includes a quarantined unclassified event example');
+      assert.equal(validate(unclassified), true, 'unclassified inbox events remain safely representable');
+      const incorrectlyRouted = structuredClone(unclassified);
+      incorrectlyRouted.routingState = 'ROUTED';
+      incorrectlyRouted.tenantRef = 'tenant_example_01';
+      assert.equal(validate(incorrectlyRouted), false, 'unclassified inbox events must remain quarantined without a tenant');
+    }
   }
   assert.ok(checked >= 60, `expected a broad request/success/error fixture set, checked ${checked}`);
 });
@@ -213,6 +222,22 @@ test('safe error catalog and OpenAPI error-code enum stay in lockstep', async ()
   assert.deepEqual(documented, schema);
   assert.ok(documented.includes('FLOW_NOT_ELIGIBLE'));
   assert.ok(documented.includes('META_UNAVAILABLE'));
+
+  const validateError = new Ajv2020({ allErrors: true, strict: false }).compile(inlineSchema(contract.components.schemas.ErrorEnvelope));
+  const errorPolicy = contract.components.schemas.ErrorEnvelope['x-error-policy-by-code'];
+  const validatesErrorContract = (envelope) => {
+    if (!validateError(envelope)) return false;
+    const policy = errorPolicy[envelope.code];
+    return !policy || (envelope.retryable === policy.retryable && envelope.action === policy.action);
+  };
+  const safeEnvelope = { safeMessage: 'The operation could not be confirmed yet.', requestId: 'req_example_99' };
+  for (const [code, action] of [['OUTCOME_UNKNOWN', 'CHECK_STATUS'], ['IDEMPOTENCY_KEY_REUSED', 'USE_NEW_REQUEST_KEY']]) {
+    const valid = { ...safeEnvelope, code, retryable: false, action };
+    assert.deepEqual(errorPolicy[code], { retryable: false, action });
+    assert.equal(validatesErrorContract(valid), true, `${code} safe envelope is valid`);
+    assert.equal(validatesErrorContract({ ...valid, retryable: true }), false, `${code} must not be retryable`);
+    assert.equal(validatesErrorContract({ ...valid, action: 'REFRESH' }), false, `${code} must use ${action}`);
+  }
 });
 
 test('compatibility matrix accounts for every sanitized baseline row exactly once', async () => {
@@ -308,6 +333,13 @@ test('proposed payload and retry bounds are explicit and UNKNOWN external writes
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.maxAutomaticRetries, 0);
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.onAmbiguousOutcome, 'UNKNOWN');
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.messageSend, 'no automatic retry');
+  for (const id of ['disconnectConnection', 'submitProviderAuthorizationCode', 'sendReply', 'createTemplate', 'actOnNotification']) {
+    const operation = operationList().find(({ operation: candidate }) => candidate.operationId === id)?.operation;
+    assert.ok(operation, `missing externally visible operation ${id}`);
+    const policy = operation['x-retry-policy'].toLowerCase();
+    assert.match(policy, /one automatic|at most one automatic/, `${id} includes one initial automatic attempt`);
+    assert.match(policy, /zero automatic retries|no automatic retry|do not automatically retry/, `${id} forbids automatic retries`);
+  }
   const sendReply = operationList().find(({ operation }) => operation.operationId === 'sendReply').operation;
   assert.match(sendReply['x-retry-policy'], /UNKNOWN/);
   assert.match(sendReply['x-retry-policy'], /No blind retry/);

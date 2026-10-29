@@ -690,8 +690,9 @@ paths:
         default: *a21
       x-external-effect: Starts a provider code exchange/provisioning job; raw code is not returned.
       x-idempotency-scope: tenant + operation + Idempotency-Key; only payload digest and accepted outcome are retained.
-      x-retry-policy: 202 means accepted, not successful. Poll Location. Ambiguous provider timeout
-        becomes UNKNOWN; reconcile before any repeat exchange.
+      x-retry-policy: At most one automatic provider-exchange attempt, including the initial request;
+        zero automatic retries without verified provider idempotency. A timeout becomes UNKNOWN; reconcile
+        before another exchange. Never resubmit the same one-time code.
   /api/v1/meta/{variant}/callback:
     parameters:
       - name: variant
@@ -915,8 +916,9 @@ paths:
         default: *a21
       x-external-effect: May request revocation or cleanup at the provider and update local grants.
       x-idempotency-scope: tenant + operation + Idempotency-Key and request payload hash.
-      x-retry-policy: Bounded adapter policy. Ambiguous provider result is UNKNOWN; reconcile grant state
-        before repeating.
+      x-retry-policy: One automatic attempt including the initial request; zero automatic retries. A
+        proven no-effect result may permit a new explicit user request with a new idempotency key. An
+        ambiguous provider result is UNKNOWN; reconcile grant state before another request.
   /api/v1/connections/{connectionId}/reauthorizations:
     parameters:
       - name: connectionId
@@ -1513,8 +1515,9 @@ paths:
         default: *a21
       x-external-effect: Submits template creation to the provider for review.
       x-idempotency-scope: tenant + operation + Idempotency-Key and canonical request payload hash.
-      x-retry-policy: Do not resubmit when provider outcome is ambiguous. Reconcile by provider template
-        identity first.
+      x-retry-policy: At most one automatic provider submission, including the initial request; zero
+        automatic retries without verified provider idempotency. If the result is ambiguous, reconcile by
+        provider template identity before any new explicit request.
   /api/v1/notifications:
     get:
       operationId: listNotifications
@@ -2051,6 +2054,13 @@ components:
           type: boolean
         action:
           $ref: "#/components/schemas/ErrorAction"
+      x-error-policy-by-code:
+        OUTCOME_UNKNOWN:
+          retryable: false
+          action: CHECK_STATUS
+        IDEMPOTENCY_KEY_REUSED:
+          retryable: false
+          action: USE_NEW_REQUEST_KEY
     AcceptedRequest:
       type: object
       additionalProperties: false

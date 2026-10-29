@@ -12,13 +12,14 @@
     "generate:client": "node scripts/generate-client.mjs",
     "generate:compatibility": "python scripts/generate-compatibility.py",
     "generate": "npm run generate:client && npm run generate:compatibility",
+    "check:generated": "node scripts/generate-client.mjs --check && python scripts/generate-compatibility.py --check",
     "lint": "redocly lint --config redocly.yaml ../../docs/meta-v2/contracts/openapi.yaml",
     "check:breaking": "node scripts/check-breaking.mjs",
     "test:breaking-sensitivity": "node scripts/test-breaking-check.mjs",
     "test:contract": "node --test src/contract.test.mjs",
     "test:behavior": "node --test src/behavior.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run lint && npm run check:breaking && npm run test:breaking-sensitivity && npm run test:contract && npm run test:behavior && npm run typecheck",
+    "test": "npm run check:generated && npm run lint && npm run check:breaking && npm run test:breaking-sensitivity && npm run test:contract && npm run test:behavior && npm run typecheck",
     "clean": "node scripts/clean.mjs"
   },
   "dependencies": {
