@@ -183,6 +183,21 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     );
     assert.equal(updatedNMinusOne[0]?.display_name, 'updated by N-1 writer');
     assert.equal(updatedNMinusOne[0]?.external_name, 'updated by N-1 writer');
+    await admin.query('UPDATE ca_meta_assets SET display_name = ? WHERE id = ?', ['updated by N-1 writer ', uuid(30_001)]);
+    const trailingSpaceName = await queryRows<{ display_name: string; external_name: string | null; display_name_bytes: number; external_name_bytes: number }>(admin,
+      `SELECT display_name, external_name, OCTET_LENGTH(display_name) AS display_name_bytes,
+              OCTET_LENGTH(external_name) AS external_name_bytes
+       FROM ca_meta_assets WHERE id = ?`, [uuid(30_001)],
+    );
+    assert.equal(trailingSpaceName[0]?.display_name, 'updated by N-1 writer ');
+    assert.equal(trailingSpaceName[0]?.external_name, 'updated by N-1 writer ');
+    assert.equal(Number(trailingSpaceName[0]?.external_name_bytes), Number(trailingSpaceName[0]?.display_name_bytes));
+    await admin.query('UPDATE ca_meta_assets SET display_name = ? WHERE id = ?', ['updated by N-1 writer', uuid(30_001)]);
+    const revertedTrailingSpaceName = await queryRows<{ display_name: string; external_name: string | null }>(admin,
+      'SELECT display_name, external_name FROM ca_meta_assets WHERE id = ?', [uuid(30_001)],
+    );
+    assert.equal(revertedTrailingSpaceName[0]?.display_name, 'updated by N-1 writer');
+    assert.equal(revertedTrailingSpaceName[0]?.external_name, 'updated by N-1 writer');
 
     // The asset unique identity includes tenant scope; the same provider ID in another tenant survived.
     const duplicateCheck = await queryRows<{ count: string | number }>(admin,

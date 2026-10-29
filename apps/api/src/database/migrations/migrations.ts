@@ -201,7 +201,7 @@ const syncExternalNameOnInsert = triggerStep(
 const syncExternalNameOnUpdate = triggerStep(
   'sync-asset-external-name-update',
   'UPDATE',
-  'SET NEW.external_name = IF(NOT (NEW.display_name <=> OLD.display_name) AND (NEW.external_name <=> OLD.external_name), NEW.display_name, NEW.external_name)',
+  'SET NEW.external_name = IF(NOT (BINARY NEW.display_name <=> BINARY OLD.display_name) AND (BINARY NEW.external_name <=> BINARY OLD.external_name), NEW.display_name, NEW.external_name)',
 );
 
 const backfillExternalName: BackfillStep = {
