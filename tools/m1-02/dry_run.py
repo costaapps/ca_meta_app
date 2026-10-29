@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import argparse
 import json
+import sys
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +22,11 @@ VALID_EXPIRY_STATES = {"known", "no_deadline_returned", "unknown"}
 # Source literals observed in MetaConnectedPages.Type plus a synthetic normalized
 # phone-asset kind from MetaConnectedNumbers. Physical DB enum values stay unconfirmed.
 KNOWN_ASSET_KINDS = {"FACEBOOK", "INSTAGRAM", "WHATSAPP", "WHATSAPP_PHONE"}
+EXPECTED_SYNTHETIC_VERSIONS = {
+    "sourceVersion": "synthetic-snapshot-v1",
+    "projectionVersion": "synthetic-projection-v1",
+}
+DEFAULT_FIXTURE = Path(__file__).resolve().parents[2] / "docs" / "meta-v2" / "fixtures" / "m1-02-synthetic.json"
 
 
 def _reject_sensitive_keys(value: Any) -> None:
@@ -43,6 +48,16 @@ def _require_text(item: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Fixture is missing required field: {key}.")
     return value.strip()
+
+
+def _require_reviewed_synthetic_versions(fixture: dict[str, Any]) -> tuple[str, str]:
+    for field, expected in EXPECTED_SYNTHETIC_VERSIONS.items():
+        if _require_text(fixture, field) != expected:
+            raise ValueError("Only the reviewed synthetic fixture versions are accepted.")
+    return (
+        EXPECTED_SYNTHETIC_VERSIONS["sourceVersion"],
+        EXPECTED_SYNTHETIC_VERSIONS["projectionVersion"],
+    )
 
 
 def _tenant_pair(item: dict[str, Any]) -> tuple[str, str]:
@@ -88,8 +103,7 @@ def dry_run(fixture: dict[str, Any]) -> dict[str, Any]:
     if fixture.get("fixtureClass") != "synthetic-only":
         raise ValueError("Only fixtures explicitly marked synthetic-only are accepted.")
     _reject_sensitive_keys(fixture)
-    source_version = _require_text(fixture, "sourceVersion")
-    projection_version = _require_text(fixture, "projectionVersion")
+    source_version, projection_version = _require_reviewed_synthetic_versions(fixture)
 
     mappings = fixture.get("tenantMappings")
     records = fixture.get("records")
@@ -135,10 +149,14 @@ def dry_run(fixture: dict[str, Any]) -> dict[str, Any]:
             else:
                 parent_id = record.get("parentSourceRowId")
                 parent_error = None
-                if parent_id is not None:
+                if kind.strip() == "WHATSAPP_PHONE" and parent_id is None:
+                    parent_error = "parent_row_missing"
+                elif parent_id is not None:
                     expected_parent_type = record.get("expectedParentType")
                     if not isinstance(expected_parent_type, str) or expected_parent_type.strip() not in KNOWN_ASSET_KINDS:
                         parent_error = "parent_type_rule_missing"
+                    elif kind.strip() == "WHATSAPP_PHONE" and expected_parent_type.strip() != "WHATSAPP":
+                        parent_error = "parent_type_rule_conflict"
                     elif not isinstance(parent_id, str) or not parent_id.strip():
                         parent_error = "parent_row_missing"
                     else:
@@ -212,15 +230,10 @@ def dry_run(fixture: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Read-only synthetic tenant migration dry-run.")
-    parser.add_argument(
-        "--fixture",
-        type=Path,
-        default=Path("docs/meta-v2/fixtures/m1-02-synthetic.json"),
-        help="JSON fixture marked synthetic-only (default: docs/meta-v2/fixtures/m1-02-synthetic.json)",
-    )
-    args = parser.parse_args()
-    fixture = json.loads(args.fixture.read_text(encoding="utf-8"))
+    if len(sys.argv) != 1:
+        print("This synthetic-only harness does not accept alternate fixture paths.", file=sys.stderr)
+        raise SystemExit(2)
+    fixture = json.loads(DEFAULT_FIXTURE.read_text(encoding="utf-8"))
     print(json.dumps(dry_run(fixture), indent=2, sort_keys=True))
 
 

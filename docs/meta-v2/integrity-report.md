@@ -12,7 +12,7 @@ The reviewed source snapshot is milestone base 54787a9f18c1cb88ed881bb3a5dd20707
 | Company ownership | resolve (IdDatabase, IdCompany) to one authorized tenant_id; never use IdDatabase alone | PHP obtains both values from Company; actual ownership map and uniqueness are Not confirmed |
 | Same database, multiple companies | evaluate each company pair separately even when ExternalId matches | Covered by synthetic rows 1 and 2 |
 | Asset duplicates | group by (tenant_id, kind, external_asset_id); quarantine all colliding rows pending resolution | Physical duplicate counts and unique indexes are Not confirmed |
-| Parent link | resolve ParentChannelId / IdWaba inside the same tenant; quarantine missing, ambiguous or cross-tenant parent | Synthetic rows 8–10 cover missing, cross-tenant and wrong-kind parent cases; live relation integrity is Not confirmed |
+| Parent link | resolve ParentChannelId / IdWaba inside the same tenant; every WhatsApp phone requires a WHATSAPP parent and parent-type rule; quarantine missing, ambiguous or cross-tenant parents | Synthetic rows 8–10 cover missing, cross-tenant and wrong-kind parents; live relation integrity is Not confirmed |
 | Expiry | distinguish provider-observed deadline, provider-explicitly-omitted deadline, and unknown; Never alone becomes unknown | Versioned WhatsApp code writes a Never sentinel; real provider provenance is absent |
 | Credential reporting | report presence/counts by internal identifiers or protected handles only; never select or log values | No credentials were read; synthetic fixture rejects credential fields |
 | Notifications | resolve a tenant owner beyond IdDatabase; inventory wildcard fields before projection | Current endpoint queries by IdDatabase and uses SELECT *; ownership and physical fields are Not confirmed |
@@ -29,7 +29,7 @@ Commands:
     python tools/m1-02/dry_run.py
     python -m unittest discover -s tools/m1-02 -p "test_*.py" -v
 
-The fixture [m1-02-synthetic.json](fixtures/m1-02-synthetic.json) explicitly labels every row as synthetic, carries sourceVersion and projectionVersion metadata, and contains no credential/connection values. The harness rejected a test copy containing UserAccessToken. It is a deterministic classifier, not a data import tool; its output includes row ordinals/reason codes but not source row IDs, tenant IDs or external IDs.
+The harness reads only the versioned [m1-02-synthetic.json](fixtures/m1-02-synthetic.json) by default and rejects alternate CLI paths and any source/projection version other than the reviewed synthetic labels. The fixture contains no credential/connection values, and the harness rejected an in-memory test copy containing UserAccessToken. It is a deterministic classifier, not a data import tool; its output includes row ordinals/reason codes but not source row IDs, tenant IDs or external IDs.
 
 Observed dry-run summary:
 
@@ -48,7 +48,7 @@ Observed dry-run summary:
 
 Same-IdDatabase companies with a matching synthetic ExternalId remain separate candidates tied to distinct synthetic tenant IDs. A different database/company pair resolves independently. A conflicting pair has two synthetic tenant mappings with different last-login timestamps; neither timestamp is consulted, and its row is quarantined. The duplicate group and orphan row are also quarantined. Three child rows with a missing, cross-tenant, or wrong-kind parent are quarantined.
 
-The unittest run passed **11 tests**: same-database isolation, different-database resolution, ambiguous/orphan quarantine, duplicate and parent-link quarantine, missing parent-type rule and unknown-kind quarantine, three expiry states, field-map coverage, pure/no-write behavior and fixture credential rejection.
+The unittest run passed **14 tests**: same-database isolation, different-database resolution, ambiguous/orphan quarantine, duplicate and parent-link quarantine, unknown-kind quarantine, required WhatsApp parent/type, missing parent-type rule, fixed synthetic version metadata, rejected alternate fixture path, three expiry states, field-map coverage, pure/no-write behavior and fixture credential rejection.
 
 ## Remaining operational gate
 

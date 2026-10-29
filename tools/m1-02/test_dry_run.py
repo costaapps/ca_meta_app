@@ -5,7 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from dry_run import dry_run  # noqa: E402
+from dry_run import dry_run, main  # noqa: E402
 
 
 FIXTURE = Path(__file__).parents[2] / "docs" / "meta-v2" / "fixtures" / "m1-02-synthetic.json"
@@ -94,6 +94,41 @@ class DryRunTests(unittest.TestCase):
         result = dry_run(missing_rule)
         self.assertEqual(result["rows"][8]["disposition"], "quarantine")
         self.assertEqual(result["rows"][8]["reason"], "parent_type_rule_missing")
+
+    def test_whatsapp_phone_requires_same_tenant_waba_parent(self):
+        valid_link = deepcopy(self.fixture)
+        valid_link["records"][7]["parentSourceRowId"] = "synthetic-row-03"
+        self.assertEqual(dry_run(valid_link)["rows"][7]["disposition"], "candidate")
+
+        missing_parent = deepcopy(self.fixture)
+        del missing_parent["records"][7]["parentSourceRowId"]
+        result = dry_run(missing_parent)
+        self.assertEqual(result["rows"][7]["disposition"], "quarantine")
+        self.assertEqual(result["rows"][7]["reason"], "parent_row_missing")
+
+        wrong_rule = deepcopy(self.fixture)
+        wrong_rule["records"][8]["expectedParentType"] = "FACEBOOK"
+        result = dry_run(wrong_rule)
+        self.assertEqual(result["rows"][8]["disposition"], "quarantine")
+        self.assertEqual(result["rows"][8]["reason"], "parent_type_rule_conflict")
+
+    def test_unreviewed_source_versions_are_rejected(self):
+        for field in ("sourceVersion", "projectionVersion"):
+            with self.subTest(field=field):
+                changed_version = deepcopy(self.fixture)
+                changed_version[field] = "snapshot-from-elsewhere"
+                with self.assertRaisesRegex(ValueError, "reviewed synthetic fixture"):
+                    dry_run(changed_version)
+
+    def test_cli_rejects_alternate_fixture_path(self):
+        original_argv = sys.argv
+        try:
+            sys.argv = ["dry_run.py", "--fixture", "outside-synthetic-fixture.json"]
+            with self.assertRaises(SystemExit) as error:
+                main()
+            self.assertEqual(error.exception.code, 2)
+        finally:
+            sys.argv = original_argv
 
     def test_fixture_cannot_contain_credential_or_connection_values(self):
         unsafe = deepcopy(self.fixture)
