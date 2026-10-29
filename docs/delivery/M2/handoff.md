@@ -5,11 +5,11 @@
 - Target package integration branch: `desktop/milestone-m2`.
 - Verified base: `develop@2f0944d771ea7e98c520b20667586304e8bb9113`.
 - M1 consolidated PR #94 is remotely merged to develop at this SHA. Its M1 handoff predates that merge; the live GitHub merge and develop tree take precedence.
-- No M2 package PRs existed at start. All package issues are open.
+- M2.01/#20 package PR #95 is merged by squash into the milestone branch as `45d32ca7f6b4ad004b52d6f675644139e17c10ca`. The issue remains open pending final acceptance in develop.
 
 ## Current stage
 
-M2.01/#20 is implemented in the managed `m2-01` worktree on branch `desktop/m2-01`, based on `af941f29e1b0862f46f299eb08ae544d1af1f04a` and synchronized with milestone tip `ca7442da8e4f2ea339ce4340c165aa1577131b9b`. The validated source candidate is `069b057721f4748bcae9ebfb92c621eaed5ad747`; subsequent changes in this handoff/progress report do not alter package code or dependencies. On Node 24.22.2/npm 11.19.1, clean `npm ci` passed for the same manifest/lock snapshot (504 packages; 46 inherited audit findings and five npm install-script warnings). Aggregate build, 5/5 Angular tests, typecheck, lint/self-tests, bundle scan, dev and static route smokes, and `git diff --check` passed. Functional and security reviews passed without blockers; the import checker is documented as a static heuristic, with broader CI/security controls remaining in M2.08. Next action: publish the package branch, open its PR to `desktop/milestone-m2`, verify remote checks/reviews/protections, and squash only if all required gates pass.
+M2.01/#20 is accepted in the milestone branch. Package PR #95 head `957d00dfbf0113a41a5642282baf293532b29648` was squash-integrated as `45d32ca7f6b4ad004b52d6f675644139e17c10ca`. GitHub checks `desktop-candidate`, baseline, plan, and orchestrator succeeded; structure was skipped by its branch condition. Its local matrix and independent reviews are recorded in `progress.md`; the issue stays open until the consolidated PR is accepted in develop. The current first eligible package is M2.02/#21, whose prerequisites are integrated.
 
 ## Environment and limits
 

@@ -5,8 +5,8 @@ Milestone branch: `desktop/milestone-m2`, initially created at that SHA.
 
 | Package / issue | Stage | Candidate | Latest evidence | Package PR | Next action |
 |---|---|---|---|---|---|
-| M2.01 / #20 | Reviewed and validated; package PR pending | source candidate `069b057721f4748bcae9ebfb92c621eaed5ad747`; `desktop/m2-01` | Node 24.22.2/npm 11.19.1. Clean `npm ci` passed for unchanged manifests/lock (504 packages; 46 inherited audit findings). Build 372.81 kB; 5/5 tests; typecheck; lint/self-tests; bundle scan; dev/static route smokes; `git diff --check` all PASS. Functional review PASS; security review PASS with documented heuristic limits. | none | publish package branch and open PR to desktop/milestone-m2 |
-| M2.02 / #21 | Waiting for M2.01 package integration | pending | M1.07/#17 is included in develop | none | implement Nest boundary and safe config |
+| M2.01 / #20 | Accepted in `desktop/milestone-m2` | source candidate `069b057721f4748bcae9ebfb92c621eaed5ad747`; PR head `957d00dfbf0113a41a5642282baf293532b29648` | PR #95 merged by squash as `45d32ca7f6b4ad004b52d6f675644139e17c10ca`. Checks: `desktop-candidate`, baseline, planning audit, and orchestrator success; structure skipped by workflow condition. Node 24.22.2/npm 11.19.1; clean install on unchanged lock; build 372.81 kB; 5/5 tests; typecheck/lint/bundle/routes PASS. Functional/security reviews PASS. | [#95](https://github.com/costaapps/ca_meta_app/pull/95), squash `45d32ca` | continue with M2.02; keep issue open until consolidated acceptance in develop |
+| M2.02 / #21 | Ready | pending | M2.01/#20 is squash-integrated; M1.07/#17 is included in develop | none | implement Nest boundary and safe config |
 | M2.03 / #22 | Waiting on M2.02 | pending | M1.02/#11 and M1.05/#14 are included in develop | none | MariaDB migrations and recovery harness |
 | M2.04 / #23 | Waiting on M2.02 | pending | M1.07/#17 is included in develop | none | canonical OpenAPI compatibility |
 | M2.05 / #24 | Waiting on M2.03 | pending | M1.05/#14 and M1.09/#16 are included in develop | none | durable outbox/inbox/worker tests |
