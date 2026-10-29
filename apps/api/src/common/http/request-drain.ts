@@ -17,6 +17,8 @@ interface ActiveRequest {
   handlerSettled: boolean;
   responseFinished: boolean;
   responseClosed: boolean;
+  requiresCancellationAck: boolean;
+  abortSignal: AbortSignal;
   released: boolean;
   completeHandler?: () => void;
 }
@@ -76,6 +78,8 @@ export class RequestDrain {
         handlerSettled: true,
         responseFinished: false,
         responseClosed: false,
+        requiresCancellationAck: false,
+        abortSignal: abortController.signal,
         released: false,
       };
       this.requestStates.set(request, state);
@@ -95,15 +99,16 @@ export class RequestDrain {
     };
   }
 
-  beginHandler(request: Request): () => void {
+  beginHandler(request: Request, requiresCancellationAck = false): () => void {
     const state = this.requestStates.get(request);
     if (!state || state.released) return () => undefined;
     if (state.completeHandler) return state.completeHandler;
 
     state.handlerSettled = false;
+    state.requiresCancellationAck = requiresCancellationAck;
     let settled = false;
     state.completeHandler = (): void => {
-      if (settled) return;
+      if (settled || (state.requiresCancellationAck && state.abortSignal.aborted)) return;
       settled = true;
       state.handlerSettled = true;
       this.releaseIfSettled(state);

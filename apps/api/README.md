@@ -83,26 +83,40 @@ both response transport and handler work to settle, then closes the listener. A 
 or an already-finished response does not release a still-running handler. GracefulExpressAdapter
 uses server.close() without destroying open sockets.
 
-Promise handlers remain leased until their Promise resolves or rejects, even after a client
-disconnect. Observable handlers must treat RxJS unsubscribe as a transport event, not proof that
-work has stopped: use `getRequestWorkContext(request).signal` to cancel and clean up, then call
-`acknowledgeCancellation()` after cleanup finishes. The method returns false before the signal is
-aborted and does not release a lease in that case. Do not use RxJS `finalize` as completion proof;
-it also runs during unsubscribe. If a handler keeps running, shutdown waits and emits a
-`api.shutdown_waiting` warning with the number of active handlers every 30 seconds. The warning
-timer is referenced so the process stays alive until the handler settles or acknowledges cleanup.
+Promise handlers settle when their Promise resolves or rejects, including after a client disconnect.
+Observable handlers remain leased if their `complete` or `error` is emitted after the request signal
+aborts; this includes `takeUntil(signal)` completion. They must use
+`getRequestWorkContext(request).signal` to cancel and clean up, then call
+`acknowledgeCancellation()` only after cleanup finishes. The method returns false before the signal
+is aborted. RxJS `unsubscribe` and `finalize` are not cleanup acknowledgements.
 
-The in-memory close test runs on the host OS. The POSIX SIGTERM subprocess test runs in an isolated
-Linux container. Windows skips only that POSIX subprocess case; the isolated runner executes it with
-both Connection: close and keep-alive policies.
+The interceptor classifies handlers from `design:returntype` metadata on the controller prototype:
+Observable return types require the post-cleanup acknowledgement after abort; Promise and synchronous
+types such as the `/health` `Object` return settle normally. Handlers with no return-type metadata
+fail closed and require acknowledgement after abort. Use `@RequireCancellationAcknowledgement()`
+for `Promise<Observable<...>>`, type-only/erased Observable returns, or any dynamic handler that may
+resolve to an Observable. The method decorator is exported from
+`src/common/http/request-drain.interceptor.js`.
+
+If a handler keeps running, shutdown waits and emits an `api.shutdown_waiting` warning with the
+number of active handlers every 30 seconds. The warning timer is referenced so the process stays
+alive until the handler settles or acknowledges cleanup.
+
+The in-memory close test runs on the host OS. POSIX SIGTERM subprocess cases run in an isolated Linux
+container. Windows skips those cases; the Linux runner executes them without skips, including
+client abort plus `takeUntil(signal)` and delayed cleanup acknowledgement.
 
 Run the isolated Linux signal-drain suite from PowerShell:
 
     .\tools\m2-02\run-sigterm-drain-linux.ps1
 
+An optional `-TestName` parameter selects a literal test-name fragment, for example:
+
+    .\tools\m2-02\run-sigterm-drain-linux.ps1 -TestName 'Observable takeUntil completion'
+
 The runner pins the Node 24.22.2 bookworm image digest recorded by M1.04, creates two UUID-named
-Docker dependency volumes, runs npm ci in a network-enabled container, then runs the API suite with
---network none. Its finally block removes only those two volume names. This provides the
+Docker dependency volumes, runs npm ci in a network-enabled container, then runs tests in a separate
+`--network none` container. Its finally block removes only those two volume names. This provides
 subprocess/SIGTERM evidence on Linux without changing the host's node_modules.
 
 ## MariaDB readiness integration harness

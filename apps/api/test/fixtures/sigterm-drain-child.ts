@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { Controller, Get, Inject, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { Observable } from 'rxjs';
+import { NEVER, Observable, takeUntil, tap } from 'rxjs';
 import { Test } from '@nestjs/testing';
 import type { ApiEnvironment } from '../../src/config/environment.js';
 import { ApiModule } from '../../src/app.module.js';
@@ -11,6 +11,7 @@ import { REQUEST_DRAIN, type RequestDrain, getRequestWorkContext } from '../../s
 import { PublicRoute } from '../../src/common/security/public-route.decorator.js';
 import { configureHttpBoundaries } from '../../src/http-boundaries.js';
 import { registerGracefulShutdown } from '../../src/main.js';
+import { RequireCancellationAcknowledgement } from '../../src/common/http/request-drain.interceptor.js';
 
 const DRAIN_STATE = Symbol('DRAIN_STATE');
 const ipc = process as NodeJS.Process & { send(message: unknown): boolean; connected: boolean };
@@ -55,6 +56,34 @@ class DrainController {
     response.status(200).json({ completed: false });
     await this.state.waitForRelease();
     notifyParent({ type: 'handler-released' });
+  }
+
+  @Get('/probe/observable-takeuntil')
+  @PublicRoute()
+  @RequireCancellationAcknowledgement()
+  async observableTakeUntil(@Req() request: Request): Promise<Observable<never>> {
+    const work = getRequestWorkContext(request);
+    if (!work) throw new Error('request work context missing');
+    notifyParent({ type: 'observable-takeuntil-started' });
+    const abort$ = new Observable<void>((subscriber) => {
+      const onAbort = (): void => {
+        notifyParent({ type: 'observable-takeuntil-cleanup-started' });
+        const cleanup = setTimeout(() => {
+          const accepted = work.acknowledgeCancellation();
+          notifyParent({ type: 'observable-takeuntil-cleanup-ack', accepted });
+        }, 300);
+        cleanup.ref();
+        subscriber.next();
+        subscriber.complete();
+      };
+      work.signal.addEventListener('abort', onAbort, { once: true });
+      if (work.signal.aborted) onAbort();
+      return () => work.signal.removeEventListener('abort', onAbort);
+    });
+    return NEVER.pipe(
+      takeUntil(abort$),
+      tap({ complete: () => notifyParent({ type: 'observable-takeuntil-completed' }) }),
+    );
   }
 
   @Get('/probe/observable-cancel')

@@ -7,8 +7,16 @@ import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import { request as httpRequest } from 'node:http';
 import { fork } from 'node:child_process';
+import { NEVER, Observable } from 'rxjs';
+import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { ApiModule } from '../src/app.module.js';
+import { HealthController } from '../src/health/health.controller.js';
+import { RequestDrain, getRequestWorkContext } from '../src/common/http/request-drain.js';
+import {
+  RequireCancellationAcknowledgement,
+  requiresCancellationAcknowledgement,
+} from '../src/common/http/request-drain.interceptor.js';
 import { GracefulExpressAdapter } from '../src/http/graceful-express-adapter.js';
 import { DATABASE_READINESS_PORT, type DatabaseReadinessPort } from '../src/database/database-readiness.port.js';
 import type { ApiEnvironment } from '../src/config/environment.js';
@@ -512,6 +520,91 @@ test('MariaDB ping deadline destroys a stalled probe connection', async () => {
   assert.equal(destroyCount, 1);
 });
 
+class ObservableHandlerProbe {
+  @PublicRoute()
+  observable(): Observable<never> {
+    return NEVER;
+  }
+}
+
+class SynchronousVoidHandlerProbe {
+  @PublicRoute()
+  run(): void {}
+}
+
+class DynamicObservableHandlerProbe {
+  @RequireCancellationAcknowledgement()
+  resolveObservable(): Promise<Observable<never>> {
+    return Promise.resolve(NEVER);
+  }
+}
+
+test('cancellation acknowledgement mode covers Observable, dynamic, and unknown return types', () => {
+  assert.equal(Reflect.getMetadata('design:returntype', HealthController.prototype, 'liveness'), Object);
+  assert.equal(
+    requiresCancellationAcknowledgement(HealthController.prototype.liveness, HealthController.prototype),
+    false,
+  );
+  assert.equal(Reflect.getMetadata('design:returntype', HealthController.prototype, 'readinessStatus'), Promise);
+  assert.equal(
+    requiresCancellationAcknowledgement(HealthController.prototype.readinessStatus, HealthController.prototype),
+    false,
+  );
+  assert.equal(Reflect.hasMetadata('design:returntype', SynchronousVoidHandlerProbe.prototype, 'run'), true);
+  assert.equal(Reflect.getMetadata('design:returntype', SynchronousVoidHandlerProbe.prototype, 'run'), undefined);
+  assert.equal(
+    requiresCancellationAcknowledgement(SynchronousVoidHandlerProbe.prototype.run, SynchronousVoidHandlerProbe.prototype),
+    false,
+  );
+  assert.equal(Reflect.getMetadata('design:returntype', ObservableHandlerProbe.prototype, 'observable'), Observable);
+  assert.equal(
+    requiresCancellationAcknowledgement(ObservableHandlerProbe.prototype.observable, ObservableHandlerProbe.prototype),
+    true,
+  );
+  assert.equal(Reflect.getMetadata('design:returntype', DynamicObservableHandlerProbe.prototype, 'resolveObservable'), Promise);
+  assert.equal(
+    requiresCancellationAcknowledgement(DynamicObservableHandlerProbe.prototype.resolveObservable, DynamicObservableHandlerProbe.prototype),
+    true,
+  );
+  const unknownHandler = (): void => undefined;
+  assert.equal(requiresCancellationAcknowledgement(unknownHandler), true);
+});
+
+test('synchronous /health handler settles its lease after a client abort without an Observable ack', async () => {
+  assert.equal(Reflect.getMetadata('design:returntype', HealthController.prototype, 'liveness'), Object);
+  assert.equal(requiresCancellationAcknowledgement(HealthController.prototype.liveness, HealthController.prototype), false);
+  const drain = new RequestDrain();
+  const request = {} as import('express').Request;
+  const response = new EventEmitter() as unknown as import('express').Response;
+  Object.assign(response, {
+    writableFinished: false,
+    shouldKeepAlive: true,
+    headersSent: false,
+    setHeader: () => response,
+  });
+  drain.middleware()(request, response, () => undefined);
+  const settled = drain.beginHandler(
+    request,
+    requiresCancellationAcknowledgement(HealthController.prototype.liveness, HealthController.prototype),
+  );
+  drain.stopAdmissions();
+  const waiting = drain.waitForActiveRequests();
+  response.emit('close');
+  settled();
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      waiting,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('Synchronous /health lease did not settle after abort.')), 250);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    getRequestWorkContext(request)?.acknowledgeCancellation();
+  }
+});
+
 test('graceful close drains an in-flight request and stops accepting new requests', async (t) => {
   const context = await startBoundaryApp();
   let closing: Promise<void> | undefined;
@@ -817,6 +910,72 @@ async function assertObservableCancellationWaitsForAcknowledgement(): Promise<vo
     }
   }
 }
+
+async function assertObservableTakeUntilWaitsForAsyncCleanup(): Promise<void> {
+  const child = fork(join(__dirname, 'fixtures', 'sigterm-drain-child.js'), [], {
+    execPath: process.execPath,
+    execArgv: [],
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  });
+  let stderr = '';
+  const exited = new Promise<ChildExit>((resolve) => {
+    child.once('exit', (code, signal) => resolve({ code, signal }));
+  });
+  child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+  let request: import('node:http').ClientRequest | undefined;
+
+  try {
+    const listening = await waitForChildMessage(child, 'listening', 5_000);
+    const port = Number(listening.port);
+    const responseClosed = waitForChildMessage(child, 'response-closed', 5_000);
+    request = openRequestUntilAborted('http://127.0.0.1:' + port + '/api/v1/probe/observable-takeuntil');
+    await waitForChildMessage(child, 'observable-takeuntil-started', 5_000);
+    request.destroy();
+    const closed = await responseClosed;
+    assert.equal(closed.writableFinished, false);
+    await waitForChildMessage(child, 'observable-takeuntil-cleanup-started', 5_000);
+    await waitForChildMessage(child, 'observable-takeuntil-completed', 5_000);
+
+    const signalReceived = waitForChildMessage(child, 'signal-received', 5_000);
+    child.kill('SIGTERM');
+    assert.equal((await signalReceived).signal, 'SIGTERM');
+    assert.equal(await waitForChildExitWithin(exited, 100), false);
+    const events = childMessageHistory.get(child) ?? [];
+    assert.equal(
+      events.some((event) => event.type === 'drain-wait-finished' || event.type === 'app-close-started'),
+      false,
+      'takeUntil completion after abort must not finish the lease before cleanup acknowledgement',
+    );
+
+    const cleanupAck = await waitForChildMessage(child, 'observable-takeuntil-cleanup-ack', 5_000);
+    assert.equal(cleanupAck.accepted, true);
+    await waitForChildMessage(child, 'drain-wait-finished', 5_000);
+    await waitForChildMessage(child, 'server-closed', 5_000);
+    await waitForChildMessage(child, 'app-close-finished', 5_000);
+    child.disconnect();
+    const result = await waitForChildExit(exited, 5_000, child);
+    assert.equal(result.code, 0, stderr);
+  } finally {
+    request?.destroy();
+    if (child.connected) child.disconnect();
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      const stoppedGracefully = await waitForChildExitWithin(exited, 2_000);
+      if (!stoppedGracefully && child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+        await waitForChildExitWithin(exited, 2_000);
+      }
+    }
+  }
+}
+
+test('Observable takeUntil completion waits for async cleanup acknowledgement after SIGTERM', {
+  skip: process.platform === 'win32'
+    ? 'Windows skips POSIX SIGTERM subprocess cases; run them with tools/m2-02/run-sigterm-drain-linux.ps1.'
+    : false,
+}, async () => {
+  await assertObservableTakeUntilWaitsForAsyncCleanup();
+});
 
 test('SIGTERM waits for a Promise handler after the client aborts its response', {
   skip: process.platform === 'win32'

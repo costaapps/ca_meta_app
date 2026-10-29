@@ -1,5 +1,6 @@
 param(
-  [string] $NodeImage = 'node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c'
+  [string] $NodeImage = 'node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c',
+  [string] $TestName = ''
 )
 
 Set-StrictMode -Version Latest
@@ -47,11 +48,18 @@ try {
   & docker @install
   if ($LASTEXITCODE -ne 0) { throw 'Isolated API dependency installation failed.' }
 
+  if ($TestName -and $TestName -notmatch "^[A-Za-z0-9 ]+$") {
+    throw 'The test name accepts letters, numbers, and spaces only.'
+  }
+  $testCommand = 'npm run test:api'
+  if ($TestName) {
+    $testCommand = "npm run build:api && npm exec --workspace=@ca-meta/api -- tsc -p tsconfig.test.json && node --test --test-name-pattern='.*$TestName.*' apps/api/dist-test/test/*.spec.js"
+  }
   $verify = @('run', '--rm', '--network', 'none') + $mounts + @(
     '--workdir', '/work',
     $NodeImage,
     'sh', '-lc',
-    'npm run test:api'
+    $testCommand
   )
   & docker @verify
   $exitCode = $LASTEXITCODE
