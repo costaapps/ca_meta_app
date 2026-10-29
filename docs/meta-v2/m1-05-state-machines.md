@@ -28,8 +28,8 @@ stateDiagram-v2
     CODE_RECEIVED --> EXCHANGING
     EXCHANGING --> ASSETS_VERIFIED
     ASSETS_VERIFIED --> PROVISIONING
-    PROVISIONING --> READY
-    PROVISIONING --> PARTIAL
+    PROVISIONING --> READY: deriveReadiness yields READY
+    PROVISIONING --> PARTIAL: deriveReadiness yields PARTIAL
     PARTIAL --> PROVISIONING: SyncJob de recuperação + nova tentativa/auditoria
     CREATED --> CANCELLED
     AWAITING_PROVIDER --> CANCELLED
@@ -45,7 +45,7 @@ stateDiagram-v2
     PROVISIONING --> FAILED
 ```
 
-Para a jornada normal, avanço é estritamente adjacente no fluxo acima; mudança condicional usa `WHERE id=? AND tenant_id=? AND status=? AND version=?`, acrescenta audit e incrementa version na mesma transação da outbox. `PARTIAL` fica consultável e somente volta a `PROVISIONING` por `SyncJob` de recuperação do mesmo tenant/onboarding, com nova tentativa de step, policy/evidence reavaliada, idempotency key e audit. Repetir diretamente `PARTIAL→READY`, voltar para etapas do provider ou reabrir `READY`/`CANCELLED`/`EXPIRED`/`FAILED` é recusado. Nova autorização ainda requer outro `OnboardingSession`; retry de provisionamento não reautoriza silenciosamente. Tentativa repetida com mesma idempotency key/payload retorna registro/resultado anterior. `EXPIRED` exige relógio UTC do servidor e vencimento da própria sessão; não infere expiração Meta. O código efêmero recebido não é auditado nem devolvido no DTO.
+Para a jornada normal, avanço é estritamente adjacente no fluxo acima; mudança condicional usa `WHERE id=? AND tenant_id=? AND status=? AND version=?`, acrescenta audit e incrementa version na mesma transação da outbox. A transição `PROVISIONING→READY/PARTIAL` exige o resultado de `deriveReadiness` para a policy/evidência atual: status fornecido pelo caller não serve como prova. Requisito obrigatório ausente, `UNKNOWN` ou stale deriva `PARTIAL`; opcional solicitado com o mesmo problema também deriva `PARTIAL` e bloqueia READY. Opcional não solicitado não bloqueia READY quando requisitos obrigatórios recentes foram verificados. `PARTIAL` fica consultável e somente volta a `PROVISIONING` por `SyncJob` de recuperação do mesmo tenant/onboarding, com nova tentativa de step, policy/evidence reavaliada, idempotency key e audit. Repetir diretamente `PARTIAL→READY`, voltar para etapas do provider ou reabrir `READY`/`CANCELLED`/`EXPIRED`/`FAILED` é recusado. Nova autorização ainda requer outro `OnboardingSession`; retry de provisionamento não reautoriza silenciosamente. Tentativa repetida com mesma idempotency key/payload retorna registro/resultado anterior. `EXPIRED` exige relógio UTC do servidor e vencimento da própria sessão; não infere expiração Meta. O código efêmero recebido não é auditado nem devolvido no DTO.
 
 ## READY e PARTIAL são derivados de policy versionada
 
@@ -94,10 +94,10 @@ Toda transição terminal, autorização/credencial nova ou revogada, mudança d
 | Acceptance matrix | Cenário Given/When/Then | Teste executável |
 |---|---|---|
 | `M1.05.AC01` | **Dado** quatro numbers distribuídos num e dois WABAs com auth/credential explícitos **Quando** reautorizo um number e faço replay do login anterior **Então** os quatro vínculos permanecem; novo grant é aditivo e resolução não escolhe a credencial “mais recente” sem cobertura | `npm test` — `AC01.single-waba`, `AC01.two-waba-reauth`, `AC01.exact-external-id` |
-| `M1.05.AC02` | **Dado** autorização e asset de tenants diferentes **Quando** gravo `AssetAuthorization` cruzado ou consulto sob tenant incorreto **Então** FK rejeita a gravação e consulta retorna zero; conflito de rota gera item quarantined sem fanout | `npm test` — `AC02.composite-fk`, `AC02.tenant-query`, `AC02.route-quarantine` |
-| `M1.05.AC03` | **Dado** policy versionada e um prerequisito requerido unknown **Quando** concluo exchange/provisioning ou observo opcional pedido incompleto **Então** onboarding fica `PARTIAL`; SyncJob auditado reavalia e pode retornar por `PROVISIONING` a `READY` quando as provas requeridas forem recentes | `npm test` — `AC03.transitions-readiness`, `AC03.independent-states` |
+| `M1.05.AC02` | **Dado** autorização, ativo, app config ou ambiente de outra relação **Quando** gravo vínculo/credential/subscription incoerente ou claim no mesmo tenant com external ID distinto **Então** FK composta rejeita gravação; consulta do tenant errado retorna zero; conflito de rota segue em quarentena | `npm test` — `AC02.composite-fk`, `AC02.tenant-query`, `AC02.route-quarantine` |
+| `M1.05.AC03` | **Dado** policy derivada com capability obrigatória ausente ou capability opcional explicitamente pedida e incompleta **Quando** tento `PROVISIONING→READY` **Então** o guard recusa e resultado fica `PARTIAL`; só derivação sem requisitos pendentes permite READY, enquanto opcional não pedida não bloqueia | `npm test` — `AC03.transitions-readiness`, `AC03.independent-states` |
 | `M1.05.AC04` | **Dado** autorização cobrindo múltiplos ativos e outra autorização sucessora **Quando** revogo um asset grant e depois aplico snapshot antigo **Então** outros grants continuam; tombstone impede reativação e somente nova autorização explícita recupera o vínculo | `npm test` — `AC04.selective-revoke-tombstone` |
-| `M1.05.AC05` | **Dado** observação envelhecida, rede indisponível e reentrega de item/outbox **Quando** reconcilio/replay **Então** mantém UNKNOWN/STALE com source/time; item e side effect local são deduplicados e checkpoint nunca retrocede | `npm test` — `AC05.unknown-stale`, `AC05.inbox-outbox-replay`, `AC05.monotonic-checkpoint`, `AC05.audit-redaction` |
+| `M1.05.AC05` | **Dado** observação envelhecida, rede indisponível, reentrega de item/outbox e diff com campo sensível **Quando** reconcilio/replay e envio para audit **Então** mantém UNKNOWN/STALE com source/time; item e side effect local são deduplicados, checkpoint não retrocede e writer rejeita diff não allowlisted antes da inserção | `npm test` — `AC05.unknown-stale`, `AC05.inbox-outbox-replay`, `AC05.monotonic-checkpoint`, `AC05.audit-redaction` |
 
 ## Evidência e gates
 

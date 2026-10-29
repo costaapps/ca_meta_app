@@ -38,6 +38,40 @@ function record(name, fn) {
   return fn().then(() => console.log(`PASS ${name}`));
 }
 
+const AUDIT_DIFF_FIELDS = new Set(['before', 'after', 'status', 'policyVersion', 'version', 'reasonCode']);
+const AUDIT_SAFE_STATES = new Set([
+  'CREATED', 'AWAITING_PROVIDER', 'CODE_RECEIVED', 'EXCHANGING', 'ASSETS_VERIFIED',
+  'PROVISIONING', 'READY', 'PARTIAL', 'CANCELLED', 'EXPIRED', 'FAILED', 'VERIFIED',
+  'REVOKED', 'ACTIVE', 'REAUTH_REQUIRED', 'UNKNOWN', 'STALE', 'MISSING', 'TOMBSTONED',
+]);
+const AUDIT_SAFE_REASONS = new Set(['CAPABILITY_MISSING', 'EVIDENCE_STALE', 'ROUTE_CONFLICT', 'REAUTH_REQUIRED']);
+
+function validateAuditDiff(diff) {
+  if (!diff || typeof diff !== 'object' || Array.isArray(diff)) throw new Error('Unsafe audit diff: object required');
+  const entries = Object.entries(diff);
+  if (entries.length === 0) throw new Error('Unsafe audit diff: empty diff');
+  for (const [key, value] of entries) {
+    if (!AUDIT_DIFF_FIELDS.has(key)) throw new Error(`Unsafe audit diff: field ${key} is not allowlisted`);
+    if (key === 'before' || key === 'after' || key === 'status') {
+      if (typeof value !== 'string' || !AUDIT_SAFE_STATES.has(value)) throw new Error(`Unsafe audit diff: invalid ${key}`);
+    } else if (key === 'reasonCode') {
+      if (typeof value !== 'string' || !AUDIT_SAFE_REASONS.has(value)) throw new Error('Unsafe audit diff: invalid reasonCode');
+    } else if (!Number.isSafeInteger(value) || value < 1) {
+      throw new Error(`Unsafe audit diff: invalid ${key}`);
+    }
+  }
+  return Object.fromEntries(entries);
+}
+
+async function insertAuditEvent(db, { id, tenantId, actorRef, action, targetRef, correlationId, safeDiff, createdAt, retentionClass }) {
+  const validatedDiff = validateAuditDiff(safeDiff);
+  return db.execute(
+    `INSERT INTO m105_audit_event (id, tenant_id, actor_ref, action, target_ref, correlation_id, safe_diff, created_at, retention_class, record_version)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    [id, tenantId, actorRef, action, targetRef, correlationId, JSON.stringify(validatedDiff), createdAt, retentionClass],
+  );
+}
+
 let db;
 try {
   const config = safeConfig();
@@ -54,10 +88,22 @@ try {
   ) ENGINE=InnoDB`);
 
   const appId = uuid(fixture.appConfig.id);
+  const alternateAppConfig = {
+    id: 'synthetic:alternate-app-config',
+    environment: fixture.appConfig.environment,
+    flowVariant: 'WHATSAPP_EXCLUSIVE',
+    authVariant: 'synthetic:exclusive',
+  };
+  const alternateAppId = uuid(alternateAppConfig.id);
   await db.execute(
     `INSERT INTO m105_meta_app_config (id, provider, provider_app_id, environment, flow_variant, auth_variant, graph_version, signup_version, capabilities_version, public_config, version)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
     [appId, fixture.provider, fixture.appConfig.id, fixture.appConfig.environment, fixture.appConfig.flowVariant, fixture.appConfig.authVariant, fixture.appConfig.graphVersion, fixture.appConfig.signupVersion, fixture.appConfig.capabilitiesVersion, JSON.stringify({ synthetic: true })],
+  );
+  await db.execute(
+    `INSERT INTO m105_meta_app_config (id, provider, provider_app_id, environment, flow_variant, auth_variant, graph_version, signup_version, capabilities_version, public_config, version)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    [alternateAppId, fixture.provider, fixture.appConfig.id, alternateAppConfig.environment, alternateAppConfig.flowVariant, alternateAppConfig.authVariant, fixture.appConfig.graphVersion, fixture.appConfig.signupVersion, fixture.appConfig.capabilitiesVersion, JSON.stringify({ synthetic: true, alternate: true })],
   );
 
   const tenants = new Map();
@@ -97,15 +143,15 @@ try {
       for (const number of waba.numbers) {
         const numberAssetId = await createAsset({ id: number.id, externalId: number.externalId, kind: 'PHONE_NUMBER' });
         await db.execute(
-          `INSERT INTO m105_asset_relation (id, tenant_id, parent_asset_id, child_asset_id, relation_kind, observed_source, observed_at, version)
-           VALUES (?, ?, ?, ?, 'CONTAINS', 'synthetic:fixture', ?, 1)`,
-          [uuid(`${waba.id}->${number.id}`), tenantId, wabaAssetId, numberAssetId, fixedSqlNow],
+          `INSERT INTO m105_asset_relation (id, tenant_id, app_config_id, environment, parent_asset_id, child_asset_id, relation_kind, observed_source, observed_at, version)
+           VALUES (?, ?, ?, ?, ?, ?, 'CONTAINS', 'synthetic:fixture', ?, 1)`,
+          [uuid(`${waba.id}->${number.id}`), tenantId, appId, fixture.appConfig.environment, wabaAssetId, numberAssetId, fixedSqlNow],
         );
       }
       await db.execute(
-        `INSERT INTO m105_webhook_subscription (id, tenant_id, app_config_id, target_asset_id, desired_fields, state, observed_status, observed_source, observed_at, version)
-         VALUES (?, ?, ?, ?, ?, 'DESIRED', 'UNKNOWN', 'synthetic:no-provider-observation', NULL, 1)`,
-        [uuid(`${waba.id}:subscription`), tenantId, appId, wabaAssetId, JSON.stringify(['synthetic:messages'])],
+        `INSERT INTO m105_webhook_subscription (id, tenant_id, app_config_id, environment, target_asset_id, desired_fields, state, observed_status, observed_source, observed_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, 'DESIRED', 'UNKNOWN', 'synthetic:no-provider-observation', NULL, 1)`,
+        [uuid(`${waba.id}:subscription`), tenantId, appId, fixture.appConfig.environment, wabaAssetId, JSON.stringify(['synthetic:messages'])],
       );
 
       for (const authorization of waba.authorizations) {
@@ -115,14 +161,14 @@ try {
         const stateHash = createHash('sha256').update(`${authorization.id}:state`).digest();
         onboardings.set(authorization.id, { id: onboardingId, tenantId, principalId, version: 1, status: 'CREATED' });
         await db.execute(
-          `INSERT INTO m105_onboarding_session (id, tenant_id, principal_id, app_config_id, flow_variant, state_hash, status, expires_at, correlation_id, readiness_policy_version, readiness_reasons, readiness_evaluated_at, version)
-           VALUES (?, ?, ?, ?, ?, ?, 'CREATED', ?, ?, 1, ?, NULL, 1)`,
-          [onboardingId, tenantId, principalId, appId, fixture.appConfig.flowVariant, stateHash, '2026-10-29 12:00:00.000000', uuid(`${authorization.id}:correlation`), JSON.stringify([{ capability: 'synthetic:required-capability', status: 'UNKNOWN' }])],
+          `INSERT INTO m105_onboarding_session (id, tenant_id, principal_id, app_config_id, flow_variant, auth_variant, state_hash, status, expires_at, correlation_id, readiness_policy_version, readiness_reasons, readiness_evaluated_at, version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'CREATED', ?, ?, 1, ?, NULL, 1)`,
+          [onboardingId, tenantId, principalId, appId, fixture.appConfig.flowVariant, fixture.appConfig.authVariant, stateHash, '2026-10-29 12:00:00.000000', uuid(`${authorization.id}:correlation`), JSON.stringify([{ capability: 'synthetic:required-capability', status: 'UNKNOWN' }])],
         );
         await db.execute(
-          `INSERT INTO m105_meta_authorization (id, tenant_id, app_config_id, source_onboarding_id, auth_variant, provider_subject_ref, granted_scopes, status, issued_at, revoked_at, version)
-           VALUES (?, ?, ?, ?, 'synthetic:coexistence', ?, ?, 'ACTIVE', ?, NULL, 1)`,
-          [authId, tenantId, appId, onboardingId, `synthetic:subject:${authorization.id}`, JSON.stringify(['synthetic:capability']), fixedSqlNow],
+          `INSERT INTO m105_meta_authorization (id, tenant_id, app_config_id, environment, source_onboarding_id, flow_variant, auth_variant, provider_subject_ref, granted_scopes, status, issued_at, revoked_at, version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, NULL, 1)`,
+          [authId, tenantId, appId, fixture.appConfig.environment, onboardingId, fixture.appConfig.flowVariant, fixture.appConfig.authVariant, `synthetic:subject:${authorization.id}`, JSON.stringify(['synthetic:capability']), fixedSqlNow],
         );
         authorizations.set(authorization.id, { id: authId, tenantId, scenario, sourceOnboardingId: onboardingId });
         credentials.set(authorization.credentialId, { id: credentialId, tenantId, authId });
@@ -133,14 +179,28 @@ try {
         );
         for (const numberId of authorization.numberIds) {
           await db.execute(
-            `INSERT INTO m105_asset_authorization (id, tenant_id, authorization_id, asset_id, capabilities, status, verified_at, revoked_at, version)
-             VALUES (?, ?, ?, ?, ?, 'VERIFIED', ?, NULL, 1)`,
-            [uuid(`${authorization.id}:${numberId}`), tenantId, authId, assets.get(numberId), JSON.stringify(['synthetic:capability']), fixedSqlNow],
+            `INSERT INTO m105_asset_authorization (id, tenant_id, authorization_id, asset_id, app_config_id, environment, capabilities, status, verified_at, revoked_at, version)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'VERIFIED', ?, NULL, 1)`,
+            [uuid(`${authorization.id}:${numberId}`), tenantId, authId, assets.get(numberId), appId, fixture.appConfig.environment, JSON.stringify(['synthetic:capability']), fixedSqlNow],
           );
         }
       }
     }
   }
+
+  const alternateAssetId = uuid('synthetic:alternate-profile-asset');
+  const firstTenantId = tenants.get('synthetic:tenant-one-waba');
+  await db.execute(
+    `INSERT INTO m105_meta_asset (id, tenant_id, app_config_id, provider, environment, kind, external_id, observed_status, observed_source, observed_at, version)
+     VALUES (?, ?, ?, ?, ?, 'WHATSAPP_BUSINESS_ACCOUNT', 'synthetic:alternate-profile-waba', 'UNKNOWN', 'synthetic:fixture', NULL, 1)`,
+    [alternateAssetId, firstTenantId, alternateAppId, fixture.provider, alternateAppConfig.environment],
+  );
+  await db.execute(
+    `INSERT INTO m105_asset_route_claim (id, provider, app_config_id, environment, kind, external_id, tenant_id, asset_id, claimed_at, version)
+     VALUES (?, ?, ?, ?, 'WHATSAPP_BUSINESS_ACCOUNT', 'synthetic:alternate-profile-waba', ?, ?, ?, 1)`,
+    [uuid('synthetic:alternate-profile-route-claim'), fixture.provider, alternateAppId, alternateAppConfig.environment, firstTenantId, alternateAssetId, fixedSqlNow],
+  );
+  assets.set('synthetic:alternate-profile-asset', alternateAssetId);
 
   await record('AC01.single-waba', async () => {
     const [waba] = fixture.scenarios.filter((item) => item.id === 'one_waba_four_numbers');
@@ -158,16 +218,32 @@ try {
     const [n1Candidates] = await db.execute(
       `SELECT auth.id AS authorization_id, credential.id AS credential_id
        FROM m105_asset_authorization grant_link
+       JOIN m105_meta_asset asset ON asset.tenant_id = grant_link.tenant_id AND asset.id = grant_link.asset_id
        JOIN m105_meta_authorization auth ON auth.tenant_id = grant_link.tenant_id AND auth.id = grant_link.authorization_id
        JOIN m105_meta_credential credential ON credential.tenant_id = auth.tenant_id AND credential.authorization_id = auth.id
        WHERE grant_link.tenant_id = ? AND grant_link.asset_id = ? AND grant_link.status = 'VERIFIED' AND auth.status = 'ACTIVE'
          AND JSON_CONTAINS(grant_link.capabilities, JSON_QUOTE('synthetic:capability'))
-         AND auth.app_config_id = ? AND credential.environment = ?`,
-      [tenants.get(waba.tenantId), assets.get('synthetic:number-01'), appId, fixture.appConfig.environment],
+          AND auth.app_config_id = ? AND asset.app_config_id = ? AND credential.app_config_id = ?
+          AND asset.app_config_id = auth.app_config_id AND credential.app_config_id = auth.app_config_id
+          AND asset.environment = auth.environment AND credential.environment = auth.environment
+          AND credential.environment = ?`,
+      [tenants.get(waba.tenantId), assets.get('synthetic:number-01'), appId, appId, appId, fixture.appConfig.environment],
     );
     assert.equal(n1Candidates.length, 1);
     assert.equal(n1Candidates[0].authorization_id, authorizations.get('synthetic:auth-one-number-01').id);
     assert.equal(n1Candidates[0].credential_id, credentials.get('synthetic:credential-one-number-01').id);
+    const [wrongProfileCandidates] = await db.execute(
+      `SELECT auth.id AS authorization_id, credential.id AS credential_id
+       FROM m105_asset_authorization grant_link
+       JOIN m105_meta_asset asset ON asset.tenant_id = grant_link.tenant_id AND asset.id = grant_link.asset_id
+       JOIN m105_meta_authorization auth ON auth.tenant_id = grant_link.tenant_id AND auth.id = grant_link.authorization_id
+       JOIN m105_meta_credential credential ON credential.tenant_id = auth.tenant_id AND credential.authorization_id = auth.id
+       WHERE grant_link.tenant_id = ? AND grant_link.asset_id = ? AND grant_link.status = 'VERIFIED' AND auth.status = 'ACTIVE'
+         AND asset.app_config_id = ? AND auth.app_config_id = ? AND credential.app_config_id = ?
+         AND asset.app_config_id = auth.app_config_id AND credential.app_config_id = auth.app_config_id`,
+      [tenants.get(waba.tenantId), assets.get('synthetic:number-01'), alternateAppId, alternateAppId, alternateAppId],
+    );
+    assert.equal(wrongProfileCandidates.length, 0, 'an asset/auth/credential tuple cannot be selected under a different app profile');
     const [n3Candidates] = await db.execute(
       `SELECT auth.id AS authorization_id FROM m105_asset_authorization grant_link
        JOIN m105_meta_authorization auth ON auth.tenant_id = grant_link.tenant_id AND auth.id = grant_link.authorization_id
@@ -207,9 +283,74 @@ try {
     const target = assets.get('synthetic:number-11');
     await assert.rejects(
       db.execute(
-        `INSERT INTO m105_asset_authorization (id, tenant_id, authorization_id, asset_id, capabilities, status, version)
-         VALUES (?, ?, ?, ?, ?, 'VERIFIED', 1)`,
-        [uuid('cross-tenant-link'), tenants.get('synthetic:tenant-two-waba'), auth.id, target, JSON.stringify(['synthetic:capability'])],
+        `INSERT INTO m105_asset_authorization (id, tenant_id, authorization_id, asset_id, app_config_id, environment, capabilities, status, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'VERIFIED', 1)`,
+        [uuid('cross-tenant-link'), tenants.get('synthetic:tenant-two-waba'), auth.id, target, appId, fixture.appConfig.environment, JSON.stringify(['synthetic:capability'])],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
+    );
+    const onboardingId = onboardings.get('synthetic:auth-one-number-01').id;
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_meta_authorization (id, tenant_id, app_config_id, environment, source_onboarding_id, flow_variant, auth_variant, provider_subject_ref, granted_scopes, status, issued_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'synthetic:wrong-context', JSON_ARRAY('synthetic:capability'), 'ACTIVE', ?, 1)`,
+        [uuid('synthetic:auth-wrong-onboarding-context'), tenants.get('synthetic:tenant-one-waba'), alternateAppId, alternateAppConfig.environment, onboardingId, alternateAppConfig.flowVariant, alternateAppConfig.authVariant, fixedSqlNow],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
+    );
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_meta_credential (id, tenant_id, authorization_id, family, issuer, app_config_id, environment, ciphertext, key_version, scopes_snapshot, authorization_version, health, observed_source, version)
+         VALUES (?, ?, ?, 'synthetic:family', 'synthetic:issuer', ?, ?, ?, 'synthetic:key', JSON_ARRAY('synthetic:capability'), 1, 'UNKNOWN', 'synthetic:test', 1)`,
+        [uuid('synthetic:credential-wrong-app-context'), tenants.get('synthetic:tenant-one-waba'), auth.id, alternateAppId, alternateAppConfig.environment, Buffer.from('synthetic-ciphertext-fixture')],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
+    );
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_meta_credential (id, tenant_id, authorization_id, family, issuer, app_config_id, environment, ciphertext, key_version, scopes_snapshot, authorization_version, health, observed_source, version)
+         VALUES (?, ?, ?, 'synthetic:family', 'synthetic:issuer', ?, 'synthetic:wrong-environment', ?, 'synthetic:key', JSON_ARRAY('synthetic:capability'), 1, 'UNKNOWN', 'synthetic:test', 1)`,
+        [uuid('synthetic:credential-wrong-environment'), tenants.get('synthetic:tenant-one-waba'), auth.id, appId, Buffer.from('synthetic-ciphertext-fixture')],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
+    );
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_asset_authorization (id, tenant_id, authorization_id, asset_id, app_config_id, environment, capabilities, status, version)
+         VALUES (?, ?, ?, ?, ?, ?, JSON_ARRAY('synthetic:capability'), 'VERIFIED', 1)`,
+        [uuid('synthetic:grant-wrong-auth-app'), tenants.get('synthetic:tenant-one-waba'), auth.id, assets.get('synthetic:number-04'), alternateAppId, alternateAppConfig.environment],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
+    );
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_asset_authorization (id, tenant_id, authorization_id, asset_id, app_config_id, environment, capabilities, status, version)
+         VALUES (?, ?, ?, ?, ?, ?, JSON_ARRAY('synthetic:capability'), 'VERIFIED', 1)`,
+        [uuid('synthetic:grant-wrong-asset-app'), tenants.get('synthetic:tenant-one-waba'), auth.id, assets.get('synthetic:alternate-profile-asset'), appId, fixture.appConfig.environment],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
+    );
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_webhook_subscription (id, tenant_id, app_config_id, environment, target_asset_id, desired_fields, state, observed_status, observed_source, version)
+         VALUES (?, ?, ?, ?, ?, JSON_ARRAY('synthetic:field'), 'DESIRED', 'UNKNOWN', 'synthetic:test', 1)`,
+        [uuid('synthetic:subscription-wrong-asset-app'), tenants.get('synthetic:tenant-one-waba'), alternateAppId, alternateAppConfig.environment, assets.get('synthetic:waba-one')],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
+    );
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_asset_relation (id, tenant_id, app_config_id, environment, parent_asset_id, child_asset_id, relation_kind, observed_source, version)
+         VALUES (?, ?, ?, ?, ?, ?, 'CONTAINS', 'synthetic:test', 1)`,
+        [uuid('synthetic:relation-wrong-profile'), tenants.get('synthetic:tenant-one-waba'), appId, fixture.appConfig.environment, assets.get('synthetic:alternate-profile-asset'), assets.get('synthetic:number-01')],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
+    );
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_meta_asset (id, tenant_id, app_config_id, provider, environment, kind, external_id, observed_status, observed_source, version)
+         VALUES (?, ?, ?, 'synthetic:wrong-provider', ?, 'PHONE_NUMBER', 'synthetic:wrong-provider-asset', 'UNKNOWN', 'synthetic:test', 1)`,
+        [uuid('synthetic:asset-wrong-provider-app'), tenants.get('synthetic:tenant-one-waba'), appId, fixture.appConfig.environment],
       ),
       (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
     );
@@ -247,6 +388,21 @@ try {
     assert.equal(claim.length, 1, 'the privileged route index has at most one tenant-scoped target');
     assert.equal(claim[0].tenant_id, original.tenantId);
     assert.equal(claim[0].asset_id, assets.get('synthetic:number-01'));
+    const mismatchAssetId = uuid('synthetic:route-identity-mismatch-asset');
+    await db.execute(
+      `INSERT INTO m105_meta_asset (id, tenant_id, app_config_id, provider, environment, kind, external_id, observed_status, observed_source, observed_at, version)
+       VALUES (?, ?, ?, ?, ?, 'PHONE_NUMBER', 'synthetic:route-identity-asset', 'UNKNOWN', 'synthetic:negative-test', NULL, 1)`,
+      [mismatchAssetId, original.tenantId, appId, fixture.provider, fixture.appConfig.environment],
+    );
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_asset_route_claim (id, provider, app_config_id, environment, kind, external_id, tenant_id, asset_id, claimed_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        [uuid('synthetic:mismatched-route-identity'), fixture.provider, appId, fixture.appConfig.environment, 'PHONE_NUMBER', 'synthetic:route-identity-asset:wrong', original.tenantId, mismatchAssetId, fixedSqlNow],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
+    );
+    await db.execute('DELETE FROM m105_meta_asset WHERE id = ? AND tenant_id = ?', [mismatchAssetId, original.tenantId]);
     const inboxId = uuid('synthetic:route-conflict-inbox');
     await db.execute(
       `INSERT INTO m105_inbox_event (id, app_config_id, provider_event_id, schema_version, received_at, signature_state, raw_ref, route_state, version)
@@ -254,9 +410,25 @@ try {
       [inboxId, appId, fixedSqlNow],
     );
     await db.execute(
-      `INSERT INTO m105_routed_event (id, inbox_event_id, item_key, tenant_id, asset_id, route_state, processing_version, version)
-       VALUES (?, ?, 'synthetic:item-conflict', NULL, NULL, 'QUARANTINED', 1, 1)`,
-      [uuid('synthetic:quarantine-item'), inboxId],
+      `INSERT INTO m105_routed_event (id, inbox_event_id, app_config_id, item_key, tenant_id, asset_id, route_state, processing_version, version)
+       VALUES (?, ?, ?, 'synthetic:item-conflict', NULL, NULL, 'QUARANTINED', 1, 1)`,
+      [uuid('synthetic:quarantine-item'), inboxId, appId],
+    );
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_routed_event (id, inbox_event_id, app_config_id, item_key, tenant_id, asset_id, route_state, processing_version, version)
+         VALUES (?, ?, ?, 'synthetic:item-wrong-inbox-app', NULL, NULL, 'QUARANTINED', 1, 1)`,
+        [uuid('synthetic:routed-event-wrong-inbox-app'), inboxId, alternateAppId],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
+    );
+    await assert.rejects(
+      db.execute(
+        `INSERT INTO m105_routed_event (id, inbox_event_id, app_config_id, item_key, tenant_id, asset_id, route_state, processing_version, version)
+         VALUES (?, ?, ?, 'synthetic:item-wrong-target-app', ?, ?, 'ROUTED', 1, 1)`,
+        [uuid('synthetic:routed-event-wrong-target-app'), inboxId, appId, original.tenantId, assets.get('synthetic:alternate-profile-asset')],
+      ),
+      (error) => error.code === 'ER_NO_REFERENCED_ROW_2',
     );
     const [routed] = await db.execute('SELECT tenant_id, asset_id, route_state FROM m105_routed_event WHERE inbox_event_id = ?', [inboxId]);
     assert.equal(routed[0].tenant_id, null);
@@ -266,7 +438,7 @@ try {
 
   await record('AC03.transitions-readiness', async () => {
     const onboarding = onboardings.get('synthetic:auth-one-number-03-initial');
-    const sequence = ['AWAITING_PROVIDER', 'CODE_RECEIVED', 'EXCHANGING', 'ASSETS_VERIFIED', 'PROVISIONING', 'PARTIAL'];
+    const sequence = ['AWAITING_PROVIDER', 'CODE_RECEIVED', 'EXCHANGING', 'ASSETS_VERIFIED', 'PROVISIONING'];
     assert.equal(canTransition('CREATED', 'CODE_RECEIVED'), false);
     let previous = 'CREATED';
     let version = 1;
@@ -280,10 +452,23 @@ try {
       previous = next;
       version += 1;
     }
+    const readyPolicy = { version: 2, required: ['SEND_MESSAGE'], optional: ['HISTORY_SYNC'], requested: [] };
+    const missingRequired = deriveReadiness({ policy: readyPolicy, evidence: { SEND_MESSAGE: { status: 'UNKNOWN', observedAt: null } }, now: fixedNow, maxAgeMs: 60_000 });
+    assert.equal(missingRequired.status, 'PARTIAL');
+    assert.equal(canTransition('PROVISIONING', 'PARTIAL', { readiness: missingRequired }), true);
+    assert.equal(canTransition('PROVISIONING', 'READY', { readiness: missingRequired }), false, 'missing required evidence cannot transition to READY');
+    assert.equal(canTransition('PROVISIONING', 'READY', { readiness: { status: 'READY', reasons: [], policyVersion: 2 } }), false, 'a freely asserted READY status is not a derived evaluation');
+    const [partialTransition] = await db.execute(
+      `UPDATE m105_onboarding_session SET status = 'PARTIAL', readiness_policy_version = ?, readiness_reasons = ?, readiness_evaluated_at = ?, version = version + 1
+       WHERE id = ? AND tenant_id = ? AND status = 'PROVISIONING' AND version = ?`,
+      [missingRequired.policyVersion, JSON.stringify(missingRequired.reasons), fixedSqlNow, onboarding.id, onboarding.tenantId, version],
+    );
+    assert.equal(partialTransition.affectedRows, 1);
+    version += 1;
     const [partialRows] = await db.execute('SELECT status, readiness_policy_version, readiness_reasons FROM m105_onboarding_session WHERE id = ?', [onboarding.id]);
     assert.equal(partialRows[0].status, 'PARTIAL');
-    assert.equal(Number(partialRows[0].readiness_policy_version), 1);
-    assert.deepEqual(jsonValue(partialRows[0].readiness_reasons), [{ capability: 'synthetic:required-capability', status: 'UNKNOWN' }]);
+    assert.equal(Number(partialRows[0].readiness_policy_version), 2);
+    assert.deepEqual(jsonValue(partialRows[0].readiness_reasons), missingRequired.reasons);
     assert.equal(canTransition('PARTIAL', 'READY'), false, 'PARTIAL cannot jump directly to READY');
     assert.equal(canTransition('PARTIAL', 'PROVISIONING'), false, 'partial recovery needs a server job and a new policy evaluation');
     assert.equal(canTransition('CREATED', 'CANCELLED'), true);
@@ -300,9 +485,6 @@ try {
     assert.equal(stepRows[0].safe_error_code, 'EXCHANGE_UNKNOWN');
     assert.equal(Boolean(stepRows[0].retryable), true);
     assert.equal(stepRows[0].evidence_ref, 'synthetic:diagnostic-ref');
-    const readyPolicy = { version: 2, required: ['SEND_MESSAGE'], optional: ['HISTORY_SYNC'], requested: [] };
-    const partial = deriveReadiness({ policy: readyPolicy, evidence: { SEND_MESSAGE: { status: 'UNKNOWN', observedAt: null } }, now: fixedNow, maxAgeMs: 60_000 });
-    assert.equal(partial.status, 'PARTIAL');
     const optionalUnknownNotRequested = deriveReadiness({
       policy: readyPolicy,
       evidence: { SEND_MESSAGE: { status: 'VERIFIED', observedAt: new Date(fixedNow).toISOString() }, HISTORY_SYNC: { status: 'UNKNOWN' } },
@@ -311,6 +493,15 @@ try {
     });
     assert.equal(optionalUnknownNotRequested.status, 'READY');
     assert.equal(optionalUnknownNotRequested.policyVersion, 2);
+    assert.equal(canTransition('PROVISIONING', 'READY', { readiness: optionalUnknownNotRequested }), true, 'an unrequested optional capability does not block a derived READY result');
+    const optionalRequested = deriveReadiness({
+      policy: { ...readyPolicy, requested: ['HISTORY_SYNC'] },
+      evidence: { SEND_MESSAGE: { status: 'VERIFIED', observedAt: new Date(fixedNow).toISOString() }, HISTORY_SYNC: { status: 'UNKNOWN', observedAt: null } },
+      now: fixedNow,
+      maxAgeMs: 60_000,
+    });
+    assert.equal(optionalRequested.status, 'PARTIAL');
+    assert.equal(canTransition('PROVISIONING', 'READY', { readiness: optionalRequested }), false, 'a missing requested optional capability cannot transition to READY');
     const evaluated = deriveReadiness({
       policy: readyPolicy,
       evidence: { SEND_MESSAGE: { status: 'VERIFIED', observedAt: new Date(fixedNow).toISOString() } },
@@ -318,6 +509,7 @@ try {
       maxAgeMs: 60_000,
     });
     assert.equal(evaluated.status, 'READY');
+    assert.equal(canTransition('PROVISIONING', 'READY', { readiness: evaluated }), true);
     const recoveryJobId = uuid('synthetic:partial-recovery-job');
     const recoveryStepId = uuid('synthetic:onboarding-step-recovery');
     await db.beginTransaction();
@@ -327,17 +519,23 @@ try {
          VALUES (?, ?, ?, 'ONBOARDING_RECOVERY', 1, 'synthetic:partial-recovery-v1', 1, ?, 'synthetic:worker', ?, 'RUNNING', NULL, 1)`,
         [recoveryJobId, onboarding.tenantId, onboarding.id, fixedSqlNow, '2026-10-28 12:05:00.000000'],
       );
-      assert.equal(canTransition('PARTIAL', 'PROVISIONING', { recoveryJobId, policyVersion: evaluated.policyVersion }), true);
+      assert.equal(canTransition('PARTIAL', 'PROVISIONING', { recoveryJobId, readiness: evaluated }), true);
       await db.execute(
         `INSERT INTO m105_onboarding_step (id, tenant_id, onboarding_id, step_name, attempt, status, safe_error_code, retryable, started_at, finished_at, evidence_ref, version)
          VALUES (?, ?, ?, 'provisioning', 2, 'RUNNING', NULL, FALSE, ?, NULL, 'synthetic:recovery-evidence', 1)`,
         [recoveryStepId, onboarding.tenantId, onboarding.id, fixedSqlNow],
       );
-      await db.execute(
-        `INSERT INTO m105_audit_event (id, tenant_id, actor_ref, action, target_ref, correlation_id, safe_diff, created_at, retention_class, record_version)
-         VALUES (?, ?, 'synthetic:worker', 'ONBOARDING_RECOVERY_STARTED', ?, ?, ?, ?, 'synthetic:short-retention', 1)`,
-        [uuid('synthetic:audit-recovery-start'), onboarding.tenantId, 'synthetic:onboarding-number-03', uuid('synthetic:recovery-correlation'), JSON.stringify({ from: 'PARTIAL', to: 'PROVISIONING', policyVersion: evaluated.policyVersion }), fixedSqlNow],
-      );
+      await insertAuditEvent(db, {
+        id: uuid('synthetic:audit-recovery-start'),
+        tenantId: onboarding.tenantId,
+        actorRef: 'synthetic:worker',
+        action: 'ONBOARDING_RECOVERY_STARTED',
+        targetRef: 'synthetic:onboarding-number-03',
+        correlationId: uuid('synthetic:recovery-correlation'),
+        safeDiff: { before: 'PARTIAL', after: 'PROVISIONING', policyVersion: evaluated.policyVersion },
+        createdAt: fixedSqlNow,
+        retentionClass: 'synthetic:short-retention',
+      });
       const [recovery] = await db.execute(
         `UPDATE m105_onboarding_session session SET status = 'PROVISIONING', version = version + 1
          WHERE session.id = ? AND session.tenant_id = ? AND session.status = 'PARTIAL' AND session.version = ?
@@ -351,6 +549,7 @@ try {
       throw error;
     }
     version += 1;
+    assert.equal(canTransition('PROVISIONING', 'READY', { readiness: evaluated }), true, 'the readiness derivation is the gate input before the READY write');
     const [readyUpdate] = await db.execute(
       `UPDATE m105_onboarding_session SET status = 'READY', readiness_policy_version = ?, readiness_reasons = ?, readiness_evaluated_at = ?, version = version + 1
        WHERE id = ? AND tenant_id = ? AND status = 'PROVISIONING' AND version = ?`,
@@ -363,13 +562,6 @@ try {
     assert.equal(readyRows[0].status, 'READY');
     assert.equal(Number(readyRows[0].readiness_policy_version), 2);
     assert.deepEqual(jsonValue(readyRows[0].readiness_reasons), []);
-    const optionalRequested = deriveReadiness({
-      policy: { ...readyPolicy, requested: ['HISTORY_SYNC'] },
-      evidence: { SEND_MESSAGE: { status: 'VERIFIED', observedAt: new Date(fixedNow).toISOString() }, HISTORY_SYNC: { status: 'UNKNOWN', observedAt: null } },
-      now: fixedNow,
-      maxAgeMs: 60_000,
-    });
-    assert.equal(optionalRequested.status, 'PARTIAL', 'an explicitly requested optional capability can remain PARTIAL/recoverable');
   });
 
   await record('AC03.independent-states', async () => {
@@ -467,16 +659,16 @@ try {
     ];
     for (const route of routes) {
       await db.execute(
-        `INSERT INTO m105_routed_event (id, inbox_event_id, item_key, tenant_id, asset_id, route_state, processing_version, version)
-         VALUES (?, ?, ?, ?, ?, 'ROUTED', 1, 1)`,
-        [uuid(route.item), inboxId, route.item, route.tenant, route.asset],
+        `INSERT INTO m105_routed_event (id, inbox_event_id, app_config_id, item_key, tenant_id, asset_id, route_state, processing_version, version)
+         VALUES (?, ?, ?, ?, ?, ?, 'ROUTED', 1, 1)`,
+        [uuid(route.item), inboxId, appId, route.item, route.tenant, route.asset],
       );
     }
     await assert.rejects(
       db.execute(
-        `INSERT INTO m105_routed_event (id, inbox_event_id, item_key, tenant_id, asset_id, route_state, processing_version, version)
-         VALUES (?, ?, ?, ?, ?, 'ROUTED', 1, 1)`,
-        [uuid('synthetic:duplicate-route'), inboxId, routes[0].item, routes[0].tenant, routes[0].asset],
+        `INSERT INTO m105_routed_event (id, inbox_event_id, app_config_id, item_key, tenant_id, asset_id, route_state, processing_version, version)
+         VALUES (?, ?, ?, ?, ?, ?, 'ROUTED', 1, 1)`,
+        [uuid('synthetic:duplicate-route'), inboxId, appId, routes[0].item, routes[0].tenant, routes[0].asset],
       ),
       (error) => error.code === 'ER_DUP_ENTRY',
     );
@@ -538,11 +730,23 @@ try {
   await record('AC05.audit-redaction', async () => {
     const tenantId = tenants.get('synthetic:tenant-one-waba');
     const marker = 'M105_SECRET_MARKER_MUST_NOT_APPEAR';
-    await db.execute(
-      `INSERT INTO m105_audit_event (id, tenant_id, actor_ref, action, target_ref, correlation_id, safe_diff, created_at, retention_class, record_version)
-       VALUES (?, ?, 'synthetic:operator', 'ASSET_GRANT_REVOKED', 'synthetic:number-01', ?, ?, ?, 'synthetic:short-retention', 1)`,
-      [uuid('synthetic:audit-revoke'), tenantId, uuid('synthetic:audit-correlation'), JSON.stringify({ before: 'VERIFIED', after: 'REVOKED' }), fixedSqlNow],
+    assert.throws(
+      () => validateAuditDiff({ before: 'VERIFIED', after: 'REVOKED', accessToken: marker }),
+      /not allowlisted/,
+      'secret-bearing diff fields are rejected before database insertion',
     );
+    assert.throws(() => validateAuditDiff({ before: marker }), /invalid before/, 'free-form secret-like status values are rejected');
+    await insertAuditEvent(db, {
+      id: uuid('synthetic:audit-revoke'),
+      tenantId,
+      actorRef: 'synthetic:operator',
+      action: 'ASSET_GRANT_REVOKED',
+      targetRef: 'synthetic:number-01',
+      correlationId: uuid('synthetic:audit-correlation'),
+      safeDiff: { before: 'VERIFIED', after: 'REVOKED' },
+      createdAt: fixedSqlNow,
+      retentionClass: 'synthetic:short-retention',
+    });
     const [rows] = await db.execute('SELECT safe_diff FROM m105_audit_event WHERE id = ?', [uuid('synthetic:audit-revoke')]);
     const serialized = JSON.stringify(jsonValue(rows[0].safe_diff));
     assert.equal(serialized.includes(marker), false);

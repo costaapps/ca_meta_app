@@ -35,6 +35,7 @@ CREATE TABLE m105_portal_session (
   context_ref_hash BINARY(32) NOT NULL,
   context_version BIGINT UNSIGNED NOT NULL,
   issued_at DATETIME(6) NOT NULL,
+  idle_at DATETIME(6) NOT NULL,
   expires_at DATETIME(6) NOT NULL,
   revoked_at DATETIME(6) NULL,
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
@@ -55,6 +56,9 @@ CREATE TABLE m105_meta_app_config (
   public_config JSON NOT NULL,
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY uq_m105_app_config (provider, provider_app_id, environment, flow_variant, auth_variant),
+  UNIQUE KEY uq_m105_app_context_provider_environment (id, provider, environment),
+  UNIQUE KEY uq_m105_app_context_environment (id, environment),
+  UNIQUE KEY uq_m105_app_context_flow_auth (id, flow_variant, auth_variant),
   CONSTRAINT ck_m105_app_config_json CHECK (JSON_VALID(public_config))
 ) ENGINE=InnoDB;
 
@@ -64,6 +68,7 @@ CREATE TABLE m105_onboarding_session (
   principal_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   app_config_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   flow_variant VARCHAR(64) NOT NULL,
+  auth_variant VARCHAR(64) NOT NULL,
   state_hash BINARY(32) NOT NULL,
   status VARCHAR(32) NOT NULL,
   expires_at DATETIME(6) NOT NULL,
@@ -74,8 +79,9 @@ CREATE TABLE m105_onboarding_session (
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY uq_m105_onboarding_state (state_hash),
   UNIQUE KEY uq_m105_onboarding_tenant_id (tenant_id, id),
+  UNIQUE KEY uq_m105_onboarding_auth_context (tenant_id, id, app_config_id, flow_variant, auth_variant),
   CONSTRAINT fk_m105_onboarding_membership FOREIGN KEY (tenant_id, principal_id) REFERENCES m105_membership (tenant_id, principal_id),
-  CONSTRAINT fk_m105_onboarding_app FOREIGN KEY (app_config_id) REFERENCES m105_meta_app_config (id),
+  CONSTRAINT fk_m105_onboarding_app FOREIGN KEY (app_config_id, flow_variant, auth_variant) REFERENCES m105_meta_app_config (id, flow_variant, auth_variant),
   CONSTRAINT ck_m105_onboarding_readiness_reasons CHECK (JSON_VALID(readiness_reasons))
 ) ENGINE=InnoDB;
 
@@ -100,7 +106,9 @@ CREATE TABLE m105_meta_authorization (
   id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
   tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   app_config_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  environment VARCHAR(32) NOT NULL,
   source_onboarding_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  flow_variant VARCHAR(64) NOT NULL,
   auth_variant VARCHAR(64) NOT NULL,
   provider_subject_ref VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
   granted_scopes JSON NOT NULL,
@@ -109,8 +117,10 @@ CREATE TABLE m105_meta_authorization (
   revoked_at DATETIME(6) NULL,
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY uq_m105_authorization_tenant_id (tenant_id, id),
-  CONSTRAINT fk_m105_authorization_onboarding FOREIGN KEY (tenant_id, source_onboarding_id) REFERENCES m105_onboarding_session (tenant_id, id),
-  CONSTRAINT fk_m105_authorization_app FOREIGN KEY (app_config_id) REFERENCES m105_meta_app_config (id),
+  UNIQUE KEY uq_m105_authorization_context (tenant_id, id, app_config_id, environment),
+  CONSTRAINT fk_m105_authorization_onboarding FOREIGN KEY (tenant_id, source_onboarding_id, app_config_id, flow_variant, auth_variant) REFERENCES m105_onboarding_session (tenant_id, id, app_config_id, flow_variant, auth_variant),
+  CONSTRAINT fk_m105_authorization_app_environment FOREIGN KEY (app_config_id, environment) REFERENCES m105_meta_app_config (id, environment),
+  CONSTRAINT fk_m105_authorization_app_variant FOREIGN KEY (app_config_id, flow_variant, auth_variant) REFERENCES m105_meta_app_config (id, flow_variant, auth_variant),
   CONSTRAINT ck_m105_authorization_scopes CHECK (JSON_VALID(granted_scopes))
 ) ENGINE=InnoDB;
 
@@ -132,8 +142,8 @@ CREATE TABLE m105_meta_credential (
   observed_source VARCHAR(64) NOT NULL,
   observed_at DATETIME(6) NULL,
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
-  CONSTRAINT fk_m105_credential_authorization FOREIGN KEY (tenant_id, authorization_id) REFERENCES m105_meta_authorization (tenant_id, id),
-  CONSTRAINT fk_m105_credential_app FOREIGN KEY (app_config_id) REFERENCES m105_meta_app_config (id),
+  CONSTRAINT fk_m105_credential_authorization_context FOREIGN KEY (tenant_id, authorization_id, app_config_id, environment) REFERENCES m105_meta_authorization (tenant_id, id, app_config_id, environment),
+  CONSTRAINT fk_m105_credential_app_environment FOREIGN KEY (app_config_id, environment) REFERENCES m105_meta_app_config (id, environment),
   CONSTRAINT ck_m105_credential_scopes CHECK (JSON_VALID(scopes_snapshot))
 ) ENGINE=InnoDB;
 
@@ -151,7 +161,10 @@ CREATE TABLE m105_meta_asset (
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY uq_m105_asset_identity (tenant_id, provider, app_config_id, environment, kind, external_id),
   UNIQUE KEY uq_m105_asset_tenant_id (tenant_id, id),
-  CONSTRAINT fk_m105_asset_app FOREIGN KEY (app_config_id) REFERENCES m105_meta_app_config (id)
+  UNIQUE KEY uq_m105_asset_app_context (tenant_id, id, app_config_id),
+  UNIQUE KEY uq_m105_asset_context (tenant_id, id, app_config_id, environment),
+  UNIQUE KEY uq_m105_asset_route_identity (provider, app_config_id, environment, kind, external_id, tenant_id, id),
+  CONSTRAINT fk_m105_asset_app FOREIGN KEY (app_config_id, provider, environment) REFERENCES m105_meta_app_config (id, provider, environment)
 ) ENGINE=InnoDB;
 
 CREATE TABLE m105_asset_route_claim (
@@ -167,13 +180,14 @@ CREATE TABLE m105_asset_route_claim (
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY uq_m105_route_identity (provider, app_config_id, environment, kind, external_id),
   UNIQUE KEY uq_m105_route_asset (tenant_id, asset_id),
-  CONSTRAINT fk_m105_route_claim_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES m105_meta_asset (tenant_id, id),
-  CONSTRAINT fk_m105_route_claim_app FOREIGN KEY (app_config_id) REFERENCES m105_meta_app_config (id)
+  CONSTRAINT fk_m105_route_claim_asset_identity FOREIGN KEY (provider, app_config_id, environment, kind, external_id, tenant_id, asset_id) REFERENCES m105_meta_asset (provider, app_config_id, environment, kind, external_id, tenant_id, id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE m105_asset_relation (
   id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
   tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  app_config_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  environment VARCHAR(32) NOT NULL,
   parent_asset_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   child_asset_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   relation_kind VARCHAR(48) NOT NULL,
@@ -181,8 +195,8 @@ CREATE TABLE m105_asset_relation (
   observed_at DATETIME(6) NULL,
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY uq_m105_asset_relation (tenant_id, parent_asset_id, child_asset_id, relation_kind),
-  CONSTRAINT fk_m105_relation_parent FOREIGN KEY (tenant_id, parent_asset_id) REFERENCES m105_meta_asset (tenant_id, id),
-  CONSTRAINT fk_m105_relation_child FOREIGN KEY (tenant_id, child_asset_id) REFERENCES m105_meta_asset (tenant_id, id)
+  CONSTRAINT fk_m105_relation_parent FOREIGN KEY (tenant_id, parent_asset_id, app_config_id, environment) REFERENCES m105_meta_asset (tenant_id, id, app_config_id, environment),
+  CONSTRAINT fk_m105_relation_child FOREIGN KEY (tenant_id, child_asset_id, app_config_id, environment) REFERENCES m105_meta_asset (tenant_id, id, app_config_id, environment)
 ) ENGINE=InnoDB;
 
 CREATE TABLE m105_asset_authorization (
@@ -190,14 +204,16 @@ CREATE TABLE m105_asset_authorization (
   tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   authorization_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   asset_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  app_config_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  environment VARCHAR(32) NOT NULL,
   capabilities JSON NOT NULL,
   status VARCHAR(24) NOT NULL,
   verified_at DATETIME(6) NULL,
   revoked_at DATETIME(6) NULL,
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY uq_m105_asset_authorization (tenant_id, authorization_id, asset_id),
-  CONSTRAINT fk_m105_asset_auth_authorization FOREIGN KEY (tenant_id, authorization_id) REFERENCES m105_meta_authorization (tenant_id, id),
-  CONSTRAINT fk_m105_asset_auth_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES m105_meta_asset (tenant_id, id),
+  CONSTRAINT fk_m105_asset_auth_authorization FOREIGN KEY (tenant_id, authorization_id, app_config_id, environment) REFERENCES m105_meta_authorization (tenant_id, id, app_config_id, environment),
+  CONSTRAINT fk_m105_asset_auth_asset FOREIGN KEY (tenant_id, asset_id, app_config_id, environment) REFERENCES m105_meta_asset (tenant_id, id, app_config_id, environment),
   CONSTRAINT ck_m105_asset_auth_capabilities CHECK (JSON_VALID(capabilities))
 ) ENGINE=InnoDB;
 
@@ -205,6 +221,7 @@ CREATE TABLE m105_webhook_subscription (
   id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
   tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   app_config_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  environment VARCHAR(32) NOT NULL,
   target_asset_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   desired_fields JSON NOT NULL,
   state VARCHAR(24) NOT NULL,
@@ -212,8 +229,8 @@ CREATE TABLE m105_webhook_subscription (
   observed_source VARCHAR(64) NOT NULL,
   observed_at DATETIME(6) NULL,
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
-  CONSTRAINT fk_m105_subscription_asset FOREIGN KEY (tenant_id, target_asset_id) REFERENCES m105_meta_asset (tenant_id, id),
-  CONSTRAINT fk_m105_subscription_app FOREIGN KEY (app_config_id) REFERENCES m105_meta_app_config (id),
+  CONSTRAINT fk_m105_subscription_asset_context FOREIGN KEY (tenant_id, target_asset_id, app_config_id, environment) REFERENCES m105_meta_asset (tenant_id, id, app_config_id, environment),
+  CONSTRAINT fk_m105_subscription_app_environment FOREIGN KEY (app_config_id, environment) REFERENCES m105_meta_app_config (id, environment),
   CONSTRAINT ck_m105_subscription_fields CHECK (JSON_VALID(desired_fields))
 ) ENGINE=InnoDB;
 
@@ -228,12 +245,14 @@ CREATE TABLE m105_inbox_event (
   route_state VARCHAR(24) NOT NULL,
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY uq_m105_inbox_provider_event (app_config_id, provider_event_id),
+  UNIQUE KEY uq_m105_inbox_id_app_context (id, app_config_id),
   CONSTRAINT fk_m105_inbox_app FOREIGN KEY (app_config_id) REFERENCES m105_meta_app_config (id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE m105_routed_event (
   id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
   inbox_event_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  app_config_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   item_key VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
   asset_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
@@ -241,8 +260,8 @@ CREATE TABLE m105_routed_event (
   processing_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY uq_m105_routed_item (inbox_event_id, item_key),
-  CONSTRAINT fk_m105_routed_inbox FOREIGN KEY (inbox_event_id) REFERENCES m105_inbox_event (id),
-  CONSTRAINT fk_m105_routed_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES m105_meta_asset (tenant_id, id),
+  CONSTRAINT fk_m105_routed_inbox FOREIGN KEY (inbox_event_id, app_config_id) REFERENCES m105_inbox_event (id, app_config_id),
+  CONSTRAINT fk_m105_routed_asset FOREIGN KEY (tenant_id, asset_id, app_config_id) REFERENCES m105_meta_asset (tenant_id, id, app_config_id),
   CONSTRAINT ck_m105_routed_destination CHECK ((tenant_id IS NULL AND asset_id IS NULL AND route_state = 'QUARANTINED') OR (tenant_id IS NOT NULL AND asset_id IS NOT NULL AND route_state <> 'QUARANTINED'))
 ) ENGINE=InnoDB;
 

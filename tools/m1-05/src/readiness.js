@@ -12,9 +12,25 @@ const ALLOWED_NEXT = new Map([
   ['FAILED', new Set()],
 ]);
 
+const READINESS_RESULT = Symbol('derived-readiness-result');
+
+function isDerivedReadiness(value) {
+  return value?.[READINESS_RESULT] === true
+    && (value.status === 'READY' || value.status === 'PARTIAL')
+    && Array.isArray(value.reasons)
+    && Number.isInteger(value.policyVersion)
+    && value.policyVersion > 0
+    && (value.status !== 'READY' || value.reasons.length === 0)
+    && (value.status !== 'PARTIAL' || value.reasons.length > 0);
+}
+
 export function canTransition(from, to, context = {}) {
-  if (from === 'PARTIAL' && to === 'PROVISIONING') {
-    return Boolean(context.recoveryJobId && Number.isInteger(context.policyVersion));
+  if ((from === 'PROVISIONING' && (to === 'READY' || to === 'PARTIAL'))
+      || (from === 'PARTIAL' && to === 'PROVISIONING')) {
+    const readiness = context.readiness;
+    if (!isDerivedReadiness(readiness)) return false;
+    if (from === 'PROVISIONING') return readiness.status === to;
+    return Boolean(context.recoveryJobId);
   }
   return ALLOWED_NEXT.get(from)?.has(to) ?? false;
 }
@@ -41,5 +57,5 @@ export function deriveReadiness({ policy, evidence, now, maxAgeMs }) {
     }
   }
   if (evidence.routeConflict === true) reasons.push({ capability: 'ASSET_ROUTE', required: true, reason: 'CONFLICT' });
-  return { status: reasons.length === 0 ? 'READY' : 'PARTIAL', reasons, policyVersion: policy.version };
+  return Object.freeze({ status: reasons.length === 0 ? 'READY' : 'PARTIAL', reasons: Object.freeze(reasons), policyVersion: policy.version, [READINESS_RESULT]: true });
 }

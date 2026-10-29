@@ -11,4 +11,4 @@ COPY src ./src
 COPY fixtures ./fixtures
 COPY sql ./sql
 
-CMD ["npm", "test"]
+CMD ["sh", "-c", "node --version && npm --version && npm test"]
