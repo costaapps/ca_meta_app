@@ -719,10 +719,8 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
          WHERE active.tenant_id = ca_meta_jobs.tenant_id
            AND active.resource_scope_ref = ca_meta_jobs.resource_scope_ref
            AND active.status = 'RUNNING' AND active.lease_expires_at > UTC_TIMESTAMP(6)
-       ) AND (
-         (status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)) OR
-         (status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6))
-       ) ORDER BY COALESCE(lease_expires_at, next_run_at), created_at, id LIMIT 1`,
+       ) AND status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)
+       ORDER BY next_run_at, created_at, id LIMIT 1`,
       [tenantWorker],
     ) as Array<{ table: string | null; key: string | null; type: string; rows: number | string }>;
     const tenantClaimScan = tenantClaimPlan.find((row) => row.table === 'ca_meta_jobs');
