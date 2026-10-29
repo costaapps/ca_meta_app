@@ -44,7 +44,7 @@
   "scripts": {
     "generate": "node scripts/generate.mjs",
     "check:generated": "node scripts/generate.mjs --check",
-    "lint": "redocly lint --config scripts/redocly.yaml ../../docs/meta-v2/contracts/openapi.yaml",
+    "lint": "redocly lint --config scripts/redocly.yaml ../../docs/meta-v2/contracts/openapi.yaml openapi.yaml",
     "check:breaking": "node scripts/check-breaking.mjs",
     "test:breaking-sensitivity": "node --test test/breaking-sensitivity.spec.mjs",
     "test:determinism": "node --test test/determinism.spec.mjs",
