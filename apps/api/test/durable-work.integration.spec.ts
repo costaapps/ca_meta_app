@@ -720,8 +720,16 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
       [tenantWorker],
     ) as Array<{ table: string | null; key: string | null; type: string; rows: number | string }>;
     const tenantClaimScan = tenantClaimPlan.find((row) => row.table === 'ca_meta_jobs');
-    assert.ok(tenantClaimScan?.key?.includes('ix_ca_meta_job_tenant_claim_ready'), 'ready tenant claims use the tenant/lane ready index');
-    assert.notEqual(tenantClaimScan?.type, 'ALL', 'tenant candidate scan is bounded by an index');
+    assert.ok(
+      tenantClaimScan?.key?.includes('ix_ca_meta_job_tenant_claim_ready') ||
+        tenantClaimScan?.key?.includes('uq_ca_meta_job_idempotency'),
+      `ready tenant lookup uses a selective index: ${JSON.stringify(tenantClaimPlan)}`,
+    );
+    assert.notEqual(tenantClaimScan?.type, 'ALL', `ready tenant lookup avoids a full scan: ${JSON.stringify(tenantClaimPlan)}`);
+    assert.ok(
+      Number(tenantClaimScan?.rows ?? Number.MAX_SAFE_INTEGER) < highHistoryCount / 10,
+      `ready tenant estimate excludes most historical backlog: ${JSON.stringify(tenantClaimPlan)}`,
+    );
 
     const tenantExpiredPlan = await dataSource.query(
       `EXPLAIN SELECT id FROM ca_meta_jobs
@@ -731,8 +739,43 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
       [tenantWorker],
     ) as Array<{ table: string | null; key: string | null; type: string; rows: number | string }>;
     const tenantExpiredScan = tenantExpiredPlan.find((row) => row.table === 'ca_meta_jobs');
-    assert.ok(tenantExpiredScan?.key?.includes('ix_ca_meta_job_tenant_claim_expired'), 'expired tenant claims use the tenant/lane lease index');
-    assert.notEqual(tenantExpiredScan?.type, 'ALL', 'expired tenant claim scan is bounded by an index');
+    assert.ok(
+      tenantExpiredScan?.key?.includes('ix_ca_meta_job_tenant_claim_expired') ||
+        tenantExpiredScan?.key?.includes('ix_ca_meta_job_claim_expired'),
+      `expired tenant lookup uses a selective lease index: ${JSON.stringify(tenantExpiredPlan)}`,
+    );
+    assert.notEqual(tenantExpiredScan?.type, 'ALL', `expired tenant lookup avoids a full scan: ${JSON.stringify(tenantExpiredPlan)}`);
+    assert.ok(
+      Number(tenantExpiredScan?.rows ?? Number.MAX_SAFE_INTEGER) < highHistoryCount / 10,
+      `expired tenant estimate excludes most historical backlog: ${JSON.stringify(tenantExpiredPlan)}`,
+    );
+
+    const tenantCombinedClaimPlan = await dataSource.query(
+      `EXPLAIN SELECT id FROM ca_meta_jobs
+       WHERE tenant_id = ? AND lane = ? AND job_type IN (?, ?) AND NOT EXISTS (
+         SELECT 1 FROM ca_meta_jobs active
+         WHERE active.tenant_id = ca_meta_jobs.tenant_id
+           AND active.resource_scope_ref = ca_meta_jobs.resource_scope_ref
+           AND active.status = 'RUNNING' AND active.lease_expires_at > UTC_TIMESTAMP(6)
+       ) AND (
+         (status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)) OR
+         (status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6))
+       ) ORDER BY COALESCE(lease_expires_at, next_run_at), created_at, id LIMIT 1`,
+      [tenantWorker, 'WEBHOOK_URGENT', 'INBOX_PROCESS', 'PROJECTION_RECONCILE'],
+    ) as Array<{ table: string | null; key: string | null; type: string; rows: number | string }>;
+    const tenantCombinedClaimScan = tenantCombinedClaimPlan.find((row) => row.table === 'ca_meta_jobs');
+    const tenantCombinedClaimKey = tenantCombinedClaimScan?.key ?? '';
+    const tenantCombinedClaimDiagnostic = JSON.stringify(tenantCombinedClaimPlan);
+    assert.ok(
+      tenantCombinedClaimKey.includes('ix_ca_meta_job_claim_ready') ||
+        tenantCombinedClaimKey.includes('ix_ca_meta_job_tenant_claim_'),
+      `combined tenant claim lookup uses a selective ready/tenant index: ${tenantCombinedClaimDiagnostic}`,
+    );
+    assert.notEqual(tenantCombinedClaimScan?.type, 'ALL', `combined tenant claim lookup avoids a full scan: ${tenantCombinedClaimDiagnostic}`);
+    assert.ok(
+      Number(tenantCombinedClaimScan?.rows ?? Number.MAX_SAFE_INTEGER) < highHistoryCount / 10,
+      `combined tenant claim estimate excludes most historical backlog: ${tenantCombinedClaimDiagnostic}`,
+    );
 
     const claimStartedAt = performance.now();
     const urgentJobs = await Promise.all([
