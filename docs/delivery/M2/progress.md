@@ -5,7 +5,7 @@ Milestone branch: `desktop/milestone-m2`, initially created at that SHA.
 
 | Package / issue | Stage | Candidate | Latest evidence | Package PR | Next action |
 |---|---|---|---|---|---|
-| M2.01 / #20 | Ready to implement | pending | M1.04/#13, M1.08/#18, M1.10/#19 are in develop through merged PR #94 | none | preserve Angular baseline in apps/web |
+| M2.01 / #20 | Implementing | `desktop/m2-01` from `af941f29e1b0862f46f299eb08ae544d1af1f04a` | Baseline on Node 24.22.2/npm 11.19.1: clean `npm ci` PASS (501 packages; 46 inherited audit findings), `npm run build` PASS, `npm test -- --watch=false` PASS (2 files / 5 tests). | none | preserve Angular baseline in apps/web; candidate checks pending |
 | M2.02 / #21 | Waiting on M2.01 | pending | M1.07/#17 is included in develop | none | implement Nest boundary and safe config |
 | M2.03 / #22 | Waiting on M2.02 | pending | M1.02/#11 and M1.05/#14 are included in develop | none | MariaDB migrations and recovery harness |
 | M2.04 / #23 | Waiting on M2.02 | pending | M1.07/#17 is included in develop | none | canonical OpenAPI compatibility |
@@ -19,7 +19,7 @@ Milestone branch: `desktop/milestone-m2`, initially created at that SHA.
 ## Environment
 
 - Windows PowerShell checkout; GitHub connector is authenticated and reports push/admin access. `gh` CLI is not installed.
-- Git identity is the configured user identity. Node 22.17.0 is installed; Node 24.22.2 runtime is being prepared outside this repository per ADR-001.
+- Git identity is the configured user identity. Node 22.17.0 remains installed; the official Node 24.22.2 runtime is available at `C:\Users\user\AppData\Local\Codex\runtimes\node-v24.22.2` with npm 11.19.1. Its official archive SHA-256 was verified as `ca1bff5d8ead13c9f2ea404a176db46bd430704d5b5113734049fa365e7799e2`.
 - Docker Engine 28.3.0 and Compose v2.38.1 are available. A pre-existing stopped container `db-migrations-mariadb-1` is preserved.
 - Existing `node_modules` in the shared checkout is preserved; clean installs run in isolated package worktrees.
 - GitHub Projects #12 operations are unavailable in the installed connector; this report and issue/PR records remain the tracking evidence.

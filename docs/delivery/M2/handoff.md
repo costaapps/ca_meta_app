@@ -9,7 +9,7 @@
 
 ## Current stage
 
-M2.01/#20 is the first package. Its prerequisites are integrated. The next action is implementation in an exclusive worktree, followed by coordinator checks and independent functional/security review before a package PR.
+M2.01/#20 is the first package. Its prerequisites are integrated. The author worktree is `C:\Users\user\.codex\worktrees\m2-01\ca_meta_app` on `desktop/m2-01`, initially based on `af941f29e1b0862f46f299eb08ae544d1af1f04a`. Before implementation, Node 24.22.2/npm 11.19.1 `npm ci` passed (501 packages, 46 inherited audit findings), Angular build passed, and 5 baseline tests passed. Implementation is underway; next, the coordinator will validate, request independent functional/security review, fix blockers, then open a package PR.
 
 ## Environment and limits
 
