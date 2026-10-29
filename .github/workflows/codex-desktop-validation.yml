@@ -32,6 +32,8 @@ jobs:
           cache: npm
       - name: Install candidate dependencies
         run: npm ci --ignore-scripts
+      - name: Install pinned OpenAPI breaking-check binary
+        run: npm rebuild @pb33f/openapi-changes --workspace=@ca-meta/contracts
       - name: Build candidate
         run: npm run build
       - name: Test candidate
