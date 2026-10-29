@@ -2041,6 +2041,7 @@ components:
             - IDEMPOTENCY_KEY_REUSED
             - CONTEXT_CHANGED
             - ORIGIN_NOT_ALLOWED
+            - HOST_NOT_ALLOWED
             - CSRF_INVALID
             - VALIDATION_FAILED
             - PAYLOAD_TOO_LARGE
@@ -2049,6 +2050,7 @@ components:
             - META_UNAVAILABLE
             - PROVIDER_REJECTED
             - INTERNAL_SCOPE_DENIED
+            - INTERNAL_ERROR
         safeMessage:
           type: string
           minLength: 1
@@ -2059,6 +2061,8 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+          pattern: ^[A-Za-z0-9_-]{1,128}$
+          description: Server-generated correlation identifier. Direct-client X-Request-Id values are ignored; this identifier is not authorization evidence.
         retryable:
           type: boolean
         action:
@@ -2070,6 +2074,12 @@ components:
         IDEMPOTENCY_KEY_REUSED:
           retryable: false
           action: USE_NEW_REQUEST_KEY
+        HOST_NOT_ALLOWED:
+          retryable: false
+          action: CONTACT_ADMIN
+        INTERNAL_ERROR:
+          retryable: false
+          action: CONTACT_ADMIN
     AcceptedRequest:
       type: object
       additionalProperties: false
@@ -3149,7 +3159,7 @@ components:
                 retryable: false
                 action: SIGN_IN
     Forbidden:
-      description: The current identity cannot perform this action.
+      description: The current identity or request host is not allowed to perform this action.
       content:
         application/json:
           schema:
@@ -3161,6 +3171,14 @@ components:
                 code: ACCESS_DENIED
                 safeMessage: This action is not available for the current account.
                 requestId: req_example_03
+                retryable: false
+                action: CONTACT_ADMIN
+            hostNotAllowed:
+              summary: Request Host is missing or is not configured
+              value:
+                code: HOST_NOT_ALLOWED
+                safeMessage: This request host is not allowed.
+                requestId: req_example_44
                 retryable: false
                 action: CONTACT_ADMIN
     NotFound:
@@ -3276,7 +3294,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
           examples:
-            sanitized: &a41
+            sanitized:
               summary: A dependency is unavailable
               value:
                 code: DEPENDENCY_UNAVAILABLE
@@ -3293,11 +3311,18 @@ components:
                 retryable: true
                 action: CHECK_STATUS
     UnexpectedError:
-      description: An unexpected safe error occurred.
+      description: An unexpected internal error occurred. Retry is not authorized without an operation-specific decision.
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
           examples:
-            sanitized: *a41
+            sanitized:
+              summary: An unexpected internal error
+              value:
+                code: INTERNAL_ERROR
+                safeMessage: The service could not complete this request.
+                requestId: req_example_45
+                retryable: false
+                action: CONTACT_ADMIN
   examples: {}

@@ -632,9 +632,10 @@ export interface components {
         readonly ErrorAction: "SIGN_IN" | "FIX_REQUEST" | "CONTACT_ADMIN" | "REFRESH" | "RESTART_ONBOARDING" | "REAUTHORIZE" | "WAIT" | "CHECK_STATUS" | "RECONCILE" | "USE_NEW_REQUEST_KEY" | "REDUCE_REQUEST" | "RELOAD_PORTAL";
         readonly ErrorEnvelope: {
             /** @enum {string} */
-            readonly code: "AUTH_REQUIRED" | "MEMBERSHIP_REVOKED" | "ACCESS_DENIED" | "RESOURCE_NOT_AVAILABLE" | "STATE_INVALID" | "ONBOARDING_EXPIRED" | "FLOW_UNAVAILABLE" | "FLOW_NOT_ELIGIBLE" | "ASSET_GRANT_MISSING" | "ASSET_CONFLICT" | "META_PERMISSION_REQUIRED" | "META_REAUTH_REQUIRED" | "META_RATE_LIMITED" | "SUBSCRIPTION_PENDING" | "OUTCOME_UNKNOWN" | "VERSION_CONFLICT" | "IDEMPOTENCY_KEY_REUSED" | "CONTEXT_CHANGED" | "ORIGIN_NOT_ALLOWED" | "CSRF_INVALID" | "VALIDATION_FAILED" | "PAYLOAD_TOO_LARGE" | "RATE_LIMITED" | "DEPENDENCY_UNAVAILABLE" | "META_UNAVAILABLE" | "PROVIDER_REJECTED" | "INTERNAL_SCOPE_DENIED";
+            readonly code: "AUTH_REQUIRED" | "MEMBERSHIP_REVOKED" | "ACCESS_DENIED" | "RESOURCE_NOT_AVAILABLE" | "STATE_INVALID" | "ONBOARDING_EXPIRED" | "FLOW_UNAVAILABLE" | "FLOW_NOT_ELIGIBLE" | "ASSET_GRANT_MISSING" | "ASSET_CONFLICT" | "META_PERMISSION_REQUIRED" | "META_REAUTH_REQUIRED" | "META_RATE_LIMITED" | "SUBSCRIPTION_PENDING" | "OUTCOME_UNKNOWN" | "VERSION_CONFLICT" | "IDEMPOTENCY_KEY_REUSED" | "CONTEXT_CHANGED" | "ORIGIN_NOT_ALLOWED" | "HOST_NOT_ALLOWED" | "CSRF_INVALID" | "VALIDATION_FAILED" | "PAYLOAD_TOO_LARGE" | "RATE_LIMITED" | "DEPENDENCY_UNAVAILABLE" | "META_UNAVAILABLE" | "PROVIDER_REJECTED" | "INTERNAL_ERROR";
             /** @description Fixed, allowlisted localization template selected by error code. Never interpolate raw provider detail, request values, secrets, or diagnostic text. */
             readonly safeMessage: string;
+            /** @description Server-generated correlation identifier. Direct-client X-Request-Id values are ignored; this identifier is not authorization evidence. */
             readonly requestId: string;
             readonly retryable: boolean;
             readonly action: components["schemas"]["ErrorAction"];
@@ -947,7 +948,7 @@ export interface components {
                 readonly "application/json": components["schemas"]["ErrorEnvelope"];
             };
         };
-        /** @description The current identity cannot perform this action. */
+        /** @description The current identity or request host is not allowed to perform this action. */
         readonly Forbidden: {
             headers: {
                 readonly [name: string]: unknown;
@@ -1028,7 +1029,7 @@ export interface components {
                 readonly "application/json": components["schemas"]["ErrorEnvelope"];
             };
         };
-        /** @description An unexpected safe error occurred. */
+        /** @description An unexpected internal error occurred. Retry is not authorized without an operation-specific decision. */
         readonly UnexpectedError: {
             headers: {
                 readonly [name: string]: unknown;

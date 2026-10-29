@@ -1,5 +1,68 @@
 {
   "name": "@ca-meta/contracts",
   "version": "0.0.0",
-  "private": true
+  "private": true,
+  "type": "commonjs",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts"
+    },
+    "./runtime": {
+      "types": "./src/runtime.d.ts",
+      "require": "./src/runtime.cjs",
+      "default": "./src/runtime.cjs"
+    },
+    "./error-codes": {
+      "types": "./src/generated/error-codes.d.ts",
+      "import": "./src/generated/error-codes.mjs",
+      "default": "./src/generated/error-codes.mjs"
+    },
+    "./error-actions": {
+      "types": "./src/generated/error-actions.d.ts",
+      "import": "./src/generated/error-actions.mjs",
+      "default": "./src/generated/error-actions.mjs"
+    },
+    "./error-policies": {
+      "types": "./src/generated/error-policies.d.ts",
+      "import": "./src/generated/error-policies.mjs",
+      "default": "./src/generated/error-policies.mjs"
+    },
+    "./openapi.yaml": "./openapi.yaml",
+    "./events/*": "./events/*"
+  },
+  "files": [
+    "openapi.yaml",
+    "error-catalog.md",
+    "fixtures",
+    "events",
+    "src/generated",
+    "src/index.d.ts",
+    "src/runtime.cjs",
+    "src/runtime.d.ts"
+  ],
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "check:generated": "node scripts/generate.mjs --check",
+    "lint": "redocly lint --config scripts/redocly.yaml ../../docs/meta-v2/contracts/openapi.yaml openapi.yaml",
+    "check:breaking": "node scripts/check-breaking.mjs",
+    "test:breaking-sensitivity": "node --test test/breaking-sensitivity.spec.mjs",
+    "test:determinism": "node --test test/determinism.spec.mjs",
+    "test:contract": "node --test test/contract.spec.mjs",
+    "test:runtime": "node --test test/runtime.spec.cjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "npm run check:generated && npm run typecheck",
+    "test": "npm run check:generated && npm run lint && npm run check:breaking && npm run test:breaking-sensitivity && npm run test:determinism && npm run test:contract && npm run test:runtime && npm run typecheck"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  },
+  "devDependencies": {
+    "@pb33f/openapi-changes": "0.2.13",
+    "@redocly/cli": "2.72.0",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3",
+    "yaml": "2.9.1"
+  }
 }

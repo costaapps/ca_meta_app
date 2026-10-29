@@ -19,8 +19,6 @@ export interface StructuredLogger {
 }
 
 export const STRUCTURED_LOGGER = Symbol('STRUCTURED_LOGGER');
-const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 export class ConsoleStructuredLogger implements StructuredLogger {
   write(record: StructuredLogRecord): void {
     process.stdout.write(`${JSON.stringify(record)}\n`);
@@ -33,10 +31,9 @@ export function newRequestId(): string {
 
 export function requestContextMiddleware(logger: StructuredLogger, clock: MonotonicClock): RequestHandler {
   return (request: Request & { requestId?: string }, response: Response, next: NextFunction): void => {
-    const suppliedId = request.header('X-Request-Id');
-    const requestId = suppliedId !== undefined && REQUEST_ID_PATTERN.test(suppliedId)
-      ? suppliedId.toLowerCase()
-      : newRequestId();
+    // This service accepts direct clients. A client-supplied correlation ID is untrusted,
+    // so always generate the value used in response envelopes and structured logs.
+    const requestId = newRequestId();
     request.requestId = requestId;
     response.setHeader('X-Request-Id', requestId);
     const startedAt = clock.now();
