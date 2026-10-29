@@ -82,6 +82,17 @@ test('OpenAPI has explicit root-host routes, deny-by-default security and no dup
   assert.ok(contract.paths['/internal/v1/assets/{assetId}/operations']);
   assert.ok(contract.paths['/health']);
   assert.ok(contract.paths['/ready']);
+  assert.deepEqual(contract.paths['/internal/v1/assets/{assetId}/operations'].post['x-internal-authorization'], {
+    requiredClaims: ['service_id', 'tenant_ref', 'asset_ref', 'operation'],
+    audience: 'msg4-meta-internal',
+    bindings: {
+      tenant_ref: 'tenant owning the asset identified by path.assetId',
+      asset_ref: 'path.assetId',
+      operation: 'requestBody.kind',
+    },
+    enforceCurrentTenantGrant: true,
+    allowlist: ['SEND_REPLY', 'MARK_READ', 'REFRESH_STATUS'],
+  });
 
   const operations = operationList();
   const ids = operations.map(({ operation }) => operation.operationId);
@@ -137,11 +148,27 @@ test('every request, success and reusable error example validates against its JS
     const schema = JSON.parse(await readFile(eventPath, 'utf8'));
     const validate = ajv.compile(schema);
     assert.ok(Array.isArray(schema.examples) && schema.examples.length > 0, `${path.basename(eventPath)} needs a sanitized example`);
+    const payloadSchema = schema.$id.endsWith(':inbox-event:v1') ? schema.properties.safeMetadata : schema.properties.data;
+    const payloadKinds = payloadSchema.oneOf.map((variant) => variant.properties.kind.const).sort();
+    const eventTypeKinds = schema.allOf.map((rule) => {
+      const eventType = rule.if.properties.eventType.const;
+      const kind = rule.then.properties[schema.$id.endsWith(':inbox-event:v1') ? 'safeMetadata' : 'data'].properties.kind.const;
+      assert.ok(schema.properties.eventType.enum.includes(eventType), `${eventType} is listed in eventType`);
+      return [eventType, kind];
+    });
+    assert.equal(eventTypeKinds.length, schema.properties.eventType.enum.length, `${path.basename(eventPath)} maps every eventType`);
+    assert.equal(new Set(eventTypeKinds.map(([eventType]) => eventType)).size, schema.properties.eventType.enum.length, `${path.basename(eventPath)} maps each eventType once`);
+    assert.deepEqual(eventTypeKinds.map(([eventType]) => eventType).sort(), [...schema.properties.eventType.enum].sort());
+    assert.deepEqual(eventTypeKinds.map(([, kind]) => kind).sort(), payloadKinds, `${path.basename(eventPath)} maps every payload kind exactly once`);
     for (const [index, example] of schema.examples.entries()) {
       const valid = validate(example);
       assert.ok(valid, `${path.basename(eventPath)} example ${index} failed: ${JSON.stringify(validate.errors)}`);
       checked += 1;
     }
+    const mismatched = structuredClone(schema.examples[0]);
+    if (schema.$id.endsWith(':inbox-event:v1')) mismatched.eventType = 'provider.authorization.changed';
+    else mismatched.eventType = 'onboarding.changed';
+    assert.equal(validate(mismatched), false, `${path.basename(eventPath)} must reject eventType/kind mismatches`);
   }
   assert.ok(checked >= 60, `expected a broad request/success/error fixture set, checked ${checked}`);
 });
@@ -277,6 +304,8 @@ test('proposed payload and retry bounds are explicit and UNKNOWN external writes
   assert.equal(retry.safeReadsAndLocallyIdempotentJobs.maxAutomaticAttempts, 3);
   assert.equal(retry.safeReadsAndLocallyIdempotentJobs.maxElapsedSeconds, 60);
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.maxAutomaticAttempts, 1);
+  assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.includesInitialRequest, true);
+  assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.maxAutomaticRetries, 0);
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.onAmbiguousOutcome, 'UNKNOWN');
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.messageSend, 'no automatic retry');
   const sendReply = operationList().find(({ operation }) => operation.operationId === 'sendReply').operation;

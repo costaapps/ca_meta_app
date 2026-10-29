@@ -110,6 +110,32 @@
       ]
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "eventType": { "const": "onboarding.changed" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "ONBOARDING_CHANGED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "connection.changed" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "CONNECTION_CHANGED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "asset.refresh.requested" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "ASSET_REFRESH_REQUESTED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "reply.requested" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "REPLY_REQUESTED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "notification.changed" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "NOTIFICATION_CHANGED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "template.creation.requested" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "TEMPLATE_CREATION_REQUESTED" } } } } }
+    }
+  ],
   "examples": [
     {
       "eventId": "outbox_example_01",

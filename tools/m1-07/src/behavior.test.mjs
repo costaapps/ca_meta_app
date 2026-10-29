@@ -133,11 +133,13 @@ test('cross-tenant reads hide resource existence and distinguish 401/403/404 saf
   assert.equal(insufficientRole.body.code, 'ACCESS_DENIED');
 });
 
-test('ambiguous external effects become UNKNOWN and never get a blind retry', () => {
+test('ambiguous external effects become UNKNOWN and the message policy allows no automatic retry', () => {
   const unknown = retryDecision({ outcome: 'UNKNOWN', attempt: 1, maxAttempts: 3, effectProvenNotApplied: false });
   assert.deepEqual(unknown, { retry: false, state: 'UNKNOWN', nextAction: 'RECONCILE' });
-  const knownNoEffect = retryDecision({ outcome: 'RETRYABLE_FAILURE', attempt: 1, maxAttempts: 3, effectProvenNotApplied: true });
-  assert.deepEqual(knownNoEffect, { retry: true, state: 'RETRY_PENDING', delaySeconds: 1 });
+  const provenNoEffectAtMessageLimit = retryDecision({ outcome: 'RETRYABLE_FAILURE', attempt: 1, maxAttempts: 1, effectProvenNotApplied: true });
+  assert.deepEqual(provenNoEffectAtMessageLimit, { retry: false, state: 'FAILED', nextAction: 'NONE' });
+  const explicitlyConfiguredSafeRetry = retryDecision({ outcome: 'RETRYABLE_FAILURE', attempt: 1, maxAttempts: 3, effectProvenNotApplied: true });
+  assert.deepEqual(explicitlyConfiguredSafeRetry, { retry: true, state: 'RETRY_PENDING', delaySeconds: 1 });
   const exhausted = retryDecision({ outcome: 'RETRYABLE_FAILURE', attempt: 3, maxAttempts: 3, effectProvenNotApplied: true });
   assert.deepEqual(exhausted, { retry: false, state: 'FAILED', nextAction: 'NONE' });
 });

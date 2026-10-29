@@ -64,6 +64,8 @@ x-retry-policy:
     retryOnlyWhen: transient failure with no external mutation
   externalMutationsWithoutVerifiedProviderIdempotency:
     maxAutomaticAttempts: 1
+    includesInitialRequest: true
+    maxAutomaticRetries: 0
     maxElapsedSeconds: 60
     onAmbiguousOutcome: UNKNOWN
     retryAfterUnknown: reconcile first; any later user request gets a new idempotency key
@@ -1296,9 +1298,10 @@ paths:
       x-external-effect: Sends one outbound message through the selected active asset authorization.
       x-idempotency-scope: tenant + operation + Idempotency-Key plus payload hash. Same key/body replays
         acceptance; different body returns 409 without another send attempt.
-      x-retry-policy: Bounded attempts only when the adapter can prove the prior attempt did not deliver.
-        Timeout-after-send is UNKNOWN; reconcile provider receipt/status before another attempt. No
-        blind retry.
+      x-retry-policy: One automatic attempt, including the initial send; no automatic retry without
+        verified provider idempotency. A proven pre-effect failure may be shown as retryable for a new
+        explicit user request. Timeout-after-send is UNKNOWN; reconcile provider receipt/status before
+        another request. No blind retry.
   /api/v1/jobs/{jobId}:
     parameters:
       - name: jobId
@@ -1625,8 +1628,9 @@ paths:
       x-external-effect: REPLY may send an outbound message. MARK_READ and DISMISS only update local
         notification state.
       x-idempotency-scope: tenant + operation + Idempotency-Key plus payload hash.
-      x-retry-policy: For REPLY, bounded attempts only when a prior delivery is disproven. Ambiguous
-        outcome is UNKNOWN until reconciled; do not blind retry.
+      x-retry-policy: For REPLY, at most one automatic attempt including the initial send. A proven
+        pre-effect failure may permit a new explicit user request; an ambiguous outcome is UNKNOWN until
+        reconciled. Do not automatically retry.
   /internal/v1/assets/{assetId}/operations:
     parameters:
       - name: assetId
@@ -1645,12 +1649,25 @@ paths:
         - Internal Operations
       summary: Execute an allowlisted tenant-scoped asset operation
       description: Service-to-service only, with a dedicated short-lived internal service identity and
-        explicit tenant/asset/operation scopes. Server resolves the asset and credential; caller
+        explicit tenant/asset/operation scopes. The signed workload token has audience `msg4-meta-internal`
+        and carries `service_id`, `tenant_ref`, `asset_ref`, and `operation` claims. Each claim is matched
+        against the server-resolved tenant, this path's `assetId`, and the request's `kind`; the server
+        rechecks the current tenant grant and exact operation allowlist on every call. Issuer and key
+        rotation are deployment-configured and remain Not confirmed. Server resolves the asset and credential; caller
         cannot provide a Graph URL, token, credential, tenant override or raw SQL. `SEND_REPLY`,
         `MARK_READ` and `REFRESH_STATUS` are distinct typed operations. This endpoint never decrypts
         or returns a token.
       security:
         - internalServiceAuth: []
+      x-internal-authorization:
+        requiredClaims: [service_id, tenant_ref, asset_ref, operation]
+        audience: msg4-meta-internal
+        bindings:
+          tenant_ref: tenant owning the asset identified by path.assetId
+          asset_ref: path.assetId
+          operation: requestBody.kind
+        enforceCurrentTenantGrant: true
+        allowlist: [SEND_REPLY, MARK_READ, REFRESH_STATUS]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1868,8 +1885,9 @@ components:
       type: http
       scheme: bearer
       bearerFormat: service token
-      description: Dedicated service identity with tenant/asset/operation scopes; never a Meta token or
-        user session.
+      description: Short-lived signed workload token for audience `msg4-meta-internal` with `service_id`,
+        `tenant_ref`, `asset_ref`, and `operation` claims. Issuer and key rotation are deployment-configured
+        and Not confirmed. Never a Meta token or user session.
   parameters:
     Origin:
       name: Origin
@@ -2023,6 +2041,8 @@ components:
           type: string
           minLength: 1
           maxLength: 240
+          description: Fixed, allowlisted localization template selected by error code. Never interpolate
+            raw provider detail, request values, secrets, or diagnostic text.
         requestId:
           type: string
           minLength: 1
@@ -3061,9 +3081,10 @@ components:
           maxLength: 1024
     ProviderWebhookEnvelope:
       type: object
-      description: Raw, signature-verified provider JSON body. Exact Meta webhook schema is Not confirmed;
-        ingress validates signature and size, then stores protected bytes. Do not use this schema as
-        an internal event or public read DTO.
+      description: Raw, signature-verified provider JSON body. This schema asserts only an object shape and
+        a maximum property count; it is not closed or a field-level provider schema. Exact Meta webhook
+        fields are Not confirmed. Ingress validates signature and size, then stores protected bytes. Do
+        not use this schema as an internal event or public read DTO.
       additionalProperties: true
       maxProperties: 256
     HealthStatus:
