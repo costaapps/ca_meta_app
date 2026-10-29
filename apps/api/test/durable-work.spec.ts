@@ -5,8 +5,9 @@ import { ApiModule } from '../src/app.module.js';
 import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { DURABLE_WORK_DATABASE } from '../src/jobs/jobs.module.js';
 import type { ApiEnvironment } from '../src/config/environment.js';
+import type { EntityManager } from 'typeorm';
 import { canonicalJson, JOB_POLICIES, MAX_ACTIVE_JOBS_PER_TENANT, MAX_WAITING_JOBS_PER_TENANT, parseInboxEvent, parseOutboxEvent, retryDelayMs } from '../src/jobs/event-validation.js';
-import type { ClaimedJob, JobOutcome, JobStore } from '../src/jobs/job-store.js';
+import type { ClaimedJob, JobFinalization, JobOutcome, JobStore } from '../src/jobs/job-store.js';
 import { DurableWorker, type JobHandler } from '../src/worker/durable-worker.js';
 import type { JobType } from '../src/jobs/event-validation.js';
 
@@ -63,6 +64,7 @@ const claimedJob: ClaimedJob = {
 
 class FakeJobStore implements JobStore {
   claimed = false;
+  claimCalls = 0;
   renewCount = 0;
   finishes: JobOutcome[] = [];
   finishAt = 0;
@@ -71,6 +73,7 @@ class FakeJobStore implements JobStore {
   async enqueue(): Promise<{ id: string; duplicate: boolean }> { throw new Error('not used'); }
   async enqueueWithin(): Promise<{ id: string; duplicate: boolean }> { throw new Error('not used'); }
   async claimNext(): Promise<ClaimedJob | null> {
+    this.claimCalls += 1;
     if (this.claimed) return null;
     this.claimed = true;
     return claimedJob;
@@ -124,6 +127,14 @@ test('worker heartbeats beyond lease TTL, drains the current handler on SIGTERM,
   assert.ok(Date.now() - started >= 220, 'SIGTERM stops claims but drains the active handler');
   assert.ok(store.renewCount >= 5, 'short lease is renewed while the handler is still active');
   assert.deepEqual(store.finishes, [{ kind: 'SUCCEEDED' }]);
+});
+
+test('worker requires heartbeat interval plus cancellation grace to fit inside the lease', () => {
+  assert.throws(() => new DurableWorker(
+    new FakeJobStore(),
+    { workerRef: 'worker-invalid-timeout-margin', leaseMs: 100, heartbeatMs: 60, handlerCancellationGraceMs: 40 },
+    new Map<JobType, JobHandler>([['PROJECTION_RECONCILE', async () => ({ kind: 'SUCCEEDED' })]]),
+  ), /heartbeatMs plus handlerCancellationGraceMs must be shorter than the lease/);
 });
 
 test('worker does not ACK after losing its claim fence and maps uncertain provider outcomes safely', async () => {
@@ -206,4 +217,73 @@ test('type timeout aborts cooperatively, waits for handler exit, and never retri
   const ambiguous = await runTimed('OUTBOX_DELIVER', 'AMBIGUOUS');
   assert.deepEqual(ambiguous.store.finishes, [{ kind: 'UNKNOWN', safeErrorCode: 'PROVIDER_RESULT_UNKNOWN' }]);
   assert.ok(ambiguous.store.finishAt >= ambiguous.handlerExitedAt);
+});
+
+test('non-cooperative handler timeout stops heartbeats and fences off late success without retry', async () => {
+  class FinalizingStore extends FakeJobStore {
+    override async finish(
+      job: ClaimedJob,
+      outcome: JobOutcome,
+      _random?: () => number,
+      applyWithin?: (manager: EntityManager, finalization: JobFinalization) => Promise<void>,
+    ): Promise<boolean> {
+      const finished = await super.finish(job, outcome);
+      if (!finished || !applyWithin) return finished;
+      const finalization: JobFinalization = {
+        status: outcome.kind === 'SUCCEEDED' ? 'SUCCEEDED' : outcome.kind === 'UNKNOWN' ? 'UNKNOWN' : 'RETRY_PENDING',
+        safeErrorCode: outcome.kind === 'SUCCEEDED' ? null : outcome.safeErrorCode,
+        safeErrorAction: outcome.kind === 'SUCCEEDED' ? null : 'CHECK_STATUS',
+      };
+      await applyWithin({} as EntityManager, finalization);
+      return true;
+    }
+  }
+  const store = new FinalizingStore();
+  let resolveHandler!: (outcome: JobOutcome) => void;
+  let observedAbort = false;
+  let finalizerCalls = 0;
+  const pendingHandler = new Promise<JobOutcome>((resolve) => { resolveHandler = resolve; });
+  const worker = new DurableWorker(store, {
+    workerRef: 'worker-timeout-stuck', leaseMs: 150, heartbeatMs: 10, idlePollMs: 5,
+    handlerTimeoutOverrides: { PROJECTION_RECONCILE: 20 }, handlerCancellationGraceMs: 30,
+  }, new Map<JobType, JobHandler>([['PROJECTION_RECONCILE', async (_job, signal) => {
+    signal.addEventListener('abort', () => { observedAbort = true; }, { once: true });
+    return pendingHandler;
+  }]]), new Map([['PROJECTION_RECONCILE', async () => { finalizerCalls += 1; }]]));
+  const controller = new AbortController();
+  const started = Date.now();
+  const run = worker.run(controller.signal);
+  const stoppedWorker = assert.rejects(run, /non-cooperative handler timeout/);
+  try {
+    while (store.finishes.length === 0 && Date.now() - started < 750) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(store.finishes.length === 1, 'a handler that ignores cancellation is bounded by deadline plus grace');
+    await stoppedWorker;
+
+    assert.ok(observedAbort, 'the worker signals cancellation at its configured deadline');
+    assert.ok(Date.now() - started < 1_000, 'the unresolved handler does not block worker settlement');
+    assert.deepEqual(store.finishes, [{ kind: 'UNKNOWN', safeErrorCode: 'PROVIDER_RESULT_UNKNOWN' }]);
+    assert.equal(finalizerCalls, 1, 'the conservative UNKNOWN result finalizes the projection once');
+    assert.equal(store.claimCalls, 1, 'worker stops claiming after an abandoned handler to avoid resource accumulation');
+    const renewalsAfterSettlement = store.renewCount;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(store.renewCount, renewalsAfterSettlement, 'heartbeats do not resume after timeout settlement');
+
+    resolveHandler({ kind: 'SUCCEEDED' });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.deepEqual(store.finishes, [{ kind: 'UNKNOWN', safeErrorCode: 'PROVIDER_RESULT_UNKNOWN' }]);
+    assert.equal(finalizerCalls, 1, 'late handler success cannot run a second projection finalizer');
+  } finally {
+    // If an assertion fails before bounded settlement, release the synthetic handler and stop the run loop
+    // so the unit runner itself cannot hang on the deliberately unresolved Promise.
+    resolveHandler({ kind: 'SUCCEEDED' });
+    controller.abort();
+    let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([stoppedWorker.then(() => undefined, () => undefined), new Promise<void>((resolve) => {
+      cleanupTimer = setTimeout(resolve, 250);
+    })]);
+    if (cleanupTimer !== undefined) clearTimeout(cleanupTimer);
+  }
 });

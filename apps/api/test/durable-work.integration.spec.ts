@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { test } from 'node:test';
 import { deployMigrations } from '../src/database/migrations/migration-runner.js';
 import { readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
@@ -51,6 +52,26 @@ function inboxEvent(appConfigRef: string, eventId = `provider-${uuid()}`): Inbox
   };
 }
 
+function unclassifiedInboxEvent(appConfigRef: string, eventId: string): InboxEventEnvelope {
+  return {
+    eventId,
+    schemaVersion: 1,
+    eventType: 'provider.unclassified',
+    appConfigRef,
+    tenantRef: null,
+    actor: { kind: 'PROVIDER', ref: 'm2-05-synthetic-crash-fixture' },
+    correlationId: 'corr-m2-05-crash-effect',
+    causationId: null,
+    aggregateRef: null,
+    aggregateVersion: 0,
+    occurredAt: '2026-10-29T12:00:00.000Z',
+    receivedAt: '2026-10-29T12:00:01.000Z',
+    protectedPayloadRef: 'payload-m2-05-crash-effect',
+    routingState: 'QUARANTINED',
+    safeMetadata: { kind: 'UNCLASSIFIED', eventRef: 'event-m2-05-crash-effect', reason: 'UNMAPPED_EVENT_TYPE' },
+  };
+}
+
 function outboxEvent(tenantRef: string, eventId = `event-${uuid()}`, aggregateVersion = 1): OutboxEventEnvelope {
   return {
     eventId,
@@ -87,6 +108,7 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
   const tenantCap = uuid();
   const tenantConcurrent = uuid();
   const appConfig = uuid();
+  const replayAppConfig = uuid();
   const timestamp = '2026-10-29 12:00:00.000000';
   const jobs = new DurableJobStore(database, () => 0);
   const inbox = new InboxService(database, jobs);
@@ -102,8 +124,9 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     await dataSource.query(
       `INSERT INTO ca_meta_app_configurations
        (id, tenant_id, provider, app_external_id, environment, created_at, updated_at)
-       VALUES (?, ?, 'META', ?, 'test', ?, ?)`,
-      [appConfig, tenantA, `app-${uuid()}`, timestamp, timestamp],
+       VALUES (?, ?, 'META', ?, 'test', ?, ?), (?, ?, 'META', ?, 'test', ?, ?)`,
+      [appConfig, tenantA, `app-${uuid()}`, timestamp, timestamp,
+        replayAppConfig, tenantReplay, `app-${uuid()}`, timestamp, timestamp],
     );
 
     // Stable idempotency returns the existing job; semantic payload changes under the same key are rejected.
@@ -337,6 +360,57 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     assert.equal(recovered?.id, crashJob.id);
     assert.equal(await jobs.finish(recovered!, { kind: 'SUCCEEDED' }), true);
 
+    // A local idempotent inbox write may commit just before process death and the job ACK.
+    // The replacement repeats the persist under the provider event key without creating a second row.
+    const crashEffectEvent = unclassifiedInboxEvent(appConfig, `provider-crash-effect-${uuid()}`);
+    const effectCrashJob = await jobs.enqueue({
+      tenantId: tenantWorker, type: 'PROJECTION_RECONCILE', idempotencyKey: 'crash-after-local-effect',
+      correlationId: 'corr-crash-local-effect', resourceScopeRef: 'crash-local-effect',
+      payload: { kind: 'PROJECTION_RECONCILE', projectionRef: 'crash-local-effect', sourceVersion: 1 },
+    });
+    const effectChild = fork(join(__dirname, 'fixtures', 'durable-job-crash-child.js'), [], {
+      execPath: process.execPath, execArgv: [], stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      env: {
+        ...process.env,
+        M2_CRASH_FIXTURE_JOB_TYPE: 'PROJECTION_RECONCILE',
+        M2_CRASH_FIXTURE_EFFECT_EVENT_ID: crashEffectEvent.eventId,
+        M2_CRASH_FIXTURE_APP_CONFIG_REF: crashEffectEvent.appConfigRef,
+      },
+    });
+    const effectMessage = await new Promise<{ type: string; jobId?: string; inboxId?: string }>((resolve, reject) => {
+      const timeout = setTimeout(() => { effectChild.kill('SIGKILL'); reject(new Error('Effect crash fixture did not commit within 10 seconds.')); }, 10_000);
+      effectChild.once('error', (error) => { clearTimeout(timeout); reject(error); });
+      effectChild.on('message', (message) => { clearTimeout(timeout); resolve(message as { type: string; jobId?: string; inboxId?: string }); });
+    });
+    assert.equal(effectMessage.type, 'effect-committed');
+    assert.equal(effectMessage.jobId, effectCrashJob.id);
+    assert.ok(effectMessage.inboxId);
+    const effectChildExit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+      effectChild.once('exit', (code, signal) => resolve({ code, signal }));
+    });
+    effectChild.kill('SIGKILL');
+    const effectKilled = await effectChildExit;
+    assert.ok(effectKilled.signal !== null || effectKilled.code !== null);
+    const firstEffect = await dataSource.query(
+      'SELECT id FROM ca_meta_inbox_events WHERE app_config_ref = ? AND provider_event_id = ?',
+      [crashEffectEvent.appConfigRef, crashEffectEvent.eventId],
+    ) as Array<{ id: string }>;
+    assert.equal(firstEffect.length, 1, 'the local inbox effect committed before the worker was killed');
+    assert.equal(firstEffect[0]?.id, effectMessage.inboxId);
+    await wait(150);
+    assert.equal(await jobs.claimNext('effect-replacement-requeues-expired', 120, ['PROJECTION_RECONCILE']), null);
+    const effectRecovered = await jobs.claimNext('effect-replacement-after-backoff', 120, ['PROJECTION_RECONCILE']);
+    assert.equal(effectRecovered?.id, effectCrashJob.id);
+    const repeatedEffect = await inbox.persist(crashEffectEvent);
+    assert.equal(repeatedEffect.duplicate, true, 'the event key makes the repeated local effect idempotent');
+    assert.equal(repeatedEffect.id, effectMessage.inboxId);
+    const uniqueEffects = await dataSource.query(
+      'SELECT COUNT(*) AS count FROM ca_meta_inbox_events WHERE app_config_ref = ? AND provider_event_id = ?',
+      [crashEffectEvent.appConfigRef, crashEffectEvent.eventId],
+    ) as Array<{ count: string | number }>;
+    assert.equal(Number(uniqueEffects[0]?.count), 1, 'recovery does not duplicate the committed inbox effect');
+    assert.equal(await jobs.finish(effectRecovered!, { kind: 'SUCCEEDED' }), true);
+
     // Expired SAFE_RETRY claims are delayed through the bounded jitter policy and stale tokens cannot ACK.
     const staleInput = await jobs.enqueue({
       tenantId: tenantA, type: 'PROJECTION_RECONCILE', idempotencyKey: 'stale-fence-01', correlationId: 'corr-stale-01',
@@ -445,6 +519,53 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     });
     assert.equal(replayDuplicate.reasonCode, 'REPLAY_DUPLICATE');
     assert.equal(replayDuplicate.jobId, replayed.jobId);
+
+    // Inbox replay resets only the exact tenant-scoped terminal projection in the enqueue transaction.
+    const inboxReplaySource = await inbox.persist(inboxEvent(replayAppConfig, `provider-inbox-replay-${uuid()}`));
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const claim = await jobs.claimNext(`worker-inbox-replay-source-${attempt}`, 300_000, ['INBOX_PROCESS']);
+      assert.equal(claim?.id, inboxReplaySource.jobId);
+      assert.equal(await jobs.finish(claim!, { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DEPENDENCY_UNAVAILABLE' }, () => 0,
+        (manager, finalization) => inbox.finalizeProcessingWithin(manager, claim!, finalization)), true);
+    }
+    const inboxReplayDlqRows = await dataSource.query(
+      `SELECT dl.id, j.resource_scope_ref FROM ca_meta_job_dead_letters dl
+       JOIN ca_meta_jobs j ON j.tenant_id = dl.tenant_id AND j.id = dl.job_id
+       WHERE dl.tenant_id = ? AND dl.job_id = ?`,
+      [tenantReplay, inboxReplaySource.jobId],
+    ) as Array<{ id: string; resource_scope_ref: string }>;
+    const inboxReplayDlq = inboxReplayDlqRows[0];
+    assert.ok(inboxReplayDlq);
+    const acceptedInboxReplay = await replayService.requeue({
+      tenantId: tenantReplay, deadLetterId: inboxReplayDlq.id, scopeRef: inboxReplayDlq.resource_scope_ref,
+      operatorRef: 'operator-synthetic-01',
+    });
+    assert.equal(acceptedInboxReplay.requeued, true);
+    const resetInboxRows = await dataSource.query(
+      'SELECT processing_state FROM ca_meta_inbox_events WHERE id = ? AND tenant_id = ?',
+      [inboxReplaySource.id, tenantReplay],
+    ) as Array<{ processing_state: string }>;
+    assert.equal(resetInboxRows[0]?.processing_state, 'PENDING');
+    const inboxReplayClaim = await jobs.claimNext('worker-inbox-replay-success', 300_000, ['INBOX_PROCESS']);
+    assert.equal(inboxReplayClaim?.id, acceptedInboxReplay.jobId);
+    assert.equal(await jobs.finish(inboxReplayClaim!, { kind: 'SUCCEEDED' }, undefined,
+      (manager, finalization) => inbox.finalizeProcessingWithin(manager, inboxReplayClaim!, finalization)), true);
+    const processedInboxRows = await dataSource.query(
+      'SELECT processing_state FROM ca_meta_inbox_events WHERE id = ? AND tenant_id = ?',
+      [inboxReplaySource.id, tenantReplay],
+    ) as Array<{ processing_state: string }>;
+    assert.equal(processedInboxRows[0]?.processing_state, 'PROCESSED');
+    const inboxReplayDuplicate = await replayService.requeue({
+      tenantId: tenantReplay, deadLetterId: inboxReplayDlq.id, scopeRef: inboxReplayDlq.resource_scope_ref,
+      operatorRef: 'operator-synthetic-01',
+    });
+    assert.equal(inboxReplayDuplicate.reasonCode, 'REPLAY_DUPLICATE');
+    const unchangedProcessedInboxRows = await dataSource.query(
+      'SELECT processing_state FROM ca_meta_inbox_events WHERE id = ? AND tenant_id = ?',
+      [inboxReplaySource.id, tenantReplay],
+    ) as Array<{ processing_state: string }>;
+    assert.equal(unchangedProcessedInboxRows[0]?.processing_state, 'PROCESSED');
+
     const wrongScope = await replayService.requeue({
       tenantId: tenantReplay, deadLetterId: deadLetter.id, scopeRef: 'different-resource-scope', operatorRef: 'operator-synthetic-01',
     });
@@ -531,6 +652,99 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     await workerRun;
     const drainedRows = await dataSource.query('SELECT status FROM ca_meta_jobs WHERE id = ?', [longJob.id]) as Array<{ status: string }>;
     assert.equal(drainedRows[0]?.status, 'SUCCEEDED', 'SIGTERM stops claims and drains the active handler');
+
+    // A historical backlog must not delay urgent webhook claims; each lane uses its own indexed candidate pass.
+    const highHistoryCount = 5_000;
+    const historyReadyAt = mysqlTime(-3_600_000);
+    const urgentClaims = await Promise.all([
+      jobs.enqueue({
+        tenantId: tenantWorker, type: 'INBOX_PROCESS', idempotencyKey: 'urgent-latency-a',
+        correlationId: 'urgent-latency-correlation-a', resourceScopeRef: 'urgent-latency-resource-a', payload: inboxPayload(),
+      }),
+      jobs.enqueue({
+        tenantId: tenantWorker, type: 'INBOX_PROCESS', idempotencyKey: 'urgent-latency-b',
+        correlationId: 'urgent-latency-correlation-b', resourceScopeRef: 'urgent-latency-resource-b', payload: inboxPayload(),
+      }),
+    ]);
+    const highHistory: unknown[][] = [];
+    for (let index = 0; index < highHistoryCount; index += 1) {
+      highHistory.push([
+        uuid(), tenantWorker, 'PROJECTION_RECONCILE', 1, 'HISTORICAL_PROJECTION', 'SAFE_RETRY', `history-scope-${index}`,
+        `history-key-${index}`, `history-correlation-${index}`, null, Buffer.alloc(32),
+        JSON.stringify({ kind: 'PROJECTION_RECONCILE', projectionRef: `history-projection-${index}`, sourceVersion: 1 }),
+        'QUEUED', 0, 5, historyReadyAt, null, null, null, null, null, null, null, timestamp, timestamp, null,
+      ]);
+    }
+    for (let offset = 0; offset < highHistory.length; offset += 100) {
+      const batch = highHistory.slice(offset, offset + 100);
+      const values = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+      await dataSource.query(
+        `INSERT INTO ca_meta_jobs
+         (id, tenant_id, job_type, schema_version, lane, effect_mode, resource_scope_ref, idempotency_key,
+          correlation_id, causation_id, payload_hash, payload_json, status, attempt, max_attempts,
+          next_run_at, budget_started_at, lease_owner, claim_token, lease_expires_at, heartbeat_at,
+          last_safe_error_code, last_safe_error_action, created_at, updated_at, completed_at)
+         VALUES ${values}`,
+        batch.flatMap((row) => row),
+      );
+    }
+    await dataSource.query('ANALYZE TABLE ca_meta_jobs');
+    const urgentCandidatePlan = await dataSource.query(
+      `EXPLAIN SELECT tenant_id, MIN(COALESCE(lease_expires_at, next_run_at)) AS ready_at
+       FROM ca_meta_jobs
+       WHERE lane = 'WEBHOOK_URGENT' AND job_type = 'INBOX_PROCESS' AND NOT EXISTS (
+         SELECT 1 FROM ca_meta_jobs active
+         WHERE active.tenant_id = ca_meta_jobs.tenant_id
+           AND active.resource_scope_ref = ca_meta_jobs.resource_scope_ref
+           AND active.status = 'RUNNING' AND active.lease_expires_at > UTC_TIMESTAMP(6)
+       ) AND (
+         (status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)) OR
+         (status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6))
+       ) GROUP BY tenant_id`,
+    ) as Array<{ table: string | null; key: string | null; type: string; rows: number | string }>;
+    const urgentCandidateScan = urgentCandidatePlan.find((row) => row.table === 'ca_meta_jobs');
+    assert.ok(urgentCandidateScan?.key?.includes('ix_ca_meta_job_claim_'), 'global urgent candidate selection uses the lane/status indexes');
+    assert.notEqual(urgentCandidateScan?.type, 'ALL', 'global candidate scan is bounded by an index');
+    assert.ok(Number(urgentCandidateScan?.rows ?? Number.MAX_SAFE_INTEGER) < highHistoryCount / 10,
+      'urgent candidate estimate excludes the historical projection backlog');
+
+    const tenantClaimPlan = await dataSource.query(
+      `EXPLAIN SELECT id FROM ca_meta_jobs
+       WHERE tenant_id = ? AND lane = 'WEBHOOK_URGENT' AND job_type = 'INBOX_PROCESS' AND NOT EXISTS (
+         SELECT 1 FROM ca_meta_jobs active
+         WHERE active.tenant_id = ca_meta_jobs.tenant_id
+           AND active.resource_scope_ref = ca_meta_jobs.resource_scope_ref
+           AND active.status = 'RUNNING' AND active.lease_expires_at > UTC_TIMESTAMP(6)
+       ) AND (
+         (status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)) OR
+         (status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6))
+       ) ORDER BY COALESCE(lease_expires_at, next_run_at), created_at, id LIMIT 1`,
+      [tenantWorker],
+    ) as Array<{ table: string | null; key: string | null; type: string; rows: number | string }>;
+    const tenantClaimScan = tenantClaimPlan.find((row) => row.table === 'ca_meta_jobs');
+    assert.ok(tenantClaimScan?.key?.includes('ix_ca_meta_job_tenant_claim_ready'), 'ready tenant claims use the tenant/lane ready index');
+    assert.notEqual(tenantClaimScan?.type, 'ALL', 'tenant candidate scan is bounded by an index');
+
+    const tenantExpiredPlan = await dataSource.query(
+      `EXPLAIN SELECT id FROM ca_meta_jobs
+       WHERE tenant_id = ? AND lane = 'HISTORICAL_PROJECTION' AND job_type = 'PROJECTION_RECONCILE'
+         AND status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6)
+       ORDER BY lease_expires_at, created_at, id LIMIT 1`,
+      [tenantWorker],
+    ) as Array<{ table: string | null; key: string | null; type: string; rows: number | string }>;
+    const tenantExpiredScan = tenantExpiredPlan.find((row) => row.table === 'ca_meta_jobs');
+    assert.ok(tenantExpiredScan?.key?.includes('ix_ca_meta_job_tenant_claim_expired'), 'expired tenant claims use the tenant/lane lease index');
+    assert.notEqual(tenantExpiredScan?.type, 'ALL', 'expired tenant claim scan is bounded by an index');
+
+    const claimStartedAt = performance.now();
+    const urgentJobs = await Promise.all([
+      jobs.claimNext('urgent-latency-worker-a', 300_000, ['INBOX_PROCESS', 'PROJECTION_RECONCILE']),
+      jobs.claimNext('urgent-latency-worker-b', 300_000, ['INBOX_PROCESS', 'PROJECTION_RECONCILE']),
+    ]);
+    const urgentClaimLatencyMs = performance.now() - claimStartedAt;
+    assert.deepEqual(new Set(urgentJobs.map((job) => job?.id)), new Set(urgentClaims.map((job) => job.id)));
+    assert.ok(urgentClaimLatencyMs < 2_000, `two urgent claims over ${highHistoryCount} queued historical jobs took ${urgentClaimLatencyMs.toFixed(1)}ms`);
+    for (const claim of urgentJobs) assert.equal(await jobs.finish(claim!, { kind: 'SUCCEEDED' }), true);
 
     // No FORCE INDEX: the ambiguous-expiry sweep uses its dedicated index on a synthetic mixed state set.
     const bulkRows: unknown[][] = [];

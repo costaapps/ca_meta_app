@@ -12,6 +12,8 @@ export interface WorkerOptions {
   readonly idlePollMs?: number;
   /** Test/adapter override may shorten a type deadline, never extend its policy maximum. */
   readonly handlerTimeoutOverrides?: Partial<Record<JobType, number>>;
+  /** Bounded wait after AbortSignal before a timed-out handler is treated as ambiguous. */
+  readonly handlerCancellationGraceMs?: number;
 }
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -33,6 +35,7 @@ export class DurableWorker {
   private readonly finalizers: ReadonlyMap<JobType, JobFinalizer>;
   private readonly heartbeatMs: number;
   private readonly idlePollMs: number;
+  private readonly handlerCancellationGraceMs: number;
 
   constructor(
     private readonly store: JobStore,
@@ -46,11 +49,19 @@ export class DurableWorker {
     }
     this.heartbeatMs = options.heartbeatMs ?? Math.max(25, Math.floor(options.leaseMs / 3));
     this.idlePollMs = options.idlePollMs ?? 250;
+    this.handlerCancellationGraceMs = options.handlerCancellationGraceMs ?? Math.min(1_000, Math.max(1, Math.floor(options.leaseMs / 3)));
     if (!Number.isSafeInteger(this.heartbeatMs) || this.heartbeatMs < 1 || this.heartbeatMs >= options.leaseMs) {
       throw new RangeError('heartbeatMs must be a positive integer shorter than the lease.');
     }
     if (!Number.isSafeInteger(this.idlePollMs) || this.idlePollMs < 1 || this.idlePollMs > 30_000) {
       throw new RangeError('idlePollMs must be an integer in [1, 30000].');
+    }
+    if (!Number.isSafeInteger(this.handlerCancellationGraceMs) || this.handlerCancellationGraceMs < 1 ||
+      this.handlerCancellationGraceMs >= options.leaseMs) {
+      throw new RangeError('handlerCancellationGraceMs must be a positive integer shorter than the lease.');
+    }
+    if (this.heartbeatMs + this.handlerCancellationGraceMs >= options.leaseMs) {
+      throw new RangeError('heartbeatMs plus handlerCancellationGraceMs must be shorter than the lease.');
     }
     for (const [type, timeout] of Object.entries(options.handlerTimeoutOverrides ?? {})) {
       if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > JOB_POLICIES[type as JobType].maxHandlerMs) {
@@ -70,25 +81,23 @@ export class DurableWorker {
         continue;
       }
       // SIGTERM stops new claims, then drains the current handler before run() returns.
-      await this.execute(job);
+      if (!(await this.execute(job))) {
+        throw new Error('Worker stopped after a non-cooperative handler timeout.');
+      }
     }
   }
 
-  private async execute(job: ClaimedJob): Promise<void> {
+  private async execute(job: ClaimedJob): Promise<boolean> {
     const handler = this.handlers.get(job.type);
-    if (!handler) return;
+    if (!handler) return true;
     const controller = new AbortController();
+    const heartbeatStop = new AbortController();
     let finished = false;
     let leaseLost = false;
-    let timedOut = false;
     const handlerTimeoutMs = this.options.handlerTimeoutOverrides?.[job.type] ?? JOB_POLICIES[job.type].maxHandlerMs;
-    const handlerDeadline = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, handlerTimeoutMs);
     const heartbeat = (async () => {
       while (!finished) {
-        await delay(this.heartbeatMs);
+        await delay(this.heartbeatMs, heartbeatStop.signal);
         if (finished) return;
         try {
           if (!(await this.store.renew(job, this.options.leaseMs))) {
@@ -104,22 +113,53 @@ export class DurableWorker {
       }
     })();
 
-    let outcome: JobOutcome;
+    type HandlerResult = { readonly kind: 'SETTLED'; readonly outcome: JobOutcome } | { readonly kind: 'TIMEOUT' };
+    const handlerResult: Promise<HandlerResult> = Promise.resolve()
+      .then(() => handler(job, controller.signal))
+      .then(
+        (outcome) => ({ kind: 'SETTLED', outcome }) as const,
+        () => ({ kind: 'SETTLED', outcome: job.effectMode === 'AMBIGUOUS'
+          ? { kind: 'UNKNOWN', safeErrorCode: 'PROVIDER_RESULT_UNKNOWN' }
+          : { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'HANDLER_FAILED' } }) as const,
+      );
+    let handlerDeadline: ReturnType<typeof setTimeout> | undefined;
+    let timed: HandlerResult;
     try {
-      outcome = await handler(job, controller.signal);
-    } catch {
-      outcome = job.effectMode === 'AMBIGUOUS'
-        ? { kind: 'UNKNOWN', safeErrorCode: 'PROVIDER_RESULT_UNKNOWN' }
-        : { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'HANDLER_FAILED' };
+      timed = await Promise.race([
+        handlerResult,
+        new Promise<HandlerResult>((resolve) => {
+          handlerDeadline = setTimeout(() => resolve({ kind: 'TIMEOUT' }), handlerTimeoutMs);
+        }),
+      ]);
     } finally {
-      clearTimeout(handlerDeadline);
-      finished = true;
-      await heartbeat;
+      if (handlerDeadline !== undefined) clearTimeout(handlerDeadline);
     }
-    if (timedOut) {
-      outcome = job.effectMode === 'AMBIGUOUS'
+
+    let outcome: JobOutcome;
+    let handlerAbandoned = false;
+    if (timed.kind === 'SETTLED') {
+      outcome = timed.outcome;
+      finished = true;
+      heartbeatStop.abort();
+      await heartbeat;
+    } else {
+      // Once the deadline is reached, stop lease extension immediately and ask the handler to cancel.
+      // A handler that ignores the signal is left detached after a bounded grace, but its late result
+      // is consumed only by handlerResult and can never finalize or retry this fenced attempt.
+      controller.abort();
+      finished = true;
+      heartbeatStop.abort();
+      await heartbeat;
+      const settledDuringGrace = await Promise.race([
+        handlerResult,
+        delay(this.handlerCancellationGraceMs).then(() => null),
+      ]);
+      handlerAbandoned = settledDuringGrace === null;
+      outcome = settledDuringGrace === null
         ? { kind: 'UNKNOWN', safeErrorCode: 'PROVIDER_RESULT_UNKNOWN' }
-        : { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DEPENDENCY_TIMEOUT' };
+        : job.effectMode === 'AMBIGUOUS'
+          ? { kind: 'UNKNOWN', safeErrorCode: 'PROVIDER_RESULT_UNKNOWN' }
+          : { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DEPENDENCY_TIMEOUT' };
     }
     if (!leaseLost) {
       const finalizer = this.finalizers.get(job.type);
@@ -127,5 +167,6 @@ export class DurableWorker {
         (manager, finalization) => finalizer(manager, job, finalization));
       else await this.store.finish(job, outcome);
     }
+    return !handlerAbandoned;
   }
 }

@@ -56,6 +56,15 @@ function affectedRows(value: unknown): number {
 
 function safeReference(value: string): boolean { return /^[A-Za-z0-9:_-]{1,128}$/.test(value); }
 
+function inboxEventReference(type: string, value: unknown): string {
+  if (type !== 'INBOX_PROCESS' || typeof value !== 'object' || value === null ||
+    !('kind' in value) || value.kind !== 'INBOX_PROCESS' ||
+    !('inboxEventRef' in value) || typeof value.inboxEventRef !== 'string' || !isUuid(value.inboxEventRef)) {
+    throw new Error('Dead-letter inbox payload is invalid.');
+  }
+  return value.inboxEventRef;
+}
+
 function validateRequest(input: ReplayAuthorizationRequest): void {
   if (!isUuid(input.tenantId) || !isUuid(input.deadLetterId) || !safeReference(input.scopeRef) ||
     !safeReference(input.operatorRef) || (input.action === 'DRY_RUN') !== input.dryRun) {
@@ -160,6 +169,20 @@ export class ReplayDryRunService {
             }
             reasonCode = status;
           } else {
+            if (!enqueued.duplicate && row.job_type === 'INBOX_PROCESS') {
+              const payloadObject = typeof row.payload_json === 'string'
+                ? JSON.parse(row.payload_json) as unknown
+                : row.payload_json;
+              const inboxEventRef = inboxEventReference(row.job_type, payloadObject);
+              const resetProjection = await manager.query(
+                `UPDATE ca_meta_inbox_events SET processing_state = 'PENDING'
+                 WHERE id = ? AND tenant_id = ? AND routing_state = 'ROUTED' AND processing_state = 'DEAD_LETTER'`,
+                [inboxEventRef, input.tenantId],
+              );
+              if (affectedRows(resetProjection) !== 1) {
+                throw new Error('Dead-letter inbox projection is missing or no longer replayable.');
+              }
+            }
             jobId = enqueued.id;
             requeued = true;
             reasonCode = enqueued.duplicate ? 'REPLAY_DUPLICATE' : 'REPLAY_ENQUEUED';

@@ -240,50 +240,23 @@ export class DurableJobStore implements JobStore {
     const supported = [...new Set(supportedTypes)];
     if (supported.length === 0) return null;
     const dataSource = await this.database.getDataSource();
+    await this.resolveExpiredAmbiguous(dataSource);
+    const lanePriority: readonly JobLane[] = ['WEBHOOK_URGENT', 'ONBOARDING', 'HISTORICAL_PROJECTION'];
     const typePlaceholders = supported.map(() => '?').join(', ');
 
-    await this.resolveExpiredAmbiguous(dataSource);
-    const candidates = await dataSource.query(
-      `SELECT ready.tenant_id,
-              (SELECT COUNT(*) FROM ca_meta_jobs active
-               WHERE active.tenant_id = ready.tenant_id AND active.status = 'RUNNING'
-                 AND active.lease_expires_at > UTC_TIMESTAMP(6)) AS active_count,
-              ready.lane_rank, ready.ready_at
-       FROM (
-         SELECT tenant_id,
-                MIN(CASE lane WHEN 'WEBHOOK_URGENT' THEN 0 WHEN 'ONBOARDING' THEN 1 ELSE 2 END) AS lane_rank,
-                MIN(COALESCE(lease_expires_at, next_run_at)) AS ready_at
-         FROM ca_meta_jobs
-         WHERE job_type IN (${typePlaceholders}) AND NOT EXISTS (
-           SELECT 1 FROM ca_meta_jobs active
-           WHERE active.tenant_id = ca_meta_jobs.tenant_id
-             AND active.resource_scope_ref = ca_meta_jobs.resource_scope_ref
-             AND active.status = 'RUNNING' AND active.lease_expires_at > UTC_TIMESTAMP(6)
-         ) AND (
-           (status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)) OR
-           (status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6))
-         )
-         GROUP BY tenant_id
-       ) ready ORDER BY active_count, ready.lane_rank, ready.ready_at, ready.tenant_id LIMIT 64`,
-      supported,
-    ) as Array<{ tenant_id: string }>;
-
-    for (const candidate of candidates) {
-      const claimed = await dataSource.transaction(async (manager) => {
-        const tenants = await manager.query(
-          'SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE',
-          [candidate.tenant_id],
-        ) as Array<{ id: string }>;
-        if (tenants.length !== 1) return null;
-
-        const rows = await manager.query(
-          `SELECT id, tenant_id, job_type, schema_version, lane, effect_mode, resource_scope_ref, idempotency_key,
-                  correlation_id, causation_id, payload_json, attempt, max_attempts,
-                  claim_token, budget_started_at,
-                  TIMESTAMPDIFF(MICROSECOND, budget_started_at, UTC_TIMESTAMP(6)) DIV 1000 AS budget_elapsed_ms,
-                  created_at
+    // Query each lane in priority order so a large historical backlog is never scanned to
+    // discover an urgent webhook. Within a lane, tenants retain least-active fairness.
+    for (const lane of lanePriority) {
+      const candidates = await dataSource.query(
+        `SELECT ready.tenant_id,
+                (SELECT COUNT(*) FROM ca_meta_jobs active
+                 WHERE active.tenant_id = ready.tenant_id AND active.status = 'RUNNING'
+                   AND active.lease_expires_at > UTC_TIMESTAMP(6)) AS active_count,
+                ready.ready_at
+         FROM (
+           SELECT tenant_id, MIN(COALESCE(lease_expires_at, next_run_at)) AS ready_at
            FROM ca_meta_jobs
-           WHERE tenant_id = ? AND job_type IN (${typePlaceholders}) AND NOT EXISTS (
+           WHERE lane = ? AND job_type IN (${typePlaceholders}) AND NOT EXISTS (
              SELECT 1 FROM ca_meta_jobs active
              WHERE active.tenant_id = ca_meta_jobs.tenant_id
                AND active.resource_scope_ref = ca_meta_jobs.resource_scope_ref
@@ -292,100 +265,129 @@ export class DurableJobStore implements JobStore {
              (status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)) OR
              (status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6))
            )
-           ORDER BY CASE lane WHEN 'WEBHOOK_URGENT' THEN 0 WHEN 'ONBOARDING' THEN 1 ELSE 2 END,
-                    COALESCE(lease_expires_at, next_run_at), created_at, id
-           LIMIT 1 FOR UPDATE SKIP LOCKED`,
-          [candidate.tenant_id, ...supported],
-        ) as JobRow[];
-        const row = rows[0];
-        if (!row) return null;
+           GROUP BY tenant_id
+         ) ready ORDER BY active_count, ready.ready_at, ready.tenant_id LIMIT 64`,
+        [lane, ...supported],
+      ) as Array<{ tenant_id: string }>;
 
-        const activeRows = await manager.query(
-          `SELECT COUNT(*) AS count FROM ca_meta_jobs
-           WHERE tenant_id = ? AND status = 'RUNNING' AND lease_expires_at > UTC_TIMESTAMP(6)`,
-          [candidate.tenant_id],
-        ) as Array<{ count: string | number }>;
-        if (Number(activeRows[0]?.count ?? 0) >= MAX_ACTIVE_JOBS_PER_TENANT) return null;
+      for (const candidate of candidates) {
+        const claimed = await dataSource.transaction(async (manager) => {
+          const tenants = await manager.query(
+            'SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE',
+            [candidate.tenant_id],
+          ) as Array<{ id: string }>;
+          if (tenants.length !== 1) return null;
 
-        const resourceRows = await manager.query(
-          `SELECT COUNT(*) AS count FROM ca_meta_jobs
-           WHERE tenant_id = ? AND resource_scope_ref = ? AND status = 'RUNNING'
-             AND lease_expires_at > UTC_TIMESTAMP(6)`,
-          [candidate.tenant_id, row.resource_scope_ref],
-        ) as Array<{ count: string | number }>;
-        if (Number(resourceRows[0]?.count ?? 0) > 0) return null;
+          const rows = await manager.query(
+            `SELECT id, tenant_id, job_type, schema_version, lane, effect_mode, resource_scope_ref, idempotency_key,
+                    correlation_id, causation_id, payload_json, attempt, max_attempts,
+                    claim_token, budget_started_at,
+                    TIMESTAMPDIFF(MICROSECOND, budget_started_at, UTC_TIMESTAMP(6)) DIV 1000 AS budget_elapsed_ms,
+                    created_at
+             FROM ca_meta_jobs
+             WHERE tenant_id = ? AND lane = ? AND job_type IN (${typePlaceholders}) AND NOT EXISTS (
+               SELECT 1 FROM ca_meta_jobs active
+               WHERE active.tenant_id = ca_meta_jobs.tenant_id
+                 AND active.resource_scope_ref = ca_meta_jobs.resource_scope_ref
+                 AND active.status = 'RUNNING' AND active.lease_expires_at > UTC_TIMESTAMP(6)
+             ) AND (
+               (status IN ('QUEUED', 'RETRY_PENDING') AND next_run_at <= UTC_TIMESTAMP(6)) OR
+               (status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6))
+             )
+             ORDER BY COALESCE(lease_expires_at, next_run_at), created_at, id
+             LIMIT 1 FOR UPDATE SKIP LOCKED`,
+            [candidate.tenant_id, lane, ...supported],
+          ) as JobRow[];
+          const row = rows[0];
+          if (!row) return null;
 
-        const type = row.job_type;
-        if (!isJobType(type)) {
-          await this.deadLetterLocked(manager, row, 'UNSUPPORTED_JOB_TYPE');
-          return null;
-        }
-        const policy = JOB_POLICIES[type];
-        if (row.effect_mode !== policy.effectMode || row.lane !== policy.lane) {
-          await this.deadLetterLocked(manager, row, 'UNSUPPORTED_JOB_TYPE');
-          return null;
-        }
+          const activeRows = await manager.query(
+            `SELECT COUNT(*) AS count FROM ca_meta_jobs
+             WHERE tenant_id = ? AND status = 'RUNNING' AND lease_expires_at > UTC_TIMESTAMP(6)`,
+            [candidate.tenant_id],
+          ) as Array<{ count: string | number }>;
+          if (Number(activeRows[0]?.count ?? 0) >= MAX_ACTIVE_JOBS_PER_TENANT) return null;
 
-        const attempt = Number(row.attempt);
-        const budgetStartedAt = row.budget_started_at ? formatDate(row.budget_started_at) : null;
-        const budgetElapsed = Number(row.budget_elapsed_ms ?? 0);
-        if (attempt >= Number(row.max_attempts)) {
-          await this.deadLetterLocked(manager, row, 'ATTEMPTS_EXHAUSTED');
-          return null;
-        }
-        if (budgetStartedAt && budgetElapsed >= policy.maxElapsedMs) {
-          await this.deadLetterLocked(manager, row, 'ATTEMPT_BUDGET_EXHAUSTED');
-          return null;
-        }
+          const resourceRows = await manager.query(
+            `SELECT COUNT(*) AS count FROM ca_meta_jobs
+             WHERE tenant_id = ? AND resource_scope_ref = ? AND status = 'RUNNING'
+               AND lease_expires_at > UTC_TIMESTAMP(6)`,
+            [candidate.tenant_id, row.resource_scope_ref],
+          ) as Array<{ count: string | number }>;
+          if (Number(resourceRows[0]?.count ?? 0) > 0) return null;
 
-        if (row.claim_token) {
-          const delayMs = retryDelayMs(policy, Math.max(1, attempt), this.random);
-          if (budgetStartedAt && budgetElapsed + delayMs >= policy.maxElapsedMs) {
+          const type = row.job_type;
+          if (!isJobType(type)) {
+            await this.deadLetterLocked(manager, row, 'UNSUPPORTED_JOB_TYPE');
+            return null;
+          }
+          const policy = JOB_POLICIES[type];
+          if (row.effect_mode !== policy.effectMode || row.lane !== policy.lane) {
+            await this.deadLetterLocked(manager, row, 'UNSUPPORTED_JOB_TYPE');
+            return null;
+          }
+
+          const attempt = Number(row.attempt);
+          const budgetStartedAt = row.budget_started_at ? formatDate(row.budget_started_at) : null;
+          const budgetElapsed = Number(row.budget_elapsed_ms ?? 0);
+          if (attempt >= Number(row.max_attempts)) {
+            await this.deadLetterLocked(manager, row, 'ATTEMPTS_EXHAUSTED');
+            return null;
+          }
+          if (budgetStartedAt && budgetElapsed >= policy.maxElapsedMs) {
             await this.deadLetterLocked(manager, row, 'ATTEMPT_BUDGET_EXHAUSTED');
             return null;
           }
-          await manager.query(
-            `UPDATE ca_meta_job_attempts
-             SET outcome = 'RETRY_PENDING', safe_error_code = 'LEASE_EXPIRED', safe_error_action = 'RETRY_LATER',
-                 finished_at = UTC_TIMESTAMP(6),
-                 duration_ms = TIMESTAMPDIFF(MICROSECOND, started_at, UTC_TIMESTAMP(6)) DIV 1000
-             WHERE tenant_id = ? AND job_id = ? AND attempt = ? AND outcome = 'RUNNING'`,
-            [row.tenant_id, row.id, attempt],
-          );
+
+          if (row.claim_token) {
+            const delayMs = retryDelayMs(policy, Math.max(1, attempt), this.random);
+            if (budgetStartedAt && budgetElapsed + delayMs >= policy.maxElapsedMs) {
+              await this.deadLetterLocked(manager, row, 'ATTEMPT_BUDGET_EXHAUSTED');
+              return null;
+            }
+            await manager.query(
+              `UPDATE ca_meta_job_attempts
+               SET outcome = 'RETRY_PENDING', safe_error_code = 'LEASE_EXPIRED', safe_error_action = 'RETRY_LATER',
+                   finished_at = UTC_TIMESTAMP(6),
+                   duration_ms = TIMESTAMPDIFF(MICROSECOND, started_at, UTC_TIMESTAMP(6)) DIV 1000
+               WHERE tenant_id = ? AND job_id = ? AND attempt = ? AND outcome = 'RUNNING'`,
+              [row.tenant_id, row.id, attempt],
+            );
+            await manager.query(
+              `UPDATE ca_meta_jobs
+               SET status = 'RETRY_PENDING', next_run_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ${delayMs * 1000} MICROSECOND),
+                   lease_owner = NULL, claim_token = NULL, lease_expires_at = NULL,
+                   last_safe_error_code = 'LEASE_EXPIRED', last_safe_error_action = 'RETRY_LATER',
+                   updated_at = UTC_TIMESTAMP(6)
+               WHERE id = ? AND tenant_id = ?`,
+              [row.id, row.tenant_id],
+            );
+            return null;
+          }
+
+          const claimToken = randomUUID();
+          const nextAttempt = attempt + 1;
+          const leaseMicros = leaseMs * 1000;
           await manager.query(
             `UPDATE ca_meta_jobs
-             SET status = 'RETRY_PENDING', next_run_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ${delayMs * 1000} MICROSECOND),
-                 lease_owner = NULL, claim_token = NULL, lease_expires_at = NULL,
-                 last_safe_error_code = 'LEASE_EXPIRED', last_safe_error_action = 'RETRY_LATER',
+             SET status = 'RUNNING', attempt = ?, claim_token = ?, lease_owner = ?,
+                 lease_expires_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ${leaseMicros} MICROSECOND),
+                 heartbeat_at = UTC_TIMESTAMP(6), budget_started_at = COALESCE(budget_started_at, UTC_TIMESTAMP(6)),
                  updated_at = UTC_TIMESTAMP(6)
              WHERE id = ? AND tenant_id = ?`,
-            [row.id, row.tenant_id],
+            [nextAttempt, claimToken, workerRef, row.id, row.tenant_id],
           );
-          return null;
-        }
-
-        const claimToken = randomUUID();
-        const nextAttempt = attempt + 1;
-        const leaseMicros = leaseMs * 1000;
-        await manager.query(
-          `UPDATE ca_meta_jobs
-           SET status = 'RUNNING', attempt = ?, claim_token = ?, lease_owner = ?,
-               lease_expires_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ${leaseMicros} MICROSECOND),
-               heartbeat_at = UTC_TIMESTAMP(6), budget_started_at = COALESCE(budget_started_at, UTC_TIMESTAMP(6)),
-               updated_at = UTC_TIMESTAMP(6)
-           WHERE id = ? AND tenant_id = ?`,
-          [nextAttempt, claimToken, workerRef, row.id, row.tenant_id],
-        );
-        await manager.query(
-          `INSERT INTO ca_meta_job_attempts
-           (id, tenant_id, job_id, attempt, worker_ref, outcome, started_at)
-           VALUES (?, ?, ?, ?, ?, 'RUNNING', UTC_TIMESTAMP(6))`,
-          [randomUUID(), row.tenant_id, row.id, nextAttempt, workerRef],
-        );
-        const updated = { ...row, claim_token: claimToken, attempt: nextAttempt };
-        return this.toClaimedJob(updated, type, workerRef, budgetStartedAt ?? new Date().toISOString());
-      });
-      if (claimed) return claimed;
+          await manager.query(
+            `INSERT INTO ca_meta_job_attempts
+             (id, tenant_id, job_id, attempt, worker_ref, outcome, started_at)
+             VALUES (?, ?, ?, ?, ?, 'RUNNING', UTC_TIMESTAMP(6))`,
+            [randomUUID(), row.tenant_id, row.id, nextAttempt, workerRef],
+          );
+          const updated = { ...row, claim_token: claimToken, attempt: nextAttempt };
+          return this.toClaimedJob(updated, type, workerRef, budgetStartedAt ?? new Date().toISOString());
+        });
+        if (claimed) return claimed;
+      }
     }
     return null;
   }
