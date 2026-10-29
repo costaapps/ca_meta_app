@@ -539,12 +539,15 @@ export class DurableJobStore implements JobStore {
     ) as Array<{ id: string; tenant_id: string; attempt: number | string }>;
     for (const stale of expired) {
       await dataSource.transaction(async (manager) => {
-        const tenants = await manager.query('SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE', [stale.tenant_id]) as Array<{ id: string }>;
+        const tenants = await manager.query(
+          'SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE SKIP LOCKED',
+          [stale.tenant_id],
+        ) as Array<{ id: string }>;
         if (tenants.length !== 1) return;
         const rows = await manager.query(
           `SELECT id, job_type, payload_json, attempt FROM ca_meta_jobs
            WHERE id = ? AND status = 'RUNNING' AND effect_mode = 'AMBIGUOUS'
-             AND lease_expires_at <= UTC_TIMESTAMP(6) FOR UPDATE`,
+             AND lease_expires_at <= UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE SKIP LOCKED`,
           [stale.id],
         ) as Array<{ id: string; job_type: string; payload_json: string | JobPayload; attempt: number | string }>;
         const row = rows[0];

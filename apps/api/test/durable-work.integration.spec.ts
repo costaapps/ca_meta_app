@@ -889,6 +889,83 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     assert.equal(fairnessAAfterUnlock?.id, fairnessABlocked.id);
     assert.equal(await jobs.finish(fairnessAAfterUnlock!, { kind: 'SUCCEEDED' }), true);
 
+    // The pre-dispatch ambiguous sweeper must skip a locked tenant so urgent work in B can proceed.
+    const lockedExpiredEvent = outboxEvent(tenantFairA, `locked-expired-${uuid()}`);
+    const lockedExpiredOutbox = await outbox.append(lockedExpiredEvent);
+    const lockedExpiredClaim = await jobs.claimNext('ambiguous-locked-expired-worker', 300_000, ['OUTBOX_DELIVER']);
+    assert.equal(lockedExpiredClaim?.id, lockedExpiredOutbox.jobId);
+    await dataSource.query(
+      `UPDATE ca_meta_jobs SET lease_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)
+       WHERE id = ? AND tenant_id = ? AND claim_token = ?`,
+      [lockedExpiredClaim!.id, tenantFairA, lockedExpiredClaim!.claimToken],
+    );
+    const urgentAfterAmbiguousB = await jobs.enqueue({
+      tenantId: tenantFairB, type: 'INBOX_PROCESS', idempotencyKey: 'urgent-after-ambiguous-lock-b',
+      correlationId: 'urgent-after-ambiguous-lock-b', resourceScopeRef: `urgent-after-ambiguous-lock-${uuid()}`,
+      payload: inboxPayload(),
+    });
+    const ambiguousTenantBlocker = dataSource.createQueryRunner();
+    let ambiguousClaimPromise: Promise<ClaimedJob | null> | undefined;
+    let ambiguousClaimFinished = false;
+    let ambiguousBlockerConnected = false;
+    try {
+      await ambiguousTenantBlocker.connect();
+      ambiguousBlockerConnected = true;
+      await ambiguousTenantBlocker.startTransaction();
+      const lockedRows = await ambiguousTenantBlocker.query(
+        'SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE',
+        [tenantFairA],
+      ) as Array<{ id: string }>;
+      assert.equal(lockedRows[0]?.id, tenantFairA);
+
+      ambiguousClaimPromise = jobs.claimNext('urgent-after-ambiguous-lock-worker', 300_000, ['OUTBOX_DELIVER', 'INBOX_PROCESS']);
+      let ambiguousWatchdog: NodeJS.Timeout | undefined;
+      let ambiguousSettlement: { kind: 'settled'; claim: ClaimedJob | null } | { kind: 'timeout' };
+      try {
+        ambiguousSettlement = await Promise.race([
+          ambiguousClaimPromise.then((claim) => ({ kind: 'settled' as const, claim })),
+          new Promise<{ kind: 'timeout' }>((resolve) => {
+            ambiguousWatchdog = setTimeout(() => resolve({ kind: 'timeout' }), 2_000);
+          }),
+        ]);
+      } finally {
+        if (ambiguousWatchdog) clearTimeout(ambiguousWatchdog);
+      }
+      if (ambiguousSettlement.kind === 'timeout') assert.fail('ambiguous expiry sweep waited on tenant A instead of dispatching B');
+      assert.equal(ambiguousSettlement.claim?.id, urgentAfterAmbiguousB.id);
+      assert.equal(ambiguousTenantBlocker.isTransactionActive, true, 'tenant A remains locked while B is claimed');
+      const skippedExpiredOutboxRows = await dataSource.query(
+        `SELECT j.status AS job_status, o.delivery_state
+         FROM ca_meta_jobs j JOIN ca_meta_outbox_events o ON o.id = ? AND o.tenant_id = j.tenant_id
+         WHERE j.id = ? AND j.tenant_id = ?`,
+        [lockedExpiredOutbox.id, lockedExpiredClaim!.id, tenantFairA],
+      ) as Array<{ job_status: string; delivery_state: string }>;
+      assert.equal(skippedExpiredOutboxRows[0]?.job_status, 'RUNNING', 'the blocked tenant cleanup was deferred');
+      assert.equal(skippedExpiredOutboxRows[0]?.delivery_state, 'PENDING', 'the blocked outbox projection remains unchanged');
+      assert.equal(await jobs.finish(ambiguousSettlement.claim!, { kind: 'SUCCEEDED' }), true);
+      ambiguousClaimFinished = true;
+    } finally {
+      try {
+        if (ambiguousBlockerConnected && ambiguousTenantBlocker.isTransactionActive) await ambiguousTenantBlocker.rollbackTransaction();
+      } finally {
+        if (ambiguousBlockerConnected && !ambiguousTenantBlocker.isReleased) await ambiguousTenantBlocker.release();
+      }
+      if (ambiguousClaimPromise) {
+        const eventualClaim = await ambiguousClaimPromise;
+        if (eventualClaim && !ambiguousClaimFinished) await jobs.finish(eventualClaim, { kind: 'SUCCEEDED' });
+      }
+    }
+    const claimAfterAmbiguousUnlock = await jobs.claimNext('ambiguous-after-unlock-sweep', 300_000, ['OUTBOX_DELIVER']);
+    assert.equal(claimAfterAmbiguousUnlock, null, 'the expired ambiguous outbox is finalized rather than claimed again');
+    const resolvedExpiredOutboxRows = await dataSource.query(
+      `SELECT j.status AS job_status, o.delivery_state
+       FROM ca_meta_jobs j JOIN ca_meta_outbox_events o ON o.id = ? AND o.tenant_id = j.tenant_id
+       WHERE j.id = ? AND j.tenant_id = ?`,
+      [lockedExpiredOutbox.id, lockedExpiredClaim!.id, tenantFairA],
+    ) as Array<{ job_status: string; delivery_state: string }>;
+    assert.equal(resolvedExpiredOutboxRows[0]?.job_status, 'UNKNOWN');
+    assert.equal(resolvedExpiredOutboxRows[0]?.delivery_state, 'UNKNOWN');
+
     // No FORCE INDEX: the ambiguous-expiry sweep uses its dedicated index on a synthetic mixed state set.
     const bulkRows: unknown[][] = [];
     for (let index = 0; index < 800; index += 1) {
