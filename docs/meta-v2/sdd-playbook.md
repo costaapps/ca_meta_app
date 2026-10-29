@@ -55,6 +55,7 @@ For M1.07, `docs/meta-v2/contracts/openapi.yaml` is the canonical proposed HTTP 
 - Keep permanent provider credentials, authorization codes, app secrets, raw payloads, production data and raw backend environment values out of browser contracts, fixtures, logs, issues and AI context.
 - Keep retry policy separate from local job retries and external side effects. `202`, popup close, timeout, redirect, or message acceptance does not prove completion. Never blindly replay a one-use code or an ambiguous non-idempotent effect.
 - Write a bounded scope, explicit non-goals, baseline evidence, changed consumers/contracts, acceptance and negative cases, migration/recovery, rollout/rollback, environmental setup, validation commands/results, known limitations, and review roles into the PR.
+- Changes to CI, validation profiles, allowed paths, required checks, or approval rules require a dedicated scope and independent review; the change being checked cannot approve itself. M2 CI/platform work may implement assigned controls, but cannot weaken its own tests or approvals or expand allowed paths to pass its validation. Reassess the actual validation profiles at every milestone boundary as the application moves toward the planned monorepository.
 - Use synthetic fixtures and disposable services. State exactly which claims remain `Not confirmed`; tests do not certify real Meta grants, Suite4 issuer/membership, Hostinger deployment, or provider behavior.
 
 ## Explicit token-limit recovery rule
