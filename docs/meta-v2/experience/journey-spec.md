@@ -21,12 +21,12 @@ Provide a small, recoverable portal for selecting one of four product journeys, 
 
 Current Angular evidence at the contract baseline:
 
-- `src/app/app.routes.ts`: `/setup`, product callback routes, `/channels`, and `/templates`.
-- `src/app/features/channels/pages/channel-setup/channel-setup.component.{ts,html,scss}`: three cards, the existing intro and Msg4/Agent4 copy, query `cUUID` copied to `localStorage`, and `auth_success=true` treated as a success message before loading authoritative connection state.
-- `src/app/features/channels/pages/channel-list/channel-list.component.{ts,html,scss}`: connected-channel cards, automation message fields, notification bell, and hard-coded “Conectado”; GET failure clears loading but is only logged, so it can look like empty content.
-- `src/app/features/channels/pages/channel-templates/channel-templates.component.{ts,html,scss}`: WhatsApp number selection, template listing/creation, loading/error/empty feedback.
-- `src/app/features/channels/components/notification-bell/notification-bell.component.{ts,html,scss}`: notifications, refresh, empty/error/loading, templates and reply actions.
-- `src/styles.scss`: shared typography, spacing and responsive primitives.
+- `apps/web/src/app/app.routes.ts`: `/setup`, product callback routes, `/channels`, and `/templates`.
+- `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.{ts,html,scss}`: three cards, the existing intro and Msg4/Agent4 copy, query `cUUID` copied to `localStorage`, and `auth_success=true` treated as a success message before loading authoritative connection state.
+- `apps/web/src/app/features/channels/pages/channel-list/channel-list.component.{ts,html,scss}`: connected-channel cards, automation message fields, notification bell, and hard-coded “Conectado”; GET failure clears loading but is only logged, so it can look like empty content.
+- `apps/web/src/app/features/channels/pages/channel-templates/channel-templates.component.{ts,html,scss}`: WhatsApp number selection, template listing/creation, loading/error/empty feedback.
+- `apps/web/src/app/features/channels/components/notification-bell/notification-bell.component.{ts,html,scss}`: notifications, refresh, empty/error/loading, templates and reply actions.
+- `apps/web/src/styles.scss`: shared typography, spacing and responsive primitives.
 
 Keep the white panels, restrained borders, clear heading hierarchy, platform accent as a secondary cue, existing onboarding story, channel cards, automation editor, templates, and notification entry point. Make only the changes needed to add the fourth choice, active-company/status information, recovery actions, and accessible interactions. Do not copy the current hard-coded success/status behavior into the new journey.
 

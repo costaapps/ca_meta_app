@@ -10,16 +10,16 @@
 - The setup screen now shows three explicit product paths instead of one combined Meta login.
 
 Evidence:
-- `src/app/app.routes.ts`
-- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `apps/web/src/app/app.routes.ts`
+- `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
 
 ### Tenant Capture
 - The active tenant is still derived from `cUUID`.
 - That value is persisted locally and reused across the Meta flows.
 
 Evidence:
-- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
-- `src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
 
 ### Meta Connection Flow
 - The setup screen now treats WhatsApp, Facebook and Instagram as separate journeys.
@@ -27,24 +27,24 @@ Evidence:
 - WhatsApp is prepared as a dedicated Embedded Signup path.
 
 Evidence:
-- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
-- `src/app/core/services/meta-auth.service.ts`
-- `src/app/app.routes.ts`
+- `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `apps/web/src/app/core/services/meta-auth.service.ts`
+- `apps/web/src/app/app.routes.ts`
 
 ### Connected Channel Management
 - The channels area still loads connected assets for the active tenant.
 - It continues to own the automation/message configuration UX.
 
 Evidence:
-- `src/app/features/channels/pages/channel-list/channel-list.component.ts`
-- `src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-list/channel-list.component.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
 
 ### WhatsApp Template Flow
 - The templates area remains a WhatsApp-specific flow built on connected numbers.
 
 Evidence:
-- `src/app/features/channels/pages/channel-templates/channel-templates.component.ts`
-- `src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-templates/channel-templates.component.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
 
 ## Navigation Shape
 - `/setup`: onboarding entry with three visible product cards
@@ -56,8 +56,8 @@ Evidence:
 - `/templates`: WhatsApp template subflow
 
 Evidence:
-- `src/app/app.routes.ts`
-- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `apps/web/src/app/app.routes.ts`
+- `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
 
 ## Read The Code When
 - you need exact callback handling

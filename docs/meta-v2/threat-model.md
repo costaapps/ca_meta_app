@@ -6,7 +6,7 @@
 
 ### Evidência atual
 
-- O frontend Angular usa `cUUID` em contexto de cliente e a base ainda não estabelece um contrato seguro parent/iframe; ver `src/app/core/services/meta-integration.service.ts`, `src/app/features/channels/pages/channel-setup/channel-setup.component.ts` e [.github/docs/agent-context/iframe-integration.md](../../.github/docs/agent-context/iframe-integration.md).
+- O frontend Angular usa `cUUID` em contexto de cliente e a base ainda não estabelece um contrato seguro parent/iframe; ver `apps/web/src/app/core/services/meta-integration.service.ts`, `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts` e [.github/docs/agent-context/iframe-integration.md](../../.github/docs/agent-context/iframe-integration.md).
 - M1.05 propõe `Principal`, `Membership`, `PortalSession`, `OnboardingSession`, jobs e audit versionados. Chaves/consultas empresariais incluem `tenant_id`; sessão guarda hashes opacos e versão de contexto. O harness M1.05 executa constraints sintéticas em MariaDB, não migra DDL real: [m1-05-domain-model.md](m1-05-domain-model.md), [m1-05-state-machines.md](m1-05-state-machines.md) e [`tools/m1-05/`](../../tools/m1-05/README.md).
 - A implementação futura deve negar por padrão e tirar autoridade de UUID do browser. PHP local, produção, emissor Suite4, identidade/membership reais, topologia/cookies e configuração de frame não são reproduzidos por esta PoC.
 - Cada uma das 53 linhas da matriz legada tem identidade, tenant, Origin/CSRF, role/scope, efeito e gate mapeados no [crosswalk](endpoint-security-crosswalk.md); o runner exige correspondência única com a fonte CSV.
