@@ -6,10 +6,10 @@
 - The backend now has product-specific entrypoints for Facebook and Instagram, while WhatsApp keeps the existing `backend/connect.php` flow.
 
 Evidence:
-- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
-- `src/app/app.routes.ts`
-- `src/app/core/services/meta-auth.service.ts`
-- `src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `apps/web/src/app/app.routes.ts`
+- `apps/web/src/app/core/services/meta-auth.service.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
 - `backend/connect.php`
 - `backend/connect_facebook.php`
 - `backend/connect_instagram.php`
@@ -26,9 +26,9 @@ Evidence:
   - still owns connected channel and WhatsApp template operations
 
 Evidence:
-- `src/app/core/services/meta-auth.service.ts`
-- `src/app/core/services/meta-integration.service.ts`
-- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `apps/web/src/app/core/services/meta-auth.service.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
 
 ## Product Boundaries Today
 - WhatsApp is treated as a dedicated Embedded Signup journey.

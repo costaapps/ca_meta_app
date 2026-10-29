@@ -6,7 +6,7 @@ This page records source-level risks and unconfirmed operational questions. It i
 
 The versioned Angular setup reads `cUUID` from the URL and browser storage and sends `company_uuid` as request context. This is not authentication or proof of membership. The checkout alone does not establish whether every deployed PHP request enforces an independent server-side membership check. Treat any client-selected tenant or asset as untrusted and keep affected operations blocked until server authorization is evidenced.
 
-Evidence: `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`, `src/app/core/services/meta-integration.service.ts`, [M1.06 identity contract](../../../docs/meta-v2/identity-contract.md). The identity contract is proposed, not implemented or verified in Suite4.
+Evidence: `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts`, `apps/web/src/app/core/services/meta-integration.service.ts`, [M1.06 identity contract](../../../docs/meta-v2/identity-contract.md). The identity contract is proposed, not implemented or verified in Suite4.
 
 ## P1 — deployed PHP, rewrite, schema and external consumers are unconfirmed
 

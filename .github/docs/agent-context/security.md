@@ -6,8 +6,8 @@
 - The repository already shows signs that auth, tenant isolation, and iframe readiness need hardening before productization.
 
 Evidence:
-- `src/app/core/services/meta-integration.service.ts`
-- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
 - `backend/connect.php`
 
 ## Priority Risks

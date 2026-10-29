@@ -1,31 +1,34 @@
 # Architecture
 
 ## Current Shape
-- This is a small standalone Angular application centered on one feature area: Meta channel onboarding and management.
+- This is an npm-workspace monorepo: the preserved Angular application is in `apps/web`; `apps/api` and `packages/contracts` are reserved workspace boundaries for the following packages.
+- The web application remains centered on one feature area: Meta channel onboarding and management.
 - The root shell is intentionally thin, and most behavior lives in routed pages plus a small set of shared integration files.
 - Tenant context is lightweight and reused across flows rather than managed by a larger app-wide state layer.
 
 Evidence:
-- `src/main.ts`
-- `src/app/app.config.ts`
-- `src/app/app.routes.ts`
+- `apps/web/src/main.ts`
+- `apps/web/src/app/app.config.ts`
+- `apps/web/src/app/app.routes.ts`
+- `package.json`
+- `apps/web/package.json`
 
 ## Project Layers
-- `src/app/core/`
+- `apps/web/src/app/core/`
   - shared contracts
   - service-level integration logic
-- `src/app/features/channels/`
+- `apps/web/src/app/features/channels/`
   - setup
   - connected channels
   - WhatsApp templates
   - review-related notifications
-- `src/environments/`
+- `apps/web/src/environments/`
   - backend base configuration
 
 Evidence:
-- `src/app/core/**/*`
-- `src/app/features/channels/**/*`
-- `src/environments/*`
+- `apps/web/src/app/core/**/*`
+- `apps/web/src/app/features/channels/**/*`
+- `apps/web/src/environments/*`
 
 ## Routing
 - Routing is flat and simple.
@@ -33,7 +36,7 @@ Evidence:
 - There is no lazy loading, resolver, or guard layer at the moment.
 
 Evidence:
-- `src/app/app.routes.ts`
+- `apps/web/src/app/app.routes.ts`
 
 ## State And Reactivity
 - The codebase is currently RxJS-oriented.
@@ -41,8 +44,8 @@ Evidence:
 - There is no real Signals adoption yet, and no need to force one before broader refactors.
 
 Evidence:
-- `src/app/core/services/meta-integration.service.ts`
-- `src/app/features/channels/**/*.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/**/*.ts`
 
 ## Backend Boundary
 - The frontend talks to a PHP backend through a small number of direct HTTP integration paths.
@@ -50,8 +53,8 @@ Evidence:
 - `backend/connect_old.php` is useful as historical context, not as the preferred operational reference.
 
 Evidence:
-- `src/app/core/services/meta-integration.service.ts`
-- `src/app/features/channels/components/notification-bell/notification-bell.component.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/components/notification-bell/notification-bell.component.ts`
 - `backend/connect.php`
 - `backend/connect_old.php`
 
@@ -61,7 +64,7 @@ Evidence:
 - Build and test tooling are modern Angular 21 tooling, though the tests themselves still need cleanup.
 
 Evidence:
-- `src/styles.scss`
-- `angular.json`
-- `package.json`
-- `src/app/**/*.spec.ts`
+- `apps/web/src/styles.scss`
+- `apps/web/angular.json`
+- `apps/web/package.json`
+- `apps/web/src/app/**/*.spec.ts`

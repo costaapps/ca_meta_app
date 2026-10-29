@@ -6,22 +6,22 @@
 - Use strict typing and small, feature-scoped edits.
 
 Evidence:
-- `package.json`
-- `tsconfig.json`
-- `src/app/**/*`
+- `apps/web/package.json`
+- `apps/web/tsconfig.json`
+- `apps/web/src/app/**/*`
 
 ## Patterns To Preserve
 - Standalone components
-- Feature-oriented folders under `src/app/features`
+- Feature-oriented folders under `apps/web/src/app/features`
 - Shared API logic in `core/services`
 - Shared TypeScript contracts in `core/models`
 - SCSS per component plus minimal global styles
 - Explicit HTTP typing where practical
 
 Evidence:
-- `src/app/features/channels/pages/*/*.ts`
-- `src/app/core/services/meta-integration.service.ts`
-- `src/app/core/models/channel.model.ts`
+- `apps/web/src/app/features/channels/pages/*/*.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/core/models/channel.model.ts`
 
 ## Patterns To Replace Gradually
 - `alert(...)` for user-visible failures
@@ -31,9 +31,9 @@ Evidence:
 - Specs still written for old Jasmine-era architecture
 
 Evidence:
-- `src/app/core/services/meta-integration.service.ts`
-- `src/app/features/channels/pages/channel-list/channel-list.component.ts`
-- `src/app/features/channels/pages/channel-list/channel-list.component.spec.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-list/channel-list.component.ts`
+- `apps/web/src/app/features/channels/pages/channel-list/channel-list.component.spec.ts`
 
 ## Signals And RxJS
 - Current code is RxJS-first and that is acceptable for now.
@@ -46,7 +46,7 @@ Project default:
 - Preserve existing `Subject<void> + takeUntil` unless you are already refactoring a component deeply enough to justify `takeUntilDestroyed`.
 
 Evidence:
-- `src/app/features/channels/**/*.ts`
+- `apps/web/src/app/features/channels/**/*.ts`
 - Angular docs consulted in `references.md`
 
 ## Dependency Injection
@@ -55,8 +55,8 @@ Evidence:
 - Keep providers centralized unless a feature-scoped provider is clearly needed.
 
 Evidence:
-- `src/app/app.config.ts`
-- `src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/app.config.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
 
 ## Typing
 - Keep `strict` compatibility.
@@ -65,8 +65,8 @@ Evidence:
 - Align spec imports and mocks with the current public API before extending tests.
 
 Evidence:
-- `tsconfig.json`
-- `src/app/features/channels/components/notification-bell/notification-bell.component.ts`
+- `apps/web/tsconfig.json`
+- `apps/web/src/app/features/channels/components/notification-bell/notification-bell.component.ts`
 
 ## Components
 - One page component should own one main screen concern.
@@ -79,8 +79,8 @@ Evidence:
   - error
 
 Evidence:
-- `src/app/features/channels/pages/channel-templates/channel-templates.component.ts`
-- `src/app/features/channels/pages/channel-list/channel-list.component.html`
+- `apps/web/src/app/features/channels/pages/channel-templates/channel-templates.component.ts`
+- `apps/web/src/app/features/channels/pages/channel-list/channel-list.component.html`
 
 ## Forms
 - The current code uses template-driven forms with `FormsModule`.
@@ -88,8 +88,8 @@ Evidence:
 - If a form becomes more complex, migrate the entire form coherently instead of mixing paradigms.
 
 Evidence:
-- `src/app/features/channels/pages/channel-list/channel-list.component.html`
-- `src/app/features/channels/pages/channel-templates/channel-templates.component.html`
+- `apps/web/src/app/features/channels/pages/channel-list/channel-list.component.html`
+- `apps/web/src/app/features/channels/pages/channel-templates/channel-templates.component.html`
 
 ## HTTP And Error Handling
 - Use `HttpClient`.
@@ -98,8 +98,8 @@ Evidence:
 - Avoid swallowing errors silently; at minimum log and surface a UI state.
 
 Evidence:
-- `src/app/app.config.ts`
-- `src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/app.config.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
 
 ## Accessibility
 - Preserve semantic buttons and labels already present.

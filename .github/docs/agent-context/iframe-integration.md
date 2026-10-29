@@ -6,8 +6,8 @@
 - No parent-child messaging contract exists.
 
 Evidence:
-- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
-- `src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
 
 ## Recommended Direction
 - Preferred tenant handoff: validated `postMessage` handshake from `suite4` to the iframe.

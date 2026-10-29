@@ -1,68 +1,55 @@
-# MetaIntegration
+# ca_meta_app monorepo
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 21.0.5.
+This repository uses npm workspaces. The Angular application lives in `apps/web`; the API and
+public contract workspaces are introduced separately so their toolchains and dependencies remain
+isolated. Node.js `24.22.2` and npm `11.19.1` are the initial pinned local toolchain (see `.nvmrc`
+and `package.json`). The project contains one root `package-lock.json`.
 
-## Development server
+## Install and run
 
-To start a local development server, run:
-
-```bash
-ng serve
-```
-
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
-
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+From the repository root:
 
 ```bash
-ng generate component component-name
+npm ci
+npm start
 ```
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+The Angular development server serves the existing app at `http://localhost:4200` and supports
+direct navigation and refresh for `/setup`, `/channels`, and `/templates`. `npm run smoke:routes`
+builds the static app and checks those deep links using a small Node built-in static server with an
+SPA fallback. This verifies the Angular bundle plus fallback contract; the Nginx container and
+proxy behavior are validated separately in M2.06.
+
+## Workspace commands
 
 ```bash
-ng generate --help
+npm run build
+npm test
+npm run typecheck
+npm run lint
+npm run build:web
+npm run test:web
+npm run start:web
+npm run smoke:routes
 ```
 
-## Building
+The aggregate commands run the scripts declared by each present workspace. Later API and contract
+packages add their own scripts without changing the root command surface. `lint` runs a static
+heuristic over web imports, common loading calls, and declared dependencies. It recognizes simple
+`const` aliases of `require` and rejects non-literal dynamic imports, but does not fully resolve
+complex alias-based loading; it is not a complete security analysis. M2.08 adds the broader CI and
+security validation profile.
 
-To build the project run:
+The Angular project configuration and its TypeScript configs are in `apps/web/`. From the web
+workspace, `npm run build`, `npm test`, `npm run typecheck`, and `npm start` address that app alone.
 
-```bash
-ng build
-```
+## Current architecture
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+- `apps/web`: preserved Angular 21 standalone UI.
+- `apps/api`: reserved workspace for the NestJS API (M2.02).
+- `packages/contracts`: public HTTP/event contract artifacts (M2.04).
+- `docs/meta-v2/contracts`: canonical OpenAPI and inbox/outbox source specifications.
 
-## Running unit tests
-
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
-
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
-# Execução das Milestones Meta v2
-
-Para configurar os agentes, validar o ambiente e executar o planejamento por dependências, consulte [o guia de execução](docs/execution/README.md). Os PRs de pacote são integrados exclusivamente por squash; o PR consolidado de cada Milestone aguarda aceite humano.
-
-
-
-## Execução por milestone no Codex Desktop
-
-[Kit completo: configuração, prompts M1–M6, agentes, validação e fluxo de PRs](docs/codex-desktop/README.md). O controlador Python anterior não é necessário para esse fluxo.
+This directory move does not change backend behavior, database schema, Meta assets, or credentials.
+Desktop milestone scope, delivery gates, and handoff guidance are documented in the
+[Desktop README](docs/codex-desktop/README.md).

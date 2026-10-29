@@ -9,7 +9,7 @@
 
 ## Current stage
 
-M2.01/#20 is the first package. Its prerequisites are integrated. The author worktree is `C:\Users\user\.codex\worktrees\m2-01\ca_meta_app` on `desktop/m2-01`, initially based on `af941f29e1b0862f46f299eb08ae544d1af1f04a`. Before implementation, Node 24.22.2/npm 11.19.1 `npm ci` passed (501 packages, 46 inherited audit findings), Angular build passed, and 5 baseline tests passed. Implementation is underway; next, the coordinator will validate, request independent functional/security review, fix blockers, then open a package PR.
+M2.01/#20 is implemented in the managed `m2-01` worktree on branch `desktop/m2-01`, based on `af941f29e1b0862f46f299eb08ae544d1af1f04a` and synchronized with milestone tip `ca7442da8e4f2ea339ce4340c165aa1577131b9b`. The validated source candidate is `069b057721f4748bcae9ebfb92c621eaed5ad747`; subsequent changes in this handoff/progress report do not alter package code or dependencies. On Node 24.22.2/npm 11.19.1, clean `npm ci` passed for the same manifest/lock snapshot (504 packages; 46 inherited audit findings and five npm install-script warnings). Aggregate build, 5/5 Angular tests, typecheck, lint/self-tests, bundle scan, dev and static route smokes, and `git diff --check` passed. Functional and security reviews passed without blockers; the import checker is documented as a static heuristic, with broader CI/security controls remaining in M2.08. Next action: publish the package branch, open its PR to `desktop/milestone-m2`, verify remote checks/reviews/protections, and squash only if all required gates pass.
 
 ## Environment and limits
 

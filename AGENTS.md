@@ -2,9 +2,9 @@
 
 ## Purpose and source of truth
 
-`ca_meta_app` is a standalone Angular frontend for Meta onboarding and management in Msg4, backed in the current checkout by versioned PHP endpoint references. The code and SHA-specific evidence are authoritative; do not infer deployed PHP/rewrite behavior from this checkout. The target platform separates Facebook, Instagram, WhatsApp exclusive and WhatsApp Coexistence journeys. Do not assume shared auth flows.
+`ca_meta_app` is an npm-workspace monorepo with a standalone Angular frontend for Meta onboarding and management in Msg4 and versioned PHP endpoint references. The code and SHA-specific evidence are authoritative; do not infer deployed PHP/rewrite behavior from this checkout. The target platform separates Facebook, Instagram, WhatsApp exclusive and WhatsApp Coexistence journeys. Do not assume shared auth flows.
 
-Current stack recorded in `package.json` and Angular configuration: Angular 21, strict TypeScript, RxJS and SCSS. Frontend entry, providers, routes and core API service are indexed in [src/main.ts](src/main.ts), [app.config.ts](src/app/app.config.ts), [app.routes.ts](src/app/app.routes.ts) and [meta-integration.service.ts](src/app/core/services/meta-integration.service.ts). Local browser storage `cUUID` is tenant-sensitive context, never proof of identity or membership.
+Current stack recorded in [`apps/web/package.json`](apps/web/package.json) and Angular configuration: Angular 21, strict TypeScript, RxJS and SCSS. Frontend entry, providers, routes and core API service are indexed in [apps/web/src/main.ts](apps/web/src/main.ts), [app.config.ts](apps/web/src/app/app.config.ts), [app.routes.ts](apps/web/src/app/app.routes.ts) and [meta-integration.service.ts](apps/web/src/app/core/services/meta-integration.service.ts). Root scripts and the npm lockfile are in `package.json` and `package-lock.json`. Local browser storage `cUUID` is tenant-sensitive context, never proof of identity or membership.
 
 ## Non-negotiable guardrails
 
@@ -38,6 +38,6 @@ Current stack recorded in `package.json` and Angular configuration: Angular 21, 
 
 ## Loading and validation
 
-Before changing components/services, load architecture and Angular guidance. For auth/tokens load Meta integration and security docs; for PHP/API load backend contracts; for UX load current flows; for Suite4 load iframe integration; for tests load testing/validation. `npm start`, `npm run build`, `npm test -- --watch=false`, and `npx ng version` are available; no lint script is configured. Run only checks relevant to scope and identify any blocked command with its exact reason.
+Before changing components/services, load architecture and Angular guidance. For auth/tokens load Meta integration and security docs; for PHP/API load backend contracts; for UX load current flows; for Suite4 load iframe integration; for tests load testing/validation. `npm start`, `npm run build`, `npm test`, `npm run typecheck`, and `npm run lint` execute workspace scripts. App-specific commands are available with `--workspace=@ca-meta/web`. Run only checks relevant to scope and identify any blocked command with its exact reason.
 
 M1.10 governance checks are documented in [tools/m1-10/README.md](tools/m1-10/README.md). They are read-only by default; do not run `.planning/validate.py`, `.planning/render.py` or `.planning/contracts.py` from the implementation checkout because they write generated artifacts.
