@@ -8,6 +8,7 @@ The reviewed source snapshot is milestone base 54787a9f18c1cb88ed881bb3a5dd20707
 
 | Check | Required key / treatment | Current evidence |
 |---|---|---|
+| Asset kind | accept only the explicit observed page-type literals; quarantine an unmapped kind | Unknown synthetic kind tested; physical enum values remain Not confirmed |
 | Company ownership | resolve (IdDatabase, IdCompany) to one authorized tenant_id; never use IdDatabase alone | PHP obtains both values from Company; actual ownership map and uniqueness are Not confirmed |
 | Same database, multiple companies | evaluate each company pair separately even when ExternalId matches | Covered by synthetic rows 1 and 2 |
 | Asset duplicates | group by (tenant_id, kind, external_asset_id); quarantine all colliding rows pending resolution | Physical duplicate counts and unique indexes are Not confirmed |
@@ -47,7 +48,7 @@ Observed dry-run summary:
 
 Same-IdDatabase companies with a matching synthetic ExternalId remain separate candidates tied to distinct synthetic tenant IDs. A different database/company pair resolves independently. A conflicting pair has two synthetic tenant mappings with different last-login timestamps; neither timestamp is consulted, and its row is quarantined. The duplicate group and orphan row are also quarantined. Three child rows with a missing, cross-tenant, or wrong-kind parent are quarantined.
 
-The unittest run passed **9 tests**: same-database isolation, different-database resolution, ambiguous/orphan quarantine, duplicate and parent-link quarantine, three expiry states, field-map coverage, pure/no-write behavior and fixture credential rejection.
+The unittest run passed **11 tests**: same-database isolation, different-database resolution, ambiguous/orphan quarantine, duplicate and parent-link quarantine, missing parent-type rule and unknown-kind quarantine, three expiry states, field-map coverage, pure/no-write behavior and fixture credential rejection.
 
 ## Remaining operational gate
 

@@ -34,6 +34,8 @@ If one legacy pair resolves to zero or multiple authorized tenants, quarantine i
 
 ## Code-observed integrity risks
 
+The synthetic classifier allowlists the `FACEBOOK`, `INSTAGRAM`, and `WHATSAPP` literals written to `MetaConnectedPages.Type` in the versioned PHP. `WHATSAPP_PHONE` is only a normalized synthetic kind for rows from the separate `MetaConnectedNumbers` table; it is not claimed as a legacy `Type` value. Physical column enum definitions and actual stored values remain **Not confirmed**.
+
 1. MetaConnectedPages and MetaConnectedNumbers use INSERT ... ON DUPLICATE KEY UPDATE. The source does not reveal which physical unique key caused the conflict; a global ExternalId key could overwrite another company. Inspect actual index definitions before any upsert or backfill.
 2. MetaConnectedNumbers rows inherit tenant scope through IdWaba; a missing or mismatched parent cannot be assigned from phone number alone.
 3. The notifications query filters by IdDatabase and notification state, while the Company lookup returns IdCompany too. This code path does not constrain notifications by IdCompany and returns SELECT *. If multiple authorized companies share the database, tenant isolation and the exposed field set are Not confirmed. The future contract must identify notification ownership and use an allowlisted tenant-scoped query; unresolved rows go to quarantine.

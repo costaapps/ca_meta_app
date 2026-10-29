@@ -19,6 +19,9 @@ FORBIDDEN_KEY_FRAGMENTS = (
 )
 FORBIDDEN_EXACT_KEYS = {"dsn"}
 VALID_EXPIRY_STATES = {"known", "no_deadline_returned", "unknown"}
+# Source literals observed in MetaConnectedPages.Type plus a synthetic normalized
+# phone-asset kind from MetaConnectedNumbers. Physical DB enum values stay unconfirmed.
+KNOWN_ASSET_KINDS = {"FACEBOOK", "INSTAGRAM", "WHATSAPP", "WHATSAPP_PHONE"}
 
 
 def _reject_sensitive_keys(value: Any) -> None:
@@ -127,11 +130,16 @@ def dry_run(fixture: dict[str, Any]) -> dict[str, Any]:
             external_id = record.get("externalId")
             if not isinstance(kind, str) or not kind.strip() or not isinstance(external_id, str) or not external_id.strip():
                 result["reason"] = "asset_identity_incomplete"
+            elif kind.strip() not in KNOWN_ASSET_KINDS:
+                result["reason"] = "unknown_asset_kind"
             else:
                 parent_id = record.get("parentSourceRowId")
                 parent_error = None
                 if parent_id is not None:
-                    if not isinstance(parent_id, str) or not parent_id.strip():
+                    expected_parent_type = record.get("expectedParentType")
+                    if not isinstance(expected_parent_type, str) or expected_parent_type.strip() not in KNOWN_ASSET_KINDS:
+                        parent_error = "parent_type_rule_missing"
+                    elif not isinstance(parent_id, str) or not parent_id.strip():
                         parent_error = "parent_row_missing"
                     else:
                         parent_indexes = rows_by_source_id.get(parent_id, [])
@@ -146,7 +154,7 @@ def dry_run(fixture: dict[str, Any]) -> dict[str, Any]:
                                 parent_error = "parent_tenant_unresolved"
                             elif next(iter(parent_owners)) != tenant_id:
                                 parent_error = "parent_cross_tenant"
-                            elif record.get("expectedParentType") and parent.get("type") != record["expectedParentType"]:
+                            elif parent.get("type") != expected_parent_type.strip():
                                 parent_error = "parent_type_conflict"
                 if parent_error:
                     result["reason"] = parent_error

@@ -81,6 +81,20 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(result["candidateRows"], 3)
         self.assertEqual(result["quarantinedRows"], 7)
 
+    def test_unknown_asset_kind_is_quarantined(self):
+        unknown = deepcopy(self.fixture)
+        unknown["records"][0]["type"] = "UNMAPPED_SYNTHETIC_KIND"
+        result = dry_run(unknown)
+        self.assertEqual(result["rows"][0]["disposition"], "quarantine")
+        self.assertEqual(result["rows"][0]["reason"], "unknown_asset_kind")
+
+    def test_child_without_parent_type_rule_is_quarantined(self):
+        missing_rule = deepcopy(self.fixture)
+        del missing_rule["records"][8]["expectedParentType"]
+        result = dry_run(missing_rule)
+        self.assertEqual(result["rows"][8]["disposition"], "quarantine")
+        self.assertEqual(result["rows"][8]["reason"], "parent_type_rule_missing")
+
     def test_fixture_cannot_contain_credential_or_connection_values(self):
         unsafe = deepcopy(self.fixture)
         unsafe["records"][0]["UserAccessToken"] = "synthetic-value"
