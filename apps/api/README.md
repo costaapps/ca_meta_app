@@ -83,9 +83,8 @@ active response streams to finish, then closes the listener. GracefulExpressAdap
 server.close() without destroying open sockets.
 
 The in-memory close test runs on the host OS. The POSIX SIGTERM subprocess test runs in an isolated
-Linux container because Windows Node 24's child SIGINT path reset the test socket after the API had
-finished the response. Windows marks only that POSIX subprocess case skipped; the isolated runner
-executes it with both Connection: close and keep-alive policies.
+Linux container. Windows skips only that POSIX subprocess case; the isolated runner executes it with
+both Connection: close and keep-alive policies.
 
 Run the isolated Linux signal-drain suite from PowerShell:
 

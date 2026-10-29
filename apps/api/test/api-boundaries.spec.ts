@@ -571,7 +571,7 @@ async function assertSubprocessShutdownDrain(connection: 'close' | 'keep-alive')
 
 test('SIGTERM in a subprocess drains the response fully with both connection policies', {
   skip: process.platform === 'win32'
-    ? 'Windows Node 24 SIGINT raises ECONNRESET for this child-process shutdown; run the POSIX SIGTERM test with tools/m2-02/run-sigterm-drain-linux.ps1.'
+    ? 'Windows skips this POSIX SIGTERM subprocess case; run it with tools/m2-02/run-sigterm-drain-linux.ps1.'
     : false,
 }, async () => {
   await assertSubprocessShutdownDrain('close');
