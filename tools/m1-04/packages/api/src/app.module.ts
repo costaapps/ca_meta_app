@@ -1,17 +1,20 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HealthController } from './health.controller';
+import { readPocDatabaseConfig } from './db-config';
+
+const database = readPocDatabaseConfig();
 
 @Module({
   controllers: [HealthController],
   imports: [
     TypeOrmModule.forRoot({
       type: 'mariadb',
-      host: process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DB_PORT ?? 3306),
-      username: process.env.DB_USER ?? '',
-      password: process.env.DB_PASSWORD ?? '',
-      database: process.env.DB_NAME ?? 'm104_poc',
+      host: database.host,
+      port: database.port,
+      username: database.username,
+      password: database.password,
+      database: database.database,
       autoLoadEntities: true,
       synchronize: false,
       migrationsRun: false,

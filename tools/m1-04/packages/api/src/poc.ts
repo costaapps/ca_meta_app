@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import type { DataSource } from 'typeorm';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -9,6 +10,7 @@ import {
   acknowledgeJob,
   claimNextJob,
   persistFakeEffect,
+  renewJobLease,
   type OutboxJob,
 } from './worker';
 
@@ -20,7 +22,11 @@ function count(value: number | string): number {
   return Number(value);
 }
 
-async function enqueueJob(operationKey: string, tenantRef: string): Promise<void> {
+async function enqueueJob(
+  dataSource: DataSource,
+  operationKey: string,
+  tenantRef: string,
+): Promise<void> {
   await dataSource.transaction(async (manager) => {
     await manager.query('INSERT INTO m104_records (attributes) VALUES (?)', [
       JSON.stringify({ tenantRef, synthetic: true }),
@@ -66,9 +72,29 @@ async function verifyNestMariaDbRuntime(): Promise<void> {
   process.stdout.write('nestjs-mariadb=health endpoint passed; SIGTERM shutdown passed\n');
 }
 
-const dataSource = createDataSource();
+function verifyDatabaseTargetFailsClosed(): void {
+  const overrides = [
+    ['DB_HOST', 'external.example.invalid'],
+    ['DB_PORT', '3307'],
+    ['DB_USER', 'root'],
+    ['DB_NAME', 'production'],
+  ] as const;
+  for (const [name, value] of overrides) {
+    const previousValue = process.env[name];
+    try {
+      process.env[name] = value;
+      assert.throws(() => createDataSource(), new RegExp(name));
+    } finally {
+      if (previousValue === undefined) delete process.env[name];
+      else process.env[name] = previousValue;
+    }
+  }
+  process.stdout.write('db-target-guard=host/port/user/database overrides refused before DataSource creation\n');
+}
 
 async function main(): Promise<void> {
+  verifyDatabaseTargetFailsClosed();
+  const dataSource = createDataSource();
   await dataSource.initialize();
   try {
     const server = (await dataSource.query('SELECT VERSION() AS version')) as Array<{
@@ -142,8 +168,8 @@ async function main(): Promise<void> {
     assert.equal(count(afterRollback[0].count), count(beforeRollback[0].count));
     process.stdout.write('dml-rollback=passed (two writes absent after failure)\n');
 
-    await enqueueJob('concurrent-a', 'tenant-a');
-    await enqueueJob('concurrent-b', 'tenant-b');
+    await enqueueJob(dataSource, 'concurrent-a', 'tenant-a');
+    await enqueueJob(dataSource, 'concurrent-b', 'tenant-b');
     const concurrentClaims = await Promise.all([
       claimNextJob(dataSource),
       claimNextJob(dataSource),
@@ -157,12 +183,34 @@ async function main(): Promise<void> {
     );
     for (const job of concurrentClaims as OutboxJob[]) {
       await persistFakeEffect(dataSource, job.operation_key);
-      await acknowledgeJob(dataSource, job.id);
+      assert.equal(await acknowledgeJob(dataSource, job.id, job.claimToken), true);
     }
     process.stdout.write('concurrent-claims=2 unique outbox rows claimed with SKIP LOCKED\n');
 
+    await enqueueJob(dataSource, 'lease-fence-overlap', 'tenant-lease-fence');
+    const staleClaim = await claimNextJob(dataSource, 2);
+    assert.ok(staleClaim);
+    assert.equal(await renewJobLease(dataSource, staleClaim.id, staleClaim.claimToken, 2), true);
+    await delay(2_300);
+    const replacementClaim = await claimNextJob(dataSource, 2);
+    assert.ok(replacementClaim);
+    assert.equal(replacementClaim.id, staleClaim.id);
+    assert.notEqual(replacementClaim.claimToken, staleClaim.claimToken);
+    assert.equal(await renewJobLease(dataSource, staleClaim.id, staleClaim.claimToken, 2), false);
+    assert.equal(await acknowledgeJob(dataSource, staleClaim.id, staleClaim.claimToken), false);
+    const fencedStatus = (await dataSource.query(
+      'SELECT status FROM m104_outbox_jobs WHERE id = ?',
+      [staleClaim.id],
+    )) as Array<{ status: string }>;
+    assert.equal(fencedStatus[0]?.status, 'RUNNING');
+    assert.equal(
+      await acknowledgeJob(dataSource, replacementClaim.id, replacementClaim.claimToken),
+      true,
+    );
+    process.stdout.write('lease-fencing=active renewal accepted; expired claimant reclaimed; stale renew/ACK rejected; owner ACK accepted\n');
+
     const crashOperationKey = 'crash-window-synthetic';
-    await enqueueJob(crashOperationKey, 'tenant-crash');
+    await enqueueJob(dataSource, crashOperationKey, 'tenant-crash');
     const childPath = join(__dirname, 'worker-child.js');
     const crash = spawnSync(
       process.execPath,
@@ -194,8 +242,8 @@ async function main(): Promise<void> {
 
     const shutdownFirst = 'shutdown-inflight';
     const shutdownNext = 'shutdown-next';
-    await enqueueJob(shutdownFirst, 'tenant-shutdown');
-    await enqueueJob(shutdownNext, 'tenant-shutdown');
+    await enqueueJob(dataSource, shutdownFirst, 'tenant-shutdown');
+    await enqueueJob(dataSource, shutdownNext, 'tenant-shutdown');
     const workerProcess = spawn(
       process.execPath,
       [join(__dirname, 'worker-child.js'), 'graceful-loop', shutdownFirst],

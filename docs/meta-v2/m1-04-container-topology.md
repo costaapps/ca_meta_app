@@ -44,7 +44,7 @@ Publicar apenas HTTPS no ingress. `MariaDB` e eventual `Redis` ficam na rede int
 
 ## Escala do worker e shutdown
 
-Cada job carrega tenant, chave de operação, versão, status e lease; cada claim valida membership/grant antes de efeito Meta. Pool/concorrência são limitados por tenant, ativo e app. Workers claim com transação e `FOR UPDATE SKIP LOCKED`, registram lease curto e liberam; manutenção/fairness e índices devem evoluir com carga. SIGTERM bloqueia novos claims, drena a unidade reclamada dentro de um grace period; execução interrompida deixa lease expirar e permite redelivery idempotente. Saída ambígua de provider vira UNKNOWN/reconciliação.
+Cada job carrega tenant, chave de operação, versão, status e lease; cada claim valida membership/grant antes de efeito Meta. Pool/concorrência são limitados por tenant, ativo e app. Workers claim com transação e `FOR UPDATE SKIP LOCKED`, registram lease curto, claim token de fencing e liberam; renew/ACK só são aceitos pelo token corrente antes da expiração. Manutenção/fairness e índices devem evoluir com carga. SIGTERM bloqueia novos claims, drena a unidade reclamada dentro de um grace period; execução interrompida deixa lease expirar e permite redelivery idempotente. Saída ambígua de provider vira UNKNOWN/reconciliação.
 
 ## Alternativas e custo inicial
 

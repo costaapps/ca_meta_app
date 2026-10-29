@@ -1,19 +1,33 @@
 import type { DataSource } from 'typeorm';
+import { randomUUID } from 'node:crypto';
 
 export interface OutboxJob {
   id: string;
   operation_key: string;
   tenant_ref: string;
   attempts: number;
+  claimToken: string;
+}
+
+function validateLeaseSeconds(leaseSeconds: number): void {
+  if (!Number.isSafeInteger(leaseSeconds) || leaseSeconds < 1 || leaseSeconds > 300) {
+    throw new RangeError('leaseSeconds must be an integer in [1, 300]');
+  }
+}
+
+function affectedRows(result: unknown): number {
+  if (Array.isArray(result)) return result.length === 0 ? 0 : affectedRows(result[0]);
+  if (typeof result === 'object' && result !== null && 'affectedRows' in result) {
+    return Number(result.affectedRows);
+  }
+  return 0;
 }
 
 export async function claimNextJob(
   dataSource: DataSource,
   leaseSeconds = 2,
 ): Promise<OutboxJob | null> {
-  if (!Number.isSafeInteger(leaseSeconds) || leaseSeconds < 1 || leaseSeconds > 300) {
-    throw new RangeError('leaseSeconds must be an integer in [1, 300]');
-  }
+  validateLeaseSeconds(leaseSeconds);
 
   const runner = dataSource.createQueryRunner();
   await runner.connect();
@@ -35,21 +49,40 @@ export async function claimNextJob(
       return null;
     }
 
+    const claimToken = randomUUID();
     await runner.query(
       `UPDATE m104_outbox_jobs
        SET status = 'RUNNING', attempts = attempts + 1,
+           claim_token = ?,
            lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ${leaseSeconds} SECOND)
        WHERE id = ?`,
-      [job.id],
+      [claimToken, job.id],
     );
     await runner.commitTransaction();
-    return { ...job, attempts: Number(job.attempts) + 1 };
+    return { ...job, attempts: Number(job.attempts) + 1, claimToken };
   } catch (error) {
     if (runner.isTransactionActive) await runner.rollbackTransaction();
     throw error;
   } finally {
     await runner.release();
   }
+}
+
+export async function renewJobLease(
+  dataSource: DataSource,
+  jobId: string,
+  claimToken: string,
+  leaseSeconds = 2,
+): Promise<boolean> {
+  validateLeaseSeconds(leaseSeconds);
+  const result: unknown = await dataSource.query(
+    `UPDATE m104_outbox_jobs
+     SET lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ${leaseSeconds} SECOND)
+     WHERE id = ? AND status = 'RUNNING' AND claim_token = ?
+       AND lease_until > UTC_TIMESTAMP(6)`,
+    [jobId, claimToken],
+  );
+  return affectedRows(result) === 1;
 }
 
 export async function persistFakeEffect(dataSource: DataSource, operationKey: string): Promise<void> {
@@ -61,13 +94,19 @@ export async function persistFakeEffect(dataSource: DataSource, operationKey: st
   );
 }
 
-export async function acknowledgeJob(dataSource: DataSource, jobId: string): Promise<void> {
-  await dataSource.query(
+export async function acknowledgeJob(
+  dataSource: DataSource,
+  jobId: string,
+  claimToken: string,
+): Promise<boolean> {
+  const result: unknown = await dataSource.query(
     `UPDATE m104_outbox_jobs
-     SET status = 'DONE', lease_until = NULL
-     WHERE id = ? AND status = 'RUNNING'`,
-    [jobId],
+     SET status = 'DONE', lease_until = NULL, claim_token = NULL
+     WHERE id = ? AND status = 'RUNNING' AND claim_token = ?
+       AND lease_until > UTC_TIMESTAMP(6)`,
+    [jobId, claimToken],
   );
+  return affectedRows(result) === 1;
 }
 
 export async function runWorker(

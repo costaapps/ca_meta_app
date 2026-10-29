@@ -23,6 +23,7 @@ export class M104InitialSchema1761670000000 implements MigrationInterface {
         tenant_ref VARCHAR(96) NOT NULL,
         status ENUM('PENDING', 'RUNNING', 'DONE') NOT NULL DEFAULT 'PENDING',
         attempts INT UNSIGNED NOT NULL DEFAULT 0,
+        claim_token CHAR(36) NULL,
         available_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         lease_until DATETIME(6) NULL,
         created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),

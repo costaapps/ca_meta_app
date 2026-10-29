@@ -18,7 +18,8 @@ async function main(): Promise<void> {
         process.stdout.write(`CLAIMED:${job.operation_key}\n`);
         await delay(500);
         await persistFakeEffect(dataSource, job.operation_key);
-        await acknowledgeJob(dataSource, job.id);
+        const acknowledged = await acknowledgeJob(dataSource, job.id, job.claimToken);
+        if (!acknowledged) throw new Error('worker lost its lease before ACK');
       });
     } finally {
       process.off('SIGTERM', onSigterm);
@@ -44,7 +45,8 @@ async function main(): Promise<void> {
     process.exit(73);
   }
 
-  await acknowledgeJob(dataSource, job.id);
+  const acknowledged = await acknowledgeJob(dataSource, job.id, job.claimToken);
+  if (!acknowledged) throw new Error('worker lost its lease before ACK');
   await dataSource.destroy();
 }
 
