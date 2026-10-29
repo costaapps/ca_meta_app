@@ -6,6 +6,11 @@
     "tenant": "tenant-synthetic-1",
     "channel": "WhatsApp",
     "aggregate": "asset-synthetic-1",
+    "app_config_ref": "app-config-synthetic-1",
+    "app_config_version": "synthetic-v7",
+    "credential_ref": "credential-ref-synthetic-9",
+    "credential_version": "synthetic-v3",
+    "operation": "webhook-processing",
     "owner_before": "legacy",
     "owner_after_cutover": "new",
     "owner_after_rollback": "legacy"
@@ -18,6 +23,23 @@
     "cutover": ["new"],
     "rollback": ["legacy"]
   },
+  "exclusive_writer_by_composite_key": [
+    {
+      "phase": "baseline",
+      "key": ["isolated", "tenant-synthetic-1", "WhatsApp", "asset-synthetic-1", "app-config-synthetic-1", "synthetic-v7", "credential-ref-synthetic-9", "synthetic-v3", "webhook-processing"],
+      "authorized_writers": ["legacy"]
+    },
+    {
+      "phase": "cutover",
+      "key": ["isolated", "tenant-synthetic-1", "WhatsApp", "asset-synthetic-1", "app-config-synthetic-1", "synthetic-v7", "credential-ref-synthetic-9", "synthetic-v3", "webhook-processing"],
+      "authorized_writers": ["new"]
+    },
+    {
+      "phase": "rollback",
+      "key": ["isolated", "tenant-synthetic-1", "WhatsApp", "asset-synthetic-1", "app-config-synthetic-1", "synthetic-v7", "credential-ref-synthetic-9", "synthetic-v3", "webhook-processing"],
+      "authorized_writers": ["legacy"]
+    }
+  ],
   "flags": {
     "shadow_read": true,
     "shadow_send": false,

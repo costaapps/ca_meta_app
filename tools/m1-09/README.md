@@ -1,6 +1,6 @@
 # M1.09 local validation
 
-Small Python standard-library harness for the synthetic capacity worksheet and API cutover/rollback tabletop. It uses no project dependencies, network, customer data, database, Meta sandbox or production service.
+Small Python standard-library harness for synthetic capacity and workload worksheets, the still-open pricing gate, and API cutover/rollback tabletop. It uses no project dependencies, network, customer data, database, Meta sandbox or production service.
 
 ## Requirements and command
 
@@ -9,7 +9,7 @@ Small Python standard-library harness for the synthetic capacity worksheet and A
 - PowerShell: `py -3 tools/m1-09/validate.py`.
 - No setup, lockfile or credentials are required. The verifier is read-only and creates no files, so no cleanup is needed.
 
-Expected result includes `M1.09 synthetic validation PASS`, 3 scenarios, 1 unavailable worker per row, 2 synthetic webhook items, zero external calls and zero customer data. A nonzero exit means a required equation/invariant failed.
+Expected result includes `M1.09 synthetic validation PASS`, three workload/capacity scenarios, one unavailable worker per capacity row, 27 cost rows OPEN/NOT_CONFIRMED, operation guardrails, a composite writer key including config and credential version in each tabletop phase, two synthetic webhook items, zero external calls and zero customer data. A nonzero exit means a required equation/invariant failed.
 
 ## Formulae and limits
 
@@ -22,5 +22,7 @@ Expected result includes `M1.09 synthetic validation PASS`, 3 scenarios, 1 unava
 - Estimated drain time = initial backlog ÷ (total ceiling − arrival rate), assuming steady arrivals and service during drain.
 - Required DB connections = active worker pools + API pools + migration reserve + operations reserve; headroom = synthetic budget − required.
 - Payload storage sensitivity = arrival rate × 86,400-second horizon × payload bytes/event. This is not retention policy or total physical footprint: it omits indexes, replicas, WAL, retries, backups and compression.
+- Asset count = companies × assets/company. History bytes = opt-in companies × retained history items/company/day × bytes/item × retention days. API, webhook, outbound-send and template-management rates are separate lanes; the webhook rate alone feeds the current worker-event worksheet.
+- Each cost line uses line forecast = quantity in the approved billing period × approved unit rate; total forecast is the sum of lines plus approved taxes/fees/FX not already included and contingency. Rates, billing period, currency, owner and budget cap remain NOT_CONFIRMED, so the cost gate must remain OPEN.
 
-Every scenario value (N=5 events/s, 3N, 10N, four total workers with one unavailable, concurrency 8, 0.25-second mean service, pool budget, payload and one-day horizon) is explicitly synthetic. No production traffic, target infrastructure, cost or provider quota is inferred. Worksheet: `docs/meta-v2/m1-09/capacity-model.csv`.
+Every scenario value (10/30/100 companies, asset/history/API/webhook/send/template rates; N=5 webhook events/s, 3N, 10N, four total workers with one unavailable, concurrency 8, 0.25-second mean service, pool budget, payload and one-day sizing horizon) is explicitly synthetic. No production traffic, target infrastructure, cost or provider quota is inferred. Worksheets: `docs/meta-v2/m1-09/workload-model.csv`, `capacity-model.csv`, and `cost-budget.csv`. Scale/maintenance/abort guardrail fixture: `tools/m1-09/fixtures/operations-guardrails.json`.
