@@ -63,6 +63,34 @@
     "exclude_from_availability_without_contract_clause": false,
     "webhook_success_ack_requires_durable_inbox": true
   },
+  "reauthorization_time_budget": {
+    "status": "PROPOSED",
+    "indicator": "accepted_callback_to_connection_readiness_projection_confirmed_seconds",
+    "target_percentile": "p95",
+    "target_seconds": 120,
+    "window_seconds": 900,
+    "population": "durably accepted valid reauthorization callbacks by flow and rollout cohort",
+    "over_budget_pending_counts_as_breach": true,
+    "minimum_sample_count": "NOT_CONFIRMED",
+    "measurement_source_fields": [
+      "callback_accepted_at",
+      "projection_confirmed_at",
+      "opaque_correlation_id",
+      "applied_projection_version"
+    ],
+    "confirmed_outcomes": ["READY", "PARTIAL", "FAILED"],
+    "pre_callback_user_or_meta_wait": "UNBOUNDED_NOT_CONFIRMED",
+    "provider_wait_after_callback": "included in server interval; provider-specific bound NOT_CONFIRMED",
+    "end_to_end_production_guarantee": false,
+    "load_validation_required_before_production": true,
+    "actions_on_breach": [
+      "freeze-cohort-expansion",
+      "inspect-saga-queue-provider-duration-and-projection-checkpoint",
+      "preserve-recoverable-state",
+      "do-not-assert-READY-before-projection-confirmed",
+      "resume-only-after-load-validation-and-approval"
+    ]
+  },
   "writer_key_fields": [
     "environment",
     "tenant",

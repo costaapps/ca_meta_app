@@ -9,7 +9,7 @@ Small Python standard-library harness for synthetic capacity and workload worksh
 - PowerShell: `py -3 tools/m1-09/validate.py`.
 - No setup, lockfile or credentials are required. The verifier is read-only and creates no files, so no cleanup is needed.
 
-Expected result includes `M1.09 synthetic validation PASS`, three workload/capacity scenarios, one unavailable worker per capacity row, 27 cost rows OPEN/NOT_CONFIRMED, operation guardrails, a composite writer key including config and credential version in each tabletop phase, two synthetic webhook items, zero external calls and zero customer data. A nonzero exit means a required equation/invariant failed.
+Expected result includes `M1.09 synthetic validation PASS`, three workload/capacity scenarios, one unavailable worker per capacity row, 27 cost rows OPEN/NOT_CONFIRMED, operation guardrails including a proposed p95 reauthorization budget (120 s/15 min) with pre-callback user/Meta wait explicitly unbounded and load validation required, a composite writer key including config and credential version in each tabletop phase, two synthetic webhook items, zero external calls and zero customer data. A nonzero exit means a required equation/invariant failed.
 
 ## Formulae and limits
 

@@ -206,6 +206,55 @@ def validate_operations_guardrails() -> int:
     require(maintenance["webhook_success_ack_requires_durable_inbox"] is True,
             "maintenance cannot ACK and discard a webhook")
 
+    reauth = data["reauthorization_time_budget"]
+    require(reauth["status"] == "PROPOSED",
+            "reauthorization target must remain proposed")
+    require(reauth["indicator"] == "accepted_callback_to_connection_readiness_projection_confirmed_seconds",
+            "reauthorization indicator must cover accepted callback through confirmed projection")
+    require(reauth["target_percentile"] == "p95", "reauthorization target must name a percentile")
+    close(reauth["target_seconds"], 120, "proposed reauthorization time budget")
+    close(reauth["window_seconds"], 900, "reauthorization measurement window")
+    require(reauth["over_budget_pending_counts_as_breach"] is True,
+            "pending callbacks past the budget must count as breaches")
+    require(reauth["minimum_sample_count"] == "NOT_CONFIRMED",
+            "do not invent a reauthorization sample floor")
+    required_reauth_sources = {
+        "callback_accepted_at", "projection_confirmed_at",
+        "opaque_correlation_id", "applied_projection_version",
+    }
+    require(required_reauth_sources <= set(reauth["measurement_source_fields"]),
+            "reauthorization SLI needs durable server timestamps and versioned projection source")
+    require(set(reauth["confirmed_outcomes"]) == {"READY", "PARTIAL", "FAILED"},
+            "reauthorization completion must use explicit confirmed outcomes")
+    require(reauth["pre_callback_user_or_meta_wait"] == "UNBOUNDED_NOT_CONFIRMED",
+            "pre-callback user/Meta wait must remain unbounded and unconfirmed")
+    require("NOT_CONFIRMED" in reauth["provider_wait_after_callback"],
+            "provider-specific wait bounds must remain unconfirmed")
+    require(reauth["end_to_end_production_guarantee"] is False,
+            "server-side time budget cannot claim an end-to-end production guarantee")
+    require(reauth["load_validation_required_before_production"] is True,
+            "reauthorization target requires load validation before production")
+    required_reauth_actions = {
+        "freeze-cohort-expansion", "preserve-recoverable-state",
+        "do-not-assert-READY-before-projection-confirmed",
+    }
+    require(required_reauth_actions <= set(reauth["actions_on_breach"]),
+            "reauthorization breach needs objective rollout and readiness actions")
+
+    nfr = (ROOT / "docs" / "meta-v2" / "m1-09" / "nfr.md").read_text(encoding="utf-8")
+    required_nfr_phrases = (
+        "Reautorização: callback aceito",
+        "p95 ≤120 s",
+        "janela móvel de 15 min",
+        "callback_accepted_at",
+        "projection_confirmed_at",
+        "UNBOUNDED / Not confirmed",
+        "carga sintética nas quatro modalidades",
+        "não declarar READY antes da projeção confirmada",
+    )
+    require(all(phrase in nfr for phrase in required_nfr_phrases),
+            "NFR documentation must expose the proposed reauthorization SLI and external-wait boundary")
+
     key_fields = data["writer_key_fields"]
     require({"app_config_ref", "app_config_version", "credential_ref", "credential_version"}
             <= set(key_fields),
@@ -219,7 +268,7 @@ def validate_operations_guardrails() -> int:
             "exclusive writer invariant must cover each transition phase")
     require(all(entry["exactly_one_owner_per_composite_key"] for entry in phase_guards),
             "every phase must have exactly one writer per config+credential key")
-    return len(scale) + len(tenant) + len(abort) + len(maintenance) + len(phase_guards)
+    return len(scale) + len(tenant) + len(abort) + len(maintenance) + len(phase_guards) + len(reauth)
 
 
 def validate_tabletop() -> int:
