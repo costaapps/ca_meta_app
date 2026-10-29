@@ -44,4 +44,4 @@ The harness and JSON fixture use only local versioned source and synthetic ident
 - `docs/baseline/execution-report.md`
 - `tools/baseline/trace_versioned_routes.py`
 
-These are currently uncommitted in the M1.01 worktree. They cite the tested base revision; no candidate commit SHA exists yet. The coordinator should validate this exact artifact set after creating the candidate commit and record the new SHA in delivery tracking.
+The artifacts were uncommitted when this report was first drafted and are now committed in the M1.01 package candidate. This report records the tested base revision and trace results but intentionally omits its own final commit SHA. The coordinator records the current candidate SHA, exact-candidate checks, and reviews in `docs/delivery/M1/progress.md` and the package PR.
