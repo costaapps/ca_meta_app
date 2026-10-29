@@ -1,3 +1,4 @@
+import { builtinModules, createRequire } from 'node:module';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -5,11 +6,111 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const webRoot = path.join(repositoryRoot, 'apps', 'web');
 const sourceRoot = path.join(webRoot, 'src');
-const forbiddenPackage = /^(?:@nestjs(?:\/|$)|typeorm(?:\/|$)|mysql2(?:\/|$)|mariadb(?:\/|$)|bcrypt(?:\/|$)|argon2(?:\/|$)|crypto(?:\/|$)|crypto-js(?:\/|$)|node:crypto$|node:(?:fs|path|child_process|net|tls)$)/;
+const requireFromWeb = createRequire(path.join(webRoot, 'package.json'));
+const ts = requireFromWeb('typescript');
+const forbiddenPackage = /^(?:@nestjs(?:\/|$)|typeorm(?:\/|$)|mysql2(?:\/|$)|mariadb(?:\/|$)|bcrypt(?:\/|$)|argon2(?:\/|$)|crypto(?:\/|$)|crypto-js(?:\/|$))/;
+const nodeBuiltins = new Set(builtinModules.map((name) => name.replace(/^node:/, '')));
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.mjs']);
-const importPattern = /(?:\bimport\s*(?:[^'";]*?\s+from\s*)?|\bexport\s+[^'";]*?\s+from\s*|\bimport\s*\()(['"])([^'"\r\n]+)\1/g;
 const issues = [];
 let sourceFiles = 0;
+
+function inspectSpecifier(specifier, relativePath) {
+  const builtinName = specifier.startsWith('node:') ? specifier.slice('node:'.length) : specifier;
+  if (forbiddenPackage.test(specifier) || /^@ca-meta\/api(?:\/|$)/.test(specifier) || nodeBuiltins.has(builtinName)) {
+    issues.push(`${relativePath}: forbidden server/runtime import "${specifier}"`);
+    return;
+  }
+
+  if (specifier.startsWith('.')) {
+    const absoluteFilePath = path.resolve(repositoryRoot, relativePath);
+    const resolvedPath = path.resolve(path.dirname(absoluteFilePath), specifier);
+    const inWeb = resolvedPath === webRoot || resolvedPath.startsWith(`${webRoot}${path.sep}`);
+    const inPublicContracts = resolvedPath.startsWith(`${path.join(repositoryRoot, 'packages', 'contracts')}${path.sep}`);
+    if (!inWeb && !inPublicContracts) {
+      issues.push(`${relativePath}: relative import escapes the web/public-contract boundary "${specifier}"`);
+    }
+  }
+}
+
+function inspectCall(node, relativePath) {
+  if (!ts.isCallExpression(node)) {
+    return;
+  }
+
+  const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+  const isRequireCall = ts.isIdentifier(node.expression) && node.expression.text === 'require';
+  const isModuleRequireCall = ts.isPropertyAccessExpression(node.expression)
+    && ts.isIdentifier(node.expression.expression)
+    && node.expression.expression.text === 'module'
+    && node.expression.name.text === 'require';
+  if (!isDynamicImport && !isRequireCall && !isModuleRequireCall) {
+    return;
+  }
+
+  const argument = node.arguments[0];
+  if (!argument || !ts.isStringLiteralLike(argument)) {
+    const callName = isDynamicImport ? 'dynamic import' : isModuleRequireCall ? 'module.require' : 'require';
+    issues.push(`${relativePath}: non-literal ${callName} cannot be checked against the web boundary`);
+    return;
+  }
+  inspectSpecifier(argument.text, relativePath);
+}
+
+function inspectSource(content, filePath, relativePath) {
+  const extension = path.extname(filePath);
+  const scriptKind = extension === '.tsx' ? ts.ScriptKind.TSX
+    : extension === '.jsx' ? ts.ScriptKind.JSX
+      : extension === '.js' || extension === '.mjs' ? ts.ScriptKind.JS
+        : ts.ScriptKind.TS;
+  const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true, scriptKind);
+
+  for (const diagnostic of sourceFile.parseDiagnostics) {
+    issues.push(`${relativePath}: TypeScript parser could not inspect source (code ${diagnostic.code})`);
+  }
+
+  function visit(node) {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+      && node.moduleSpecifier
+      && ts.isStringLiteralLike(node.moduleSpecifier)) {
+      inspectSpecifier(node.moduleSpecifier.text, relativePath);
+    }
+    if (ts.isImportEqualsDeclaration(node)
+      && ts.isExternalModuleReference(node.moduleReference)
+      && node.moduleReference.expression
+      && ts.isStringLiteralLike(node.moduleReference.expression)) {
+      inspectSpecifier(node.moduleReference.expression.text, relativePath);
+    }
+    inspectCall(node, relativePath);
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+}
+
+function runSelfTest() {
+  const relativePath = 'apps/web/src/__m2_boundary_self_test__.ts';
+  const filePath = path.join(repositoryRoot, ...relativePath.split('/'));
+  const checkpoint = issues.length;
+  inspectSource(`
+    import 'node:fs/promises';
+    const fromRequire = require('crypto');
+    const dynamic = import(runtimeSpecifier);
+    import './app.routes';
+  `, filePath, relativePath);
+  const findings = issues.splice(checkpoint);
+  const expectedFindings = [
+    'forbidden server/runtime import "node:fs/promises"',
+    'forbidden server/runtime import "crypto"',
+    'non-literal dynamic import',
+  ];
+  const missingFindings = expectedFindings.filter((expected) => !findings.some((finding) => finding.includes(expected)));
+  const rejectedSameAppImport = findings.some((finding) => finding.includes('relative import escapes')
+    && finding.includes('"./app.routes"'));
+  if (missingFindings.length > 0 || rejectedSameAppImport) {
+    const problems = [...missingFindings, ...(rejectedSameAppImport ? ['same-app relative import was rejected'] : [])];
+    issues.push(`Web boundary self-test failed: ${problems.join('; ')}`);
+  }
+}
 
 async function walk(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -25,32 +126,19 @@ async function walk(directory) {
 
     sourceFiles += 1;
     const content = await readFile(filePath, 'utf8');
-    for (const match of content.matchAll(importPattern)) {
-      const specifier = match[2];
-      const relativePath = path.relative(repositoryRoot, filePath).replaceAll('\\', '/');
-      if (forbiddenPackage.test(specifier) || /^@ca-meta\/api(?:\/|$)/.test(specifier)) {
-        issues.push(`${relativePath}: forbidden server/runtime import "${specifier}"`);
-        continue;
-      }
-
-      if (specifier.startsWith('.')) {
-        const resolvedPath = path.resolve(path.dirname(filePath), specifier);
-        const inWeb = resolvedPath === webRoot || resolvedPath.startsWith(`${webRoot}${path.sep}`);
-        const inPublicContracts = resolvedPath.startsWith(`${path.join(repositoryRoot, 'packages', 'contracts')}${path.sep}`);
-        if (!inWeb && !inPublicContracts) {
-          issues.push(`${relativePath}: relative import escapes the web/public-contract boundary "${specifier}"`);
-        }
-      }
-    }
+    const relativePath = path.relative(repositoryRoot, filePath).replaceAll('\\', '/');
+    inspectSource(content, filePath, relativePath);
   }
 }
 
 try {
+  runSelfTest();
   await stat(sourceRoot);
   const manifest = JSON.parse(await readFile(path.join(webRoot, 'package.json'), 'utf8'));
   const dependencies = { ...manifest.dependencies, ...manifest.devDependencies };
   for (const name of Object.keys(dependencies)) {
-    if (forbiddenPackage.test(name) || /^@ca-meta\/api(?:\/|$)/.test(name)) {
+    const builtinName = name.startsWith('node:') ? name.slice('node:'.length) : name;
+    if (forbiddenPackage.test(name) || /^@ca-meta\/api(?:\/|$)/.test(name) || nodeBuiltins.has(builtinName)) {
       issues.push(`apps/web/package.json: forbidden server/runtime dependency "${name}"`);
     }
   }

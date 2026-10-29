@@ -49,3 +49,5 @@ workspace, `npm run build`, `npm test`, `npm run typecheck`, and `npm start` add
 - `docs/meta-v2/contracts`: canonical OpenAPI and inbox/outbox source specifications.
 
 This directory move does not change backend behavior, database schema, Meta assets, or credentials.
+Desktop milestone scope, delivery gates, and handoff guidance are documented in the
+[Desktop README](docs/codex-desktop/README.md).
