@@ -14,6 +14,7 @@ O resultado desejado é um portal recorrente de gerenciamento de conexões Meta 
 | [04 · Identidade, API e segurança](04-identity-api-and-security.md) | Como entrar, autorizar ações e proteger callbacks/segredos? |
 | [05 · Quatro fluxos Meta](05-meta-flows-and-webhooks.md) | Como cada login conclui, assina eventos e recupera falhas? |
 | [06 · Entrega e migração](06-delivery-migration-and-operations.md) | Como desenvolver, empacotar, publicar, migrar, operar e voltar? |
+| [M1.09 · SLO](m1-09/nfr.md), [carga](m1-09/workload-model.csv), [capacidade](m1-09/capacity-model.csv), [controles operacionais](m1-09/capacity-controls.md), [retenção](m1-09/retention-policy.md), [transição/tabletop](m1-09/transition-strategy.md), [budget](m1-09/cost-budget.csv), [riscos](m1-09/risk-register.md) | Quais hipóteses operacionais observar, dimensionar cenários sintéticos, definir gates de custo, reter dados e transicionar com um writer? |
 | [07 · Aceite e governança](07-acceptance-risk-and-governance.md) | Qual sequência, responsáveis funcionais, riscos e provas de 100%? |
 | [08 · Project e provisionamento](08-project-configuration.md) | Como organizar campos, visões, issues, hierarquia e dependências? |
 | [Catálogo navegável](work-packages.md) | Onde está cada um dos 66 pacotes e seu vínculo no GitHub? |
