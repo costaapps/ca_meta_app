@@ -8,13 +8,14 @@ import { RequestDrainInterceptor } from './common/http/request-drain.interceptor
 import { DenyByDefaultGuard } from './common/security/deny-by-default.guard.js';
 import { CLOCK, SystemMonotonicClock } from './common/time/clock.port.js';
 import { HealthModule } from './health/health.module.js';
+import { JobsModule } from './jobs/jobs.module.js';
 
 @Module({})
 export class ApiModule {
   static register(environment: ApiEnvironment): DynamicModule {
     return {
       module: ApiModule,
-      imports: [HealthModule.register(environment)],
+      imports: [HealthModule.register(environment), JobsModule.register(environment)],
       providers: [
         { provide: STRUCTURED_LOGGER, useClass: ConsoleStructuredLogger },
         { provide: CLOCK, useClass: SystemMonotonicClock },

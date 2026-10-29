@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { MigrationEnvironmentError, readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
 import { migrationStepChecksum } from '../src/database/migrations/migration-fingerprint.js';
 import { MIGRATIONS } from '../src/database/migrations/migrations.js';
+import { DURABLE_WORK_MIGRATION } from '../src/database/migrations/durable-work.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -43,11 +44,19 @@ test('migration configuration rejects runtime account reuse and privileged built
 });
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
-  assert.equal(MIGRATIONS.length, 2);
-  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2]);
+  assert.equal(MIGRATIONS.length, 3);
+  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3]);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
+  assert.deepEqual(DURABLE_WORK_MIGRATION.steps.slice(0, 6).map((step) => step.id), [
+    'create-durable-jobs', 'create-job-attempt-history', 'create-outbox-events',
+    'create-inbox-events', 'create-job-dead-letters', 'create-replay-audit',
+  ]);
+  assert.ok(DURABLE_WORK_MIGRATION.steps.some((step) => step.id === 'replay-audit-no-update'));
+  assert.ok(DURABLE_WORK_MIGRATION.steps.some((step) => step.id === 'replay-audit-no-delete'));
+  assert.ok(DURABLE_WORK_MIGRATION.steps[0]?.definition.includes('ix_ca_meta_job_ambiguous_expired'));
+  assert.ok(DURABLE_WORK_MIGRATION.steps[0]?.definition.includes('ix_ca_meta_job_tenant_resource_active'));
 });
 
 test('migration fingerprints detect definition configuration and callback drift', () => {
