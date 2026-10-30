@@ -79,9 +79,10 @@ credentialed CORS headers. Mutations require exact same-origin `Origin` and
 `Sec-Fetch-Site: same-origin`; requests with a portal session also require the matching session-bound
 CSRF cookie/header. The initial idle/absolute expiry values are 30 minutes/eight hours; product
 and operational policy are **Not confirmed**.
-The real Suite4 iframe/browser cookie topology is **Not confirmed**; the implemented cookie policy
-supports the first-party/top-level path and does not certify cross-site embedding. The pre-auth
-endpoint rejects `SUITE4_EMBED` until M3.05 implements and validates that separate flow. Only
+The real Suite4 iframe/browser cookie topology is **Not confirmed**. `SUITE4_EMBED` pre-auth requires
+an exact HTTPS `API_SUITE4_EMBED_ORIGINS` allowlist and uses `SameSite=None; Secure; Partitioned`
+cookies; the portal/app request still must pass the exact `API_ALLOWED_ORIGINS` and same-origin
+Fetch Metadata checks. This local policy does not certify Suite4 or cross-browser behavior. Only
 `NODE_ENV=test` accepts exact loopback HTTP origins for the exchange service; production requires
 HTTPS and the same exact-origin boundary as the API middleware.
 

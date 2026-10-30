@@ -86,16 +86,23 @@ Proposta inicial por tenant; o serviço deriva papel de membership atual. Permis
 
 Papéis e permissões acima são uma política proposta para M2, não roles recebidas/confirmadas do Suite4. Grants reais, delegação de admin/owner, fronteira dos serviços e política de suporte são **Not confirmed**.
 
-## Handshake de embed proposto
+## Handshake de embed e retorno OAuth
 
 | Direção | Mensagem | Campos | Verificações |
 |---|---|---|---|
-| child → parent | `EMBED_READY` | `version=1`, `nonce`, `requestId` | Child envia apenas a `targetOrigin` exata configurada |
-| parent → child | `EMBED_BOOTSTRAP` | `version=1`, nonce correspondente, ticket curto | `event.origin` e `event.source` exatos; schema allowlist; nonce recente, pendente e de uso único; ticket trocado server-side |
-| child → parent | `EMBED_ACK` | `version=1`, requestId, status público | Enviado à mesma origem exata; sem tenant secreto, cookie ou token Meta |
-| ambos | resize/theme/navigation | payload tipado pequeno e versão conhecida | Esquema específico; sem URL livre, comando de administração ou segredo |
+| child → parent | `EMBED_READY` | `version=1`, `nonce`, `correlationId`, `requestId` | Child envia apenas a `targetOrigin` exata configurada; cria pre-auth antes do handshake |
+| parent → child | `EMBED_BOOTSTRAP` | IDs correspondentes e um ticket curto | `event.origin` e `event.source === window.parent` exatos; schema fechado; nonce pendente, expira em 60s e é usado uma vez; sem tenant/context/URL |
+| child → parent | `EMBED_ACK` | IDs correspondentes e estado público pequeno | Enviado à mesma origem; sem tenant, cookie, ticket ou token Meta |
+| parent → child | `NAVIGATION_REQUEST`, atualização de tema | IDs correspondentes e enum de rota/tema | Rotas locais fixas, tema `light`/`dark`/`system`, sem URL ou CSS arbitrários |
+| child → parent | `RESIZE` | IDs correspondentes e altura inteira | `targetOrigin` exato e altura limitada a 240–4096px |
 
-Sem suporte a terceiro cookie, o estado é `TOP_LEVEL_REQUIRED` e a retomada ocorre em navegação top-level consentida. `frame-ancestors`, CSP, sandbox, domínio exato, callback e comportamento de popup precisam ser acordados com Suite4 antes de ativar iframe.
+O child troca o ticket em `POST /api/v1/auth/exchanges` com seu `challengeRef` em memória e confirma a sessão em `GET /api/v1/session`. Principal, tenant, roles e permissões vêm do ticket assinado e do membership ativo no servidor. O child guarda o contexto só em memória e ignora qualquer pedido de troca de tenant vindo do Suite4; onboardings ficam ligados ao tenant inicial do servidor.
+
+Pre-auth e sessão de embed usam cookies `Secure; SameSite=None; Partitioned`. Sessões top-level preservam suas políticas Lax/Strict. Se a sessão não puder ser confirmada após o exchange, o child pede retomada top-level. Suporte de navegador e comportamento de cookies do Suite4 permanecem **Not confirmed**.
+
+A janela de autorização abre só uma URL HTTPS retornada pelo servidor cujo origin exato está configurado. Popup bloqueado ou fechado mostra recuperação; fechar não confirma sucesso. O callback permitido é `/oauth/return?onboardingRef=<opaque-id>`. A página remove a query do histórico e envia somente o ID opaco ao opener. O child aceita o sinal apenas do popup registrado e do origin exato do portal, confere o onboarding pendente e consulta `/api/v1/onboarding-sessions/{id}`. Só a resposta de servidor com `status=READY` e `readiness=READY` mostra sucesso; `auth_success`, `FINISH`, redirect e fechamento do popup não são prova. O endpoint M3.05 usa um reader indisponível até a entrega de persistência do onboarding e responde 503 neste base.
+
+`API_SUITE4_EMBED_ORIGINS` e `WEB_SUITE4_EMBED_ORIGINS` são listas públicas separadas de origins HTTPS exatos e devem coincidir. Sem a lista no web runtime, CSP emite `frame-ancestors 'none'`; sem a lista de API, pre-auth embed é recusado. `API_ALLOWED_ORIGINS` continua a validar o origin do portal/app na API e o Fetch Metadata: uma chamada fetch originada dentro de iframe apresenta o origin do child, não o ancestor Suite4. Nenhuma rota confia em `parentOrigin` enviado pelo cliente. Origins Suite4/provedor, issuer/claims/chaves reais, sandbox e callback deployed seguem **Not confirmed**.
 
 ## Cenários e rastreabilidade
 

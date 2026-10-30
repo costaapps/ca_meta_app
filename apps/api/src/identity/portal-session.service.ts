@@ -22,7 +22,7 @@ export interface StartedPortalPreAuth {
   readonly challengeRef: string;
   readonly cookieValue: string;
   readonly expiresAt: string;
-  readonly entryMode: 'PORTAL_TOP_LEVEL';
+  readonly entryMode: 'PORTAL_TOP_LEVEL' | 'SUITE4_EMBED';
 }
 
 export interface PortalSessionIssueOptions {
@@ -54,6 +54,8 @@ export interface IssuedPortalSession {
   readonly tenantId: string;
   readonly expiresAt: string;
   readonly publicContext: PortalSessionPublicContext;
+  /** Set only when the pre-auth capability was created for the Suite4 embed mode. */
+  readonly cookiePartitioned?: boolean;
 }
 
 export interface PortalSessionRecord {
@@ -123,7 +125,7 @@ export interface PortalSessionStore {
 }
 
 export abstract class PortalPreAuthService {
-  abstract begin(): Promise<StartedPortalPreAuth>;
+  abstract begin(entryMode?: 'PORTAL_TOP_LEVEL' | 'SUITE4_EMBED'): Promise<StartedPortalPreAuth>;
   abstract verifyBrowserBinding(challengeRef: string | undefined, preAuthCookie: string | undefined): Promise<VerifiedPortalPreAuth | undefined>;
 }
 
@@ -180,16 +182,16 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
     if (Buffer.byteLength(recoveryKey, 'utf8') < 32) throw new Error('Portal session recovery key must contain at least 32 bytes.');
   }
 
-  async begin(): Promise<StartedPortalPreAuth> {
+  async begin(entryMode: 'PORTAL_TOP_LEVEL' | 'SUITE4_EMBED' = 'PORTAL_TOP_LEVEL'): Promise<StartedPortalPreAuth> {
     const challengeRef = randomBytes(32).toString('base64url');
     const cookieValue = randomBytes(32).toString('base64url');
     const expiresAt = await this.store.createPreAuth({
       id: randomUUID(),
       challengeHash: digestHex(challengeRef),
       browserCookieHash: digestHex(cookieValue),
-      entryMode: 'PORTAL_TOP_LEVEL',
+      entryMode,
     });
-    return Object.freeze({ challengeRef, cookieValue, expiresAt: expiresAt.toISOString(), entryMode: 'PORTAL_TOP_LEVEL' });
+    return Object.freeze({ challengeRef, cookieValue, expiresAt: expiresAt.toISOString(), entryMode });
   }
 
   async verifyBrowserBinding(challengeRef: string | undefined, preAuthCookie: string | undefined): Promise<VerifiedPortalPreAuth | undefined> {
@@ -252,6 +254,7 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
       tenantId: record.tenantId,
       expiresAt: record.expiresAt,
       publicContext,
+      ...(options.preAuth.entryMode === 'SUITE4_EMBED' ? { cookiePartitioned: true } : {}),
     });
   }
 
@@ -320,28 +323,39 @@ export function readPortalCookie(header: string | undefined, name: string): stri
   return matches[0];
 }
 
-function cookie(value: string, options: { readonly httpOnly: boolean; readonly maxAgeSeconds: number; readonly sameSite?: 'Lax' | 'Strict' }): string {
+function cookie(value: string, options: { readonly httpOnly: boolean; readonly maxAgeSeconds: number; readonly sameSite?: 'Lax' | 'Strict' | 'None'; readonly partitioned?: boolean }): string {
   const safe = /^[A-Za-z0-9._~-]*$/.test(value);
   if (!safe || !Number.isSafeInteger(options.maxAgeSeconds) || options.maxAgeSeconds < 0) throw new Error('Invalid portal cookie value.');
-  return `${PORTAL_SESSION_COOKIE}=${value}; Path=/; Max-Age=${options.maxAgeSeconds}; Secure; SameSite=${options.sameSite ?? 'Lax'}${options.httpOnly ? '; HttpOnly' : ''}`;
+  return `${PORTAL_SESSION_COOKIE}=${value}; Path=/; Max-Age=${options.maxAgeSeconds}; Secure; SameSite=${options.sameSite ?? 'Lax'}${options.partitioned ? '; Partitioned' : ''}${options.httpOnly ? '; HttpOnly' : ''}`;
 }
 
-function serializeNamedCookie(name: string, value: string, options: { readonly httpOnly: boolean; readonly maxAgeSeconds: number; readonly sameSite?: 'Lax' | 'Strict' }): string {
+function serializeNamedCookie(name: string, value: string, options: { readonly httpOnly: boolean; readonly maxAgeSeconds: number; readonly sameSite?: 'Lax' | 'Strict' | 'None'; readonly partitioned?: boolean }): string {
   const safe = /^[A-Za-z0-9._~-]*$/.test(value);
   if (!safe || !Number.isSafeInteger(options.maxAgeSeconds) || options.maxAgeSeconds < 0) throw new Error('Invalid portal cookie value.');
-  return `${name}=${value}; Path=/; Max-Age=${options.maxAgeSeconds}; Secure; SameSite=${options.sameSite ?? 'Lax'}${options.httpOnly ? '; HttpOnly' : ''}`;
+  return `${name}=${value}; Path=/; Max-Age=${options.maxAgeSeconds}; Secure; SameSite=${options.sameSite ?? 'Lax'}${options.partitioned ? '; Partitioned' : ''}${options.httpOnly ? '; HttpOnly' : ''}`;
 }
 
 export function setPortalSessionCookies(response: Response, issued: IssuedPortalSession): void {
   const maxAgeSeconds = Math.max(0, Math.floor((Date.parse(issued.expiresAt) - Date.now()) / 1000));
-  response.append('Set-Cookie', cookie(issued.sessionCookie, { httpOnly: true, maxAgeSeconds }));
-  response.append('Set-Cookie', serializeNamedCookie(PORTAL_CSRF_COOKIE, issued.csrfToken, { httpOnly: false, maxAgeSeconds, sameSite: 'Strict' }));
-  response.append('Set-Cookie', serializeNamedCookie(PORTAL_CONTEXT_COOKIE, issued.contextRef, { httpOnly: false, maxAgeSeconds }));
+  const cookieMode = issued.cookiePartitioned
+    ? { sameSite: 'None' as const, partitioned: true }
+    : { sameSite: 'Lax' as const };
+  response.append('Set-Cookie', cookie(issued.sessionCookie, { httpOnly: true, maxAgeSeconds, ...cookieMode }));
+  response.append('Set-Cookie', serializeNamedCookie(PORTAL_CSRF_COOKIE, issued.csrfToken, {
+    httpOnly: false, maxAgeSeconds, sameSite: issued.cookiePartitioned ? 'None' : 'Strict',
+    ...(issued.cookiePartitioned ? { partitioned: true } : {}),
+  }));
+  response.append('Set-Cookie', serializeNamedCookie(PORTAL_CONTEXT_COOKIE, issued.contextRef, { httpOnly: false, maxAgeSeconds, ...cookieMode }));
 }
 
 export function setPortalPreAuthCookie(response: Response, started: StartedPortalPreAuth): void {
   const maxAgeSeconds = Math.max(0, Math.floor((Date.parse(started.expiresAt) - Date.now()) / 1000));
-  response.append('Set-Cookie', serializeNamedCookie(PORTAL_PREAUTH_COOKIE, started.cookieValue, { httpOnly: true, maxAgeSeconds }));
+  const cookieMode = started.entryMode === 'SUITE4_EMBED'
+    ? { sameSite: 'None' as const, partitioned: true }
+    : { sameSite: 'Lax' as const };
+  response.append('Set-Cookie', serializeNamedCookie(PORTAL_PREAUTH_COOKIE, started.cookieValue, {
+    httpOnly: true, maxAgeSeconds, ...cookieMode,
+  }));
 }
 
 export function setPortalContextCookies(response: Response, contextRef: string, csrfToken: string, expiresAt: string): void {
@@ -358,6 +372,7 @@ export function clearPortalSessionCookies(response: Response): void {
     [PORTAL_PREAUTH_COOKIE, true, 'Lax'],
   ] as const) {
     response.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; Secure; SameSite=${sameSite}${httpOnly ? '; HttpOnly' : ''}`);
+    response.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; Secure; SameSite=None; Partitioned${httpOnly ? '; HttpOnly' : ''}`);
   }
 }
 

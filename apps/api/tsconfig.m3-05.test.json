@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-m3-05-test",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/m3-02-preauth.spec.ts",
+    "test/m3-05-*.spec.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-test", "dist-m3-05-test"]
+}

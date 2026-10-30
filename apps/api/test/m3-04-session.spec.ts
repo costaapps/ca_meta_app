@@ -263,7 +263,7 @@ async function invokeMiddleware(
 test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismatches', async () => {
   const env = {
     nodeEnv: 'test', port: 3000, bindAddress: '127.0.0.1', allowedHosts: ['portal.example'],
-    allowedOrigins: ['https://portal.example'], trustedProxyCidrs: false,
+    allowedOrigins: ['https://portal.example'], suite4EmbedOrigins: [], trustedProxyCidrs: false,
     portalSessionRecoveryKey: recoveryKey,
     portalSessionIdleTimeoutSeconds: 1800,
     portalSessionAbsoluteTimeoutSeconds: 28800,
