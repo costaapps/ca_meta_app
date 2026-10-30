@@ -37,6 +37,9 @@ jobs:
           node-version: 24.22.2
           cache: npm
           cache-dependency-path: package-lock.json
+      - name: Validate M2.09 release and scan evidence contracts when present
+        if: hashFiles('tools/m2-09/test-release-contract.mjs') != ''
+        run: node tools/m2-09/test-release-contract.mjs
       - name: Pin npm and verify toolchain
         run: |
           npm install --global npm@11.19.1
