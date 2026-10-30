@@ -115,7 +115,20 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - mariadb-admin ping --protocol=socket --user=root --password="$$(cat /run/secrets/mariadb_root_password)" --silent
+        - >-
+          set -eu;
+          umask 077;
+          defaults_file="$$(mktemp /tmp/ca-meta-mariadb-health.XXXXXX)";
+          trap 'rm -f "$$defaults_file"' EXIT;
+          trap 'exit 129' HUP;
+          trap 'exit 130' INT;
+          trap 'exit 143' TERM;
+          {
+            printf '%s\n' '[client]' 'user=root' 'protocol=socket';
+            printf 'password=%s\n' "$$(cat /run/secrets/mariadb_root_password)";
+          } > "$$defaults_file";
+          chmod 600 "$$defaults_file";
+          mariadb-admin --defaults-extra-file="$$defaults_file" --protocol=socket --user=root ping --silent
       interval: 5s
       timeout: 3s
       start_period: 20s

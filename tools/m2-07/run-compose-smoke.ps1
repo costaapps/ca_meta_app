@@ -157,8 +157,24 @@ function Assert-NoPublishedPorts {
 function Invoke-DbQuery {
   param([string]$Sql)
   $container = Get-ContainerInfo -Service 'database'
-  $output = & docker exec --user root $container.Id mariadb --protocol=socket --user=root --database $databaseName --batch --skip-column-names --execute $Sql 2>&1
-  if ($LASTEXITCODE -ne 0) { throw 'The isolated development database query failed; output suppressed.' }
+  $clientCommand = @'
+set -eu
+umask 077
+defaults_file="$(mktemp /tmp/ca-meta-mariadb-smoke.XXXXXX)"
+trap 'rm -f "$defaults_file"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+{
+  printf '%s\n' '[client]' 'user=root' 'protocol=socket'
+  printf 'password=%s\n' "$(cat /run/secrets/mariadb_root_password)"
+} > "$defaults_file"
+chmod 600 "$defaults_file"
+mariadb --defaults-extra-file="$defaults_file" --protocol=socket --user=root --database "$1" --batch --skip-column-names --execute "$2"
+'@
+  $output = & docker exec --user root $container.Id sh -ec $clientCommand -- $databaseName $Sql 2>&1
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) { throw 'The isolated development database query failed; output suppressed.' }
   return (@($output) -join '').Trim()
 }
 
