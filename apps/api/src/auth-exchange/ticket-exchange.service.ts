@@ -26,6 +26,7 @@ export interface ExchangeRequest {
 }
 
 export interface SessionContextResponse {
+  readonly sessionRef?: string;
   readonly principalRef: string;
   readonly tenantRef: string;
   readonly roles: readonly MembershipRole[];
@@ -41,6 +42,7 @@ export interface ExchangeRequestContext {
 }
 
 const SAFE_ROLES = new Set<MembershipRole>(['owner', 'admin', 'operator', 'viewer']);
+const SESSION_REF_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function unauthorized(): never {
   throw new UnauthorizedException();
@@ -56,6 +58,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function invalidRequest(): never {
   throw new BadRequestException();
+}
+
+function rateLimitRetryAfterSeconds(error: unknown): number | undefined {
+  if (error instanceof PortalExchangeRateLimitedError) return error.retryAfterSeconds;
+  return isRecord(error) && error.code === 'RATE_LIMITED' ? 60 : undefined;
 }
 
 function parseExchangeRequest(value: unknown): ExchangeRequest {
@@ -116,8 +123,10 @@ function assertRequestOrigin(context: ExchangeRequestContext, allowedOrigins: Re
 function safePublicContext(issued: IssuedPortalSession, requestId: string): SessionContextResponse {
   const context = issued.publicContext;
   const roles = context?.roles;
+  const sessionRef = context?.sessionRef;
   if (
     !context ||
+    (sessionRef !== undefined && (typeof sessionRef !== 'string' || !SESSION_REF_PATTERN.test(sessionRef))) ||
     !context.principalRef || context.principalRef.length > 128 ||
     !context.tenantRef || context.tenantRef !== issued.tenantId || context.tenantRef.length > 128 ||
     !context.tenantContextRef || context.tenantContextRef.length < 16 || context.tenantContextRef.length > 512 ||
@@ -129,6 +138,7 @@ function safePublicContext(issued: IssuedPortalSession, requestId: string): Sess
     unavailable();
   }
   return Object.freeze({
+    ...(sessionRef !== undefined ? { sessionRef } : {}),
     principalRef: context.principalRef,
     tenantRef: context.tenantRef,
     roles: Object.freeze([...roles]),
@@ -178,8 +188,9 @@ export class TicketExchangeService {
         actor: `${ticket.assertion.issuer}\0${ticket.assertion.subject}`,
       });
     } catch (error) {
-      if (error instanceof PortalExchangeRateLimitedError) {
-        response.setHeader('Retry-After', String(error.retryAfterSeconds));
+      const retryAfterSeconds = rateLimitRetryAfterSeconds(error);
+      if (retryAfterSeconds !== undefined) {
+        response.setHeader('Retry-After', String(retryAfterSeconds));
         throw new HttpException('Request limit exceeded.', HttpStatus.TOO_MANY_REQUESTS);
       }
       unavailable();
@@ -222,12 +233,14 @@ export class TicketExchangeService {
       unavailable();
     }
 
+    const publicContext = safePublicContext(issued, context.requestId);
+
     // Session material is only written to Set-Cookie; it never enters this response DTO.
     try {
       this.cookieWriter.set(response, issued);
     } catch {
       unavailable();
     }
-    return safePublicContext(issued, context.requestId);
+    return publicContext;
   }
 }

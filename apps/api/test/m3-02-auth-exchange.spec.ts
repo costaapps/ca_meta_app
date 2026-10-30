@@ -111,6 +111,7 @@ class FakeSessions implements PortalSessionIssuerPort {
   readonly assertions: VerifiedIdentityAssertion[] = [];
   readonly requestedTenants: string[] = [];
   readonly options: PortalSessionIssueOptions[] = [];
+  sessionRef: string | undefined = '91b2ef8b-2763-4dca-b3d4-845f7223949d';
   issueCount = 0;
   denyMembership = false;
 
@@ -136,6 +137,7 @@ class FakeSessions implements PortalSessionIssuerPort {
       tenantId: requestedTenantId,
       expiresAt: new Date(NOW + 3_600_000).toISOString(),
       publicContext: {
+        ...(this.sessionRef !== undefined ? { sessionRef: this.sessionRef } : {}),
         principalRef: 'principal-reference-pseudonymous',
         tenantRef: requestedTenantId,
         roles,
@@ -158,9 +160,11 @@ class FakeSessionVerifier implements PortalSessionVerifierPort {
 class FakeAbuseLimit implements PortalExchangeAbuseLimitPort {
   readonly calls: { bucket: 'PORTAL_EXCHANGE'; ip: string; actor: string }[] = [];
   deny = false;
+  failure: unknown;
 
   async consume(bucket: 'PORTAL_EXCHANGE', dimensions: { readonly ip: string; readonly actor: string }): Promise<void> {
     this.calls.push({ bucket, ...dimensions });
+    if (this.failure !== undefined) throw this.failure;
     if (this.deny) throw new PortalExchangeRateLimitedError();
   }
 }
@@ -238,10 +242,11 @@ test('valid signed ticket creates a session with only server membership roles in
   );
 
   assert.equal(result.tenantRef, 'tenant-a');
+  assert.equal(result.sessionRef, '91b2ef8b-2763-4dca-b3d4-845f7223949d');
   assert.deepEqual(result.roles, ['viewer']);
   assert.equal(result.principalRef, 'principal-reference-pseudonymous');
   assert.equal(result.requestId, 'request-123');
-  assert.deepEqual(Object.keys(result).sort(), ['contextVersion', 'principalRef', 'requestId', 'roles', 'tenantContextRef', 'tenantRef']);
+  assert.deepEqual(Object.keys(result).sort(), ['contextVersion', 'principalRef', 'requestId', 'roles', 'sessionRef', 'tenantContextRef', 'tenantRef']);
   assert.equal(JSON.stringify(result).includes(SESSION_COOKIE), false);
   assert.equal(JSON.stringify(result).includes(RAW_JTI), false);
   assert.equal(JSON.stringify(result).includes(RAW_CHALLENGE), false);
@@ -327,6 +332,51 @@ test('exchange abuse limit uses request IP and the verified issuer/subject, and 
   assert.equal(sessions.issueCount, 1);
   assert.equal(cookieWriter.setCalls, 1);
   assert.equal(deniedResponse.headers.get('retry-after'), '60');
+});
+
+test('stable rate-limit boundary code maps to 429 with a safe Retry-After', async () => {
+  const abuseLimit = new FakeAbuseLimit();
+  abuseLimit.failure = Object.assign(new Error('safe boundary detail'), { code: 'RATE_LIMITED' });
+  const { service, sessions, cookieWriter } = makeService({ abuseLimit });
+  const deniedResponse = makeResponse();
+
+  await assert.rejects(
+    service.exchange({ ticket: makeTicket(), challengeRef: 'preauth-reference-123' }, context(), deniedResponse.response),
+    (error: unknown) => {
+      assert.equal(typeof error === 'object' && error !== null && 'getStatus' in error && typeof error.getStatus === 'function' && error.getStatus(), 429);
+      assert.equal(JSON.stringify(error).includes('safe boundary detail'), false);
+      return true;
+    },
+  );
+
+  assert.equal(deniedResponse.headers.get('retry-after'), '60');
+  assert.equal(sessions.issueCount, 0);
+  assert.equal(cookieWriter.setCalls, 0);
+});
+
+test('sessionRef is optional for older issuers and malformed values fail before cookies are written', async () => {
+  const withoutSessionRef = new FakeSessions();
+  withoutSessionRef.sessionRef = undefined;
+  const legacyService = makeService({ sessions: withoutSessionRef }).service;
+  const legacyResult = await legacyService.exchange(
+    { ticket: makeTicket(), challengeRef: 'preauth-reference-123' },
+    context(),
+    makeResponse().response,
+  );
+  assert.equal('sessionRef' in legacyResult, false);
+
+  const malformedSessions = new FakeSessions();
+  malformedSessions.sessionRef = 'not-an-opaque-session-uuid';
+  const malformed = makeService({ sessions: malformedSessions });
+  await assert.rejects(
+    malformed.service.exchange(
+      { ticket: makeTicket(), challengeRef: 'preauth-reference-123' },
+      context(),
+      makeResponse().response,
+    ),
+    (error: unknown) => typeof error === 'object' && error !== null && 'getStatus' in error && typeof error.getStatus === 'function' && error.getStatus() === 503,
+  );
+  assert.equal(malformed.cookieWriter.setCalls, 0);
 });
 
 test('unsigned, unsupported, URL-selected, malformed and forged tickets are rejected before session issuance', async (t) => {

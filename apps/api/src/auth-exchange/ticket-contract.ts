@@ -41,6 +41,7 @@ export interface PortalSessionIssueOptions {
 }
 
 export interface PortalSessionPublicContext {
+  readonly sessionRef?: string;
   readonly principalRef: string;
   readonly tenantRef: string;
   readonly roles: readonly MembershipRole[];
