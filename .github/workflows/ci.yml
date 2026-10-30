@@ -40,6 +40,9 @@ jobs:
       - name: Validate M2.09 release and scan evidence contracts when present
         if: hashFiles('tools/m2-09/test-release-contract.mjs') != ''
         run: node tools/m2-09/test-release-contract.mjs
+      - name: Run M2.10 synthetic staging preflight when present
+        if: hashFiles('tools/m2-10/run-preflight-smoke.mjs') != ''
+        run: node tools/m2-10/run-preflight-smoke.mjs
       - name: Pin npm and verify toolchain
         run: |
           npm install --global npm@11.19.1
