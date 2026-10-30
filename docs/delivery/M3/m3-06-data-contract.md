@@ -1,0 +1,51 @@
+# M3.06 — authorization, asset and grant persistence
+
+## Delivered contract
+
+META_ASSETS_MIGRATION in apps/api/src/database/migrations/meta-assets.ts is schema version 6 (202610300003-meta-assets-grants-relations). Version 5 is reserved for M3.04. The migration is additive and restartable through the M2.03 migration ledger. It creates authorization, secret-free credential metadata, confirmed scopes, asset-authorization links, asset grants, typed relations, append-only history, verified global identity claims and tenant-local quarantine records. It also adds a composite tenant/app/environment key to the existing assets table.
+
+MetaAssetsModule.register(environment) is defined in apps/api/src/meta-assets/meta-assets.module.ts. It imports and re-exports JobsModule, so the root API module can replace its direct JobsModule.register(environment) import with MetaAssetsModule.register(environment) and avoid creating a second durable-work database/outbox pool. The module exports META_ASSETS_REPOSITORY. Registration is intentionally left to the milestone coordinator because M3.04 owns the shared API module and migration registry.
+
+Coordinator wiring after M3.04 lands:
+
+1. Import META_ASSETS_MIGRATION and META_ASSETS_TABLES from apps/api/src/database/migrations/meta-assets.js.
+2. Append META_ASSETS_MIGRATION after the M3.04 version-5 migration in migrationsWithoutChecksums; retain migration schema versions 1–6 in order.
+3. Include ...META_ASSETS_TABLES in DOMAIN_TABLES.
+4. Replace the root JobsModule.register(environment) with MetaAssetsModule.register(environment) (it re-exports JobsModule) and import MetaAssetsModule from ./meta-assets/meta-assets.module.js.
+5. Keep M3.04's session provider and migration intact; do not edit either package's version/checksum to make a registry test pass.
+
+## Tenant and evidence rules
+
+- All Meta external identifiers remain opaque strings (VARCHAR, up to 512 characters); leading zeroes and values above JavaScript's safe integer range are preserved.
+- The asset table's natural key remains tenant + app configuration + environment + provider + kind + external ID. Reauthorization reuses the same tenant asset row and preserves its internal ID.
+- display_name is a local display field and is never overwritten by this provider upsert. Confirmed provider names update external_name.
+- Browser claims create a CLAIMED relation and cannot write granted scopes, asset grants, typed relations, provider authorization IDs or a verified global ownership claim. Existing confirmed scopes and authorization state are preserved on a browser-only observation.
+- Only trusted provider adapters can issue the in-process VerifiedMetaEvidence capability. Its reference is stored as a SHA-256 digest; the provider payload/reference is not stored.
+- The first verified claim reserves the app/provider/environment/kind/external-ID identity. A claim from another tenant is stored in that tenant's quarantine with CROSS_TENANT_VERIFIED_OWNER; it does not create or reassign an asset. The owning tenant ID is not copied into the quarantined candidate. Cross-tenant fanout remains disallowed until product evidence changes this policy.
+- Same-tenant assets may be related to multiple authorizations. PHONE_TO_ACCOUNT and INSTAGRAM_TO_PAGE are verified relation types; an Instagram account does not require a Facebook relation.
+- Composite FKs include tenant, authorization, app, provider and environment. An AssetAuthorization cannot connect an asset, authorization or credential from different tenants or app contexts.
+- ca_meta_credentials contains metadata only. M3.07 owns ciphertext, key versions and credential rotation; it should extend this table rather than create a parallel credential model.
+- Exact legacy asset references remain strings in ca_meta_asset_legacy_refs, are attached only by SERVICE/SYSTEM actors, and must match the tenant's existing ca_meta_tenant_legacy_maps row. Their source DDL semantics are Not confirmed; these are references only, not imported state.
+- Authorization/asset history and quarantine are append-only. Application rollback is compatible with these additive tables; automatic destructive down migration is intentionally absent.
+
+## Read and event contract
+
+MetaAssetsRepository.listReadModels selects only explicit public metadata columns. The allowlisted AuthorizationReadModel / AssetReadModel has no credential/token/ciphertext property. Authorization, asset verification, subscription and projection states are distinct; subscription and projection start at UNKNOWN until their owning integrations update them.
+
+A successful state change calls the existing OutboxService.appendWithin with the same TypeORM EntityManager and transaction used for authorization, asset, grant and history writes. It emits the existing connection.changed envelope (no outbox schema change). A failed commit therefore rolls back both domain rows and delivery intent. Cross-tenant asset claims report a PARTIAL connection event when the authorization itself is active.
+
+## Reproducible local unit harness
+
+Prerequisites: Node 24.22.2, npm 11.19.1 and the existing npm workspace install. This package adds no dependencies or lockfile changes.
+
+From the repository root, with the project Node runtime on PATH:
+
+- npm run typecheck --workspace=@ca-meta/api
+- npm run build --workspace=@ca-meta/api
+- npx tsc -p apps/api/tsconfig.test.json
+- node --test apps/api/dist-test/test/m3-06-meta-assets.spec.js
+
+Expected result: strict API/test compilation and the focused M3.06 Node test file pass. No database, provider account or production resource is needed for these unit checks. The generated API dist and dist-test directories are ignored build output.
+After these checks, run tools/m3-06/cleanup.ps1 to remove only those two local output directories; it refuses linked or out-of-worktree targets.
+
+The MariaDB migration/FK/concurrent-upsert scenarios remain an integration gate for the coordinator's writable disposable database / exact PR CI run. They were not executed in this implementation worktree. Do not report a local unit test as MariaDB evidence. Actual Meta grants and real asset ownership remain Not confirmed; only synthetic provider evidence is covered here.
