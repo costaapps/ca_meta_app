@@ -14,6 +14,7 @@ npm ci --ignore-scripts
 npm rebuild @pb33f/openapi-changes --workspace=@ca-meta/contracts
 npm run lint
 npm run typecheck
+node tools/m2-08/prepare-test-reports.mjs
 npm test -- --watch=false
 npm run build
 python -B tools/m1-10/check_governance.py
@@ -34,7 +35,7 @@ pwsh -NoLogo -NoProfile -File tools/m2-05/run-mariadb-tests.ps1
 pwsh -NoLogo -NoProfile -File tools/m2-06/run-container-smoke.ps1
 ```
 
-The M2.03 integration suite consumes `fixtures/tenant-isolation-negative.json`: a tenant-B read of tenant A's synthetic asset returns no row, and an asset from tenant B cannot reference tenant A's app configuration. The existing MariaDB test fails if either isolation assertion stops holding. No provider credentials or real tenant data are used.
+The M2.03 integration suite consumes `fixtures/tenant-isolation-negative.json` to attempt a synthetic tenant-B asset insert referencing tenant A's app configuration; MariaDB must reject it through the composite tenant foreign key. This is database referential-integrity evidence only and does not establish application-level read authorization. No provider credentials or real tenant data are used.
 
 CI calls the M2.06 smoke with `-KeepImages`. On full smoke success only, it exposes the two locally built tags to Trivy, scans each independently with Trivy `v0.76.1` for OS/library vulnerabilities, then removes those exact tags. The scan fails on any HIGH/CRITICAL finding. The image labels record the same source commit SHA; neither tag is pushed to a registry.
 
@@ -61,10 +62,12 @@ The local security reports are written under `artifacts/security/`, ignored by G
 
 ## Checks and branch protection
 
+The candidate and MariaDB jobs retain Angular/API JUnit reports and API LCOV coverage reports for 7 days, including synthetic integration-run reports where produced. The workflow uses the existing Angular Vitest JUnit reporter and Node 24's native JUnit/LCOV reporters; it adds no test-reporter dependency and sets no coverage threshold. Angular reports to `artifacts/test-results/web.junit.xml`; API reports to `artifacts/test-results/api.junit.xml` and `api.lcov.info`; the M2.05 database test writes distinct `m2-05-durable-work.*` reports. Reports contain test metadata/stack traces and source coverage paths, not customer payloads; tests here use synthetic fixtures.
+
 The workflow defines stable checks named `desktop-candidate`, `m2-08-mariadb`, `m2-08-security`, and `m2-08-images`. The existing `m1-07-contract` check is conditional on its contract paths. A check appearing in Actions only proves that the workflow ran; it does **not** prove that GitHub branch protection or a ruleset requires it.
 
 Repository administrators should inspect Settings → Rules → Rulesets / Branch protection and explicitly require the intended checks on `develop` and `main` (if `main` is used), with the protected branch names matched to actual repository practice. For milestone branches, apply the same required checks if they are intended to be protected. Verify the exact check names from a completed run before selecting them. This package does not read or change branch protection, and no protection is claimed as enabled by this change.
 
 ## Reports and retention
 
-CI uploads `artifacts/security/` even after a failing scan when any report exists. The `m2-08-security-<commit>` and `m2-08-images-<commit>` artifacts have a 14-day retention. The secret report omits matched content and tokens; the npm report includes only advisory metadata, package names/paths and version ranges; the Trivy run scans vulnerabilities only and does not enable image secret/config scanning. Workflow logs suppress scanner payloads. Actions log retention is controlled by the repository/organization setting and cannot be set per workflow here; administrators should verify its current value alongside branch protection.
+CI uploads `artifacts/security/` even after a failing scan when any report exists. The `m2-08-security-<commit>` and `m2-08-images-<commit>` artifacts have a 14-day retention; test-report artifacts have a 7-day retention. The secret report omits matched content and tokens; the npm report includes only advisory metadata, package names/paths and version ranges; the Trivy run scans vulnerabilities only and does not enable image secret/config scanning. Workflow logs suppress scanner payloads. Actions log retention is controlled by the repository/organization setting and cannot be set per workflow here; administrators should verify its current value alongside branch protection.

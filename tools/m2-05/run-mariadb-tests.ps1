@@ -100,7 +100,16 @@ try {
   try {
     Invoke-Checked -FilePath 'docker' -ArgumentList @('compose', '-p', $composeProject, '-f', $composeFile, 'up', '-d', '--wait')
     Invoke-Checked -FilePath $npmCommand -ArgumentList @('exec', '--workspace=@ca-meta/api', '--', 'tsc', '-p', 'tsconfig.test.json')
-    Invoke-Checked -FilePath $nodeCommand -ArgumentList @('--test', 'apps/api/dist-test/test/durable-work.integration.spec.js')
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m2-08/prepare-test-reports.mjs')
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
+      '--test',
+      '--experimental-test-coverage',
+      '--test-reporter=junit',
+      '--test-reporter=lcov',
+      '--test-reporter-destination=artifacts/test-results/m2-05-durable-work.junit.xml',
+      '--test-reporter-destination=artifacts/test-results/m2-05-durable-work.lcov.info',
+      'apps/api/dist-test/test/durable-work.integration.spec.js'
+    )
   } finally { Pop-Location }
 } finally {
   if (-not $keepEnvironment) {

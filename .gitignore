@@ -38,6 +38,8 @@ yarn-error.log
 /connect.lock
 /coverage
 /artifacts/security/
+/artifacts/test-results/
+/apps/web/coverage/
 /libpeerconnection.log
 testem.log
 /typings

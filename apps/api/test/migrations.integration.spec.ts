@@ -18,8 +18,6 @@ const tenantIsolationFixture = JSON.parse(readFileSync(
   tenantB: 'other';
   appConfigurationTenant: 'primary' | 'other';
   assetTenant: 'primary' | 'other';
-  readTenant: 'primary' | 'other';
-  targetAsset: number;
   expectedMariaDbError: string;
 };
 
@@ -123,12 +121,6 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
       [tenantIsolationFixture.tenantA]: tenantA,
       [tenantIsolationFixture.tenantB]: tenantB,
     };
-    const targetAssetId = uuid(tenantIsolationFixture.targetAsset);
-    const crossTenantRead = await queryRows<{ id: string }>(admin,
-      'SELECT id FROM ca_meta_assets WHERE id = ? AND tenant_id = ?',
-      [targetAssetId, tenantByFixtureLabel[tenantIsolationFixture.readTenant]],
-    );
-    assert.deepEqual(crossTenantRead, [], 'tenant B cannot read the synthetic asset owned by tenant A');
     const longestSupportedExternalId = 'é'.repeat(512);
     await admin.query(
       `INSERT INTO ca_meta_assets

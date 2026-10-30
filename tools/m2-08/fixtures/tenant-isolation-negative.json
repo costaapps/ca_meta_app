@@ -1,11 +1,9 @@
 {
-  "name": "cross-tenant-asset-configuration-reference",
-  "description": "An asset owned by tenant B must not reference tenant A's app configuration.",
+  "name": "cross-tenant-asset-configuration-foreign-key",
+  "description": "MariaDB's composite tenant foreign key rejects a tenant-B asset referencing tenant A's app configuration; it does not prove application read authorization.",
   "tenantA": "primary",
   "tenantB": "other",
   "appConfigurationTenant": "primary",
   "assetTenant": "other",
-  "readTenant": "other",
-  "targetAsset": 10000,
   "expectedMariaDbError": "ER_NO_REFERENCED_ROW_2"
 }
