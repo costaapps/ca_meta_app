@@ -226,12 +226,17 @@ try {
     $prodModel = $prodConfigText | ConvertFrom-Json -Depth 50
     $prodServices = @($prodModel.services.PSObject.Properties.Name)
     if ($prodServices -contains 'database' -or $prodServices -contains 'db') { throw 'Production Compose unexpectedly includes a local database.' }
-    if (@($prodModel.services.web.ports).Count -ne 1 -or $prodModel.services.web.ports[0].host_ip -ne '0.0.0.0') {
+    $webPorts = @($prodModel.services.web.ports | Where-Object { $null -ne $_ })
+    if ($webPorts.Count -ne 1) {
+      throw 'The production model must publish only its web ingress on all host interfaces by default.'
+    }
+    if ($webPorts[0].host_ip -ne '0.0.0.0') {
       throw 'The production model must publish only its web ingress on all host interfaces by default.'
     }
     foreach ($service in @('api', 'worker', 'migrate')) {
       $serviceModel = $prodModel.services.PSObject.Properties[$service].Value
-      if (@($serviceModel.ports).Count -gt 0) { throw "Production service $service publishes a host port." }
+      $servicePorts = @($serviceModel.ports | Where-Object { $null -ne $_ })
+      if ($servicePorts.Count -gt 0) { throw "Production service $service publishes a host port." }
     }
     $apiEnvironment = @($prodModel.services.api.environment.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" } | Sort-Object)
     $workerEnvironment = @($prodModel.services.worker.environment.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" } | Sort-Object)
