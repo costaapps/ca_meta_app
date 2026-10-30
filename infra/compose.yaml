@@ -73,7 +73,10 @@ services:
         - CMD
         - node
         - -e
-        - fetch('http://127.0.0.1:'+(process.env.API_PORT||'3000')+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+        - >-
+          const host=(process.env.API_ALLOWED_HOSTS||'').split(',')[0].trim();
+          if(!host)process.exit(1);
+          require('node:http').get({hostname:'127.0.0.1',port:Number(process.env.API_PORT||3000),path:'/ready',headers:{host}},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))
       interval: 30s
       timeout: 3s
       start_period: 10s
@@ -135,9 +138,9 @@ services:
       - no-new-privileges:true
     environment:
       NODE_ENV: ${NODE_ENV:-production}
-      MIGRATION_DATABASE_HOST: ${MIGRATION_DATABASE_HOST:?Set the private or managed MariaDB host}
-      MIGRATION_DATABASE_PORT: "${MIGRATION_DATABASE_PORT:-3306}"
-      MIGRATION_DATABASE_NAME: ${MIGRATION_DATABASE_NAME:?Set the application database name}
+      MIGRATION_DATABASE_HOST: ${API_DATABASE_HOST:?Set the private or managed MariaDB host}
+      MIGRATION_DATABASE_PORT: "${API_DATABASE_PORT:-3306}"
+      MIGRATION_DATABASE_NAME: ${API_DATABASE_NAME:?Set the application database name}
       MIGRATION_DATABASE_USER: ${MIGRATION_DATABASE_USER:?Set the least-privilege migrator user}
       MIGRATION_DATABASE_PASSWORD_FILE: /run/secrets/migration_database_password
       MIGRATION_DATABASE_CONNECT_TIMEOUT_MS: "${MIGRATION_DATABASE_CONNECT_TIMEOUT_MS:-10000}"

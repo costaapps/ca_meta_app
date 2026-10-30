@@ -11,7 +11,7 @@ O desenho segue a documentação oficial do [Compose startup order](https://docs
 - `infra/compose.prod.yaml` seleciona os digests web/API do release lock; não adiciona serviços de banco/fila nem portas.
 - Somente web publica a porta de ingress. API, worker, migration e DB não publicam portas do host.
 - `edge` permite web → API; `internal` mantém o banco privado; `outbound` fornece saída do API/worker/migration para serviços externos autorizados. Regras reais de egress, firewall, DNS, TLS e ingress reverso são **Not confirmed**.
-- API e worker recebem o mesmo bloco de configuração e o mesmo segredo de runtime em `/run/secrets`. O worker não escuta HTTP e seu healthcheck HTTP do Dockerfile da API fica desativado.
+- API e worker recebem o mesmo bloco de configuração e o mesmo segredo de runtime em `/run/secrets`. O worker não escuta HTTP e seu healthcheck HTTP do Dockerfile da API fica desativado. API, worker e migration derivam host/porta/banco de `API_DATABASE_HOST/PORT/NAME`; somente usuários e senhas do banco são separados.
 - A stack Compose no host único tem SPOF. Compose sozinho não oferece HA, failover, armazenamento replicado ou backup verificado. Capacidade, RPO/RTO, hostname, região, ingress e banco gerenciado são **Not confirmed**.
 - O lock entregue é template: imagens publicadas, namespace Docker Hub e proveniência verificável dependem de M2.09. Ele registra schema v3 e a compatibilidade atual exata v3. Até que M2.09 o preencha e a revisão/validação aceite o release, não há release implantável.
 
@@ -69,6 +69,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Migration failed; leave the current applicatio
 docker compose --project-name ca-meta-prod --env-file $envFile --env-file $lockFile @composeFiles up --detach --wait --wait-timeout 180 web api worker
 if ($LASTEXITCODE -ne 0) { throw 'Application health gate failed; follow rollback guidance.' }
 ```
+
+The API container healthcheck gates on `/ready` and derives its `Host` header from the first trimmed hostname in `API_ALLOWED_HOSTS`; keep that allowlist exact and non-empty. The web harness checks both API liveness (`/health`) and readiness (`/ready`).
 
 Use `config --quiet` only in ordinary terminal/CI output. Docker Compose can read host files while resolving a Compose model; never redirect or paste a full resolved model, `docker inspect` secret data or secret-store output to shared logs. The explicit one-off `up --force-recreate --exit-code-from migrate migrate` must exit 0 before the app promotion command is reached. It leaves the successful migration container as the completion record consumed by `api`/`worker` dependencies. The base Compose also declares those services dependent on `migrate` with `service_completed_successfully`; on failure, the command exits nonzero and no promotion command runs. Preserve logs with sensitive values redacted; investigate and repair/forward-fix before retrying.
 

@@ -44,7 +44,7 @@ function ConvertTo-ComposePath {
 }
 
 function Write-ComposeEnvironment {
-  param([string]$Path, [string]$MigrationHost)
+  param([string]$Path, [string]$DatabaseHost = 'database')
   $lines = @(
     "COMPOSE_PROJECT_NAME=$composeProject",
     "DEV_IMAGE_TAG=$runId",
@@ -53,14 +53,11 @@ function Write-ComposeEnvironment {
     'API_BIND_ADDRESS=0.0.0.0',
     'API_ALLOWED_HOSTS=127.0.0.1,localhost',
     'API_TRUSTED_PROXIES=none',
-    'API_DATABASE_HOST=database',
+    "API_DATABASE_HOST=$DatabaseHost",
     'API_DATABASE_PORT=3306',
     "API_DATABASE_NAME=$databaseName",
     'API_DATABASE_USER=ca_meta_api',
     'API_DATABASE_CONNECT_TIMEOUT_MS=3000',
-    "MIGRATION_DATABASE_HOST=$MigrationHost",
-    'MIGRATION_DATABASE_PORT=3306',
-    "MIGRATION_DATABASE_NAME=$databaseName",
     'MIGRATION_DATABASE_USER=ca_meta_migrator',
     'MIGRATION_DATABASE_CONNECT_TIMEOUT_MS=10000',
     'MIGRATION_LOCK_TIMEOUT_SECONDS=30',
@@ -90,9 +87,6 @@ function Write-ProductionEnvironment {
     'API_DATABASE_NAME=ca_meta_smoke',
     'API_DATABASE_USER=ca_meta_api',
     'API_DATABASE_CONNECT_TIMEOUT_MS=3000',
-    'MIGRATION_DATABASE_HOST=private-db.example.test',
-    'MIGRATION_DATABASE_PORT=3306',
-    'MIGRATION_DATABASE_NAME=ca_meta_smoke',
     'MIGRATION_DATABASE_USER=ca_meta_migrator',
     'MIGRATION_DATABASE_CONNECT_TIMEOUT_MS=10000',
     'MIGRATION_LOCK_TIMEOUT_SECONDS=30',
@@ -199,8 +193,8 @@ try {
   Write-PrivateSecretFile -Path $apiPasswordPath -Value $apiPassword
   Write-PrivateSecretFile -Path $migrationPasswordPath -Value $migrationPassword
   Write-PrivateSecretFile -Path $rootPasswordPath -Value $rootPassword
-  Write-ComposeEnvironment -Path $composeEnvPath -MigrationHost 'database'
-  Write-ComposeEnvironment -Path $migrationFailureEnvPath -MigrationHost 'm207-unavailable.invalid'
+  Write-ComposeEnvironment -Path $composeEnvPath
+  Write-ComposeEnvironment -Path $migrationFailureEnvPath -DatabaseHost 'm207-unavailable.invalid'
   Write-ProductionEnvironment -Path $productionEnvPath
   Write-SyntheticReleaseLock
   $apiPassword = $null
@@ -240,7 +234,16 @@ try {
     if (Compare-Object -ReferenceObject $apiEnvironment -DifferenceObject $workerEnvironment) {
       throw 'API and worker do not receive identical runtime domain configuration.'
     }
-    Write-Output 'Production model: managed DB only, web ingress published, API/worker/migration private, release lock valid, and DB passwords absent.'
+    foreach ($field in @('HOST', 'PORT', 'NAME')) {
+      $apiEndpoint = $prodModel.services.api.environment.PSObject.Properties["API_DATABASE_$field"].Value
+      $migrationEndpoint = $prodModel.services.migrate.environment.PSObject.Properties["MIGRATION_DATABASE_$field"].Value
+      if ($apiEndpoint -ne $migrationEndpoint) { throw "API and migration DB $field differ in the rendered production model." }
+    }
+    $apiHealthcheck = @($prodModel.services.api.healthcheck.test) -join ' '
+    if ($apiHealthcheck -notmatch '/ready' -or $apiHealthcheck -notmatch 'API_ALLOWED_HOSTS') {
+      throw 'Production API healthcheck must gate readiness and derive its Host header from API_ALLOWED_HOSTS.'
+    }
+    Write-Output 'Production model: managed DB only, web ingress published, API/worker/migration private, shared DB endpoint, readiness healthcheck, valid release lock, and DB passwords absent.'
 
     # Exercise the migration dependency before any API or worker is promoted.
     $null = Invoke-Compose -Arguments @('up', '-d', '--wait', '--wait-timeout', '90', 'database')
@@ -255,7 +258,7 @@ try {
     }
     $failedMigrationEnvironment = @($failedMigration.Config.Env)
     if (-not ($failedMigrationEnvironment -contains 'MIGRATION_DATABASE_HOST=m207-unavailable.invalid')) {
-      throw 'The expected unavailable migration target was not applied to the one-off service.'
+      throw 'The expected unavailable shared database endpoint was not applied to the one-off service.'
     }
     foreach ($service in @('api', 'worker')) {
       $ps = Invoke-Compose -Arguments @('ps', '--quiet', $service)
@@ -271,7 +274,8 @@ try {
     $baseUri = "http://127.0.0.1:$webPort"
     Assert-HttpStatus -Uri "$baseUri/healthz" -ExpectedStatus 200
     Assert-HttpStatus -Uri "$baseUri/api/health" -ExpectedStatus 200
-    Write-Output 'Ingress smoke: web health and same-origin API health both returned HTTP 200.'
+    Assert-HttpStatus -Uri "$baseUri/api/ready" -ExpectedStatus 200
+    Write-Output 'Ingress smoke: web health, API liveness, and API readiness all returned HTTP 200.'
 
     $runtimeSecretValues = @(
       [System.IO.File]::ReadAllText($apiPasswordPath),
@@ -337,6 +341,7 @@ SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_jobs WHERE id = '$jobId'), ':',
       $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', 'database')
       $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', 'api', 'worker')
       Assert-HttpStatus -Uri "$baseUri/api/health" -ExpectedStatus 200
+      Assert-HttpStatus -Uri "$baseUri/api/ready" -ExpectedStatus 200
       if ((Invoke-DbQuery -Sql "SELECT CONCAT(status, ':', (SELECT MAX(schema_version) FROM ca_meta_schema_migrations)) FROM ca_meta_jobs WHERE id = '$jobId';") -ne 'QUEUED:3') {
         throw 'The queued job was lost after a temporary database stop/restart.'
       }
