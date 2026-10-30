@@ -44,7 +44,7 @@ export type ServiceScope =
   | 'MAGIC_LINK_DELIVERY';
 
 declare const tenantScopeBrand: unique symbol;
-const serviceScopeBrand: unique symbol = Symbol('verified-service-tenant-scope');
+declare const serviceScopeBrand: unique symbol;
 
 /**
  * A context minted after the current session and membership have been checked.
@@ -84,12 +84,4 @@ export interface VerifiedServiceTenantScope {
   readonly principalId: string;
   readonly tenantId: string;
   readonly scopes: readonly ServiceScope[];
-}
-
-export function isVerifiedServiceTenantScope(value: unknown): value is VerifiedServiceTenantScope {
-  return typeof value === 'object' && value !== null && serviceScopeBrand in value;
-}
-
-export function makeVerifiedServiceTenantScope(input: Omit<VerifiedServiceTenantScope, typeof serviceScopeBrand>): VerifiedServiceTenantScope {
-  return Object.freeze({ ...input, scopes: Object.freeze([...input.scopes]), [serviceScopeBrand]: true as const });
 }

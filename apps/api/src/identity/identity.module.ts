@@ -48,7 +48,7 @@ export class IdentityModule {
           inject: [IDENTITY_ADMINISTRATION_REPOSITORY, TenantContextService],
         },
       ],
-      exports: [IDENTITY_REPOSITORY, TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService,
+      exports: [TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService,
         IdentityAdministrationService, PlatformIdentityAdminAuthority],
     };
   }

@@ -2,8 +2,6 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { IdentityDeniedError } from './identity.errors.js';
 import type { IdentityRepository } from './identity.repository.js';
 import {
-  isVerifiedServiceTenantScope,
-  makeVerifiedServiceTenantScope,
   type AuthorizedTenantScope,
   type MembershipRole,
   type ServiceScope,
@@ -12,10 +10,18 @@ import {
   type TenantScopedIdPredicate,
   type VerifiedServiceTenantScope,
 } from './identity.types.js';
-import { isVerifiedPortalSession, type VerifiedPortalSession } from './identity.trust.js';
+import {
+  isVerifiedPersistedJobContext,
+  isVerifiedPortalSession,
+  isVerifiedServiceCredential,
+  type VerifiedPersistedJobContext,
+  type VerifiedPortalSession,
+  type VerifiedServiceCredential,
+} from './identity.trust.js';
 
 const ALLOWED_ROLES = new Set<MembershipRole>(['owner', 'admin', 'operator', 'viewer']);
 const authorizedTenantScopes = new WeakSet<object>();
+const verifiedServiceTenantScopes = new WeakSet<object>();
 
 interface AuthorizedTenantScopeInput {
   readonly principalId: string;
@@ -35,6 +41,22 @@ function makeAuthorizedTenantScope(input: AuthorizedTenantScopeInput): Authorize
   const roles = Object.freeze([...input.roles]);
   const scope = Object.freeze({ ...input, roles }) as AuthorizedTenantScope;
   authorizedTenantScopes.add(scope);
+  return scope;
+}
+
+interface VerifiedServiceTenantScopeInput {
+  readonly principalId: string;
+  readonly tenantId: string;
+  readonly scopes: readonly ServiceScope[];
+}
+
+export function isVerifiedServiceTenantScope(value: unknown): value is VerifiedServiceTenantScope {
+  return typeof value === 'object' && value !== null && verifiedServiceTenantScopes.has(value);
+}
+
+function makeVerifiedServiceTenantScope(input: VerifiedServiceTenantScopeInput): VerifiedServiceTenantScope {
+  const scope = Object.freeze({ ...input, scopes: Object.freeze([...input.scopes]) }) as VerifiedServiceTenantScope;
+  verifiedServiceTenantScopes.add(scope);
   return scope;
 }
 
@@ -121,7 +143,9 @@ export class TenantContextService {
     });
   }
 
-  async listCurrentMemberships(principalId: string): Promise<readonly { tenantId: string; roles: readonly MembershipRole[] }[]> {
+  async listCurrentMemberships(session: VerifiedPortalSession): Promise<readonly { tenantId: string; roles: readonly MembershipRole[] }[]> {
+    if (!isVerifiedPortalSession(session)) throw new IdentityDeniedError();
+    const principalId = session.principalId;
     const memberships = await this.repository.listActiveMemberships(principalId);
     return memberships
       .filter((membership) =>
@@ -135,15 +159,13 @@ export class TenantContextService {
   }
 
   /** Rebuilds job authority from persisted tenant/principal IDs and the current membership. */
-  async resolveJobContext(job: { readonly tenantId?: unknown; readonly principalId?: unknown }): Promise<AuthorizedTenantScope> {
-    if (typeof job.tenantId !== 'string' || !job.tenantId || typeof job.principalId !== 'string' || !job.principalId) {
-      throw new IdentityDeniedError();
-    }
+  async resolveJobContext(job: VerifiedPersistedJobContext): Promise<AuthorizedTenantScope> {
+    if (!isVerifiedPersistedJobContext(job)) throw new IdentityDeniedError();
     const membership = await this.repository.findMembership(job.principalId, job.tenantId);
     assertCurrentMembership(membership, job.principalId, job.tenantId);
     return makeAuthorizedTenantScope({
       principalId: job.principalId,
-      sessionId: 'server-job',
+      sessionId: `server-job:${job.jobId}`,
       tenantId: job.tenantId,
       roles: membership.roles,
       membershipVersion: membership.version,
@@ -204,7 +226,9 @@ export class TenantAuthorizationService {
 export class ServiceTenantAuthorizationService {
   constructor(private readonly repository: IdentityRepository) {}
 
-  async resolveScope(principalId: string, tenantId: string): Promise<VerifiedServiceTenantScope> {
+  async resolveScope(credential: VerifiedServiceCredential): Promise<VerifiedServiceTenantScope> {
+    if (!isVerifiedServiceCredential(credential)) throw new IdentityDeniedError();
+    const { principalId, tenantId } = credential;
     const grant = await this.repository.findServiceTenantGrant(principalId, tenantId);
     if (
       !grant ||
@@ -227,6 +251,8 @@ export class ServiceTenantAuthorizationService {
     const grant = await this.repository.findServiceTenantGrant(scope.principalId, scope.tenantId);
     if (
       !grant ||
+      grant.principalId !== scope.principalId ||
+      grant.tenantId !== scope.tenantId ||
       grant.principalKind !== 'SERVICE' ||
       grant.principalStatus !== 'ACTIVE' ||
       grant.tenantStatus !== 'ACTIVE' ||
@@ -267,7 +293,7 @@ export function tenantScopedIdPredicate(scope: AuthorizedTenantScope, resourceId
   return Object.freeze({ sql: 'id = ? AND tenant_id = ?', values: [resourceId, scope.tenantId] as const });
 }
 
-export function requireJobTenant(job: { readonly tenantId?: unknown }): string {
-  if (typeof job.tenantId !== 'string' || job.tenantId.length === 0) throw new IdentityDeniedError();
+export function requireJobTenant(job: VerifiedPersistedJobContext): string {
+  if (!isVerifiedPersistedJobContext(job)) throw new IdentityDeniedError();
   return job.tenantId;
 }

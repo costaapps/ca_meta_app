@@ -3,13 +3,19 @@ import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import { IdentityDeniedError } from '../src/identity/identity.errors.js';
 import { IdentityAdministrationService } from '../src/identity/identity-administration.service.js';
+import { IDENTITY_REPOSITORY } from '../src/identity/identity.repository.js';
+import { IdentityModule } from '../src/identity/identity.module.js';
 import type { LegacyTenantMappingInput } from '../src/identity/identity-administration.repository.js';
 import type { IdentityAdministrationCommand, IdentityAdministrationRepository, IdentityAdministrationResult } from '../src/identity/identity-administration.repository.js';
 import {
   IdentityAssertionVerifier,
+  isVerifiedPersistedJobContext,
   isVerifiedPortalSession,
+  isVerifiedServiceCredential,
+  PersistedJobContextVerifier,
   PlatformIdentityAdminAuthority,
   PortalSessionVerifier,
+  ServiceCredentialVerifier,
   type VerifiedIdentityAssertion,
   type VerifiedPortalSession,
 } from '../src/identity/identity.trust.js';
@@ -140,6 +146,13 @@ class SyntheticAssertionVerifier extends IdentityAssertionVerifier {
   }
 }
 
+class SyntheticServiceCredentialVerifier extends ServiceCredentialVerifier {
+  override async verifyCredential(credential: string | undefined) {
+    if (credential !== 'synthetic-service-credential') return undefined;
+    return this.issueVerifiedServiceCredential(serviceId, tenantA);
+  }
+}
+
 class FakeIdentityAdministrationRepository implements IdentityAdministrationRepository {
   readonly commands: IdentityAdministrationCommand[] = [];
   readonly auditEvents: Array<{ readonly action: string; readonly actorRef: string; readonly reasonCode: string; readonly idempotencyKey: string; readonly requestHash: string }> = [];
@@ -200,6 +213,10 @@ test('tenant context is server-derived, versioned and invalidates stale tabs on 
   assert.equal(scopeB.tenantId, tenantB);
   assert.equal(scopeB.contextVersion, 2);
   assert.equal(session.tenantId, tenantA, 'switch resolution does not rewrite a session or existing onboarding/job tenant');
+  const memberships = await contexts.listCurrentMemberships(session);
+  assert.deepEqual(memberships.map((entry) => entry.tenantId), [tenantA, tenantB]);
+  await assert.rejects(contexts.listCurrentMemberships(humanId as never), IdentityDeniedError);
+  await assert.rejects(contexts.listCurrentMemberships({ ...session } as VerifiedPortalSession), IdentityDeniedError);
   await assert.rejects(
     contexts.resolveCurrent(session, 'synthetic-context-ref-stale-000000'),
     (error: unknown) => error instanceof IdentityDeniedError && error.code === 'CONTEXT_CHANGED',
@@ -289,21 +306,46 @@ test('operator cannot grant admin, disconnect or read secrets; viewer remains re
 test('service authorization uses tenant-scoped service scopes and never human membership roles', async () => {
   const repository = new FakeIdentityRepository();
   const services = new ServiceTenantAuthorizationService(repository);
-  const serviceScope = await services.resolveScope(serviceId, tenantA);
+  const verifier = new SyntheticServiceCredentialVerifier();
+  assert.equal(await verifier.verifyCredential('untrusted-service-credential'), undefined);
+  const credential = await verifier.verifyCredential('synthetic-service-credential');
+  assert.ok(credential);
+  assert.equal(isVerifiedServiceCredential(credential), true);
+  const serviceScope = await services.resolveScope(credential);
   await services.authorize(serviceScope, 'CREDENTIAL_USE', tenantA);
   await assert.rejects(services.authorize(serviceScope, 'WEBHOOK_ROUTE', tenantA));
   await assert.rejects(services.authorize(serviceScope, 'CREDENTIAL_USE', tenantB));
+  await assert.rejects(services.resolveScope({ principalId: serviceId, tenantId: tenantA } as never), IdentityDeniedError);
+  await assert.rejects(services.resolveScope(serviceId as never), IdentityDeniedError);
   await assert.rejects(
     services.authorize({ principalId: humanId, tenantId: tenantA, scopes: ['CREDENTIAL_USE'] } as never, 'CREDENTIAL_USE', tenantA),
   );
+  const contextModule = IdentityModule.register({
+    nodeEnv: 'test', port: 0, bindAddress: '127.0.0.1', allowedHosts: ['localhost'], trustedProxyCidrs: false,
+    database: { host: '127.0.0.1', port: 3306, name: 'synthetic', user: 'synthetic', password: 'not-a-secret', connectTimeoutMs: 100 },
+  });
+  assert.ok(contextModule.exports);
+  assert.equal((contextModule.exports as unknown[]).includes(IDENTITY_REPOSITORY), false);
 });
 
 test('jobs require a persisted tenant and principal, then revalidate the membership at execution', async () => {
   const repository = new FakeIdentityRepository();
   const contexts = new TenantContextService(repository);
-  assert.throws(() => requireJobTenant({}), IdentityDeniedError);
-  await assert.rejects(contexts.resolveJobContext({ tenantId: tenantA }));
-  const jobScope = await contexts.resolveJobContext({ tenantId: tenantA, principalId: humanId });
+  const jobVerifier = new PersistedJobContextVerifier({
+    async findPersistedJobContext(reference) {
+      return reference === 'synthetic-job-reference'
+        ? { jobId: 'persisted-job-1', tenantId: tenantA, principalId: humanId }
+        : undefined;
+    },
+  });
+  const persistedJob = await jobVerifier.verify('synthetic-job-reference');
+  assert.ok(persistedJob);
+  assert.equal(isVerifiedPersistedJobContext(persistedJob), true);
+  assert.equal(requireJobTenant(persistedJob), tenantA);
+  assert.equal(await jobVerifier.verify('unknown-job-reference'), undefined);
+  assert.throws(() => requireJobTenant({ tenantId: tenantA } as never), IdentityDeniedError);
+  await assert.rejects(contexts.resolveJobContext({ tenantId: tenantA, principalId: humanId } as never), IdentityDeniedError);
+  const jobScope = await contexts.resolveJobContext(persistedJob);
   assert.equal(jobScope.tenantId, tenantA);
   repository.memberships.set(tenantA, { ...membership(tenantA, ['operator']), status: 'REVOKED', version: 2 });
   await assert.rejects(new TenantAuthorizationService(repository).authorize(jobScope, 'CONNECT', tenantA));
