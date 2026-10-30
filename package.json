@@ -12,6 +12,12 @@
     "packages/*"
   ],
   "overrides": {
+    "@angular-devkit/core": {
+      "picomatch": "4.0.7"
+    },
+    "@angular/build": {
+      "picomatch": "4.0.7"
+    },
     "fdir": {
       "picomatch": "4.0.7"
     }

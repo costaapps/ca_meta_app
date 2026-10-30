@@ -22,6 +22,8 @@ function runAudit(cwd, omitDev) {
     cwd,
     encoding: 'utf8',
     maxBuffer: 50 * 1024 * 1024,
+    // Resolve npm.cmd on Windows; this function supplies only fixed audit flags.
+    shell: process.platform === 'win32',
     windowsHide: true,
   });
   if (child.error) throw new Error('npm audit could not start.');
