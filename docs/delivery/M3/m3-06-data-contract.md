@@ -48,4 +48,12 @@ From the repository root, with the project Node runtime on PATH:
 Expected result: strict API/test compilation and the focused M3.06 Node test file pass. No database, provider account or production resource is needed for these unit checks. The generated API dist and dist-test directories are ignored build output.
 After these checks, run tools/m3-06/cleanup.ps1 to remove only those two local output directories; it refuses linked or out-of-worktree targets.
 
-The MariaDB migration/FK/concurrent-upsert scenarios remain an integration gate for the coordinator's writable disposable database / exact PR CI run. They were not executed in this implementation worktree. Do not report a local unit test as MariaDB evidence. Actual Meta grants and real asset ownership remain Not confirmed; only synthetic provider evidence is covered here.
+The gated database test is `apps/api/test/m3-06-meta-assets.integration.spec.ts`. It runs in the existing M2.05/M3 disposable MariaDB profile when `M2_DURABLE_WORK_TEST=1`, calls the migration runner, then covers concurrent upsert/shared assets, cross-tenant FK rejection and quarantine, exact external IDs above 2^53, and rollback after outbox staging. The profile must use the integrated migration registry through M3.06 v6.
+
+After the profile has compiled the API test tree and started its disposable database, run:
+
+```powershell
+node --test apps/api/dist-test/test/m3-06-meta-assets.integration.spec.js
+```
+
+The integration test was not executed in this implementation worktree; do not report a local unit test as MariaDB evidence. Actual Meta grants and real asset ownership remain Not confirmed; only synthetic provider evidence is covered here.
