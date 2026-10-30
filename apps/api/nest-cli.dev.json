@@ -5,6 +5,8 @@
   "compilerOptions": {
     "deleteOutDir": false,
     "webpack": false,
-    "tsConfigPath": "tsconfig.build.json"
+    "tsConfigPath": "tsconfig.build.json",
+    "assets": ["auth/**/*.html"],
+    "watchAssets": true
   }
 }

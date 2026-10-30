@@ -60,6 +60,27 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/auth/magic-links/confirm": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Show an explicit sign-in confirmation page
+         * @description Safe for email scanners. GET only renders a no-referrer, no-store page with a deliberate POST action; it does not look up or consume the link and never creates a session.
+         */
+        readonly get: operations["showMagicLinkConfirmation"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        /** Probe the confirmation page without consuming a link */
+        readonly head: operations["probeMagicLinkConfirmation"];
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/auth/magic-links/consume": {
         readonly parameters: {
             readonly query?: never;
@@ -702,6 +723,11 @@ export interface components {
             readonly tenantContextRef: string;
             readonly contextVersion: number;
             readonly requestId: string;
+            /** @description Current ACTIVE memberships offered after magic-link sign-in. Each selection is revalidated server-side. */
+            readonly availableTenants?: readonly {
+                readonly tenantRef: string;
+                readonly roles: readonly ("owner" | "admin" | "operator" | "viewer")[];
+            }[];
         };
         readonly TenantSwitchRequest: {
             /** @description Requested membership reference; always revalidated server-side. */
@@ -1225,6 +1251,53 @@ export interface operations {
             readonly 422: components["responses"]["Unprocessable"];
             readonly 429: components["responses"]["TooManyRequests"];
             readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly showMagicLinkConfirmation: {
+        readonly parameters: {
+            readonly query: {
+                /** @description Temporary opaque link token. It is never logged or sent to analytics. */
+                readonly token: string;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Confirmation form only; no session or link state changes. */
+            readonly 200: {
+                headers: {
+                    readonly "Referrer-Policy"?: "no-referrer";
+                    readonly "Cache-Control"?: "no-store";
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "text/html": string;
+                };
+            };
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly probeMagicLinkConfirmation: {
+        readonly parameters: {
+            readonly query: {
+                readonly token: string;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Headers only; no session or link state changes. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
             readonly default: components["responses"]["UnexpectedError"];
         };
     };

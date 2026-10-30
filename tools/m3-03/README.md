@@ -9,11 +9,14 @@ From the repository root in Windows PowerShell:
 ```powershell
 npm ci
 powershell -ExecutionPolicy Bypass -File tools/m3-03/run-focused-tests.ps1
+powershell -ExecutionPolicy Bypass -File tools/m3-03/run-migration-unit.ps1
 ```
 
 The repository root `package-lock.json` supplies the API workspace dependencies. The harness requires Node `24.22.2` and npm `11.19.1`; set `M3_NODE_RUNTIME_DIR` to that runtime directory when it is not under `%LOCALAPPDATA%\Codex\runtimes\node-v24.22.2`.
 
 The script creates a uniquely named directory under the operating-system temp directory, compiles only into that directory, and removes only that exact directory after the run. It preserves repository build output and any pre-existing temp resources.
+
+`run-migration-unit.ps1` uses the same isolated compilation and cleanup pattern to run only `apps/api/test/migration-unit.spec.ts`, including the complete ordered migration-chain assertion.
 
 ## Coverage and limits
 

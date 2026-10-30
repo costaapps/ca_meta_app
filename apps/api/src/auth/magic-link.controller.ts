@@ -14,6 +14,8 @@ import {
 import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
 import type { Request, Response } from 'express';
 import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { PublicRoute } from '../common/security/public-route.decorator.js';
 import type { ApiEnvironment } from '../config/environment.js';
 import {
@@ -49,6 +51,21 @@ function isLoopbackAddress(value: string | undefined): boolean {
   return value === '127.0.0.1' || value === '::1' || value === '::ffff:127.0.0.1';
 }
 
+let confirmationPageTemplate: string | undefined;
+
+function loadConfirmationPageTemplate(): string {
+  if (confirmationPageTemplate !== undefined) return confirmationPageTemplate;
+  const candidates = [
+    join(__dirname, 'magic-link-confirmation.html'),
+    join(process.cwd(), 'src', 'auth', 'magic-link-confirmation.html'),
+    join(process.cwd(), 'apps', 'api', 'src', 'auth', 'magic-link-confirmation.html'),
+  ];
+  const path = candidates.find((candidate) => existsSync(candidate));
+  if (!path) throw new Error('Magic-link confirmation page asset is missing.');
+  confirmationPageTemplate = readFileSync(path, 'utf8');
+  return confirmationPageTemplate;
+}
+
 @Controller('auth/magic-links')
 export class MagicLinkController {
   constructor(
@@ -73,71 +90,9 @@ export class MagicLinkController {
     // GET is deliberately presentation-only. No token lookup, attempt count, or session write occurs here.
     const safeToken = typeof token === 'string' && /^[A-Za-z0-9_-]{43}$/.test(token) ? token : '';
     const nonce = randomBytes(18).toString('base64');
-    const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Confirm portal sign-in</title><script nonce="${nonce}">history.replaceState(null, '', location.pathname)</script></head><body><main><h1>Confirm sign-in</h1><p id="message" aria-live="polite">Continue only if you requested this portal link.</p><form id="confirmation" method="post" action="/api/v1/auth/magic-links/consume"><input type="hidden" name="linkToken" value="${escapeHtml(safeToken)}"><button type="submit">Continue to the portal</button></form><section id="tenant-options" hidden><h2>Choose a business</h2></section></main><script nonce="${nonce}">
-      const form = document.getElementById('confirmation');
-      const message = document.getElementById('message');
-      const choices = document.getElementById('tenant-options');
-      const submitButton = form.querySelector('button');
-      function readCookie(name) {
-        const prefix = name + '=';
-        const item = document.cookie.split(';').map(value => value.trim()).find(value => value.startsWith(prefix));
-        return item ? item.slice(prefix.length) : '';
-      }
-      async function chooseTenant(option, currentTenant) {
-        if (option.tenantRef !== currentTenant) {
-          const switched = await fetch('/api/v1/session/tenant-switch', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-CSRF-Token': readCookie('__Host-ca_meta_csrf'),
-              'X-Tenant-Context': readCookie('__Host-ca_meta_context'),
-            },
-            body: JSON.stringify({ tenantRef: option.tenantRef }),
-          });
-          if (!switched.ok) {
-            message.textContent = 'That business is no longer available. Refresh your session and choose again.';
-            return;
-          }
-        }
-        window.location.replace('/');
-      }
-      form.addEventListener('submit', async event => {
-        event.preventDefault();
-        submitButton.disabled = true;
-        message.textContent = 'Signing you in…';
-        try {
-          const response = await fetch(form.action, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ linkToken: form.elements.linkToken.value }),
-          });
-          if (!response.ok) {
-            message.textContent = 'This link is no longer available. Request a new sign-in link.';
-            submitButton.disabled = false;
-            return;
-          }
-          const result = await response.json();
-          message.textContent = 'Choose the business you want to open.';
-          choices.replaceChildren();
-          for (const option of result.availableTenants) {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.textContent = option.tenantRef;
-            button.addEventListener('click', () => void chooseTenant(option, result.tenantRef));
-            choices.append(button);
-          }
-          choices.hidden = false;
-          if (result.availableTenants.length === 1) {
-            await chooseTenant(result.availableTenants[0], result.tenantRef);
-          }
-        } catch {
-          message.textContent = 'Sign-in could not be completed. Return to the portal and check your session.';
-          submitButton.disabled = false;
-        }
-      });
-    </script></body></html>`;
+    const page = loadConfirmationPageTemplate()
+      .replaceAll('@@NONCE@@', nonce)
+      .replace('@@LINK_TOKEN@@', escapeHtml(safeToken));
     response.status(200)
       .type('html')
       .setHeader('Referrer-Policy', 'no-referrer')
