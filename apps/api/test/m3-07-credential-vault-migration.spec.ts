@@ -16,6 +16,7 @@ test('M3.07 migration is additive and binds encrypted material to tenant authori
   assert.ok(secrets.sql.includes('authentication_tag BINARY(16) NOT NULL'));
   assert.ok(secrets.sql.includes('FOREIGN KEY (tenant_id, credential_id, authorization_id, app_configuration_id, provider, environment)'));
   assert.ok(secrets.sql.includes('REFERENCES ca_meta_credentials (tenant_id, id, authorization_id, app_configuration_id, provider, environment)'));
+  assert.ok(secrets.sql.includes('KEY ix_ca_meta_secret_credential_context (tenant_id, credential_id, authorization_id, app_configuration_id, provider, environment)'));
   const audit = META_CREDENTIAL_VAULT_MIGRATION.steps[2];
   assert.ok(audit && 'sql' in audit);
   assert.ok(!/ciphertext|nonce|token_value|secret_value/i.test(audit.sql));

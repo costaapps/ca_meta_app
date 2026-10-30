@@ -63,6 +63,7 @@ async function verifyCredentialSecrets(context: MigrationStepContext): Promise<b
     [
       { name: 'PRIMARY', columns: ['tenant_id', 'credential_id'], unique: true },
       { name: 'ix_ca_meta_secret_rotation', columns: ['key_version', 'credential_id'], unique: false },
+      { name: 'ix_ca_meta_secret_credential_context', columns: ['tenant_id', 'credential_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'], unique: false },
     ],
     [{ name: 'fk_ca_meta_secret_credential', columns: ['tenant_id', 'credential_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'], table: 'ca_meta_credentials', referencedColumns: ['tenant_id', 'id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'] }],
   );
@@ -106,6 +107,7 @@ const createCredentialSecrets = {
     ' format_version SMALLINT UNSIGNED NOT NULL DEFAULT 1, version BIGINT UNSIGNED NOT NULL DEFAULT 1,',
     ' created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL,',
     ' PRIMARY KEY (tenant_id, credential_id), KEY ix_ca_meta_secret_rotation (key_version, credential_id),',
+    ' KEY ix_ca_meta_secret_credential_context (tenant_id, credential_id, authorization_id, app_configuration_id, provider, environment),',
     ' CONSTRAINT ck_ca_meta_secret_format CHECK (format_version = 1),',
     ' CONSTRAINT fk_ca_meta_secret_credential FOREIGN KEY (tenant_id, credential_id, authorization_id, app_configuration_id, provider, environment)',
     '   REFERENCES ca_meta_credentials (tenant_id, id, authorization_id, app_configuration_id, provider, environment)',

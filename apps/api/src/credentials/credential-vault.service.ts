@@ -191,7 +191,15 @@ export class CredentialVaultService {
     }
   }
 
-  async rotationState(targetKeyVersion: string): Promise<CredentialVaultRotationState> {
+  async rotationState(actor: CredentialVaultActor, targetKeyVersion: string): Promise<CredentialVaultRotationState> {
+    this.validateActor(actor);
+    if (!KEY_VERSION.test(targetKeyVersion)) throw new CredentialVaultRotationError();
+    await this.authorize({
+      action: 'ROTATE',
+      actorRef: actor.actorRef,
+      operation: 'CREDENTIAL_KEY_ROTATION',
+      targetKeyVersion,
+    });
     try {
       return await this.repository.getRotationState(targetKeyVersion);
     } catch {

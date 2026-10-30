@@ -179,6 +179,7 @@ test('vault authorizes store/use, audits metadata only, fails closed without a k
   await assert.rejects(noAccess.withCredential({ ...first, ...actor, operation: 'MESSAGE_SEND' }, async () => 'unreachable'), CredentialVaultDeniedError);
   const authorizedVault = new CredentialVaultService(repo, activeKeys, new AllowVaultAccess());
   const rotation = await authorizedVault.beginRotation(actor);
+  await assert.rejects(noAccess.rotationState(actor, rotation.targetKeyVersion), CredentialVaultDeniedError);
   const firstBatch = await authorizedVault.rotateNextBatch(actor, rotation.targetKeyVersion, 1);
   assert.equal(firstBatch.processed, 1);
   assert.equal(firstBatch.done, false);
@@ -188,7 +189,7 @@ test('vault authorizes store/use, audits metadata only, fails closed without a k
   const resumedBatch = await restartedWorker.rotateNextBatch(actor, rotation.targetKeyVersion, 1);
   assert.equal(resumedBatch.processed, 1);
   assert.equal(resumedBatch.done, true);
-  assert.equal((await restartedWorker.rotationState(rotation.targetKeyVersion)).state, 'COMPLETED');
+  assert.equal((await restartedWorker.rotationState(actor, rotation.targetKeyVersion)).state, 'COMPLETED');
   const recovered = await Promise.all([first, second].map((context) =>
     restartedWorker.withCredential({ ...context, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => secret)));
   assert.deepEqual(new Set(recovered), new Set(['synthetic-credential-A', 'synthetic-credential-B']));
