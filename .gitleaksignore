@@ -2,3 +2,10 @@
 74af0136f1b1fd69b2142b12489bd9bc771ab2d8:tools/m2-09/test-release-contract.mjs:generic-api-key:41
 # False positive: API_SOURCE_REVISION is a synthetic SHA bound to the fixture manifest; it is not a credential.
 37ff1536753914c6c56a244cd8d05c84ab9c18e9:tools/m2-10/fixtures/release-lock.synthetic.env:generic-api-key:6
+# The full consolidated diff is scanned after package PRs are squashed; these synthetic test values receive new exact fingerprints.
+# M2.05 durable-work fixture: synthetic crash/reclaim idempotency marker, not a credential.
+52e9745137680056860cf4d1fbf3b9ffd7c2c62a:apps/api/test/durable-work.integration.spec.ts:generic-api-key:349
+# M2.09 negative contract fixture: synthetic 40-hex source revision, not a credential.
+48444e0ce2ca69f18f91124809f0418f484d759a:tools/m2-09/test-release-contract.mjs:generic-api-key:58
+# M2.10 release lock fixture: synthetic API_SOURCE_REVISION, not a credential.
+710bc1f305c4a1db6803d616e55843334f68bb50:tools/m2-10/fixtures/release-lock.synthetic.env:generic-api-key:6
