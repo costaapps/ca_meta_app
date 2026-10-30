@@ -551,7 +551,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     }
 
     const applied = await readMigrationStatus(environment);
-    assert.equal(applied.migrations.length, 5);
+    assert.equal(applied.migrations.length, MIGRATIONS.length);
     assert.ok(applied.migrations.every((migration) => migration.state === 'APPLIED' && migration.checksumMatches));
 
     const runtime = await createConnection(connectionOptions);
