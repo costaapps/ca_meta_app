@@ -3,7 +3,7 @@
 Base verified: `develop@2f0944d771ea7e98c520b20667586304e8bb9113` (2026-10-29).
 Milestone branch: `desktop/milestone-m2`, initially created at that SHA.
 Latest package integration: `0ab2b2d7b1d18dbfcfef8495de9f5d9eb4b3160d` (M2.08/#30 Ajv security follow-up, PR #107 squash).
-Consolidated delivery branch: `desktop/m2-consolidated` → `develop`; PR #105 is open for human acceptance, with final consolidated checks pending.
+Consolidated delivery branch: `desktop/m2-consolidated` → `develop`; PR #105 is open for human acceptance. All applicable consolidated checks passed on source head `82a2724fe7433418d16b498716be403742aa4d75`; the final status-documentation commit will receive its own exact-head checks.
 
 | Package / issue | Stage | Candidate | Latest evidence | Package PR | Next action |
 |---|---|---|---|---|---|
