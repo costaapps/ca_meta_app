@@ -1,0 +1,15 @@
+services:
+  web:
+    image: ${CA_META_WEB_IMAGE:?Set CA_META_WEB_IMAGE from the release lock to a registry reference pinned by sha256 digest}
+    environment:
+      WEB_PUBLIC_META_API_BASE_URL: ${WEB_PUBLIC_META_API_BASE_URL:-/api}
+
+  api:
+    image: ${CA_META_API_IMAGE:?Set CA_META_API_IMAGE from the release lock to a registry reference pinned by sha256 digest}
+
+  worker:
+    image: ${CA_META_API_IMAGE:?Set CA_META_API_IMAGE from the release lock to a registry reference pinned by sha256 digest}
+
+  migrate:
+    image: ${CA_META_API_IMAGE:?Set CA_META_API_IMAGE from the release lock to a registry reference pinned by sha256 digest}
+

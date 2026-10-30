@@ -1,0 +1,25 @@
+# M2.07 Compose harness
+
+This harness provides an isolated, repeatable Docker Compose environment smoke without relying on an existing developer database or production configuration. It requires Docker Engine, Docker Compose 2.23.0+ and PowerShell 7+ on the host. Node 24.22.2/npm 11.19.1 and API/web dependencies are installed inside a dev image using the repository lockfile. The local database is MariaDB 11.8.8 pinned by digest; Compose dependencies and schema v3 come from M2.05/M2.06. No extra PowerShell module or host npm install is required.
+
+From the repository root on Windows:
+
+```powershell
+pwsh -NoProfile -File tools/m2-07/run-compose-smoke.ps1
+```
+
+The script creates a UUID Compose project (`m207-...`), three synthetic random DB passwords in a temporary folder, a project-prefixed named DB volume, and a loopback-only dev web port. It validates a synthetic production lock/model in memory, checks that no secret bytes appear in the rendered model, and confirms the prod model has no local DB or internal published ports. It then verifies that a migration aimed at an unavailable DB host prevents API/worker startup, brings up the dev stack, checks web/API ingress and internal ports, confirms worker healthcheck disabled, seeds a schema-v3 synthetic queued job, forces API/worker recreation, and restarts the isolated DB. Jobs are durable rows in MariaDB; there is no broker container. It never contacts Meta, a managed database, Docker Hub, staging, or production. The production firewall is not tested.
+
+Cleanup removes only the UUID project created by this process, including its named volumes, the unique image tag still pointing to the image ID it built, and the exact temporary directory created for this run. The script verifies the directory still matches its generated UUID path beneath the OS temp root before recursive deletion. `down --volumes --remove-orphans` appears only in this test cleanup. Use `-KeepEnvironment` to retain one identified harness stack and image; the script prints its project and cleanup command. Do not pass any production environment file to this script.
+
+`infra/release-lock.env.example` is a template because M2.09 has not yet published image digests/provenance. A filled lock must pass this checker before production/staging promotion:
+
+```powershell
+pwsh -NoProfile -File tools/m2-07/check-release-lock.ps1 -Path C:\secure\ca-meta\release-lock.env
+```
+
+The checker requires separate digest-pinned web/API images, source SHA matching both image provenance fields, and a compatibility range containing schema v3. It checks lock structure and declared metadata; it cannot authenticate registry signatures/provenance, perform a pull, validate DNS/firewall/TLS, or prove a production restore. Read the operational steps in [the Compose environment runbook](../../docs/runbooks/compose-environments.md).
+
+This subtask does not execute the harness. The coordinator runs the executable harness and records its command, result, environment and candidate SHA once after all M2 package edits are stable.
+
+Compose behavior follows the official [startup-order](https://docs.docker.com/compose/how-tos/startup-order/), [secrets](https://docs.docker.com/reference/compose-file/secrets/), [service](https://docs.docker.com/reference/compose-file/services/), and [`config`](https://docs.docker.com/reference/cli/docker/compose/config/) references.
