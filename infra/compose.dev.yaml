@@ -20,7 +20,6 @@ services:
     volumes:
       - ../apps/web:/workspace/apps/web
       - ../packages/contracts:/workspace/packages/contracts
-      - dev_node_modules:/workspace/node_modules
     networks:
       - edge
     healthcheck:
@@ -53,7 +52,6 @@ services:
       - ../apps/api:/workspace/apps/api
       - dev_api_dist:/workspace/apps/api/dist
       - ../packages/contracts:/workspace/packages/contracts
-      - dev_node_modules:/workspace/node_modules
 
   worker:
     image: local/ca-meta-dev:${DEV_IMAGE_TAG:-m2-07}
@@ -71,7 +69,6 @@ services:
       - ../apps/api:/workspace/apps/api
       - dev_api_dist:/workspace/apps/api/dist
       - ../packages/contracts:/workspace/packages/contracts
-      - dev_node_modules:/workspace/node_modules
 
   migrate:
     image: local/ca-meta-dev:${DEV_IMAGE_TAG:-m2-07}
@@ -89,7 +86,6 @@ services:
       - ../apps/api:/workspace/apps/api
       - dev_api_dist:/workspace/apps/api/dist
       - ../packages/contracts:/workspace/packages/contracts
-      - dev_node_modules:/workspace/node_modules
     depends_on:
       database:
         condition: service_healthy
@@ -132,5 +128,4 @@ secrets:
 
 volumes:
   dev_mariadb_data:
-  dev_node_modules:
   dev_api_dist:

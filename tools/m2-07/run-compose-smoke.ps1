@@ -255,7 +255,7 @@ try {
     Write-Output 'Production model: managed DB only, web ingress published, API/worker/migration private, shared DB endpoint, readiness healthcheck, valid release lock, and DB passwords absent.'
 
     # Exercise the migration dependency before any API or worker is promoted.
-    $null = Invoke-Compose -Arguments @('up', '-d', '--wait', '--wait-timeout', '90', 'database')
+    # The first dev up builds the shared image and starts the DB only as the migration dependency.
     $bad = & docker compose --project-name $composeProject --env-file $migrationFailureEnvPath @composeFiles up --build --detach --wait --wait-timeout 45 api worker 2>&1
     $badExitCode = $LASTEXITCODE
     $imageInspect = & docker image inspect --format '{{.Id}}' $imageReference 2>$null

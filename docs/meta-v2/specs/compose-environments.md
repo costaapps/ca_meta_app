@@ -4,7 +4,7 @@ Status: implemented; candidate validation pending. Issue: [M2.07 / #29](https://
 
 ## Problem and intended behavior
 
-Provide an operator-declared web/API/worker Compose stack with a schema-migration gate. Development can build from lockfile and mount source; staging/production consume the same immutable image digests and external configuration. MariaDB-backed jobs remain durable across application-container recreation. Production database is managed/outside this Compose project; the local MariaDB exists only in the explicit dev/test override.
+Provide an operator-declared web/API/worker Compose stack with a schema-migration gate. Development can build from lockfile and mount source; npm dependencies stay in the built dev image and are not shadowed by a named node_modules volume. Staging/production consume the same immutable image digests and external configuration. MariaDB-backed jobs remain durable across application-container recreation. Production database is managed/outside this Compose project; the local MariaDB exists only in the explicit dev/test override.
 
 ## Invariants and trust boundaries
 
@@ -24,7 +24,7 @@ See [release-lock contract](../contracts/release-lock.md). Current image digests
 
 | ID | Given | When | Then | Evidence artifact |
 |---|---|---|---|---|
-| M2.07-AC01 | Docker/Compose and a fresh local project | Run the documented harness | Web/API/worker/migration/local DB start without a developer-installed Node runtime; source mounts and unique project resources are used | `tools/m2-07/run-compose-smoke.ps1` (coordinator execution pending) |
+| M2.07-AC01 | Docker/Compose and a fresh local project | Run the documented harness | The shared dev image is built from the lockfile before the first stack start; web/API/worker/migration/local DB start without a developer-installed Node runtime; source mounts and unique project resources are used | `tools/m2-07/run-compose-smoke.ps1` (coordinator execution pending) |
 | M2.07-AC02 | Prod Compose files and protected config | Resolve/publish services | Only web publishes ingress; DB/fila are absent from prod and app containers have no host port mapping | Compose config smoke (pending) |
 | M2.07-AC03 | One API release and environment | Start API and worker | Same validated domain/database config and runtime secret; shared DB endpoint for API/migration; readiness healthcheck and web `/api/ready` succeed; worker HTTP healthcheck is disabled | Compose model plus liveness/readiness ingress and worker inspect in harness (pending) |
 | M2.07-AC04 | DB target unavailable to migration | Start API/worker through Compose dependency | One-off migration exits nonzero and neither service starts; operator does not reach promotion | Failure-gate scenario in harness (pending) |
