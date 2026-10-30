@@ -9,7 +9,14 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[3]
 BASELINE = ROOT / "docs" / "baseline" / "endpoint-matrix.csv"
-OUTPUT = ROOT / "docs" / "meta-v2" / "contracts" / "compatibility-matrix.csv"
+default_output = ROOT / "docs" / "meta-v2" / "contracts" / "compatibility-matrix.csv"
+output_argument = next((argument.split("=", 1)[1] for argument in sys.argv[1:] if argument.startswith("--output=")), None)
+OUTPUT = Path(output_argument).resolve() if output_argument else default_output
+
+
+def generated_text_matches(current: str, generated: str) -> bool:
+    """Treat Git's CRLF checkout conversion as equivalent to generated LF text."""
+    return current.replace("\r\n", "\n") == generated.replace("\r\n", "\n")
 
 
 def mapping(row: dict[str, str]) -> tuple[str, str, str, str, str]:
@@ -132,8 +139,12 @@ generated = buffer.getvalue()
 if "--check" in sys.argv[1:]:
     with OUTPUT.open(encoding="utf-8", newline="") as handle:
         current = handle.read()
-    if current != generated:
-        raise SystemExit(f"Generated compatibility matrix is stale: run npm run generate ({OUTPUT.relative_to(ROOT)}).")
+    if not generated_text_matches(current, generated):
+        try:
+            output_label = OUTPUT.relative_to(ROOT)
+        except ValueError:
+            output_label = OUTPUT
+        raise SystemExit(f"Generated compatibility matrix is stale: run npm run generate ({output_label}).")
     print(f"Verified {len(rows)} compatibility rows match {BASELINE.relative_to(ROOT)}")
 else:
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)

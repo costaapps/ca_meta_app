@@ -1,0 +1,13 @@
+{
+  "/api": {
+    "target": "http://api:3000",
+    "secure": false,
+    "changeOrigin": false,
+    "pathRewrite": {
+      "^/api/health$": "/health",
+      "^/api/ready$": "/ready",
+      "^/api/v1/health$": "/health",
+      "^/api/v1/ready$": "/ready"
+    }
+  }
+}

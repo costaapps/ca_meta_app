@@ -14,10 +14,10 @@
 - The runtime backend currently consumed here is PHP.
 
 Evidence:
-- `src/environments/environment.ts`
-- `src/environments/environment.prod.ts`
-- `src/app/core/services/meta-auth.service.ts`
-- `src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/environments/environment.ts`
+- `apps/web/src/environments/environment.prod.ts`
+- `apps/web/src/app/core/services/meta-auth.service.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
 
 ## Current Endpoint Families
 
@@ -36,9 +36,9 @@ Evidence:
   - the shared helper lives in `backend/meta_auth_helper.php`
 
 Primary sources:
-- `src/app/core/services/meta-auth.service.ts`
-- `src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
-- `src/app/app.routes.ts`
+- `apps/web/src/app/core/services/meta-auth.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-setup/channel-setup.component.ts`
+- `apps/web/src/app/app.routes.ts`
 - `backend/connect.php`
 - `backend/connect_facebook.php`
 - `backend/connect_instagram.php`
@@ -51,8 +51,8 @@ Primary sources:
   - persist channel automation configuration
 
 Primary sources:
-- `src/app/core/services/meta-integration.service.ts`
-- `src/app/features/channels/pages/channel-list/channel-list.component.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-list/channel-list.component.ts`
 - `backend/connect.php`
 
 ### Notifications And Review Actions
@@ -62,7 +62,7 @@ Primary sources:
   - trigger backend-mediated user actions for those notifications
 
 Primary sources:
-- `src/app/features/channels/components/notification-bell/notification-bell.component.ts`
+- `apps/web/src/app/features/channels/components/notification-bell/notification-bell.component.ts`
 - `backend/connect.php`
 
 ### WhatsApp Templates
@@ -72,8 +72,8 @@ Primary sources:
   - create templates through backend-owned Meta credentials
 
 Primary sources:
-- `src/app/core/services/meta-integration.service.ts`
-- `src/app/features/channels/pages/channel-templates/channel-templates.component.ts`
+- `apps/web/src/app/core/services/meta-integration.service.ts`
+- `apps/web/src/app/features/channels/pages/channel-templates/channel-templates.component.ts`
 - `backend/connect.php`
 
 ## Shared Contract Traits

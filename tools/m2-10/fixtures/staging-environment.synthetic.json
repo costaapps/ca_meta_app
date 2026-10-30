@@ -1,0 +1,120 @@
+{
+  "formatVersion": 1,
+  "evidenceMode": "synthetic",
+  "targetEnvironment": "staging",
+  "displayLabel": "STAGING",
+  "stagingOrigin": "https://staging.example.invalid",
+  "productionOrigin": "https://production.example.invalid",
+  "releaseId": "1.2.3+0123456789ab",
+  "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
+  "resources": {
+    "staging": {
+      "databaseRef": "fixture://staging/database",
+      "secretStoreRef": "fixture://staging/secret-store",
+      "tenantCatalogRef": "fixture://staging/tenant-catalog",
+      "ingressRef": "fixture://staging/ingress",
+      "metaAppConfigRefs": [
+        "fixture://staging/meta-config/facebook",
+        "fixture://staging/meta-config/instagram-via-facebook-login",
+        "fixture://staging/meta-config/instagram-login",
+        "fixture://staging/meta-config/whatsapp-exclusive",
+        "fixture://staging/meta-config/whatsapp-coexistence"
+      ]
+    },
+    "production": {
+      "databaseRef": "fixture://production/database",
+      "secretStoreRef": "fixture://production/secret-store",
+      "tenantCatalogRef": "fixture://production/tenant-catalog",
+      "ingressRef": "fixture://production/ingress",
+      "metaAppConfigRefs": [
+        "fixture://production/meta-config/facebook",
+        "fixture://production/meta-config/instagram-via-facebook-login",
+        "fixture://production/meta-config/instagram-login",
+        "fixture://production/meta-config/whatsapp-exclusive",
+        "fixture://production/meta-config/whatsapp-coexistence"
+      ]
+    }
+  },
+  "routes": {
+    "providerCallback": {
+      "path": "/api/v1/meta/{variant}/callback",
+      "runtimeStatus": "contract-only"
+    },
+    "webhookChallenge": {
+      "path": "/api/v1/webhooks/meta/{appConfigRef}",
+      "runtimeStatus": "contract-only"
+    },
+    "webhookDelivery": {
+      "path": "/api/v1/webhooks/meta/{appConfigRef}",
+      "runtimeStatus": "contract-only"
+    },
+    "deauthorization": {
+      "path": null,
+      "status": "Not confirmed"
+    },
+    "dataDeletion": {
+      "path": null,
+      "status": "Not confirmed"
+    }
+  },
+  "journeys": [
+    {
+      "id": "facebook",
+      "variants": [
+        {
+          "contractVariant": "FACEBOOK_LOGIN",
+          "appConfigRef": "fixture://staging/meta-config/facebook",
+          "availability": "Not confirmed"
+        }
+      ]
+    },
+    {
+      "id": "instagram",
+      "variants": [
+        {
+          "contractVariant": "INSTAGRAM_VIA_FACEBOOK_LOGIN",
+          "appConfigRef": "fixture://staging/meta-config/instagram-via-facebook-login",
+          "availability": "Not confirmed"
+        },
+        {
+          "contractVariant": "INSTAGRAM_LOGIN",
+          "appConfigRef": "fixture://staging/meta-config/instagram-login",
+          "availability": "Not confirmed"
+        }
+      ]
+    },
+    {
+      "id": "whatsapp-exclusive",
+      "variants": [
+        {
+          "contractVariant": "WHATSAPP_CLOUD_API",
+          "appConfigRef": "fixture://staging/meta-config/whatsapp-exclusive",
+          "availability": "Not confirmed"
+        }
+      ]
+    },
+    {
+      "id": "whatsapp-coexistence",
+      "variants": [
+        {
+          "contractVariant": "WHATSAPP_COEXISTENCE",
+          "appConfigRef": "fixture://staging/meta-config/whatsapp-coexistence",
+          "availability": "Not confirmed"
+        }
+      ]
+    }
+  ],
+  "externalEvidence": {
+    "hostAndIngress": "Not confirmed",
+    "dns": "Not confirmed",
+    "tls": "Not confirmed",
+    "secretsManagement": "Not confirmed",
+    "databaseIsolation": "Not confirmed",
+    "metaAppConfigs": "Not confirmed",
+    "authorizedTestAssets": "Not confirmed",
+    "callbackRuntime": "Not confirmed",
+    "webhookSignature": "Not confirmed",
+    "deauthorizationAndDataDeletionRoutes": "Not confirmed",
+    "externalSmoke": "Not confirmed"
+  }
+}

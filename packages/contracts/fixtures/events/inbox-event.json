@@ -1,0 +1,25 @@
+{
+  "eventId": "inbox_example_01",
+  "schemaVersion": 1,
+  "eventType": "provider.message.received",
+  "appConfigRef": "appcfg_example_01",
+  "tenantRef": null,
+  "actor": {
+    "kind": "PROVIDER",
+    "ref": "provider_example_01"
+  },
+  "correlationId": "corr_example_01",
+  "causationId": null,
+  "aggregateRef": null,
+  "aggregateVersion": 0,
+  "occurredAt": "2026-10-29T11:58:00Z",
+  "receivedAt": "2026-10-29T11:58:01Z",
+  "protectedPayloadRef": "payloadref_example_01",
+  "routingState": "PENDING",
+  "safeMetadata": {
+    "kind": "MESSAGE_RECEIVED",
+    "assetRef": "asset_external_ref_example_01",
+    "messageRef": "message_external_ref_example_01",
+    "channel": "WHATSAPP"
+  }
+}

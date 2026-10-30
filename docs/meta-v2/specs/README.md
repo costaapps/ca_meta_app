@@ -4,6 +4,7 @@ These seven specs turn accepted M1 contracts into bounded implementation slices.
 
 | Feature | Issue trace | Canonical contract / baseline | Executable local evidence |
 |---|---|---|---|
+| [Compose environments](compose-environments.md) | #29 | [Release-lock contract](../contracts/release-lock.md); ADR-003 jobs and ADR-005 secret custody | `tools/m2-07/` |
 | [Authentication](authentication.md) | #15, #17 | `identity-contract.md`; OpenAPI auth and session operations | `tools/m1-06/`, `tools/m1-07/` |
 | [Tenancy](tenancy.md) | #11, #14, #15 | `m1-05-domain-model.md`; tenant-scoped endpoint security crosswalk | `tools/m1-02/`, `tools/m1-05/`, `tools/m1-06/` |
 | [Credentials](credentials.md) | #14, #16 | domain model; ADR-005; error catalog | `tools/m1-05/`, `tools/m1-09/` |

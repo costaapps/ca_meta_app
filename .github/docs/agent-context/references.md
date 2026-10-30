@@ -28,7 +28,7 @@
 
 ### Angular Style Guide
 - URL: https://angular.dev/style-guide
-- Topic: consistency, file naming, project structure, `src/main.ts`
+- Topic: consistency, file naming, project structure, `apps/web/src/main.ts`
 - Applicable version: Angular 21 codebase, doc page currently served by Angular docs
 - Consulted on: 2026-06-23
 - Decision used here:

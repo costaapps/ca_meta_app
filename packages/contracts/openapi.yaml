@@ -1,0 +1,3260 @@
+# Generated public OpenAPI from docs/meta-v2/contracts/openapi.yaml.
+# Internal-only operations, schemas, security schemes, and error codes are excluded.
+openapi: 3.1.0
+jsonSchemaDialect: https://spec.openapis.org/oas/3.1/dialect/base
+info:
+  title: Msg4 Meta Connections API
+  version: 1.0.0-proposed
+  summary: Proposed, versioned API contract for Meta connection management.
+  description: This contract is proposed for M1.07 and does not describe a
+    deployed service. Production PHP routing, Suite4 issuer claims, Meta grants,
+    flow eligibility, provider callback details, and deployment behavior are Not
+    confirmed. Every route is deny-by-default. Tenant and actor authority come
+    from the authenticated server context; company_uuid is never authorization
+    input.
+  contact:
+    name: Msg4 Meta Platform API
+servers:
+  - url: https://api.example.invalid
+    description: Root-host placeholder; the actual deployment host is Not confirmed.
+security: &a10
+  - portalSession: []
+x-status: proposed
+x-public-routes:
+  - method: POST
+    path: /api/v1/auth/preauth
+    purpose: Start a browser-bound pre-auth challenge; exact Origin and Fetch
+      Metadata are required.
+  - method: POST
+    path: /api/v1/auth/exchanges
+    purpose: Exchange a trusted, one-time portal-entry ticket plus its pre-auth
+      cookie; it does not accept provider authorization codes.
+  - method: POST
+    path: /api/v1/auth/magic-links
+    purpose: Uniform, rate-limited request for an already-invited identity; never
+      creates membership.
+  - method: POST
+    path: /api/v1/auth/magic-links/consume
+    purpose: Explicit one-use magic-link confirmation; GET/HEAD never consume it.
+  - method: GET
+    path: /api/v1/meta/{variant}/callback
+    purpose: Provider callback keyed by server-created onboarding state; no tenant
+      query parameter is trusted.
+  - method: GET
+    path: /api/v1/webhooks/meta/{appConfigRef}
+    purpose: Signature-verified provider webhook handshake; exact provider semantics
+      remain Not confirmed.
+  - method: POST
+    path: /api/v1/webhooks/meta/{appConfigRef}
+    purpose: Signature-verified, size-bounded provider webhook ingress; routing is
+      resolved server-side.
+  - method: GET
+    path: /health
+    purpose: Non-sensitive liveness only.
+  - method: GET
+    path: /ready
+    purpose: Non-sensitive readiness summary; no provider call.
+x-proposed-payload-limits:
+  defaultJsonRequestBytes: 65536
+  providerAuthorizationCodeRequestBytes: 16384
+  replyTextBytes: 4096
+  templateRequestBytes: 16384
+  signedWebhookRawBytes: 1048576
+  pageSizeDefault: 50
+  pageSizeMaximum: 100
+x-retry-policy:
+  status: proposed-local-bounds; provider idempotency and retry guarantees are Not
+    confirmed.
+  safeReadsAndLocallyIdempotentJobs:
+    maxAutomaticAttempts: 3
+    maxElapsedSeconds: 60
+    backoff: exponential-with-jitter
+    retryOnlyWhen: transient failure with no external mutation
+  externalMutationsWithoutVerifiedProviderIdempotency:
+    maxAutomaticAttempts: 1
+    includesInitialRequest: true
+    maxAutomaticRetries: 0
+    maxElapsedSeconds: 60
+    onAmbiguousOutcome: UNKNOWN
+    retryAfterUnknown: reconcile first; any later user request gets a new idempotency key
+    messageSend: no automatic retry
+paths:
+  /api/v1/auth/preauth:
+    post:
+      operationId: startPreauth
+      tags:
+        - Authentication
+      summary: Start browser-bound pre-authentication
+      description: Public before a portal session. Requires an exact allowlisted
+        Origin, matching Fetch Metadata, and an HttpOnly pre-auth cookie bound
+        to the server-created challenge. The challenge is for the trusted Suite4
+        portal-entry handoff, not a Meta provider code.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreauthStartRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  entryMode: SUITE4_EMBED
+                  returnRoute: connections
+      responses:
+        "201":
+          description: Sanitized success example
+          headers:
+            Set-Cookie:
+              description: Host-only Secure HttpOnly pre-auth cookie; no Domain attribute.
+                Cookie value is not in the response body.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreauthChallenge"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    challengeRef: preauth_example_01
+                    expiresAt: 2026-10-29T12:00:30Z
+                    requestId: req_example_13
+        "400": &a1
+          $ref: "#/components/responses/BadRequest"
+        "401": &a2
+          $ref: "#/components/responses/Unauthorized"
+        "404": &a3
+          $ref: "#/components/responses/NotFound"
+        "409": &a4
+          $ref: "#/components/responses/Conflict"
+        "413": &a5
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422": &a6
+          $ref: "#/components/responses/Unprocessable"
+        "429": &a7
+          $ref: "#/components/responses/TooManyRequests"
+        "503": &a8
+          $ref: "#/components/responses/Unavailable"
+        default: &a9
+          $ref: "#/components/responses/UnexpectedError"
+      x-retry-policy: A fresh challenge may be started; a challenge and ticket are single-use.
+  /api/v1/auth/exchanges:
+    post:
+      operationId: exchangePortalEntryTicket
+      tags:
+        - Authentication
+      summary: Exchange a portal-entry ticket for a portal session
+      description: Public in the sense that no session exists yet; protected by a
+        pre-auth cookie and one-time signed ticket. This exchange is distinct
+        from Meta OAuth/Embedded Signup callback handling and MUST NOT accept an
+        authorization code. Ticket, browser challenge, cookie, current server
+        membership, issuer and audience must match atomically. The `tenant`
+        claim is revalidated; `company_uuid` is ignored. Set-Cookie returns the
+        opaque portal session; the JSON DTO contains no session cookie, Meta
+        credential, or ticket.
+      security:
+        - preAuthCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalEntryExchangeRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  ticket: synthetic.one-time-entry-ticket
+                  challengeRef: preauth_example_01
+      responses:
+        "201":
+          description: Sanitized success example
+          headers:
+            Set-Cookie:
+              description: Opaque host-only Secure HttpOnly portal session cookie.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionContext"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    principalRef: principal_example_01
+                    tenantRef: tenant_example_01
+                    roles:
+                      - operator
+                    tenantContextRef: ctx_example_ref_01
+                    contextVersion: 3
+                    requestId: req_example_14
+        "400": *a1
+        "401": *a2
+        "404": *a3
+        "409": *a4
+        "413": *a5
+        "422": *a6
+        "429": *a7
+        "503": *a8
+        default: *a9
+      x-external-effect: Consumes the one-time entry ticket/challenge and creates a
+        portal session atomically.
+      x-retry-policy: A consumed ticket is never replayed. If its response is lost,
+        start a fresh pre-auth challenge in the same browser; do not resubmit it
+        as a bearer credential.
+  /api/v1/auth/magic-links:
+    post:
+      operationId: requestMagicLink
+      tags:
+        - Authentication
+      summary: Request a sign-in link
+      description: Public and rate-limited. The response is uniform for known and
+        unknown identities. The server sends only to an already invited identity
+        and does not create a membership. No address or delivery status is
+        reflected in the response. Email enqueue is deduplicated by the
+        rate-limit bucket and request fingerprint.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MagicLinkRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  email: operator@example.invalid
+      responses:
+        "202":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedRequest"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    accepted: true
+                    requestId: req_example_15
+        "400": *a1
+        "401": *a2
+        "404": *a3
+        "409": *a4
+        "413": *a5
+        "422": *a6
+        "429": *a7
+        "503": *a8
+        default: *a9
+      x-external-effect: May enqueue one email delivery to an already invited
+        identity. The enqueue is deduplicated by the rate-limit bucket and
+        request fingerprint; no membership is created.
+      x-idempotency-scope: Rate-limit bucket plus request fingerprint; no membership side effect.
+      x-retry-policy: At most one automatic email delivery attempt and zero automatic
+        retries or resends. A new explicit user request is rate-limited and
+        receives the same uniform response; delivery outcome is not disclosed.
+        Provider delivery receipts/idempotency are Not confirmed.
+  /api/v1/auth/magic-links/consume:
+    post:
+      operationId: consumeMagicLink
+      tags:
+        - Authentication
+      summary: Consume a sign-in link after explicit user confirmation
+      description: Public before session creation. POST only; GET/HEAD do not consume.
+        Requires exact Origin and one-use link token. Tenant and membership are
+        read from the token record and current server state, never from request
+        tenant fields.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MagicLinkConsumeRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  linkToken: synthetic.one-time-link-token-example-0123456789
+      responses:
+        "201":
+          description: Sanitized success example
+          headers:
+            Set-Cookie:
+              description: Opaque host-only Secure HttpOnly portal session cookie.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionContext"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    principalRef: principal_example_01
+                    tenantRef: tenant_example_01
+                    roles:
+                      - viewer
+                    tenantContextRef: ctx_example_ref_02
+                    contextVersion: 1
+                    requestId: req_example_16
+        "400": *a1
+        "401": *a2
+        "404": *a3
+        "409": *a4
+        "413": *a5
+        "422": *a6
+        "429": *a7
+        "503": *a8
+        default: *a9
+      x-external-effect: Consumes a one-use link and creates a portal session in one transaction.
+      x-retry-policy: One use only. A lost response requires a new authorized identity process.
+  /api/v1/session:
+    get:
+      operationId: getSession
+      tags:
+        - Session
+      summary: Read the current session context
+      description: Returns public identity, current tenant context and role names
+        only. Membership is revalidated server-side. No token, cookie value,
+        authorization code, ciphertext or provider credential is returned. CSRF
+        material, if bootstrapped, is delivered as a separate cookie/header
+        protocol and is not a DTO field.
+      security: *a10
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionContext"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    principalRef: principal_example_01
+                    tenantRef: tenant_example_01
+                    roles:
+                      - operator
+                    tenantContextRef: ctx_example_ref_01
+                    contextVersion: 3
+                    requestId: req_example_17
+        "400": &a11
+          $ref: "#/components/responses/BadRequest"
+        "401": &a12
+          $ref: "#/components/responses/Unauthorized"
+        "403": &a13
+          $ref: "#/components/responses/Forbidden"
+        "404": &a14
+          $ref: "#/components/responses/NotFound"
+        "409": &a15
+          $ref: "#/components/responses/Conflict"
+        "412": &a16
+          $ref: "#/components/responses/PreconditionFailed"
+        "413": &a17
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422": &a18
+          $ref: "#/components/responses/Unprocessable"
+        "429": &a19
+          $ref: "#/components/responses/TooManyRequests"
+        "503": &a20
+          $ref: "#/components/responses/Unavailable"
+        default: &a21
+          $ref: "#/components/responses/UnexpectedError"
+  /api/v1/session/tenant-switch:
+    post:
+      operationId: switchTenantContext
+      tags:
+        - Session
+      summary: Switch to another current membership
+      description: Tenant selection is a request to check current membership, never
+        authority. Rotates tenantContextRef/contextVersion. Existing onboarding
+        sessions/jobs retain their original server-resolved tenant and
+        principal. Requires current context, exact Origin, CSRF and allowed
+        Fetch Metadata.
+      security: *a10
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/TenantContext"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantSwitchRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  tenantRef: tenant_example_02
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionContext"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    principalRef: principal_example_01
+                    tenantRef: tenant_example_02
+                    roles:
+                      - viewer
+                    tenantContextRef: ctx_example_ref_03
+                    contextVersion: 4
+                    requestId: req_example_18
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: Rotates server-side tenant context and audit record.
+      x-retry-policy: A stale context returns CONTEXT_CHANGED; reload session before
+        trying again.
+  /api/v1/session/logout:
+    post:
+      operationId: logoutSession
+      tags:
+        - Session
+      summary: Revoke the current portal session
+      description: Requires current context, exact Origin, CSRF and allowed Fetch
+        Metadata. Revokes the server session and expires the host-only cookie.
+      security: *a10
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Completed without a response body
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: Revokes the current server-side portal session.
+  /api/v1/integrations/flows:
+    get:
+      operationId: listIntegrationFlows
+      tags:
+        - Integrations
+      summary: List configured flow choices
+      description: Returns only server-enabled flow configurations for the current
+        tenant. Product variant names distinguish Facebook, Instagram variants,
+        WhatsApp Cloud API and WhatsApp Coexistence; their actual availability,
+        grants and eligibility are Not confirmed.
+      security: *a10
+      parameters: &a22
+        - $ref: "#/components/parameters/TenantContext"
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowList"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    items:
+                      - variant: WHATSAPP_COEXISTENCE
+                        enabled: false
+                        requestedCapabilities:
+                          - READ_STATUS
+                    requestId: req_example_19
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/onboarding-sessions:
+    post:
+      operationId: createOnboardingSession
+      tags:
+        - Onboarding
+      summary: Create an onboarding session and provider launch request
+      description: Tenant/principal/config are resolved from the current server
+        session. Body cannot select a tenant, CompanyUUID, app or secret. The
+        server generates provider state and its correlation to this onboarding;
+        launch URL is server-generated from allowlisted configuration. A 201 or
+        provider redirect means only that a flow was created, never that a
+        connection is READY.
+      security: *a10
+      parameters: &a23
+        - &a26
+          $ref: "#/components/parameters/Origin"
+        - &a27
+          $ref: "#/components/parameters/FetchSite"
+        - &a28
+          $ref: "#/components/parameters/CsrfToken"
+        - &a29
+          $ref: "#/components/parameters/TenantContext"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingCreateRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  flowVariant: WHATSAPP_COEXISTENCE
+                  requestedCapabilities:
+                    - READ_STATUS
+                  returnRoute: connections
+      responses:
+        "201":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingCreated"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    id: onb_example_01
+                    status: AWAITING_PROVIDER
+                    expiresAt: 2026-10-29T12:10:00Z
+                    launchUrl: https://provider.example.invalid/authorize?state=opaque-example
+                    requestId: req_example_20
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: Creates an onboarding aggregate and provider authorization
+        launch state; provider completion is a separate callback/code-submission
+        step.
+      x-idempotency-scope: tenant + operation + Idempotency-Key; persist payload hash
+        and outcome, never the raw authorization code. Equal key and equal
+        payload replays the prior acceptance; a different payload returns 409
+        IDEMPOTENCY_KEY_REUSED without another effect.
+      x-retry-policy: Creation can be retried only with the same key and body.
+        Provider result is reconciled through onboarding status.
+  /api/v1/onboarding-sessions/{onboardingSessionId}:
+    parameters:
+      - name: onboardingSessionId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: getOnboardingSession
+      tags:
+        - Onboarding
+      summary: Read authoritative onboarding status
+      description: The server derives READY/PARTIAL from current versioned policy and
+        verified evidence. A code exchange, HTTP 200, popup finish event, or
+        redirect alone never sets READY. UNKNOWN/STALE evidence stays visible
+        and blocks READY when required.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingStatus"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    id: onb_example_01
+                    flowVariant: WHATSAPP_COEXISTENCE
+                    status: PROVISIONING
+                    readiness: UNKNOWN
+                    steps:
+                      - name: authorization
+                        status: SUCCEEDED
+                      - name: asset-verification
+                        status: RUNNING
+                    nextAction: CHECK_STATUS
+                    lastUpdatedAt: 2026-10-29T12:01:00Z
+                    requestId: req_example_21
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/onboarding-sessions/{onboardingSessionId}/authorization-code:
+    parameters:
+      - name: onboardingSessionId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    post:
+      operationId: submitProviderAuthorizationCode
+      tags:
+        - Onboarding
+      summary: Submit an ephemeral provider authorization code
+      description: Authenticated portal submission for a code returned by the provider
+        Embedded Signup/browser flow. It is not the Suite4 portal-entry ticket
+        accepted by POST /api/v1/auth/exchanges. The server binds the onboarding
+        ID and one-time state to the original principal, tenant, flow and app
+        config. The body never accepts company_uuid; secrets/codes are not
+        logged or returned. When the provider instead calls the server callback,
+        use GET /api/v1/meta/{variant}/callback; do not send that callback code
+        through portal authentication exchange.
+      security: *a10
+      parameters: *a23
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderAuthorizationCodeRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  authorizationCode: synthetic.short-lived-provider-code
+                  stateRef: state_example_01
+      responses:
+        "202":
+          description: Sanitized success example
+          headers: &a24
+            Location:
+              description: Relative URI of the tenant-scoped accepted job; poll it for the
+                outcome.
+              schema:
+                type: string
+                pattern: ^/api/v1/jobs/[A-Za-z0-9_-]+$
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobAccepted"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    jobId: job_example_01
+                    status: PENDING
+                    location: /api/v1/jobs/job_example_01
+                    requestId: req_example_22
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: Starts a provider code exchange/provisioning job; raw code is
+        not returned.
+      x-idempotency-scope: tenant + operation + Idempotency-Key; only payload digest
+        and accepted outcome are retained.
+      x-retry-policy: At most one automatic provider-exchange attempt, including the
+        initial request; zero automatic retries without verified provider
+        idempotency. A timeout becomes UNKNOWN; reconcile before another
+        exchange. Never resubmit the same one-time code.
+  /api/v1/meta/{variant}/callback:
+    parameters:
+      - name: variant
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+            - facebook
+            - instagram
+            - whatsapp
+      - name: code
+        in: query
+        required: false
+        description: One-time provider authorization code. Never log or echo it. A
+          missing code is an explicit denial/return path.
+        schema:
+          type: string
+          maxLength: 16384
+      - name: state
+        in: query
+        required: true
+        description: Opaque, one-use server state correlated to an onboarding session.
+          It does not identify a tenant by itself.
+        schema:
+          type: string
+          minLength: 16
+          maxLength: 512
+      - name: error
+        in: query
+        required: false
+        description: Allowlisted provider error class only; raw provider descriptions
+          are discarded.
+        schema:
+          type: string
+          maxLength: 128
+    get:
+      operationId: receiveProviderCallback
+      tags:
+        - Onboarding
+      summary: Receive provider callback correlated by one-time server state
+      description: Explicit unauthenticated callback route. Correlates the callback to
+        the existing onboarding using one-time server state and configured
+        flow/app variant. It never accepts or trusts company_uuid/tenant from
+        the return query. Callback acceptance schedules or records processing;
+        browser redirect is only navigation, not READY. Provider callback
+        details for deployed variants remain Not confirmed.
+      security: []
+      responses:
+        "303":
+          description: Redirect to an allowlisted local return route with an opaque
+            onboarding reference only; no code/state/token in Location.
+          headers:
+            Location:
+              description: Validated same-origin portal route; never arbitrary caller URL.
+              schema:
+                type: string
+                example: /setup/callback?onboardingRef=onb_example_01
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+        "400": &a30
+          $ref: "#/components/responses/BadRequest"
+        "404": &a31
+          $ref: "#/components/responses/NotFound"
+        "409": &a32
+          $ref: "#/components/responses/Conflict"
+        "413": &a33
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429": &a34
+          $ref: "#/components/responses/TooManyRequests"
+        "503": &a35
+          $ref: "#/components/responses/Unavailable"
+        default: &a36
+          $ref: "#/components/responses/UnexpectedError"
+      x-external-effect: Consumes one-time state and records provider return for a
+        server-side job.
+      x-retry-policy: State is single-use. A duplicate callback is rejected or safely
+        resumes the same recorded operation; ambiguous exchange becomes UNKNOWN
+        and is reconciled before retry.
+  /api/v1/connections:
+    get:
+      operationId: listConnections
+      tags:
+        - Connections
+      summary: List tenant-scoped connection projections
+      description: Cursor pagination; tenant is resolved from the session and current
+        context only. List items identify status, freshness and last confirmed
+        evidence but contain no raw provider payload or credential.
+      security: *a10
+      parameters: &a25
+        - $ref: "#/components/parameters/TenantContext"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionListPage"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    items:
+                      - id: conn_example_01
+                        flowVariant: WHATSAPP_COEXISTENCE
+                        status: PARTIAL
+                        readiness: PARTIAL
+                        observedAt: 2026-10-29T11:59:00Z
+                        stale: false
+                        assetCount: 1
+                    nextCursor: null
+                    requestId: req_example_23
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/connections/{connectionId}:
+    parameters:
+      - name: connectionId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: getConnection
+      tags:
+        - Connections
+      summary: Read one tenant-scoped connection
+      description: Resource lookup and authorization are both scoped by the
+        server-derived tenant. A foreign tenant resource is indistinguishable
+        from an unavailable resource.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Sanitized success example
+          headers:
+            ETag:
+              description: Opaque representation version for conditional updates.
+              schema:
+                type: string
+                example: W/"conn-v7"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionDetail"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    id: conn_example_01
+                    flowVariant: WHATSAPP_COEXISTENCE
+                    status: PARTIAL
+                    readiness: PARTIAL
+                    observedAt: 2026-10-29T11:59:00Z
+                    stale: false
+                    assets:
+                      - id: asset_example_01
+                        kind: PHONE_NUMBER
+                        status: ACTIVE
+                        authorizationStatus: VERIFIED
+                        observedAt: 2026-10-29T11:59:00Z
+                    requestId: req_example_24
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+    delete:
+      operationId: disconnectConnection
+      tags:
+        - Connections
+      summary: Start a connection disconnect
+      description: Requires operator/owner scope and CSRF. Local desired state is
+        recorded first; provider revocation/cleanup is a separate bounded job. A
+        provider success is not assumed.
+      security: *a10
+      parameters: *a23
+      responses:
+        "202":
+          description: Sanitized success example
+          headers: *a24
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobAccepted"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    jobId: job_example_02
+                    status: PENDING
+                    location: /api/v1/jobs/job_example_02
+                    requestId: req_example_25
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: May request revocation or cleanup at the provider and update
+        local grants.
+      x-idempotency-scope: tenant + operation + Idempotency-Key and request payload hash.
+      x-retry-policy: One automatic attempt including the initial request; zero
+        automatic retries. A proven no-effect result may permit a new explicit
+        user request with a new idempotency key. An ambiguous provider result is
+        UNKNOWN; reconcile grant state before another request.
+  /api/v1/connections/{connectionId}/reauthorizations:
+    parameters:
+      - name: connectionId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    post:
+      operationId: createReauthorization
+      tags:
+        - Connections
+      summary: Start reauthorization without prematurely revoking the current grant
+      description: Creates a new local onboarding session for the selected connection.
+        Provider authorization starts only after the user follows its launch
+        URL; this request changes no provider state. The prior grant remains
+        usable while verified and eligible under current policy; rotation is
+        explicit.
+      security: *a10
+      parameters: *a23
+      responses:
+        "202":
+          description: Sanitized success example
+          headers: *a24
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobAccepted"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    jobId: job_example_03
+                    status: PENDING
+                    location: /api/v1/jobs/job_example_03
+                    requestId: req_example_26
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: Creates local onboarding and launch state; provider
+        authorization and follow-up grant reconciliation occur in later
+        user/callback steps.
+      x-idempotency-scope: tenant + operation + Idempotency-Key and request payload hash.
+      x-retry-policy: This local creation may be retried only with the same
+        Idempotency-Key and body, which returns the recorded job. Provider
+        authorization/callback are separate single-use steps; never discard the
+        prior grant on an ambiguous result.
+  /api/v1/assets:
+    get:
+      operationId: listAssets
+      tags:
+        - Assets
+      summary: List verified assets in the current tenant
+      description: Cursor-paginated tenant-scoped projection. External IDs are opaque
+        strings and are never resolved across tenants. Status includes
+        observation freshness.
+      security: *a10
+      parameters: *a25
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetListPage"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    items:
+                      - id: asset_example_01
+                        kind: PHONE_NUMBER
+                        status: ACTIVE
+                        authorizationStatus: VERIFIED
+                        observedAt: 2026-10-29T11:59:00Z
+                        stale: false
+                    nextCursor: null
+                    requestId: req_example_27
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/assets/{assetId}:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: getAsset
+      tags:
+        - Assets
+      summary: Read one tenant-scoped asset
+      description: Returns normalized metadata only. Provider response bodies, tokens
+        and raw webhook data are excluded.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Sanitized success example
+          headers:
+            ETag:
+              schema:
+                type: string
+                example: W/"asset-v4"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    id: asset_example_01
+                    kind: PHONE_NUMBER
+                    status: ACTIVE
+                    authorizationStatus: VERIFIED
+                    observedAt: 2026-10-29T11:59:00Z
+                    stale: false
+                    requestId: req_example_28
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/assets/{assetId}/refresh:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    post:
+      operationId: refreshAsset
+      tags:
+        - Assets
+      summary: Queue an asset status refresh
+      description: Coalesced refresh; does not call a provider synchronously from the
+        HTTP request. Caller receives a job reference, not a claim that status
+        is fresh.
+      security: *a10
+      parameters: *a23
+      responses:
+        "202":
+          description: Sanitized success example
+          headers: *a24
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobAccepted"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    jobId: job_example_04
+                    status: PENDING
+                    location: /api/v1/jobs/job_example_04
+                    requestId: req_example_29
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: May read provider state through an allowlisted adapter.
+      x-idempotency-scope: tenant + operation + Idempotency-Key; concurrent refreshes may coalesce.
+      x-retry-policy: Bounded exponential retry with jitter; exhausted or ambiguous
+        outcome is UNKNOWN and must be reconciled.
+  /api/v1/assets/{assetId}/automation-config:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: getAutomationConfig
+      tags:
+        - Configuration
+      summary: Read automation/reply configuration
+      description: Tenant and asset authorization are checked for the requested
+        capability. ETag is returned for conditional updates.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Sanitized success example
+          headers:
+            ETag:
+              schema:
+                type: string
+                example: '"automation-v7"'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationConfig"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    assetId: asset_example_01
+                    enabled: true
+                    replyText: Thanks for contacting our team.
+                    version: 7
+                    updatedAt: 2026-10-29T11:00:00Z
+                    requestId: req_example_30
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+    put:
+      operationId: replaceAutomationConfig
+      tags:
+        - Configuration
+      summary: Replace automation/reply configuration conditionally
+      description: Requires exact Origin, CSRF, current tenant context and If-Match
+        from the latest representation. Unknown fields are rejected. This
+        changes local configuration; delivery of a reply is a separate external
+        effect.
+      security: *a10
+      parameters:
+        - *a26
+        - *a27
+        - *a28
+        - *a29
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutomationConfigUpdate"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  enabled: false
+                  replyText: ""
+      responses:
+        "200":
+          description: Sanitized success example
+          headers:
+            ETag:
+              schema:
+                type: string
+                example: '"automation-v8"'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationConfig"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    assetId: asset_example_01
+                    enabled: false
+                    replyText: ""
+                    version: 8
+                    updatedAt: 2026-10-29T12:02:00Z
+                    requestId: req_example_31
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-retry-policy: On 412, read the current representation and make an explicit new update.
+  /api/v1/assets/{assetId}/replies:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    post:
+      operationId: sendReply
+      tags:
+        - Replies
+      summary: Queue a reply to an authorized message reference
+      description: Message text is accepted only for this explicit tenant-authorized
+        action and is not copied into inbox/outbox event envelopes or logs.
+        Recipient/message references are resolved server-side. External delivery
+        is not exactly-once; provider idempotency support is Not confirmed.
+      security: *a10
+      parameters: *a23
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  inReplyToRef: message_example_01
+                  text: Thanks, we will follow up shortly.
+      responses:
+        "202":
+          description: Sanitized success example
+          headers: *a24
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobAccepted"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    jobId: job_example_05
+                    status: PENDING
+                    location: /api/v1/jobs/job_example_05
+                    requestId: req_example_32
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: Sends one outbound message through the selected active asset
+        authorization.
+      x-idempotency-scope: tenant + operation + Idempotency-Key plus payload hash.
+        Same key/body replays acceptance; different body returns 409 without
+        another send attempt.
+      x-retry-policy: One automatic attempt, including the initial send; no automatic
+        retry without verified provider idempotency. A proven pre-effect failure
+        may be shown as retryable for a new explicit user request.
+        Timeout-after-send is UNKNOWN; reconcile provider receipt/status before
+        another request. No blind retry.
+  /api/v1/jobs/{jobId}:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: getJob
+      tags:
+        - Jobs
+      summary: Read asynchronous work status
+      description: Tenant-scoped job status. UNKNOWN means an external effect may have
+        occurred; it is not retryable until reconciliation supplies evidence.
+        Job responses never include raw provider error bodies or credentials.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatus"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    id: job_example_05
+                    status: UNKNOWN
+                    operation: SEND_REPLY
+                    createdAt: 2026-10-29T12:03:00Z
+                    updatedAt: 2026-10-29T12:03:20Z
+                    nextAction: CHECK_STATUS
+                    safeError:
+                      code: OUTCOME_UNKNOWN
+                      safeMessage: The result is being checked.
+                      requestId: req_example_33
+                      retryable: false
+                      action: CHECK_STATUS
+                    requestId: req_example_34
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/operations/{operationId}:
+    parameters:
+      - name: operationId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: getOperation
+      tags:
+        - Operations
+      summary: Read an external-operation outcome
+      description: Returns SUCCEEDED/FAILED/UNKNOWN and redacted status metadata only.
+        UNKNOWN is not success and does not authorize blind retry.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationStatus"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    id: op_example_01
+                    kind: SEND_REPLY
+                    status: UNKNOWN
+                    requestId: req_example_35
+                    updatedAt: 2026-10-29T12:03:20Z
+                    nextAction: CHECK_STATUS
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/whatsapp/accounts/{assetId}/templates:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        description: Opaque account asset ID; the server verifies tenant and
+          MANAGE_TEMPLATES capability.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: listTemplates
+      tags:
+        - Templates
+      summary: List templates for an authorized WhatsApp account
+      description: Returns a tenant/account-scoped template projection from the
+        selected eligible grant. Provider eligibility and actual grant semantics
+        are Not confirmed; no global credential is selected.
+      security: *a10
+      parameters: *a25
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemplateListPage"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    items:
+                      - id: template_example_01
+                        name: order_update
+                        language: en
+                        status: APPROVED
+                        category: UTILITY
+                        updatedAt: 2026-10-29T10:00:00Z
+                    nextCursor: null
+                    requestId: req_example_36
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+    post:
+      operationId: createTemplate
+      tags:
+        - Templates
+      summary: Request creation of a template
+      description: Validates an allowlisted payload and selected account grant before
+        dispatch. Provider template review/approval is asynchronous and is not
+        inferred from request acceptance.
+      security: *a10
+      parameters: *a23
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TemplateCreateRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  name: order_update
+                  language: en
+                  category: UTILITY
+                  bodyText: Your order is ready for pickup.
+      responses:
+        "202":
+          description: Sanitized success example
+          headers: *a24
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobAccepted"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    jobId: job_example_06
+                    status: PENDING
+                    location: /api/v1/jobs/job_example_06
+                    requestId: req_example_37
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: Submits template creation to the provider for review.
+      x-idempotency-scope: tenant + operation + Idempotency-Key and canonical request payload hash.
+      x-retry-policy: At most one automatic provider submission, including the initial
+        request; zero automatic retries without verified provider idempotency.
+        If the result is ambiguous, reconcile by provider template identity
+        before any new explicit request.
+  /api/v1/notifications:
+    get:
+      operationId: listNotifications
+      tags:
+        - Notifications
+      summary: List tenant-scoped operational notifications
+      description: Returns safe metadata, references and freshness; no message body or
+        raw provider payload is included. Cursor and limit are bounded.
+      security: *a10
+      parameters: *a25
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationListPage"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    items:
+                      - id: notice_example_01
+                        kind: MESSAGE_RECEIVED
+                        assetRef: asset_example_01
+                        messageRef: message_example_01
+                        status: UNREAD
+                        safeSummary: A new message is available.
+                        createdAt: 2026-10-29T11:58:00Z
+                        actions:
+                          - MARK_READ
+                          - DISMISS
+                          - REPLY
+                    nextCursor: null
+                    requestId: req_example_38
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/notifications/{notificationId}/actions:
+    parameters:
+      - name: notificationId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    post:
+      operationId: actOnNotification
+      tags:
+        - Notifications
+      summary: Apply a notification action
+      description: The action is checked against current membership, asset grant and
+        role. MARK_READ/DISMISS are local; REPLY is an external message effect
+        and enters the bounded async job/reconciliation path. This endpoint
+        never reports a provider send as complete on HTTP acceptance.
+      security: *a10
+      parameters: *a23
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationActionRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  action: REPLY
+                  replyText: Thanks, we will follow up shortly.
+      responses:
+        "202":
+          description: Sanitized success example
+          headers: *a24
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationActionAccepted"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    notificationId: notice_example_01
+                    jobId: job_example_07
+                    status: PENDING
+                    location: /api/v1/jobs/job_example_07
+                    requestId: req_example_39
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: REPLY may send an outbound message. MARK_READ and DISMISS
+        only update local notification state.
+      x-idempotency-scope: tenant + operation + Idempotency-Key plus payload hash.
+      x-retry-policy: For REPLY, at most one automatic attempt including the initial
+        send. A proven pre-effect failure may permit a new explicit user
+        request; an ambiguous outcome is UNKNOWN until reconciled. Do not
+        automatically retry.
+  /api/v1/webhooks/meta/{appConfigRef}:
+    parameters:
+      - name: appConfigRef
+        in: path
+        required: true
+        description: Opaque server-side app-configuration reference; public identifier,
+          not an authorization secret.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: verifyMetaWebhook
+      tags:
+        - Webhooks
+      summary: Respond to a provider webhook verification challenge
+      description: Public only for an allowlisted configured app reference. Validate
+        the provider handshake against server configuration and never expose
+        secrets. Exact provider protocol/variant and production ingress are Not
+        confirmed.
+      security: []
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookChallengeResponse"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    challenge: synthetic-webhook-challenge
+        "400": *a30
+        "404": *a31
+        "409": *a32
+        "413": *a33
+        "429": *a34
+        "503": *a35
+        default: *a36
+      x-external-effect: None beyond a challenge response after configured verification.
+    post:
+      operationId: receiveMetaWebhook
+      tags:
+        - Webhooks
+      summary: Receive a signed provider webhook
+      description: Public ingress must verify signature over exact raw bytes before
+        accepting. Body is bounded; duplicate delivery is idempotent. The raw
+        body is stored only in a protected short-retention inbox reference;
+        routed internal events contain no indiscriminate message content. Exact
+        Meta signature/event schemas are Not confirmed.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ProviderSignature"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderWebhookEnvelope"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  object: synthetic
+                  entry: []
+      responses:
+        "202":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedRequest"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    accepted: true
+                    requestId: req_example_41
+        "400": *a30
+        "404": *a31
+        "409": *a32
+        "413": *a33
+        "429": *a34
+        "503": *a35
+        default: *a36
+      x-external-effect: Stores a bounded signed inbox envelope for asynchronous routing.
+      x-idempotency-scope: Configured app + provider delivery ID when available;
+        otherwise a bounded raw-body digest with signature-verification
+        evidence.
+      x-retry-policy: Provider redelivery is deduplicated. Invalid signatures are
+        rejected; internal consumers use event ID and version fencing.
+  /health:
+    get:
+      operationId: liveness
+      tags:
+        - Health
+      summary: Check process liveness
+      description: Public minimal response. Does not call Meta or reveal dependencies,
+        tenants, environment values or credentials.
+      security: []
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    status: ok
+        "405": &a37
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503": &a38
+          $ref: "#/components/responses/Unavailable"
+        default: &a39
+          $ref: "#/components/responses/UnexpectedError"
+  /ready:
+    get:
+      operationId: readiness
+      tags:
+        - Health
+      summary: Check readiness without exposing dependency details
+      description: Public minimal response. Provider health is not synchronously
+        probed; output never includes connection strings, environment values,
+        tenant IDs or secret state.
+      security: []
+      responses:
+        "200":
+          description: Sanitized success example
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    status: ok
+        "405": *a37
+        "503": *a38
+        default: *a39
+components:
+  securitySchemes:
+    portalSession:
+      type: apiKey
+      in: cookie
+      name: __Host-meta_portal
+      description: Opaque host-only Secure HttpOnly portal session. The cookie value
+        is never a DTO field.
+    preAuthCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-meta_preauth
+      description: Browser-bound pre-auth cookie, distinct from the portal session and
+        from any provider code.
+  parameters:
+    Origin:
+      name: Origin
+      in: header
+      required: true
+      description: Exact configured browser Origin; wildcard matching is forbidden.
+      schema:
+        type: string
+        format: uri
+        maxLength: 512
+      example: https://portal.example.invalid
+    FetchSite:
+      name: Sec-Fetch-Site
+      in: header
+      required: true
+      description: Must match the configured exact-origin topology; cross-site,
+        missing or invalid values fail.
+      schema:
+        type: string
+        enum:
+          - same-origin
+          - same-site
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      description: Session-bound anti-CSRF value; not a DTO property and not
+        sufficient without the session cookie.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 512
+    TenantContext:
+      name: X-Tenant-Context
+      in: header
+      required: true
+      description: Opaque current context reference returned by the session. It is not
+        authorization without the cookie and current server membership.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 512
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Random caller-generated request key; server scope is current tenant
+        + operation + key. Same payload hash replays prior acceptance; different
+        payload hash returns 409 with no new effect.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+        pattern: ^[A-Za-z0-9._~-]+$
+      example: idem_example_key_01
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: ETag from the latest representation. Missing/stale precondition is
+        rejected; no blind overwrite.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      example: '"automation-v7"'
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque tenant-bound continuation cursor; do not parse or edit.
+      schema:
+        type: string
+        maxLength: 512
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size, default 50, maximum 100.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    ProviderSignature:
+      name: X-Hub-Signature-256
+      in: header
+      required: true
+      description: Provider signature over exact raw request bytes. Supported
+        algorithm/header configuration must be ratified for the actual app.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 512
+  schemas:
+    ErrorAction:
+      type: string
+      enum:
+        - SIGN_IN
+        - FIX_REQUEST
+        - CONTACT_ADMIN
+        - REFRESH
+        - RESTART_ONBOARDING
+        - REAUTHORIZE
+        - WAIT
+        - CHECK_STATUS
+        - RECONCILE
+        - USE_NEW_REQUEST_KEY
+        - REDUCE_REQUEST
+        - RELOAD_PORTAL
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - safeMessage
+        - requestId
+        - retryable
+        - action
+      properties:
+        code:
+          type: string
+          enum:
+            - AUTH_REQUIRED
+            - MEMBERSHIP_REVOKED
+            - ACCESS_DENIED
+            - RESOURCE_NOT_AVAILABLE
+            - STATE_INVALID
+            - ONBOARDING_EXPIRED
+            - FLOW_UNAVAILABLE
+            - FLOW_NOT_ELIGIBLE
+            - ASSET_GRANT_MISSING
+            - ASSET_CONFLICT
+            - META_PERMISSION_REQUIRED
+            - META_REAUTH_REQUIRED
+            - META_RATE_LIMITED
+            - SUBSCRIPTION_PENDING
+            - OUTCOME_UNKNOWN
+            - VERSION_CONFLICT
+            - IDEMPOTENCY_KEY_REUSED
+            - CONTEXT_CHANGED
+            - ORIGIN_NOT_ALLOWED
+            - HOST_NOT_ALLOWED
+            - CSRF_INVALID
+            - VALIDATION_FAILED
+            - PAYLOAD_TOO_LARGE
+            - RATE_LIMITED
+            - DEPENDENCY_UNAVAILABLE
+            - META_UNAVAILABLE
+            - PROVIDER_REJECTED
+            - INTERNAL_ERROR
+        safeMessage:
+          type: string
+          minLength: 1
+          maxLength: 240
+          description: Fixed, allowlisted localization template selected by error code.
+            Never interpolate raw provider detail, request values, secrets, or
+            diagnostic text.
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]{1,128}$
+          description: Server-generated correlation identifier. Direct-client X-Request-Id
+            values are ignored; this identifier is not authorization evidence.
+        retryable:
+          type: boolean
+        action:
+          $ref: "#/components/schemas/ErrorAction"
+      x-error-policy-by-code:
+        OUTCOME_UNKNOWN:
+          retryable: false
+          action: CHECK_STATUS
+        IDEMPOTENCY_KEY_REUSED:
+          retryable: false
+          action: USE_NEW_REQUEST_KEY
+        HOST_NOT_ALLOWED:
+          retryable: false
+          action: CONTACT_ADMIN
+        INTERNAL_ERROR:
+          retryable: false
+          action: CONTACT_ADMIN
+    AcceptedRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - accepted
+        - requestId
+      properties:
+        accepted:
+          type: boolean
+          const: true
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    PreauthStartRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - entryMode
+        - returnRoute
+      properties:
+        entryMode:
+          type: string
+          enum:
+            - PORTAL_TOP_LEVEL
+            - SUITE4_EMBED
+        returnRoute:
+          type: string
+          enum:
+            - connections
+            - setup
+    PreauthChallenge:
+      type: object
+      additionalProperties: false
+      required:
+        - challengeRef
+        - expiresAt
+        - requestId
+      properties:
+        challengeRef:
+          type: string
+          minLength: 16
+          maxLength: 128
+        expiresAt:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    PortalEntryExchangeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - ticket
+        - challengeRef
+      properties:
+        ticket:
+          type: string
+          minLength: 16
+          maxLength: 8192
+          writeOnly: true
+          description: Short-lived Suite4 portal-entry ticket; never a Meta authorization
+            code.
+        challengeRef:
+          type: string
+          minLength: 16
+          maxLength: 128
+    MagicLinkRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+    MagicLinkConsumeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - linkToken
+      properties:
+        linkToken:
+          type: string
+          minLength: 32
+          maxLength: 512
+          writeOnly: true
+    SessionContext:
+      type: object
+      additionalProperties: false
+      required:
+        - principalRef
+        - tenantRef
+        - roles
+        - tenantContextRef
+        - contextVersion
+        - requestId
+      properties:
+        principalRef:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenantRef:
+          type: string
+          minLength: 1
+          maxLength: 128
+        roles:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - owner
+              - admin
+              - operator
+              - viewer
+        tenantContextRef:
+          type: string
+          minLength: 16
+          maxLength: 512
+          description: Session-bound context reference; does not authorize independently.
+        contextVersion:
+          type: integer
+          minimum: 1
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    TenantSwitchRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - tenantRef
+      properties:
+        tenantRef:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Requested membership reference; always revalidated server-side.
+    FlowVariant:
+      type: string
+      enum:
+        - FACEBOOK_LOGIN
+        - INSTAGRAM_VIA_FACEBOOK_LOGIN
+        - INSTAGRAM_LOGIN
+        - WHATSAPP_CLOUD_API
+        - WHATSAPP_COEXISTENCE
+      description: Distinct configured journeys. Availability, permissions and
+        eligibility are Not confirmed.
+    FlowDefinition:
+      type: object
+      additionalProperties: false
+      required:
+        - variant
+        - enabled
+        - requestedCapabilities
+      properties:
+        variant:
+          $ref: "#/components/schemas/FlowVariant"
+        enabled:
+          type: boolean
+        requestedCapabilities:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            pattern: ^[A-Z][A-Z0-9_]{0,63}$
+    FlowList:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - requestId
+      properties:
+        items:
+          type: array
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/FlowDefinition"
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    OnboardingCreateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - flowVariant
+        - requestedCapabilities
+        - returnRoute
+      properties:
+        flowVariant:
+          $ref: "#/components/schemas/FlowVariant"
+        requestedCapabilities:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            pattern: ^[A-Z][A-Z0-9_]{0,63}$
+        returnRoute:
+          type: string
+          enum:
+            - connections
+            - setup
+    OnboardingCreated:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - status
+        - expiresAt
+        - launchUrl
+        - requestId
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          type: string
+          const: AWAITING_PROVIDER
+        expiresAt:
+          type: string
+          format: date-time
+        launchUrl:
+          type: string
+          format: uri
+          maxLength: 4096
+          description: Server-generated allowlisted provider launch URL; contains no
+            access token or client secret.
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    JobAccepted:
+      type: object
+      additionalProperties: false
+      required:
+        - jobId
+        - status
+        - location
+        - requestId
+      properties:
+        jobId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          type: string
+          const: PENDING
+        location:
+          type: string
+          pattern: ^/api/v1/jobs/[A-Za-z0-9_-]+$
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    StepStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - status
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        status:
+          type: string
+          enum:
+            - PENDING
+            - RUNNING
+            - SUCCEEDED
+            - RETRY_PENDING
+            - FAILED
+            - UNKNOWN
+            - SKIPPED
+    OnboardingStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - flowVariant
+        - status
+        - readiness
+        - steps
+        - nextAction
+        - lastUpdatedAt
+        - requestId
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        flowVariant:
+          $ref: "#/components/schemas/FlowVariant"
+        status:
+          type: string
+          enum:
+            - CREATED
+            - AWAITING_PROVIDER
+            - CODE_RECEIVED
+            - EXCHANGING
+            - ASSETS_VERIFIED
+            - PROVISIONING
+            - READY
+            - PARTIAL
+            - CANCELLED
+            - EXPIRED
+            - FAILED
+        readiness:
+          type: string
+          enum:
+            - READY
+            - PARTIAL
+            - UNKNOWN
+        steps:
+          type: array
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/StepStatus"
+        nextAction:
+          type: string
+          enum:
+            - WAIT
+            - CHECK_STATUS
+            - REAUTHORIZE
+            - RECONCILE
+            - RESOLVE_CONFLICT
+            - NONE
+        lastUpdatedAt:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    ProviderAuthorizationCodeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - authorizationCode
+        - stateRef
+      properties:
+        authorizationCode:
+          type: string
+          minLength: 1
+          maxLength: 16384
+          writeOnly: true
+          description: Ephemeral Meta provider code from this onboarding flow. Never log,
+            persist in cleartext, or return.
+        stateRef:
+          type: string
+          minLength: 16
+          maxLength: 512
+          writeOnly: true
+          description: One-use server-generated state reference bound to this onboarding.
+    Connection:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - flowVariant
+        - status
+        - readiness
+        - observedAt
+        - stale
+        - assetCount
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        flowVariant:
+          $ref: "#/components/schemas/FlowVariant"
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - PARTIAL
+            - REAUTH_REQUIRED
+            - UNKNOWN
+            - DISCONNECTED
+        readiness:
+          type: string
+          enum:
+            - READY
+            - PARTIAL
+            - UNKNOWN
+        observedAt:
+          type: string
+          format: date-time
+        stale:
+          type: boolean
+        assetCount:
+          type: integer
+          minimum: 0
+    ConnectionAsset:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - status
+        - authorizationStatus
+        - observedAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum:
+            - PAGE
+            - INSTAGRAM_ACCOUNT
+            - WHATSAPP_BUSINESS_ACCOUNT
+            - PHONE_NUMBER
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - INACTIVE
+            - UNKNOWN
+            - STALE
+        authorizationStatus:
+          type: string
+          enum:
+            - VERIFIED
+            - REVOKED
+            - UNKNOWN
+        observedAt:
+          type: string
+          format: date-time
+    ConnectionDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - flowVariant
+        - status
+        - readiness
+        - observedAt
+        - stale
+        - assets
+        - requestId
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        flowVariant:
+          $ref: "#/components/schemas/FlowVariant"
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - PARTIAL
+            - REAUTH_REQUIRED
+            - UNKNOWN
+            - DISCONNECTED
+        readiness:
+          type: string
+          enum:
+            - READY
+            - PARTIAL
+            - UNKNOWN
+        observedAt:
+          type: string
+          format: date-time
+        stale:
+          type: boolean
+        assets:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/ConnectionAsset"
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    ConnectionListPage:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - nextCursor
+        - requestId
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Connection"
+        nextCursor:
+          type:
+            - string
+            - "null"
+          maxLength: 512
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    Asset:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - status
+        - authorizationStatus
+        - observedAt
+        - stale
+        - requestId
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum:
+            - PAGE
+            - INSTAGRAM_ACCOUNT
+            - WHATSAPP_BUSINESS_ACCOUNT
+            - PHONE_NUMBER
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - INACTIVE
+            - UNKNOWN
+            - STALE
+        authorizationStatus:
+          type: string
+          enum:
+            - VERIFIED
+            - REVOKED
+            - UNKNOWN
+        observedAt:
+          type: string
+          format: date-time
+        stale:
+          type: boolean
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    AssetListItem:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - status
+        - authorizationStatus
+        - observedAt
+        - stale
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum:
+            - PAGE
+            - INSTAGRAM_ACCOUNT
+            - WHATSAPP_BUSINESS_ACCOUNT
+            - PHONE_NUMBER
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - INACTIVE
+            - UNKNOWN
+            - STALE
+        authorizationStatus:
+          type: string
+          enum:
+            - VERIFIED
+            - REVOKED
+            - UNKNOWN
+        observedAt:
+          type: string
+          format: date-time
+        stale:
+          type: boolean
+    AssetListPage:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - nextCursor
+        - requestId
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/AssetListItem"
+        nextCursor:
+          type:
+            - string
+            - "null"
+          maxLength: 512
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    AutomationConfig:
+      type: object
+      additionalProperties: false
+      required:
+        - assetId
+        - enabled
+        - replyText
+        - version
+        - updatedAt
+        - requestId
+      properties:
+        assetId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enabled:
+          type: boolean
+        replyText:
+          type: string
+          maxLength: 4096
+        version:
+          type: integer
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    AutomationConfigUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - replyText
+      properties:
+        enabled:
+          type: boolean
+        replyText:
+          type: string
+          maxLength: 4096
+    ReplyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - inReplyToRef
+        - text
+      properties:
+        inReplyToRef:
+          type: string
+          minLength: 1
+          maxLength: 128
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          writeOnly: true
+    JobStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - status
+        - operation
+        - createdAt
+        - updatedAt
+        - nextAction
+        - requestId
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          type: string
+          enum:
+            - PENDING
+            - RUNNING
+            - RETRY_PENDING
+            - SUCCEEDED
+            - FAILED
+            - UNKNOWN
+            - CANCELLED
+        operation:
+          type: string
+          minLength: 1
+          maxLength: 64
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        nextAction:
+          type: string
+          enum:
+            - WAIT
+            - CHECK_STATUS
+            - RECONCILE
+            - REAUTHORIZE
+            - NONE
+        safeError:
+          anyOf:
+            - $ref: "#/components/schemas/ErrorEnvelope"
+            - type: "null"
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    OperationStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - status
+        - requestId
+        - updatedAt
+        - nextAction
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 64
+        status:
+          type: string
+          enum:
+            - PENDING
+            - RUNNING
+            - SUCCEEDED
+            - FAILED
+            - UNKNOWN
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        updatedAt:
+          type: string
+          format: date-time
+        nextAction:
+          type: string
+          enum:
+            - WAIT
+            - CHECK_STATUS
+            - RECONCILE
+            - NONE
+    Template:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - language
+        - status
+        - category
+        - updatedAt
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        language:
+          type: string
+          minLength: 2
+          maxLength: 16
+        status:
+          type: string
+          enum:
+            - PENDING
+            - APPROVED
+            - REJECTED
+            - PAUSED
+            - UNKNOWN
+        category:
+          type: string
+          enum:
+            - AUTHENTICATION
+            - MARKETING
+            - UTILITY
+            - UNKNOWN
+        updatedAt:
+          type: string
+          format: date-time
+    TemplateListPage:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - nextCursor
+        - requestId
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Template"
+        nextCursor:
+          type:
+            - string
+            - "null"
+          maxLength: 512
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    TemplateCreateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - language
+        - category
+        - bodyText
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[a-z0-9_]+$
+        language:
+          type: string
+          minLength: 2
+          maxLength: 16
+        category:
+          type: string
+          enum:
+            - AUTHENTICATION
+            - MARKETING
+            - UTILITY
+        bodyText:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    Notification:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - assetRef
+        - messageRef
+        - status
+        - safeSummary
+        - createdAt
+        - actions
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum:
+            - MESSAGE_RECEIVED
+            - ASSET_STATUS_CHANGED
+            - ACTION_REQUIRED
+        assetRef:
+          type: string
+          minLength: 1
+          maxLength: 128
+        messageRef:
+          type:
+            - string
+            - "null"
+          maxLength: 128
+        status:
+          type: string
+          enum:
+            - UNREAD
+            - READ
+            - DISMISSED
+        safeSummary:
+          type: string
+          maxLength: 160
+        createdAt:
+          type: string
+          format: date-time
+        actions:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - MARK_READ
+              - DISMISS
+              - REPLY
+              - REFRESH
+    NotificationListPage:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - nextCursor
+        - requestId
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Notification"
+        nextCursor:
+          type:
+            - string
+            - "null"
+          maxLength: 512
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    NotificationActionRequest:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - action
+          properties:
+            action:
+              type: string
+              enum:
+                - MARK_READ
+                - DISMISS
+        - type: object
+          additionalProperties: false
+          required:
+            - action
+            - replyText
+          properties:
+            action:
+              type: string
+              const: REPLY
+            replyText:
+              type: string
+              minLength: 1
+              maxLength: 4096
+              writeOnly: true
+    NotificationActionAccepted:
+      type: object
+      additionalProperties: false
+      required:
+        - notificationId
+        - jobId
+        - status
+        - location
+        - requestId
+      properties:
+        notificationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        jobId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          type: string
+          const: PENDING
+        location:
+          type: string
+          pattern: ^/api/v1/jobs/[A-Za-z0-9_-]+$
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    WebhookChallengeResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - challenge
+      properties:
+        challenge:
+          type: string
+          maxLength: 1024
+    ProviderWebhookEnvelope:
+      type: object
+      description: Raw, signature-verified provider JSON body. This schema asserts
+        only an object shape and a maximum property count; it is not closed or a
+        field-level provider schema. Exact Meta webhook fields are Not
+        confirmed. Ingress validates signature and size, then stores protected
+        bytes. Do not use this schema as an internal event or public read DTO.
+      additionalProperties: true
+      maxProperties: 256
+    HealthStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - unavailable
+  responses:
+    BadRequest:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized: &a40
+              summary: Invalid input, redacted
+              value:
+                code: VALIDATION_FAILED
+                safeMessage: Check the submitted fields.
+                requestId: req_example_01
+                retryable: false
+                action: FIX_REQUEST
+    Unauthorized:
+      description: Authentication or one-time proof is required.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized:
+              summary: No portal session
+              value:
+                code: AUTH_REQUIRED
+                safeMessage: Sign in to continue.
+                requestId: req_example_02
+                retryable: false
+                action: SIGN_IN
+    Forbidden:
+      description: The current identity or request host is not allowed to perform this
+        action.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized:
+              summary: Authenticated caller lacks this operation role
+              value:
+                code: ACCESS_DENIED
+                safeMessage: This action is not available for the current account.
+                requestId: req_example_03
+                retryable: false
+                action: CONTACT_ADMIN
+            hostNotAllowed:
+              summary: Request Host is missing or is not configured
+              value:
+                code: HOST_NOT_ALLOWED
+                safeMessage: This request host is not allowed.
+                requestId: req_example_44
+                retryable: false
+                action: CONTACT_ADMIN
+    NotFound:
+      description: The resource is unavailable in this tenant; foreign-resource
+        existence is not disclosed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized:
+              summary: Resource unavailable in the current tenant
+              value:
+                code: RESOURCE_NOT_AVAILABLE
+                safeMessage: The requested resource is not available.
+                requestId: req_example_04
+                retryable: false
+                action: REFRESH
+    Conflict:
+      description: The operation conflicts with recorded state or idempotency key.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized:
+              summary: Same idempotency key, different payload
+              value:
+                code: IDEMPOTENCY_KEY_REUSED
+                safeMessage: This request key was already used for a different request.
+                requestId: req_example_05
+                retryable: false
+                action: USE_NEW_REQUEST_KEY
+    PreconditionFailed:
+      description: The supplied ETag is missing or stale.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized:
+              summary: Stale version
+              value:
+                code: VERSION_CONFLICT
+                safeMessage: The resource changed. Refresh before trying again.
+                requestId: req_example_06
+                retryable: true
+                action: REFRESH
+    MethodNotAllowed:
+      description: This route does not support the requested method.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized: *a40
+    PayloadTooLarge:
+      description: The payload exceeds the endpoint limit.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized:
+              summary: Request exceeded its configured size limit
+              value:
+                code: PAYLOAD_TOO_LARGE
+                safeMessage: The submitted content is too large.
+                requestId: req_example_07
+                retryable: false
+                action: REDUCE_REQUEST
+    Unprocessable:
+      description: The requested transition is not allowed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized:
+              summary: Flow state cannot be used
+              value:
+                code: STATE_INVALID
+                safeMessage: This authorization step is no longer valid.
+                requestId: req_example_08
+                retryable: false
+                action: RESTART_ONBOARDING
+            flowNotEligible:
+              summary: Fresh server evidence says this configured flow is not eligible
+              value:
+                code: FLOW_NOT_ELIGIBLE
+                safeMessage: This configured flow is not currently available for the selected
+                  account.
+                requestId: req_example_42
+                retryable: false
+                action: CONTACT_ADMIN
+    TooManyRequests:
+      description: The configured rate limit was exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized:
+              summary: Operation quota reached
+              value:
+                code: RATE_LIMITED
+                safeMessage: Wait before trying this action again.
+                requestId: req_example_09
+                retryable: true
+                action: WAIT
+    Unavailable:
+      description: A dependency is unavailable or outcome must be checked.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized:
+              summary: A dependency is unavailable
+              value:
+                code: DEPENDENCY_UNAVAILABLE
+                safeMessage: The operation could not be confirmed yet.
+                requestId: req_example_10
+                retryable: true
+                action: CHECK_STATUS
+            metaUnavailable:
+              summary: Provider dependency is unavailable
+              value:
+                code: META_UNAVAILABLE
+                safeMessage: Provider status could not be checked yet.
+                requestId: req_example_43
+                retryable: true
+                action: CHECK_STATUS
+    UnexpectedError:
+      description: An unexpected internal error occurred. Retry is not authorized
+        without an operation-specific decision.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            sanitized:
+              summary: An unexpected internal error
+              value:
+                code: INTERNAL_ERROR
+                safeMessage: The service could not complete this request.
+                requestId: req_example_45
+                retryable: false
+                action: CONTACT_ADMIN
+  examples: {}

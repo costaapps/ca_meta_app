@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/costaapps/ca_meta_app/blob/develop/docs/meta-v2/contracts/release-manifest.schema.json",
+  "title": "CA Meta immutable container release manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestVersion",
+    "release",
+    "sourceRevision",
+    "contract",
+    "databaseSchema",
+    "images",
+    "worker",
+    "checks",
+    "changelog",
+    "scanEvidence"
+  ],
+  "properties": {
+    "manifestVersion": { "const": 1 },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "semver", "releaseId", "createdAt", "workflowRunUrl"],
+      "properties": {
+        "tag": { "type": "string", "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
+        "semver": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
+        "releaseId": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\+[0-9a-f]{12}$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "workflowRunUrl": { "type": "string", "format": "uri" }
+      }
+    },
+    "sourceRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "path", "sha256"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "path": { "const": "docs/meta-v2/contracts/openapi.yaml" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "databaseSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "minCompatible", "maxCompatible"],
+      "properties": {
+        "version": { "const": 3 },
+        "minCompatible": { "const": 3 },
+        "maxCompatible": { "const": 3 }
+      }
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["web", "api"],
+      "properties": {
+        "web": {
+          "allOf": [
+            { "$ref": "#/$defs/image" },
+            { "properties": { "name": { "pattern": "/ca-meta-web$" }, "reference": { "pattern": "/ca-meta-web@sha256:" } } }
+          ]
+        },
+        "api": {
+          "allOf": [
+            { "$ref": "#/$defs/image" },
+            { "properties": { "name": { "pattern": "/ca-meta-api$" }, "reference": { "pattern": "/ca-meta-api@sha256:" } } }
+          ]
+        }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "command", "composeService"],
+      "properties": {
+        "image": { "type": "string", "pattern": "^docker\\.io/[^@]+@sha256:[0-9a-f]{64}$" },
+        "command": {
+          "const": [
+            "sh",
+            "-ec",
+            "export API_DATABASE_PASSWORD=\"$(cat /run/secrets/api_database_password)\"; exec node dist/worker/main.js"
+          ]
+        },
+        "composeService": { "const": "worker" }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredCi", "imageScan"],
+      "properties": {
+        "requiredCi": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "conclusion", "url"],
+            "properties": {
+              "name": { "enum": ["desktop-candidate", "m2-08-mariadb", "m2-08-security", "m2-08-images"] },
+              "conclusion": { "const": "success" },
+              "url": { "type": "string", "format": "uri" }
+            }
+          }
+        },
+        "imageScan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["engine", "version", "severity", "result", "reports"],
+          "properties": {
+            "engine": { "const": "Trivy" },
+            "version": { "const": "0.76.1" },
+            "severity": { "const": ["HIGH", "CRITICAL"] },
+            "result": { "const": "success" },
+            "reports": { "type": "array", "minItems": 2, "items": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+    "changelog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "markdown"],
+      "properties": {
+        "url": { "type": "string", "format": "uri" },
+        "markdown": { "type": "string", "minLength": 1 }
+      }
+    },
+    "scanEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset", "sha256"],
+      "properties": {
+        "asset": { "const": "scan-results.json" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  },
+  "$defs": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "reference", "digest", "sourceRevision", "buildKitProvenance", "attestations", "scan"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^docker\\.io/[^:@]+$" },
+        "reference": { "type": "string", "pattern": "^docker\\.io/[^@]+@sha256:[0-9a-f]{64}$" },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "sourceRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "buildKitProvenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["asset", "sha256"],
+          "properties": {
+            "asset": { "type": "string", "pattern": "^(web|api)-provenance\\.slsa\\.json$" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "attestations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provenance", "sbom"],
+          "properties": {
+            "provenance": { "$ref": "#/$defs/verifiedAttestation" },
+            "sbom": {
+              "allOf": [
+                { "$ref": "#/$defs/verifiedAttestation" },
+                {
+                  "type": "object",
+                  "required": ["format", "sha256", "asset"],
+                  "properties": {
+                    "format": { "type": "string", "pattern": "^SPDX-2\\.[0-9]+$" },
+                    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                  "asset": { "type": "string", "pattern": "^(web|api)-sbom\\.spdx\\.json$" }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "scan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["imageReference", "digest", "sourceRevision", "engine", "version", "severity", "result", "report", "reportSha256"],
+          "properties": {
+            "imageReference": { "type": "string", "pattern": "^docker\\.io/[^@]+@sha256:[0-9a-f]{64}$" },
+            "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "sourceRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "engine": { "const": "Trivy" },
+            "version": { "const": "0.76.1" },
+            "severity": { "const": ["HIGH", "CRITICAL"] },
+            "result": { "const": "success" },
+            "report": { "type": "string", "pattern": "^trivy-(web|api)\\.json$" },
+            "reportSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        }
+      }
+    },
+    "verifiedAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer", "predicateType", "verified", "url"],
+      "properties": {
+        "issuer": { "const": "GitHub Actions / Sigstore" },
+        "predicateType": { "type": "string", "minLength": 1 },
+        "verified": { "const": true },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "GitHub attestation summary URL, or the release workflow run URL containing exact-source verification of a previously existing attestation."
+        }
+      }
+    }
+  }
+}

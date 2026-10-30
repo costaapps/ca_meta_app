@@ -1,0 +1,118 @@
+{
+  "ErrorAction": {
+    "type": "string",
+    "enum": [
+      "SIGN_IN",
+      "FIX_REQUEST",
+      "CONTACT_ADMIN",
+      "REFRESH",
+      "RESTART_ONBOARDING",
+      "REAUTHORIZE",
+      "WAIT",
+      "CHECK_STATUS",
+      "RECONCILE",
+      "USE_NEW_REQUEST_KEY",
+      "REDUCE_REQUEST",
+      "RELOAD_PORTAL"
+    ]
+  },
+  "ErrorEnvelope": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "code",
+      "safeMessage",
+      "requestId",
+      "retryable",
+      "action"
+    ],
+    "properties": {
+      "code": {
+        "type": "string",
+        "enum": [
+          "AUTH_REQUIRED",
+          "MEMBERSHIP_REVOKED",
+          "ACCESS_DENIED",
+          "RESOURCE_NOT_AVAILABLE",
+          "STATE_INVALID",
+          "ONBOARDING_EXPIRED",
+          "FLOW_UNAVAILABLE",
+          "FLOW_NOT_ELIGIBLE",
+          "ASSET_GRANT_MISSING",
+          "ASSET_CONFLICT",
+          "META_PERMISSION_REQUIRED",
+          "META_REAUTH_REQUIRED",
+          "META_RATE_LIMITED",
+          "SUBSCRIPTION_PENDING",
+          "OUTCOME_UNKNOWN",
+          "VERSION_CONFLICT",
+          "IDEMPOTENCY_KEY_REUSED",
+          "CONTEXT_CHANGED",
+          "ORIGIN_NOT_ALLOWED",
+          "HOST_NOT_ALLOWED",
+          "CSRF_INVALID",
+          "VALIDATION_FAILED",
+          "PAYLOAD_TOO_LARGE",
+          "RATE_LIMITED",
+          "DEPENDENCY_UNAVAILABLE",
+          "META_UNAVAILABLE",
+          "PROVIDER_REJECTED",
+          "INTERNAL_ERROR"
+        ]
+      },
+      "safeMessage": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 240,
+        "description": "Fixed, allowlisted localization template selected by error code. Never interpolate raw provider detail, request values, secrets, or diagnostic text."
+      },
+      "requestId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]{1,128}$",
+        "description": "Server-generated correlation identifier. Direct-client X-Request-Id values are ignored; this identifier is not authorization evidence."
+      },
+      "retryable": {
+        "type": "boolean"
+      },
+      "action": {
+        "$ref": "#/components/schemas/ErrorAction"
+      }
+    },
+    "x-error-policy-by-code": {
+      "OUTCOME_UNKNOWN": {
+        "retryable": false,
+        "action": "CHECK_STATUS"
+      },
+      "IDEMPOTENCY_KEY_REUSED": {
+        "retryable": false,
+        "action": "USE_NEW_REQUEST_KEY"
+      },
+      "HOST_NOT_ALLOWED": {
+        "retryable": false,
+        "action": "CONTACT_ADMIN"
+      },
+      "INTERNAL_ERROR": {
+        "retryable": false,
+        "action": "CONTACT_ADMIN"
+      }
+    }
+  },
+  "HealthStatus": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "status"
+    ],
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "unavailable"
+        ]
+      }
+    }
+  }
+}
