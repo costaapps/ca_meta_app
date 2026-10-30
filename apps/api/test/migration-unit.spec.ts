@@ -88,6 +88,7 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.ok(IDENTITY_MIGRATION.steps.some((step) => step.id === 'identity-admin-audit-no-update'));
   assert.ok(IDENTITY_MIGRATION.steps.some((step) => step.id === 'identity-admin-audit-no-delete'));
   assert.equal(PORTAL_SESSIONS_MIGRATION.schemaVersion, 5);
+  assert.equal(PORTAL_SESSIONS_MIGRATION.checksum, '59d87f7c8fef2205f0093805e746d5fd222521f95a015ba30ff993449e420e5e');
   assert.deepEqual(PORTAL_SESSIONS_MIGRATION.steps.map((step) => step.id), [
     'create-portal-pre-auth', 'create-portal-sessions', 'create-portal-ticket-jtis', 'create-abuse-limit-buckets',
   ]);
@@ -104,6 +105,10 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.deepEqual(TICKET_RETRY_MIGRATION.steps.map((step) => step.id), ['add-exact-portal-ticket-hash']);
   const ticketHashStep = TICKET_RETRY_MIGRATION.steps[0];
   assert.ok(ticketHashStep && 'sql' in ticketHashStep);
+  assert.deepEqual(ticketHashStep.compatiblePriorSteps?.map(({ migrationId, stepId }) => ({ migrationId, stepId })), [{
+    migrationId: PORTAL_SESSIONS_MIGRATION.id,
+    stepId: 'create-portal-ticket-jtis',
+  }]);
   assert.ok(ticketHashStep.sql.includes('ticket_sha256 CHAR(64)'));
   assert.ok(ticketHashStep.sql.includes('NULL'));
   assert.ok(ticketHashStep.definition.includes('store only SHA-256'));
@@ -124,6 +129,13 @@ test('migration fingerprints detect definition configuration and callback drift'
   assert.equal(migrationStepChecksum(ddl('{"columns":["id"]}', verifyPresent)), migrationStepChecksum(ddl('{"columns":["id"]}', verifyPresent)));
   assert.notEqual(migrationStepChecksum(ddl('{"columns":["id"]}', verifyPresent)), migrationStepChecksum(ddl('{"columns":["id","tenant_id"]}', verifyPresent)));
   assert.notEqual(migrationStepChecksum(ddl('{"columns":["id"]}', verifyPresent)), migrationStepChecksum(ddl('{"columns":["id"]}', verifyMissing)));
+  assert.notEqual(
+    migrationStepChecksum(ddl('{"columns":["id"]}', verifyPresent)),
+    migrationStepChecksum({
+      ...ddl('{"columns":["id"]}', verifyPresent),
+      compatiblePriorSteps: [{ migrationId: 'prior-migration', stepId: 'prior-step', verify: verifyMissing }],
+    }),
+  );
 
   const backfill = (runBatch: () => Promise<{ nextCursor: string | null; done: boolean }>) => ({
     id: 'callback-backfill',

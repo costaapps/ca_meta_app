@@ -1,5 +1,6 @@
 import type { QueryRunner } from 'typeorm';
 import { migrationChecksum } from './migration-fingerprint.js';
+import { verifyPortalTicketJtiTableShape } from './portal-sessions.js';
 import type { DdlStep, VersionedMigration } from './migration.types.js';
 
 async function verifyTicketHashColumn(queryRunner: QueryRunner): Promise<boolean> {
@@ -23,6 +24,17 @@ async function verifyTicketHashColumn(queryRunner: QueryRunner): Promise<boolean
   return true;
 }
 
+async function verifyCurrentTicketJtiTable({ queryRunner }: import('./migration.types.js').MigrationStepContext): Promise<boolean> {
+  if (!(await verifyTicketHashColumn(queryRunner))) return false;
+  return verifyPortalTicketJtiTableShape(queryRunner, 'v6');
+}
+
+const compatiblePriorSteps: NonNullable<DdlStep['compatiblePriorSteps']> = [{
+  migrationId: '202610300002-portal-sessions-and-abuse-limits',
+  stepId: 'create-portal-ticket-jtis',
+  verify: verifyCurrentTicketJtiTable,
+}];
+
 const addTicketHash: DdlStep = {
   id: 'add-exact-portal-ticket-hash',
   phase: 'expand',
@@ -33,9 +45,13 @@ const addTicketHash: DdlStep = {
     column: { name: 'ticket_sha256', type: 'CHAR(64)', charset: 'ascii', collation: 'ascii_bin', nullable: true },
     purpose: 'exact compact ticket recovery binding; store only SHA-256',
     legacyRows: 'NULL digest is non-recoverable and must be denied',
+    compatiblePriorSteps: compatiblePriorSteps.map(({ migrationId, stepId, verify }) => ({
+      migrationId, stepId, verify: verify.toString(),
+    })),
   }),
   retryWhenAbsent: true,
-  verify: async ({ queryRunner }) => verifyTicketHashColumn(queryRunner),
+  verify: verifyCurrentTicketJtiTable,
+  compatiblePriorSteps,
 };
 
 const definition = {

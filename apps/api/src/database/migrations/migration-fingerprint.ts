@@ -7,7 +7,21 @@ function sha256(value: string): string {
 
 export function migrationStepDefinition(step: MigrationStep): string {
   if ('sql' in step) {
-    return [step.id, step.phase, step.definitionVersion, step.definition, step.retryWhenAbsent, step.sql, step.verify.toString()].join('\n');
+    const compatiblePriorSteps = step.compatiblePriorSteps?.map((compatible) => [
+      compatible.migrationId,
+      compatible.stepId,
+      compatible.verify.toString(),
+    ].join('\n')).join('\n---\n');
+    return [
+      step.id,
+      step.phase,
+      step.definitionVersion,
+      step.definition,
+      step.retryWhenAbsent,
+      step.sql,
+      step.verify.toString(),
+      ...(compatiblePriorSteps ? [compatiblePriorSteps] : []),
+    ].join('\n');
   }
   if ('runBatch' in step) {
     return [step.id, step.phase, step.definitionVersion, step.definition, step.batchSize, step.runBatch.toString()].join('\n');
