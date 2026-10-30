@@ -38,15 +38,19 @@ class FixedClock implements MonotonicClock {
 class FakeAbuseLimits extends AbuseLimitService {
   readonly calls: { policy: AbuseLimitPolicy; dimensions: AbuseLimitDimensions }[] = [];
   rateLimitPreAuth = false;
+  rateLimitExchangeAttempt = false;
+  rateLimitExchange = false;
   async consume(policy: AbuseLimitPolicy, dimensions: AbuseLimitDimensions): Promise<void> {
     this.calls.push({ policy, dimensions });
-    if (policy === 'PORTAL_EXCHANGE') throw Object.freeze({ code: 'RATE_LIMITED', detail: 'synthetic private limiter detail' });
+    if (policy === 'PORTAL_EXCHANGE_ATTEMPT' && this.rateLimitExchangeAttempt) throw Object.freeze({ code: 'RATE_LIMITED', detail: 'synthetic private limiter detail' });
+    if (policy === 'PORTAL_EXCHANGE' && this.rateLimitExchange) throw Object.freeze({ code: 'RATE_LIMITED', detail: 'synthetic private limiter detail' });
     if (policy === 'PORTAL_PREAUTH' && this.rateLimitPreAuth) throw Object.freeze({ code: 'RATE_LIMITED' });
   }
 }
 
 class FakePreAuth extends PortalPreAuthService {
   beginCalls = 0;
+  verifyCalls = 0;
   async begin(): Promise<StartedPortalPreAuth> {
     this.beginCalls += 1;
     return Object.freeze({
@@ -56,7 +60,10 @@ class FakePreAuth extends PortalPreAuthService {
       entryMode: 'PORTAL_TOP_LEVEL',
     });
   }
-  async verifyBrowserBinding(): Promise<VerifiedPortalPreAuth | undefined> { return undefined; }
+  async verifyBrowserBinding(): Promise<VerifiedPortalPreAuth | undefined> {
+    this.verifyCalls += 1;
+    return undefined;
+  }
 }
 
 class FakeSessionIssuer extends PortalSessionIssuer {
@@ -88,8 +95,11 @@ function ticketFor(privateKey: KeyObject): string {
   const claims = Buffer.from(JSON.stringify({
     iss: ISSUER,
     aud: AUDIENCE,
+    purpose: 'META_PORTAL_ENTRY',
+    ver: 1,
     sub: 'synthetic-subject',
     tenant: 'synthetic-tenant',
+    session_iss: 'synthetic-session-authority-01',
     roles: ['viewer'],
     jti: 'synthetic-one-use-jti',
     iat: now,
@@ -206,6 +216,30 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
   assert.equal(context.preAuth.beginCalls, 1);
   context.abuseLimits.rateLimitPreAuth = false;
 
+  context.abuseLimits.rateLimitExchangeAttempt = true;
+  const attemptLimited = await fetch(`${context.baseUrl}/api/v1/auth/exchanges`, {
+    method: 'POST',
+    headers: {
+      ...sameOriginHeaders(context.origin),
+      cookie: '__Host-meta_preauth=synthetic-browser-cookie-value-12345678901234567890',
+    },
+    body: JSON.stringify({ ticket: 'synthetic-not-a-valid-ticket', challengeRef: 'synthetic-browser-challenge-123' }),
+  });
+  assert.equal(attemptLimited.status, 429);
+  assert.equal(attemptLimited.headers.get('retry-after'), '60');
+  assert.equal(attemptLimited.headers.get('set-cookie'), null);
+  assert.deepEqual(await attemptLimited.json(), {
+    code: 'RATE_LIMITED',
+    safeMessage: 'Too many requests. Try again later.',
+    requestId: attemptLimited.headers.get('x-request-id'),
+    retryable: true,
+    action: 'WAIT',
+  });
+  assert.equal(context.preAuth.verifyCalls, 0);
+  assert.equal(context.sessionIssuer.issueCalls, 0);
+  context.abuseLimits.rateLimitExchangeAttempt = false;
+  context.abuseLimits.rateLimitExchange = true;
+
   const signedTicket = ticketFor(context.privateKey);
   const exchange = await fetch(`${context.baseUrl}/api/v1/auth/exchanges`, {
     method: 'POST',
@@ -228,7 +262,12 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
   });
   assert.equal(JSON.stringify(error).includes('synthetic private limiter detail'), false);
   assert.equal(context.sessionIssuer.issueCalls, 0);
-  assert.deepEqual(context.abuseLimits.calls.map(({ policy }) => policy), ['PORTAL_PREAUTH', 'PORTAL_PREAUTH', 'PORTAL_EXCHANGE']);
+  assert.equal(context.preAuth.verifyCalls, 0);
+  assert.deepEqual(context.abuseLimits.calls.map(({ policy }) => policy), [
+    'PORTAL_PREAUTH', 'PORTAL_PREAUTH', 'PORTAL_EXCHANGE_ATTEMPT', 'PORTAL_EXCHANGE_ATTEMPT', 'PORTAL_EXCHANGE',
+  ]);
+  assert.deepEqual(context.abuseLimits.calls[2]?.dimensions, { ip: '127.0.0.1' });
+  assert.deepEqual(context.abuseLimits.calls[4]?.dimensions, { ip: '127.0.0.1', actor: `${ISSUER}\0synthetic-subject` });
   assert.equal(JSON.stringify(context.logger.records).includes(signedTicket), false);
 });
 

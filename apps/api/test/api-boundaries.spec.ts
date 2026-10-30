@@ -3,6 +3,7 @@ import { Body, Controller, Get, Inject, INestApplication, Post } from '@nestjs/c
 import { Test } from '@nestjs/testing';
 import { IsString, MaxLength } from 'class-validator';
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
 import { test } from 'node:test';
 import { createServer, connect as netConnect } from 'node:net';
 import type { AddressInfo } from 'node:net';
@@ -359,6 +360,24 @@ test('configuration validation requires typed fields, reports names only, and re
       API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON: '[{"issuer":"https://issuer.synthetic.invalid","subject":"operator-1"}]',
     }).identity?.platformIdentityAdmins, [{ issuer: 'https://issuer.synthetic.invalid', subject: 'operator-1' }]);
     assert.equal(validateEnvironment({ ...valid, API_DATABASE_PASSWORD: '  preserved password  ' }).database.password, '  preserved password  ');
+  });
+
+  await t.test('portal ticket clock skew accepts five seconds and rejects six', () => {
+    const publicKeyPem = generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey
+      .export({ format: 'pem', type: 'spki' }).toString();
+    const ticketEnv = {
+      ...valid,
+      API_PORTAL_ENTRY_TICKET_ISSUER: 'https://suite4.synthetic.invalid/portal',
+      API_PORTAL_ENTRY_TICKET_AUDIENCE: 'https://portal.synthetic.invalid',
+      API_PORTAL_ENTRY_TICKET_PUBLIC_KEYS_JSON: JSON.stringify([{ kid: 'synthetic', publicKeyPem }]),
+    };
+    assert.equal(validateEnvironment({ ...ticketEnv, API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS: '5' })
+      .portalEntryTicket?.configuration.clockSkewSeconds, 5);
+    assert.throws(
+      () => validateEnvironment({ ...ticketEnv, API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS: '6' }),
+      (error: unknown) => error instanceof EnvironmentValidationError &&
+        error.fieldNames.includes('API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS'),
+    );
   });
 
   await t.test('reports absent and malformed field names without values', () => {

@@ -73,6 +73,7 @@ export interface PortalSessionVerifierPort {
 }
 
 export interface PortalExchangeAbuseLimitPort {
+  consume(bucket: 'PORTAL_EXCHANGE_ATTEMPT', dimensions: { readonly ip: string }): Promise<void>;
   consume(bucket: 'PORTAL_EXCHANGE', dimensions: { readonly ip: string; readonly actor: string }): Promise<void>;
 }
 

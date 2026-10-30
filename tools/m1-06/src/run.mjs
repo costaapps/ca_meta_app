@@ -282,8 +282,21 @@ try {
     await expectFailure(model.exchangeTicket(replayedChallengeTicket, victimEntry.context, nowMs), 'EXCHANGE_CHALLENGE_INVALID');
     await expectJtiUnused(replayedChallengeJti);
     const victimJti = verifyFakeTicket(victimTicket, fakeIssuer.jwks, nowMs).jti;
-    await expectFailure(model.exchangeTicket(victimTicket, victimEntry.context, nowMs), 'EXCHANGE_CHALLENGE_INVALID');
+    const attackerReplayContext = createTrustedExchangeContext({
+      requestOrigin: APP_ORIGIN,
+      hostOrigin: APP_ORIGIN,
+      entryMode: 'PORTAL_TOP_LEVEL',
+      preAuthCookie: attackerEntry.preAuthCookie,
+    });
+    await expectFailure(model.exchangeTicket(victimTicket, attackerReplayContext, nowMs), 'EXCHANGE_CHALLENGE_INVALID');
     await expectJtiConsumed(victimJti);
+    const [sessionCountBeforeRetry] = await db.execute('SELECT COUNT(*) AS total FROM m106_portal_session');
+    const recoveredSession = await model.exchangeTicket(victimTicket, victimEntry.context, nowMs);
+    assert.equal(recoveredSession.sessionSecret, ownerSession.sessionSecret, 'exact same-browser retry returns the original active session');
+    assert.equal(recoveredSession.cookie, ownerSession.cookie);
+    assert.equal(recoveredSession.csrfToken, ownerSession.csrfToken);
+    const [sessionCountAfterRetry] = await db.execute('SELECT COUNT(*) AS total FROM m106_portal_session');
+    assert.equal(Number(sessionCountAfterRetry[0].total), Number(sessionCountBeforeRetry[0].total), 'exact retry creates no session');
     const duplicateJtiEntry = await beginBrowserEntry();
     const duplicateJtiTicket = issueFakeTicket(fakeIssuer, {
       sub: 'user-owner-01', tenant: 'tenant-a', jti: victimJti, preauth_challenge: duplicateJtiEntry.challenge,

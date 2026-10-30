@@ -6,7 +6,7 @@ The wire shape is `ErrorEnvelope` in [`openapi.yaml`](openapi.yaml): stable `cod
 
 | Code | HTTP | Meaning exposed to caller | Action | Retry rule |
 |---|---:|---|---|---|
-| `AUTH_REQUIRED` | 401 | No usable portal session or one-time proof | `SIGN_IN` | Re-enter through the configured identity flow. A consumed ticket is never replayed. |
+| `AUTH_REQUIRED` | 401 | No usable portal session or one-time proof | `SIGN_IN` | Ticket-exchange response-loss recovery retries only the exact same ticket/JTI, challenge and pre-auth browser binding to return the same still-active session; changed bindings and expired/revoked state are denied. |
 | `MEMBERSHIP_REVOKED` | 403 | Current membership is no longer active | `CONTACT_ADMIN` | No retry until current membership is confirmed. |
 | `ACCESS_DENIED` | 403 | Current role/capability cannot perform this action | `CONTACT_ADMIN` | Do not retry without a new authorization decision. |
 | `RESOURCE_NOT_AVAILABLE` | 404 | Resource is absent or unavailable in the current tenant | `REFRESH` | Same safe response for a foreign-tenant identifier and an absent resource. |

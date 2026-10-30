@@ -12,9 +12,9 @@ O portal oferece uma experiência sem senha adicional, mas sempre cria identidad
 | 4 | API | Rotaciona sessão e emite cookie opaco HttpOnly/Secure; retorna contexto público |
 | 5 | Angular | Consulta sessão/recursos; não persiste ticket ou token Meta em localStorage |
 
-Claims propostas: `iss`, `aud`, `sub`, `tenant`, `roles` ou referência autoritativa, `jti`, `iat`, `exp`, versão e identificação da sessão emissora. TTL inicial de até 60 segundos, clock skew limitado e algoritmo permitido; confirmar com emissor real antes de implementar. O servidor deve consultar ou comprovar membership vigente, inclusive quando claims antigas ainda estiverem assinadas.
+Claims propostas: `iss`, `aud`, `sub`, `tenant`, `roles` ou referência autoritativa, `jti`, `iat`, `exp`, `purpose=META_PORTAL_ENTRY`, `ver=1` e `session_iss`, com header `typ=JWT`, `alg=RS256` e `kid` localmente confiável. O skew proposto é limitado a 5 segundos e TTL a 60 segundos. `session_iss` é apenas string obrigatória não vazia e limitada; formato/semântica e relação com Suite4 são **Not confirmed**, sem autoridade sobre identidade ou tenant. Confirmar o perfil com o emissor real. O servidor deve consultar ou comprovar membership vigente, inclusive quando claims antigas ainda estiverem assinadas.
 
-Rotação de chave usa `kid` e conjunto confiável de chaves; não seguir `jku` de input arbitrário. Consumo de jti e criação de sessão são atômicos. Falha de rede após troca tem recuperação vinculada ao mesmo browser/exchange, sem tornar ticket reaproveitável por qualquer pessoa.
+Rotação de chave usa `kid` e conjunto confiável de chaves; não seguir `jku` de input arbitrário. Consumo de jti e criação de sessão são atômicos. Retry de resposta perdida com o mesmo ticket/JTI, challenge e binding pre-auth do browser pode retornar somente a mesma sessão ainda ativa, sem criá-la ou renová-la; sessão/membership/tenant revogada ou expirada e qualquer binding diferente são negados. O ticket não funciona como bearer fora dessa recuperação exata.
 
 Se Suite4 já oferecer OIDC confiável, o ADR pode adotar esse padrão em vez de inventar outro emissor; mantêm-se as invariantes de tenant, replay, audience e sessão. O contrato real ainda não foi fornecido.
 

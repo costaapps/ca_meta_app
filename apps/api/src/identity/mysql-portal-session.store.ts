@@ -72,6 +72,8 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
   private readonly pool: Pool;
   private readonly idleTimeoutSeconds: number;
   private readonly absoluteTimeoutSeconds: number;
+  private readonly cleanupTimer: NodeJS.Timeout;
+  private cleanupInFlight: Promise<{ readonly ticketJtisDeleted: number; readonly preAuthDeleted: number }> | undefined;
 
   constructor(environment: Pick<ApiEnvironment, 'database' | 'portalSessionIdleTimeoutSeconds' | 'portalSessionAbsoluteTimeoutSeconds'>) {
     this.idleTimeoutSeconds = environment.portalSessionIdleTimeoutSeconds;
@@ -91,6 +93,39 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
       dateStrings: true,
       timezone: 'Z',
     });
+    this.cleanupTimer = setInterval(() => {
+      void this.purgeExpiredRecords().catch(() => undefined);
+    }, 60_000);
+    this.cleanupTimer.unref();
+  }
+
+  /** Bounded, retryable cleanup; the ticket tombstone is removed before its expired pre-auth row. */
+  async purgeExpiredRecords(): Promise<{ readonly ticketJtisDeleted: number; readonly preAuthDeleted: number }> {
+    if (this.cleanupInFlight) return this.cleanupInFlight;
+    const operation = this.purgeExpiredRecordsBatch();
+    this.cleanupInFlight = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.cleanupInFlight === operation) this.cleanupInFlight = undefined;
+    }
+  }
+
+  private async purgeExpiredRecordsBatch(): Promise<{ readonly ticketJtisDeleted: number; readonly preAuthDeleted: number }> {
+    const [tickets] = await this.pool.execute<ResultSetHeader>(
+      `DELETE FROM ca_meta_portal_ticket_jtis
+       WHERE ticket_expires_at <= UTC_TIMESTAMP(6)
+       ORDER BY ticket_expires_at ASC LIMIT 1000`,
+    );
+    const [preAuth] = await this.pool.execute<ResultSetHeader>(
+      `DELETE FROM ca_meta_portal_pre_auth
+       WHERE expires_at <= UTC_TIMESTAMP(6)
+         AND NOT EXISTS (
+           SELECT 1 FROM ca_meta_portal_ticket_jtis AS ticket WHERE ticket.pre_auth_id = ca_meta_portal_pre_auth.id
+         )
+       ORDER BY expires_at ASC LIMIT 1000`,
+    );
+    return Object.freeze({ ticketJtisDeleted: tickets.affectedRows, preAuthDeleted: preAuth.affectedRows });
   }
 
   async createPreAuth(input: Omit<PortalPreAuthRecord, 'consumedAt' | 'expiresAt'>): Promise<Date> {
@@ -441,6 +476,8 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
   }
 
   async onApplicationShutdown(): Promise<void> {
+    clearInterval(this.cleanupTimer);
+    await this.cleanupInFlight?.catch(() => undefined);
     await this.pool.end();
   }
 }

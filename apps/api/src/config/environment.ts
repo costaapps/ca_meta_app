@@ -299,7 +299,7 @@ function portalEntryTicketField(
     invalid.push(issuerField);
   }
   if (audience.length < 1 || audience.length > 255 || /[\u0000-\u001f\u007f]/.test(audience)) invalid.push(audienceField);
-  const clockSkewSeconds = optionalIntegerField(source, 'API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS', 5, 0, 30, invalid);
+  const clockSkewSeconds = optionalIntegerField(source, 'API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS', 5, 0, 5, invalid);
   const maximumLifetimeSeconds = optionalIntegerField(source, 'API_PORTAL_ENTRY_TICKET_MAX_LIFETIME_SECONDS', 60, 1, 60, invalid);
 
   let publicKeys: readonly ConfiguredTicketPublicKey[] = [];

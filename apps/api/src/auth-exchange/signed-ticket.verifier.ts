@@ -3,6 +3,7 @@ import {
   IdentityAssertionVerifier,
   type VerifiedIdentityAssertion,
 } from '../identity/identity.trust.js';
+import type { MembershipRole } from '../identity/identity.types.js';
 import {
   TrustedTicketKeySetUnavailableError,
   type TicketExchangeConfiguration,
@@ -14,6 +15,7 @@ const MAX_TICKET_LENGTH = 8192;
 const MAX_HEADER_BYTES = 2048;
 const MAX_CLAIMS_BYTES = 4096;
 const MAX_SIGNATURE_BYTES = 1024;
+const ALLOWED_ROLES = new Set<MembershipRole>(['owner', 'admin', 'operator', 'viewer']);
 
 export class RejectedTicketError extends Error {
   constructor() {
@@ -33,19 +35,23 @@ export interface ValidatedEntryTicket {
 interface JwtHeader {
   readonly alg: string;
   readonly kid: string;
-  readonly typ?: string;
+  readonly typ: 'JWT';
 }
 
 interface EntryClaims {
   readonly iss: string;
   readonly aud: string | readonly string[];
+  readonly purpose: 'META_PORTAL_ENTRY';
+  readonly ver: 1;
   readonly sub: string;
   readonly tenant: string;
+  /** Bounded issuer-origin metadata only; format/meaning and any relationship to Suite4 remain Not confirmed. */
+  readonly session_iss: string;
   readonly jti: string;
   readonly iat: number;
   readonly exp: number;
   readonly preauth_challenge: string;
-  readonly roles: unknown;
+  readonly roles: readonly MembershipRole[];
   readonly nbf?: number;
 }
 
@@ -203,11 +209,16 @@ function boundedString(value: unknown, maximumLength: number): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= maximumLength && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
+function validTicketRoles(value: unknown): value is readonly MembershipRole[] {
+  return Array.isArray(value) && value.length > 0 && value.length <= 8 &&
+    value.every((role): role is MembershipRole => typeof role === 'string' && ALLOWED_ROLES.has(role as MembershipRole)) &&
+    new Set(value).size === value.length;
+}
+
 function parseHeader(value: unknown): JwtHeader {
   if (!isRecord(value)) return invalid();
   if (Object.keys(value).some((key) => !['alg', 'kid', 'typ'].includes(key))) return invalid();
-  if (value.alg !== ALLOWED_ALGORITHM || !boundedString(value.kid, 128)) return invalid();
-  if (value.typ !== undefined && value.typ !== 'JWT') return invalid();
+  if (value.alg !== ALLOWED_ALGORITHM || !boundedString(value.kid, 128) || value.typ !== 'JWT') return invalid();
   return value as unknown as JwtHeader;
 }
 
@@ -221,11 +232,14 @@ function parseClaims(value: unknown, configuration: TicketExchangeConfiguration,
   if (
     value.iss !== configuration.issuer ||
     !exactAudience(value.aud, configuration.audience) ||
+    value.purpose !== 'META_PORTAL_ENTRY' ||
+    !Number.isSafeInteger(value.ver) || value.ver !== 1 ||
     !boundedString(value.sub, 255) ||
     !boundedString(value.tenant, 255) ||
+    !boundedString(value.session_iss, 512) ||
     !boundedString(value.jti, 255) ||
     !boundedString(value.preauth_challenge, 512) ||
-    !Object.prototype.hasOwnProperty.call(value, 'roles') ||
+    !validTicketRoles(value.roles) ||
     !Number.isSafeInteger(value.iat) ||
     !Number.isSafeInteger(value.exp)
   ) {
@@ -260,7 +274,7 @@ function validConfiguration(configuration: TicketExchangeConfiguration): void {
     issuer.protocol !== 'https:' || issuer.username || issuer.password || issuer.hash ||
     configuration.issuer.length > 512 ||
     !boundedString(configuration.audience, 255) ||
-    !Number.isSafeInteger(configuration.clockSkewSeconds) || configuration.clockSkewSeconds < 0 || configuration.clockSkewSeconds > 30 ||
+    !Number.isSafeInteger(configuration.clockSkewSeconds) || configuration.clockSkewSeconds < 0 || configuration.clockSkewSeconds > 5 ||
     !Number.isSafeInteger(configuration.maximumLifetimeSeconds) || configuration.maximumLifetimeSeconds < 1 || configuration.maximumLifetimeSeconds > 60
   ) {
     throw new Error('Ticket exchange configuration is invalid.');

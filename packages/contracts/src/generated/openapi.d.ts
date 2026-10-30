@@ -31,7 +31,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Exchange a portal-entry ticket for a portal session
-         * @description Public in the sense that no session exists yet; protected by a pre-auth cookie and one-time signed ticket. This exchange is distinct from Meta OAuth/Embedded Signup callback handling and MUST NOT accept an authorization code. Ticket, browser challenge, cookie, current server membership, issuer and audience must match atomically. The `tenant` claim is revalidated; `company_uuid` is ignored. Set-Cookie returns the opaque portal session; the JSON DTO contains no session cookie, Meta credential, or ticket. When the trusted issuer or server-configured public key set is unavailable, the endpoint returns a safe 503 and issues no session.
+         * @description Public in the sense that no session exists yet; protected by a pre-auth cookie and one-time signed ticket. This exchange is distinct from Meta OAuth/Embedded Signup callback handling and MUST NOT accept an authorization code. Ticket, browser challenge, pre-auth cookie/browser binding, current server membership, issuer and audience must match atomically. The `tenant` claim is revalidated; `company_uuid` is ignored. Set-Cookie returns the opaque portal session; the JSON DTO contains no session cookie, Meta credential, or ticket. An exact retry after a lost response (same ticket/JTI, challenge, and pre-auth browser binding) may recover only the same still-active session; it creates or renews no session and fails after session, membership, or tenant revocation/expiry. A different cookie or challenge is denied. When the trusted issuer or server-configured public key set is unavailable, the endpoint returns a safe 503 and issues no session.
          */
         readonly post: operations["exchangePortalEntryTicket"];
         readonly delete?: never;
@@ -964,7 +964,7 @@ export interface components {
                 readonly "application/json": components["schemas"]["ErrorEnvelope"];
             };
         };
-        /** @description Authentication or one-time proof is required. */
+        /** @description Authentication or one-time proof is required. For ticket exchange this includes a mismatched pre-auth cookie/challenge or an expired/revoked session, membership, or tenant; a response-loss retry is accepted only for the same still-active session and browser binding. */
         readonly Unauthorized: {
             headers: {
                 readonly [name: string]: unknown;

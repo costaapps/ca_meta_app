@@ -157,13 +157,17 @@ paths:
       description: Public in the sense that no session exists yet; protected by a
         pre-auth cookie and one-time signed ticket. This exchange is distinct
         from Meta OAuth/Embedded Signup callback handling and MUST NOT accept an
-        authorization code. Ticket, browser challenge, cookie, current server
-        membership, issuer and audience must match atomically. The `tenant`
-        claim is revalidated; `company_uuid` is ignored. Set-Cookie returns the
-        opaque portal session; the JSON DTO contains no session cookie, Meta
-        credential, or ticket. When the trusted issuer or server-configured
-        public key set is unavailable, the endpoint returns a safe 503 and
-        issues no session.
+        authorization code. Ticket, browser challenge, pre-auth cookie/browser
+        binding, current server membership, issuer and audience must match
+        atomically. The `tenant` claim is revalidated; `company_uuid` is
+        ignored. Set-Cookie returns the opaque portal session; the JSON DTO
+        contains no session cookie, Meta credential, or ticket. An exact retry
+        after a lost response (same ticket/JTI, challenge, and pre-auth browser
+        binding) may recover only the same still-active session; it creates or
+        renews no session and fails after session, membership, or tenant
+        revocation/expiry. A different cookie or challenge is denied. When the
+        trusted issuer or server-configured public key set is unavailable, the
+        endpoint returns a safe 503 and issues no session.
       security:
         - preAuthCookie: []
       parameters:
@@ -221,10 +225,12 @@ paths:
         "503": *a8
         default: *a9
       x-external-effect: Consumes the one-time entry ticket/challenge and creates a
-        portal session atomically.
-      x-retry-policy: A consumed ticket is never replayed. If its response is lost,
-        start a fresh pre-auth challenge in the same browser; do not resubmit it
-        as a bearer credential.
+        portal session atomically; an exact retry may return that same
+        still-active session.
+      x-retry-policy: Exact idempotent retry only with the same ticket/JTI, challenge
+        and pre-auth browser binding. It returns the same active session without
+        creating or renewing a session; revoked or expired
+        session/membership/tenant and any changed cookie/challenge are denied.
   /api/v1/auth/magic-links:
     post:
       operationId: requestMagicLink
@@ -3125,7 +3131,10 @@ components:
                 retryable: false
                 action: FIX_REQUEST
     Unauthorized:
-      description: Authentication or one-time proof is required.
+      description: Authentication or one-time proof is required. For ticket exchange
+        this includes a mismatched pre-auth cookie/challenge or an
+        expired/revoked session, membership, or tenant; a response-loss retry is
+        accepted only for the same still-active session and browser binding.
       content:
         application/json:
           schema:

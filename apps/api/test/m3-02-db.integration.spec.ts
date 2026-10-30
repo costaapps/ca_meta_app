@@ -50,7 +50,13 @@ class SyntheticAbuseLimit implements PortalExchangeAbuseLimitPort {
     this.fail = reject;
   });
 
-  async consume(): Promise<void> {
+  consume(bucket: 'PORTAL_EXCHANGE_ATTEMPT', dimensions: { readonly ip: string }): Promise<void>;
+  consume(bucket: 'PORTAL_EXCHANGE', dimensions: { readonly ip: string; readonly actor: string }): Promise<void>;
+  async consume(
+    bucket: 'PORTAL_EXCHANGE_ATTEMPT' | 'PORTAL_EXCHANGE',
+    _dimensions: { readonly ip: string; readonly actor?: string },
+  ): Promise<void> {
+    if (bucket === 'PORTAL_EXCHANGE_ATTEMPT') return;
     this.arrived += 1;
     if (this.arrived === 1) {
       this.timeout = setTimeout(() => this.fail(new Error('M3.02 DB race barrier timed out.')), 5000);
@@ -90,8 +96,11 @@ function makeTicket(tenantId: string, subject: string, challengeRef: string, jti
   const claims = encoded(JSON.stringify({
     iss: issuer,
     aud: audience,
+    purpose: 'META_PORTAL_ENTRY',
+    ver: 1,
     sub: subject,
     tenant: tenantId,
+    session_iss: 'synthetic-session-authority-db-race',
     roles: ['owner'],
     jti,
     iat: issuedAt,
@@ -174,8 +183,8 @@ test('MariaDB persists one ticket session and recovers only for its original bro
   const identityB = new MysqlIdentityRepository(runtimeDatabase);
   const sessionsA = new MysqlPortalSessionService(storeA, new TenantContextService(identityA), recoveryKey);
   const sessionsB = new MysqlPortalSessionService(storeB, new TenantContextService(identityB), recoveryKey);
-  let challengeHash: string | undefined;
-  let jtiHash: string | undefined;
+  const challengeHashes: string[] = [];
+  const jtiHashes: string[] = [];
 
   try {
     await admin.query(
@@ -196,9 +205,11 @@ test('MariaDB persists one ticket session and recovers only for its original bro
     );
 
     const started = await sessionsA.begin();
-    challengeHash = createHash('sha256').update(started.challengeRef, 'utf8').digest('hex');
+    const challengeHash = createHash('sha256').update(started.challengeRef, 'utf8').digest('hex');
+    challengeHashes.push(challengeHash);
     const jti = randomUUID();
-    jtiHash = createHash('sha256').update(issuer, 'utf8').update('\0').update(jti, 'utf8').digest('hex');
+    const jtiHash = createHash('sha256').update(issuer, 'utf8').update('\0').update(jti, 'utf8').digest('hex');
+    jtiHashes.push(jtiHash);
     const ticket = makeTicket(tenantId, subject, started.challengeRef, jti);
     const abuseLimit = new SyntheticAbuseLimit();
     const exchangeA = new TicketExchangeService(
@@ -236,6 +247,26 @@ test('MariaDB persists one ticket session and recovers only for its original bro
     assert.equal(persistedTicket.length, 1, 'one JTI row records the committed exchange');
     assert.equal(persistedTicket[0]?.session_id, attemptA.sessionRef);
 
+    const recoveredResponse = captureResponse();
+    const recovered = await exchangeA.exchange(value, exchangeContext(started.cookieValue), recoveredResponse.response);
+    assert.equal(recovered.sessionRef, attemptA.sessionRef, 'an exact response-loss retry returns the same session');
+    assert.equal(sessionCookie(recoveredResponse.cookies), sessionCookie(responseA.cookies));
+    assert.deepEqual(await queryRows<{ id: string }>(admin,
+      'SELECT id FROM ca_meta_portal_sessions WHERE principal_id = ? AND tenant_id = ? AND revoked_at IS NULL',
+      [principalId, tenantId],
+    ), [{ id: attemptA.sessionRef }], 'an exact retry creates no additional session');
+
+    await admin.query(
+      'UPDATE ca_meta_portal_sessions SET idle_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE id = ?',
+      [attemptA.sessionRef],
+    );
+    const expiredRetryResponse = captureResponse();
+    await assert.rejects(
+      exchangeA.exchange(value, exchangeContext(started.cookieValue), expiredRetryResponse.response),
+      UnauthorizedException,
+    );
+    assert.equal(expiredRetryResponse.cookies.length, 0, 'an exact retry cannot recover an expired session');
+
     const wrongBrowserResponse = captureResponse();
     await assert.rejects(
       exchangeA.exchange(value, exchangeContext('w'.repeat(43)), wrongBrowserResponse.response),
@@ -247,17 +278,106 @@ test('MariaDB persists one ticket session and recovers only for its original bro
       [principalId, tenantId],
     );
     assert.deepEqual(unchangedSessions, [{ id: attemptA.sessionRef }]);
+
+    const revokedStart = await sessionsA.begin();
+    const revokedChallengeHash = createHash('sha256').update(revokedStart.challengeRef, 'utf8').digest('hex');
+    challengeHashes.push(revokedChallengeHash);
+    const revokedJti = randomUUID();
+    const revokedJtiHash = createHash('sha256').update(issuer, 'utf8').update('\0').update(revokedJti, 'utf8').digest('hex');
+    jtiHashes.push(revokedJtiHash);
+    const revokedTicket = makeTicket(tenantId, subject, revokedStart.challengeRef, revokedJti);
+    await admin.query(
+      `UPDATE ca_meta_memberships SET status = 'REVOKED', revoked_at = UTC_TIMESTAMP(6)
+       WHERE tenant_id = ? AND principal_id = ?`,
+      [tenantId, principalId],
+    );
+    const revokedReplayResponse = captureResponse();
+    await assert.rejects(
+      exchangeA.exchange(value, exchangeContext(started.cookieValue), revokedReplayResponse.response),
+      UnauthorizedException,
+    );
+    assert.equal(revokedReplayResponse.cookies.length, 0, 'an exact retry cannot recover after membership revocation');
+    const revokedResponse = captureResponse();
+    await assert.rejects(
+      exchangeA.exchange(
+        { ticket: revokedTicket, challengeRef: revokedStart.challengeRef },
+        exchangeContext(revokedStart.cookieValue),
+        revokedResponse.response,
+      ),
+      UnauthorizedException,
+    );
+    assert.equal(revokedResponse.cookies.length, 0, 'a still-live ticket cannot create a session after membership revocation');
+    assert.deepEqual(await queryRows<{ session_id: string }>(admin,
+      'SELECT session_id FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?',
+      [issuer, revokedJtiHash],
+    ), [], 'the rejected ticket does not consume a JTI');
+    assert.deepEqual(await queryRows<{ consumed_at: string | null }>(admin,
+      'SELECT consumed_at FROM ca_meta_portal_pre_auth WHERE challenge_hash = ?',
+      [revokedChallengeHash],
+    ), [{ consumed_at: null }], 'the rejected ticket does not consume its pre-auth challenge');
+    assert.deepEqual(await queryRows<{ id: string }>(admin,
+      'SELECT id FROM ca_meta_portal_sessions WHERE principal_id = ? AND tenant_id = ? AND revoked_at IS NULL',
+      [principalId, tenantId],
+    ), [{ id: attemptA.sessionRef }], 'revocation creates no additional session');
+
+    const beforeCutoffJti = await queryRows<{ jti_hash: string }>(admin,
+      'SELECT jti_hash FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?',
+      [issuer, jtiHash],
+    );
+    const beforeCutoffPreAuth = await queryRows<{ id: string }>(admin,
+      'SELECT id FROM ca_meta_portal_pre_auth WHERE challenge_hash = ?', [challengeHash],
+    );
+    assert.equal(beforeCutoffJti.length, 1, 'the active ticket tombstone exists before its cutoff');
+    assert.equal(beforeCutoffPreAuth.length, 1);
+    await storeA.purgeExpiredRecords();
+    assert.equal((await queryRows<{ jti_hash: string }>(admin,
+      'SELECT jti_hash FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?',
+      [issuer, jtiHash],
+    )).length, 1, 'cleanup keeps the active ticket tombstone');
+    assert.equal((await queryRows<{ id: string }>(admin,
+      'SELECT id FROM ca_meta_portal_pre_auth WHERE challenge_hash = ?', [challengeHash],
+    )).length, 1, 'cleanup keeps its active pre-auth row');
+
+    const originalPreAuth = await queryRows<{ id: string }>(admin,
+      'SELECT id FROM ca_meta_portal_pre_auth WHERE challenge_hash = ?', [challengeHash],
+    );
+    assert.equal(originalPreAuth.length, 1);
+    await admin.query(
+      'UPDATE ca_meta_portal_ticket_jtis SET ticket_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE issuer = ? AND jti_hash = ?',
+      [issuer, jtiHash],
+    );
+    await admin.query(
+      `UPDATE ca_meta_portal_pre_auth
+       SET created_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 10 SECOND),
+           expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)
+       WHERE id = ?`,
+      [originalPreAuth[0]?.id],
+    );
+    const [purgeA, purgeB] = await Promise.all([storeA.purgeExpiredRecords(), storeA.purgeExpiredRecords()]);
+    assert.deepEqual(purgeA, purgeB, 'concurrent maintenance calls share one bounded purge batch');
+    assert.ok(purgeA.ticketJtisDeleted >= 1);
+    assert.ok(purgeA.preAuthDeleted >= 1, 'expired pre-auth is removed after its JTI child');
+    assert.equal((await queryRows<{ jti_hash: string }>(admin,
+      'SELECT jti_hash FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?',
+      [issuer, jtiHash],
+    )).length, 0);
+    assert.equal((await queryRows<{ id: string }>(admin,
+      'SELECT id FROM ca_meta_portal_pre_auth WHERE challenge_hash = ?', [challengeHash],
+    )).length, 0);
+    assert.deepEqual(await queryRows<{ id: string }>(admin,
+      'SELECT id FROM ca_meta_portal_sessions WHERE id = ?', [attemptA.sessionRef],
+    ), [{ id: attemptA.sessionRef }], 'expiry cleanup leaves the portal session untouched');
   } finally {
     const poolShutdowns = await Promise.allSettled([
       storeA.onApplicationShutdown(), storeB.onApplicationShutdown(),
       identityA.onApplicationShutdown(), identityB.onApplicationShutdown(),
     ]);
     try {
-      if (jtiHash) {
+      for (const jtiHash of jtiHashes) {
         await admin.query('DELETE FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?', [issuer, jtiHash]);
       }
       await admin.query('DELETE FROM ca_meta_portal_sessions WHERE principal_id = ? AND tenant_id = ?', [principalId, tenantId]);
-      if (challengeHash) {
+      for (const challengeHash of challengeHashes) {
         await admin.query('DELETE FROM ca_meta_portal_pre_auth WHERE challenge_hash = ?', [challengeHash]);
       }
       await admin.query('DELETE FROM ca_meta_memberships WHERE tenant_id = ? AND principal_id = ?', [tenantId, principalId]);

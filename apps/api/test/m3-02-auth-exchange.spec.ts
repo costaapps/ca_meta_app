@@ -60,13 +60,16 @@ function makeTicket(options: {
   readonly rawClaims?: string;
   readonly privateKey?: KeyObject;
 } = {}): string {
-  const header = { alg: 'RS256', kid: 'key-current', ...options.header };
+  const header = { alg: 'RS256', kid: 'key-current', typ: 'JWT', ...options.header };
   const issuedAt = Math.floor(NOW / 1000) - 3;
   const claims: Record<string, unknown> = {
     iss: ISSUER,
     aud: AUDIENCE,
+    purpose: 'META_PORTAL_ENTRY',
+    ver: 1,
     sub: 'suite4-user-123',
     tenant: 'tenant-a',
+    session_iss: 'https://session-issuer.synthetic.invalid',
     roles: ['owner'],
     jti: RAW_JTI,
     iat: issuedAt,
@@ -158,14 +161,26 @@ class FakeSessionVerifier implements PortalSessionVerifierPort {
 }
 
 class FakeAbuseLimit implements PortalExchangeAbuseLimitPort {
-  readonly calls: { bucket: 'PORTAL_EXCHANGE'; ip: string; actor: string }[] = [];
+  readonly calls: (
+    | { bucket: 'PORTAL_EXCHANGE_ATTEMPT'; ip: string }
+    | { bucket: 'PORTAL_EXCHANGE'; ip: string; actor: string }
+  )[] = [];
   deny = false;
+  denyAttempt = false;
   failure: unknown;
 
-  async consume(bucket: 'PORTAL_EXCHANGE', dimensions: { readonly ip: string; readonly actor: string }): Promise<void> {
-    this.calls.push({ bucket, ...dimensions });
+  consume(bucket: 'PORTAL_EXCHANGE_ATTEMPT', dimensions: { readonly ip: string }): Promise<void>;
+  consume(bucket: 'PORTAL_EXCHANGE', dimensions: { readonly ip: string; readonly actor: string }): Promise<void>;
+  async consume(
+    bucket: 'PORTAL_EXCHANGE_ATTEMPT' | 'PORTAL_EXCHANGE',
+    dimensions: { readonly ip: string; readonly actor?: string },
+  ): Promise<void> {
+    if (bucket === 'PORTAL_EXCHANGE_ATTEMPT') this.calls.push({ bucket, ip: dimensions.ip });
+    else this.calls.push({ bucket, ip: dimensions.ip, actor: dimensions.actor ?? '' });
     if (this.failure !== undefined) throw this.failure;
-    if (this.deny) throw new PortalExchangeRateLimitedError();
+    if ((bucket === 'PORTAL_EXCHANGE_ATTEMPT' && this.denyAttempt) || (bucket === 'PORTAL_EXCHANGE' && this.deny)) {
+      throw new PortalExchangeRateLimitedError();
+    }
   }
 }
 
@@ -259,15 +274,23 @@ test('valid signed ticket creates a session with only server membership roles in
   assert.equal(sessions.options[0].ticketChallengeSha256.length, 64);
   assert.equal(preAuth.calls.length, 1);
   assert.equal(preAuth.calls[0].cookie, PREAUTH_COOKIE);
-  assert.deepEqual(abuseLimit.calls, [{
-    bucket: 'PORTAL_EXCHANGE',
-    ip: '192.0.2.44',
-    actor: `${ISSUER}\0suite4-user-123`,
-  }]);
+  assert.deepEqual(abuseLimit.calls, [
+    { bucket: 'PORTAL_EXCHANGE_ATTEMPT', ip: '192.0.2.44' },
+    { bucket: 'PORTAL_EXCHANGE', ip: '192.0.2.44', actor: `${ISSUER}\0suite4-user-123` },
+  ]);
   assert.equal(cookieWriter.setCalls, 1);
   const setCookie = headers.get('set-cookie');
   assert.ok(Array.isArray(setCookie));
   assert.ok(setCookie.some((value) => value.includes(`${PORTAL_SESSION_COOKIE_NAME}=${SESSION_COOKIE}`)));
+});
+
+test('ticket configuration allows five seconds of clock skew and rejects six', () => {
+  assert.doesNotThrow(() => new SignedEntryTicketVerifier(
+    { ...configuration, clockSkewSeconds: 5 }, new MemoryKeySet(), () => NOW,
+  ));
+  assert.throws(() => new SignedEntryTicketVerifier(
+    { ...configuration, clockSkewSeconds: 6 }, new MemoryKeySet(), () => NOW,
+  ), /Ticket exchange configuration is invalid/);
 });
 
 test('two concurrent exchanges of one ticket produce at most one session', async () => {
@@ -315,11 +338,10 @@ test('exchange abuse limit uses request IP and the verified issuer/subject, and 
   const { service, sessions, cookieWriter } = makeService({ abuseLimit });
   const { response, headers } = makeResponse();
   await service.exchange({ ticket: makeTicket(), challengeRef: 'preauth-reference-123' }, context(), response);
-  assert.deepEqual(abuseLimit.calls, [{
-    bucket: 'PORTAL_EXCHANGE',
-    ip: '192.0.2.44',
-    actor: `${ISSUER}\0suite4-user-123`,
-  }]);
+  assert.deepEqual(abuseLimit.calls, [
+    { bucket: 'PORTAL_EXCHANGE_ATTEMPT', ip: '192.0.2.44' },
+    { bucket: 'PORTAL_EXCHANGE', ip: '192.0.2.44', actor: `${ISSUER}\0suite4-user-123` },
+  ]);
 
   abuseLimit.deny = true;
   const deniedResponse = makeResponse();
@@ -333,12 +355,31 @@ test('exchange abuse limit uses request IP and the verified issuer/subject, and 
   assert.equal(sessions.issueCount, 1);
   assert.equal(cookieWriter.setCalls, 1);
   assert.equal(deniedResponse.headers.get('retry-after'), '60');
+  assert.deepEqual(abuseLimit.calls.slice(2), [
+    { bucket: 'PORTAL_EXCHANGE_ATTEMPT', ip: '192.0.2.44' },
+    { bucket: 'PORTAL_EXCHANGE', ip: '192.0.2.44', actor: `${ISSUER}\0suite4-user-123` },
+  ]);
+});
+
+test('invalid client IP is rejected before distributed attempt quota or key lookup', async () => {
+  const abuseLimit = new FakeAbuseLimit();
+  const { service, keySet } = makeService({ abuseLimit });
+  await assert.rejects(
+    service.exchange(
+      { ticket: makeTicket(), challengeRef: 'preauth-reference-123' },
+      { ...context(), clientIp: 'not-an-ip' },
+      makeResponse().response,
+    ),
+    ServiceUnavailableException,
+  );
+  assert.deepEqual(abuseLimit.calls, []);
+  assert.deepEqual(keySet.lookups, []);
 });
 
 test('stable rate-limit boundary code maps to 429 with a safe Retry-After', async () => {
   const abuseLimit = new FakeAbuseLimit();
   abuseLimit.failure = Object.assign(new Error('safe boundary detail'), { code: 'RATE_LIMITED' });
-  const { service, sessions, cookieWriter } = makeService({ abuseLimit });
+  const { service, sessions, preAuth, keySet, cookieWriter } = makeService({ abuseLimit });
   const deniedResponse = makeResponse();
 
   await assert.rejects(
@@ -351,6 +392,9 @@ test('stable rate-limit boundary code maps to 429 with a safe Retry-After', asyn
   );
 
   assert.equal(deniedResponse.headers.get('retry-after'), '60');
+  assert.deepEqual(abuseLimit.calls, [{ bucket: 'PORTAL_EXCHANGE_ATTEMPT', ip: '192.0.2.44' }]);
+  assert.deepEqual(keySet.lookups, [], 'a rate-limited attempt stops before trusted key lookup and RSA verification');
+  assert.equal(preAuth.calls.length, 0);
   assert.equal(sessions.issueCount, 0);
   assert.equal(cookieWriter.setCalls, 0);
 });
@@ -390,6 +434,8 @@ test('unsigned, unsupported, URL-selected, malformed and forged tickets are reje
   const pieces = normal.split('.');
   const damaged = `${pieces[0]}.${pieces[1]}.${pieces[2].slice(0, -1)}${pieces[2].endsWith('A') ? 'B' : 'A'}`;
   const cases: [string, string][] = [
+    ['missing typ', makeTicket({ header: { typ: undefined } })],
+    ['wrong typ', makeTicket({ header: { typ: 'JWS' } })],
     ['alg none', makeTicket({ header: { alg: 'none' } })],
     ['algorithm substitution', makeTicket({ header: { alg: 'HS256' } })],
     ['token key URL', makeTicket({ header: { jku: 'https://attacker.invalid/keys' } })],
@@ -412,6 +458,17 @@ test('issuer, audience, tenant, subject, JTI, challenge, role, and time claims a
   const cases: [string, Record<string, unknown>][] = [
     ['wrong issuer', { iss: 'https://other.synthetic.invalid' }],
     ['wrong audience', { aud: 'https://other.synthetic.invalid' }],
+    ['missing purpose', { purpose: undefined }],
+    ['wrong purpose', { purpose: 'OTHER_PURPOSE' }],
+    ['missing profile version', { ver: undefined }],
+    ['wrong profile version', { ver: 2 }],
+    ['non-integer profile version', { ver: 1.5 }],
+    ['missing session issuer', { session_iss: undefined }],
+    ['empty session issuer', { session_iss: '' }],
+    ['oversized session issuer', { session_iss: 's'.repeat(513) }],
+    ['unknown ticket role', { roles: ['platform_admin'] }],
+    ['malformed ticket roles', { roles: 'owner' }],
+    ['duplicate ticket roles', { roles: ['owner', 'owner'] }],
     ['wrong tenant type', { tenant: 14 }],
     ['empty subject', { sub: '' }],
     ['missing JTI', { jti: undefined }],
@@ -427,6 +484,13 @@ test('issuer, audience, tenant, subject, JTI, challenge, role, and time claims a
       await assert.rejects(verifier.verify(makeTicket({ claims })), RejectedTicketError);
     });
   }
+});
+
+test('session_iss is bounded metadata and does not mint the identity issuer', async () => {
+  const verifier = new SignedEntryTicketVerifier(configuration, new MemoryKeySet(), () => NOW);
+  const result = await verifier.verify(makeTicket({ claims: { session_iss: 'synthetic-session-authority-01' } }));
+  assert.equal(result.assertion.issuer, ISSUER);
+  assert.equal(result.assertion.subject, 'suite4-user-123');
 });
 
 test('configured trusted key rotation accepts a new key ID without honoring token URLs', async () => {

@@ -64,7 +64,7 @@ private-key PEM. No Suite4 issuer, audience, signing key, or production configur
 | API_PORTAL_ENTRY_TICKET_ISSUER | Exact HTTPS issuer URL, no credentials/query/fragment; required with audience and key set |
 | API_PORTAL_ENTRY_TICKET_AUDIENCE | Exact nonblank audience string up to 255 characters; required with issuer and key set |
 | API_PORTAL_ENTRY_TICKET_PUBLIC_KEYS_JSON | JSON array of 1–20 `{ "kid", "publicKeyPem" }` entries; unique bounded kid and RSA public key 2048–8192 bits; public keys only |
-| API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS | Optional integer 0–30; default 5 |
+| API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS | Optional integer 0–5; default 5 |
 | API_PORTAL_ENTRY_TICKET_MAX_LIFETIME_SECONDS | Optional integer 1–60; default 60 |
 
 API_ALLOWED_HOSTS is fail-closed in every environment: list only exact hosts assigned to that

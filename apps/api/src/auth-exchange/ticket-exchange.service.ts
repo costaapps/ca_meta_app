@@ -1,4 +1,5 @@
 import { BadRequestException, HttpException, HttpStatus, UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
+import { isIP } from 'node:net';
 import type { Response } from 'express';
 import { IdentityDeniedError } from '../identity/identity.errors.js';
 import type { VerifiedPortalSession } from '../identity/identity.trust.js';
@@ -63,6 +64,19 @@ function invalidRequest(): never {
 function rateLimitRetryAfterSeconds(error: unknown): number | undefined {
   if (error instanceof PortalExchangeRateLimitedError) return error.retryAfterSeconds;
   return isRecord(error) && error.code === 'RATE_LIMITED' ? 60 : undefined;
+}
+
+async function consumeAbuseLimit(response: Response, consume: () => Promise<void>): Promise<void> {
+  try {
+    await consume();
+  } catch (error) {
+    const retryAfterSeconds = rateLimitRetryAfterSeconds(error);
+    if (retryAfterSeconds !== undefined) {
+      response.setHeader('Retry-After', String(retryAfterSeconds));
+      throw new HttpException('Request limit exceeded.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    unavailable();
+  }
 }
 
 function parseExchangeRequest(value: unknown): ExchangeRequest {
@@ -174,6 +188,10 @@ export class TicketExchangeService {
     const request = parseExchangeRequest(value);
     assertRequestOrigin(context, this.allowedOrigins);
     if (!context.requestId || context.requestId.length > 128) unauthorized();
+    const clientIp = context.clientIp;
+    if (!clientIp || clientIp.length > 128 || isIP(clientIp) === 0) unavailable();
+
+    await consumeAbuseLimit(response, () => this.abuseLimit.consume('PORTAL_EXCHANGE_ATTEMPT', { ip: clientIp }));
 
     let ticket: Awaited<ReturnType<SignedEntryTicketVerifier['verify']>>;
     try {
@@ -184,20 +202,10 @@ export class TicketExchangeService {
       unavailable();
     }
 
-    if (!context.clientIp || context.clientIp.length > 128) unavailable();
-    try {
-      await this.abuseLimit.consume('PORTAL_EXCHANGE', {
-        ip: context.clientIp,
-        actor: `${ticket.assertion.issuer}\0${ticket.assertion.subject}`,
-      });
-    } catch (error) {
-      const retryAfterSeconds = rateLimitRetryAfterSeconds(error);
-      if (retryAfterSeconds !== undefined) {
-        response.setHeader('Retry-After', String(retryAfterSeconds));
-        throw new HttpException('Request limit exceeded.', HttpStatus.TOO_MANY_REQUESTS);
-      }
-      unavailable();
-    }
+    await consumeAbuseLimit(response, () => this.abuseLimit.consume('PORTAL_EXCHANGE', {
+      ip: clientIp,
+      actor: `${ticket.assertion.issuer}\0${ticket.assertion.subject}`,
+    }));
 
     let preAuth: Awaited<ReturnType<PortalPreAuthServicePort['verifyBrowserBinding']>>;
     try {
