@@ -12,9 +12,9 @@ import {
   type TenantOperation,
   type TenantScopePredicate,
   type TenantScopedIdPredicate,
-  type VerifiedPortalSession,
   type VerifiedServiceTenantScope,
 } from './identity.types.js';
+import { isVerifiedPortalSession, type VerifiedPortalSession } from './identity.trust.js';
 
 const ALLOWED_ROLES = new Set<MembershipRole>(['owner', 'admin', 'operator', 'viewer']);
 
@@ -133,6 +133,7 @@ export class TenantContextService {
 
   private assertCurrentReference(session: VerifiedPortalSession, presented: string | undefined): void {
     if (
+      !isVerifiedPortalSession(session) ||
       !session.sessionId ||
       !session.principalId ||
       !session.tenantId ||

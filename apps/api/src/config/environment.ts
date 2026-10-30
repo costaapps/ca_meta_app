@@ -16,6 +16,10 @@ export interface ApiEnvironment {
     readonly password: string;
     readonly connectTimeoutMs: number;
   };
+  readonly identity?: {
+    /** Exact verified issuer/subject pairs granted platform identity administration. Empty is fail-closed. */
+    readonly platformIdentityAdmins: readonly { readonly issuer: string; readonly subject: string }[];
+  };
 }
 
 export class EnvironmentValidationError extends Error {
@@ -180,6 +184,30 @@ function trustedProxiesField(value: string, invalid: string[]): false | readonly
   return entries;
 }
 
+function platformIdentityAdminsField(source: NodeJS.ProcessEnv, invalid: string[]): readonly { readonly issuer: string; readonly subject: string }[] {
+  const value = source.API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON;
+  if (value === undefined || value.trim() === '') return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.length > 100) throw new Error();
+    const identities = parsed.map((entry: unknown) => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new Error();
+      const issuer = Reflect.get(entry, 'issuer');
+      const subject = Reflect.get(entry, 'subject');
+      if (typeof issuer !== 'string' || issuer.length < 1 || issuer.length > 255 ||
+          typeof subject !== 'string' || subject.length < 1 || subject.length > 255 ||
+          issuer.trim() !== issuer || subject.trim() !== subject) throw new Error();
+      return Object.freeze({ issuer, subject });
+    });
+    const keys = identities.map(({ issuer, subject }) => `${issuer}\0${subject}`);
+    if (new Set(keys).size !== keys.length) throw new Error();
+    return Object.freeze(identities);
+  } catch {
+    invalid.push('API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON');
+    return [];
+  }
+}
+
 export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   const invalid: string[] = [];
   const nodeEnv = required(source, 'NODE_ENV', invalid);
@@ -221,6 +249,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     5000,
     invalid,
   );
+  const platformIdentityAdmins = platformIdentityAdminsField(source, invalid);
 
   if (invalid.length > 0) {
     const fieldNames = [...new Set([...REQUIRED_FIELDS.filter((name) => source[name] === undefined || source[name]?.trim() === ''), ...invalid])];
@@ -241,5 +270,6 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
       password: databasePassword,
       connectTimeoutMs,
     },
+    identity: { platformIdentityAdmins },
   };
 }

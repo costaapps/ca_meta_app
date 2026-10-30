@@ -272,6 +272,7 @@ export const DOMAIN_TABLES = [
   'ca_meta_principals',
   'ca_meta_memberships',
   'ca_meta_service_identity_scopes',
+  'ca_meta_identity_admin_audit',
   ...DURABLE_WORK_TABLES,
 ] as const;
 

@@ -66,6 +66,7 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(IDENTITY_MIGRATION.id, '202610300001-principals-memberships');
   assert.deepEqual(IDENTITY_MIGRATION.steps.map((step) => step.id), [
     'create-principals', 'create-tenant-memberships', 'create-service-identity-scopes',
+    'create-identity-admin-audit', 'identity-admin-audit-no-update', 'identity-admin-audit-no-delete',
   ]);
   const membershipStep = IDENTITY_MIGRATION.steps.find((step) => step.id === 'create-tenant-memberships');
   const serviceScopeStep = IDENTITY_MIGRATION.steps.find((step) => step.id === 'create-service-identity-scopes');
@@ -75,6 +76,12 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.ok(membershipStep.sql.includes("CHECK (principal_kind = 'USER')"));
   assert.ok(serviceScopeStep.sql.includes("CHECK (principal_kind = 'SERVICE')"));
   assert.ok(membershipStep.sql.includes('FOREIGN KEY (principal_kind, principal_id)'));
+  const adminAuditStep = IDENTITY_MIGRATION.steps.find((step) => step.id === 'create-identity-admin-audit');
+  assert.ok(adminAuditStep && 'sql' in adminAuditStep);
+  assert.ok(adminAuditStep.sql.includes('uq_ca_meta_identity_admin_idem'));
+  assert.ok(adminAuditStep.sql.includes('request_hash'));
+  assert.ok(IDENTITY_MIGRATION.steps.some((step) => step.id === 'identity-admin-audit-no-update'));
+  assert.ok(IDENTITY_MIGRATION.steps.some((step) => step.id === 'identity-admin-audit-no-delete'));
 });
 
 test('migration fingerprints detect definition configuration and callback drift', () => {

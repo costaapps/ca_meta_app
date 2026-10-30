@@ -12,6 +12,7 @@ Compose secrets use host files referenced by path. They are mounted read-only un
 | `NODE_ENV` | API, worker, migrate | One environment value shared by API/worker; `production`, `staging`, `development`, or `test`. |
 | `API_PORT`, `API_BIND_ADDRESS` | API and worker | API listener settings. Worker receives the same validated domain config but runs no HTTP listener. |
 | `API_TRUSTED_PROXIES` | API and worker | Explicitly trusted ingress CIDRs. Proxy CIDRs are **Not confirmed** until the target ingress is selected. |
+| `API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON` | API and worker | Optional exact verified `(issuer, subject)` allowlist for platform identity administration; empty denies first-tenant provisioning. The real issuer and initial operator identity are **Not confirmed**. |
 | `API_DATABASE_HOST`, `API_DATABASE_PORT`, `API_DATABASE_NAME` | API, worker, and migrate | The single DB endpoint is mapped to migration-client variable names inside Compose, preventing host/port/database divergence. Runtime user has only `SELECT, INSERT, UPDATE, DELETE` on the application database. |
 | `API_DATABASE_USER`, `MIGRATION_DATABASE_USER` | API/worker and migrate | Separate least-privilege accounts on the shared endpoint. Runtime has `SELECT, INSERT, UPDATE, DELETE`; migrator has database-scoped DDL/DML grants and never uses `root`. |
 | `API_ALLOWED_HOSTS` | API, worker, and API readiness healthcheck | Exact comma-separated public host allowlist. The API container healthcheck sends the first trimmed host as its `Host` header. |

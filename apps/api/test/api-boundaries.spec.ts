@@ -331,6 +331,11 @@ test('configuration validation requires typed fields, reports names only, and re
     assert.equal(parsed.trustedProxyCidrs, false);
     assert.deepEqual(parsed.allowedHosts, ['127.0.0.1', 'localhost']);
     assert.equal(parsed.database.password, 'synthetic-marker-value');
+    assert.deepEqual(parsed.identity?.platformIdentityAdmins, []);
+    assert.deepEqual(validateEnvironment({
+      ...valid,
+      API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON: '[{"issuer":"https://issuer.synthetic.invalid","subject":"operator-1"}]',
+    }).identity?.platformIdentityAdmins, [{ issuer: 'https://issuer.synthetic.invalid', subject: 'operator-1' }]);
     assert.equal(validateEnvironment({ ...valid, API_DATABASE_PASSWORD: '  preserved password  ' }).database.password, '  preserved password  ');
   });
 
@@ -359,6 +364,7 @@ test('configuration validation requires typed fields, reports names only, and re
     assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_HOSTS: '' }), /API_ALLOWED_HOSTS/);
     assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_HOSTS: '*.example.test' }), /API_ALLOWED_HOSTS/);
     assert.throws(() => validateEnvironment({ ...valid, API_DATABASE_PASSWORD: '   ' }), /API_DATABASE_PASSWORD/);
+    assert.throws(() => validateEnvironment({ ...valid, API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON: '[{"issuer":"x"}]' }), /API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON/);
   });
 });
 

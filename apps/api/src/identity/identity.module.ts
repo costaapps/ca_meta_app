@@ -3,6 +3,10 @@ import type { ApiEnvironment } from '../config/environment.js';
 import { IDENTITY_REPOSITORY } from './identity.repository.js';
 import { ServiceTenantAuthorizationService, TenantAuthorizationService, TenantContextService } from './identity.service.js';
 import { MysqlIdentityRepository } from './mysql-identity.repository.js';
+import { IDENTITY_ADMINISTRATION_REPOSITORY } from './identity-administration.repository.js';
+import { IdentityAdministrationService } from './identity-administration.service.js';
+import { MysqlIdentityAdministrationRepository } from './mysql-identity-administration.repository.js';
+import { PlatformIdentityAdminAuthority } from './identity.trust.js';
 
 @Module({})
 export class IdentityModule {
@@ -29,8 +33,23 @@ export class IdentityModule {
           useFactory: (repository: MysqlIdentityRepository) => new ServiceTenantAuthorizationService(repository),
           inject: [IDENTITY_REPOSITORY],
         },
+        {
+          provide: IDENTITY_ADMINISTRATION_REPOSITORY,
+          useFactory: () => new MysqlIdentityAdministrationRepository(environment.database),
+        },
+        {
+          provide: PlatformIdentityAdminAuthority,
+          useValue: new PlatformIdentityAdminAuthority(environment.identity?.platformIdentityAdmins ?? []),
+        },
+        {
+          provide: IdentityAdministrationService,
+          useFactory: (repository: MysqlIdentityAdministrationRepository, contexts: TenantContextService) =>
+            new IdentityAdministrationService(repository, contexts),
+          inject: [IDENTITY_ADMINISTRATION_REPOSITORY, TenantContextService],
+        },
       ],
-      exports: [IDENTITY_REPOSITORY, TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService],
+      exports: [IDENTITY_REPOSITORY, TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService,
+        IDENTITY_ADMINISTRATION_REPOSITORY, IdentityAdministrationService, PlatformIdentityAdminAuthority],
     };
   }
 }

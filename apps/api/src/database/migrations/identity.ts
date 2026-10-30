@@ -19,6 +19,7 @@ interface ExpectedForeignKey {
 const principalsColumns = ['id', 'kind', 'issuer', 'subject', 'status', 'version', 'created_at', 'updated_at'] as const;
 const membershipsColumns = ['tenant_id', 'principal_id', 'principal_kind', 'roles', 'status', 'version', 'created_at', 'updated_at', 'revoked_at'] as const;
 const serviceScopeColumns = ['tenant_id', 'principal_id', 'principal_kind', 'scope', 'status', 'created_at', 'revoked_at'] as const;
+const adminAuditColumns = ['id', 'authority_kind', 'actor_ref', 'tenant_id', 'action', 'target_principal_id', 'reason_code', 'idempotency_key', 'request_hash', 'result_tenant_id', 'created_at'] as const;
 
 async function verifyKeys(
   queryRunner: QueryRunner,
@@ -192,11 +193,79 @@ const serviceScopes = createTableStep(
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
 );
 
+const identityAdminAudit = createTableStep(
+  'create-identity-admin-audit',
+  'ca_meta_identity_admin_audit',
+  adminAuditColumns,
+  [
+    { name: 'PRIMARY', columns: ['id'], unique: true },
+    { name: 'uq_ca_meta_identity_admin_idem', columns: ['actor_ref', 'idempotency_key'], unique: true },
+    { name: 'ix_ca_meta_identity_admin_tenant_created', columns: ['tenant_id', 'created_at'], unique: false },
+  ],
+  [
+    { name: 'fk_ca_meta_identity_admin_tenant', columns: ['tenant_id'], table: 'ca_meta_tenants', referencedColumns: ['id'] },
+    { name: 'fk_ca_meta_identity_admin_target', columns: ['target_principal_id'], table: 'ca_meta_principals', referencedColumns: ['id'] },
+    { name: 'fk_ca_meta_identity_admin_result_tenant', columns: ['result_tenant_id'], table: 'ca_meta_tenants', referencedColumns: ['id'] },
+  ],
+  `CREATE TABLE IF NOT EXISTS ca_meta_identity_admin_audit (
+    id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    authority_kind VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    actor_ref CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    action VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    target_principal_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    reason_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    idempotency_key CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    request_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    result_tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_ca_meta_identity_admin_idem (actor_ref, idempotency_key),
+    KEY ix_ca_meta_identity_admin_tenant_created (tenant_id, created_at),
+    CONSTRAINT ck_ca_meta_identity_admin_authority CHECK (authority_kind IN ('PLATFORM_IDENTITY_ADMIN', 'TENANT_OWNER', 'TENANT_ADMIN')),
+    CONSTRAINT ck_ca_meta_identity_admin_action CHECK (action IN ('BOOTSTRAP_TENANT', 'GRANT_MEMBERSHIP', 'REVOKE_MEMBERSHIP')),
+    CONSTRAINT ck_ca_meta_identity_admin_reason CHECK (reason_code IN ('INITIAL_PROVISIONING', 'MEMBERSHIP_GRANT', 'ROLE_CHANGE', 'MEMBERSHIP_REVOCATION')),
+    CONSTRAINT fk_ca_meta_identity_admin_tenant FOREIGN KEY (tenant_id) REFERENCES ca_meta_tenants (id)
+      ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_ca_meta_identity_admin_target FOREIGN KEY (target_principal_id) REFERENCES ca_meta_principals (id)
+      ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_ca_meta_identity_admin_result_tenant FOREIGN KEY (result_tenant_id) REFERENCES ca_meta_tenants (id)
+      ON UPDATE RESTRICT ON DELETE RESTRICT
+  ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
+);
+
+function auditAppendOnlyTrigger(id: string, event: 'UPDATE' | 'DELETE'): DdlStep {
+  const name = `tr_ca_meta_identity_admin_audit_no_${event.toLowerCase()}`;
+  return {
+    id,
+    phase: 'expand',
+    sql: `CREATE TRIGGER ${name} BEFORE ${event} ON ca_meta_identity_admin_audit FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'identity administration audit is append-only'`,
+    definitionVersion: 'v1',
+    definition: JSON.stringify({ name, table: 'ca_meta_identity_admin_audit', event, appendOnly: true }),
+    retryWhenAbsent: true,
+    verify: async ({ queryRunner }) => {
+      const rows = await queryRunner.query(
+        `SELECT action_timing, event_manipulation, event_object_table
+         FROM information_schema.triggers WHERE trigger_schema = DATABASE() AND trigger_name = ?`, [name],
+      ) as Array<{ action_timing: string; event_manipulation: string; event_object_table: string }>;
+      if (rows.length === 0) return false;
+      const row = rows[0];
+      if (row?.action_timing !== 'BEFORE' || row.event_manipulation !== event || row.event_object_table !== 'ca_meta_identity_admin_audit') {
+        throw new Error(`Migration preflight found an unexpected identity audit trigger (${name}).`);
+      }
+      return true;
+    },
+  };
+}
+
+const auditNoUpdate = auditAppendOnlyTrigger('identity-admin-audit-no-update', 'UPDATE');
+const auditNoDelete = auditAppendOnlyTrigger('identity-admin-audit-no-delete', 'DELETE');
+
 const identityMigrationDefinition = {
   id: '202610300001-principals-memberships',
   schemaVersion: 4,
   minimumSupportedApiVersion: 1,
-  steps: [principals, memberships, serviceScopes],
+  steps: [principals, memberships, serviceScopes, identityAdminAudit, auditNoUpdate, auditNoDelete],
 };
 
 export const IDENTITY_MIGRATION: VersionedMigration = {

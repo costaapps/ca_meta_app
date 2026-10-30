@@ -24,16 +24,6 @@ export interface TenantMembership {
   readonly version: number;
 }
 
-/** Session fields are supplied only by the server-side session adapter added in M3.04. */
-export interface VerifiedPortalSession {
-  readonly sessionId: string;
-  readonly principalId: string;
-  readonly tenantId: string;
-  readonly contextVersion: number;
-  /** Lowercase SHA-256 hex digest of the opaque tenant context reference. */
-  readonly contextRefHash: string;
-}
-
 export type TenantOperation =
   | 'TENANT_READ'
   | 'RESOURCE_READ'

@@ -6,6 +6,7 @@ x-api-environment: &api-environment
   API_BIND_ADDRESS: ${API_BIND_ADDRESS:-0.0.0.0}
   API_ALLOWED_HOSTS: ${API_ALLOWED_HOSTS:?Set an exact comma-separated host allowlist}
   API_TRUSTED_PROXIES: ${API_TRUSTED_PROXIES:-none}
+  API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON: ${API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON:-[]}
   API_DATABASE_HOST: ${API_DATABASE_HOST:?Set the private or managed MariaDB host}
   API_DATABASE_PORT: "${API_DATABASE_PORT:-3306}"
   API_DATABASE_NAME: ${API_DATABASE_NAME:?Set the application database name}
