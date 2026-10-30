@@ -301,7 +301,12 @@ try {
     if ($probe.Status -eq 200) { break }
     Start-Sleep -Milliseconds 500
   } while ((Get-Date) -lt $deadline)
-  Assert-True ($probe.Status -eq 200 -and $probe.Body -match '"status"\s*:\s*"ok"') 'API liveness did not pass through the web proxy.'
+  if ($probe.Status -ne 200 -or $probe.Body -notmatch '"status"\s*:\s*"ok"') {
+    $apiState = Get-ContainerInfo -Name $apiContainer
+    $webState = Get-ContainerInfo -Name $webContainer
+    $apiHealth = if ($apiState.State.Health) { $apiState.State.Health.Status } else { 'not-configured' }
+    throw "API liveness did not pass through the web proxy (HTTP=$($probe.Status); bodyOk=$($probe.Body -match '"status"\s*:\s*"ok"'); api=$($apiState.State.Status)/$($apiState.State.ExitCode)/$apiHealth; web=$($webState.State.Status)/$($webState.State.ExitCode))."
+  }
   Assert-True ($probe.Headers -match '(?im)^X-Request-Id:\s*[^\r\n]+') 'API response correlation header was not preserved.'
   $versionedHealth = Send-Http -Uri "$baseUri/api/v1/health"
   Assert-True ($versionedHealth.Status -eq 200 -and $versionedHealth.Body -match '"status"\s*:\s*"ok"') 'Versioned API health route was not mapped correctly.'
