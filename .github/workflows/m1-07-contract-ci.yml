@@ -32,11 +32,16 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Set up Node
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: 24.22.1
+          node-version: 24.22.2
           cache: npm
           cache-dependency-path: tools/m1-07/package-lock.json
+      - name: Pin npm 11.19.1
+        run: |
+          npm install --global npm@11.19.1
+          test "$(node --version)" = 'v24.22.2'
+          test "$(npm --version)" = '11.19.1'
       - name: Install isolated contract toolchain
         working-directory: tools/m1-07
         run: npm ci

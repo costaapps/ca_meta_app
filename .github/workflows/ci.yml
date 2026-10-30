@@ -1,0 +1,217 @@
+name: Desktop candidate validation
+
+on:
+  pull_request:
+    branches: [main, develop, 'desktop/milestone-*']
+  push:
+    branches: [main, develop, 'desktop/milestone-*', 'desktop/m2-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 24.22.2
+  NPM_VERSION: 11.19.1
+
+jobs:
+  candidate:
+    name: desktop-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CI: 'true'
+    steps:
+      - name: Checkout candidate, not historical baseline
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Set up Node 24.22.2
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.2
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Pin npm and verify toolchain
+        run: |
+          npm install --global npm@11.19.1
+          test "$(node --version)" = "v${NODE_VERSION}"
+          test "$(npm --version)" = "${NPM_VERSION}"
+      - name: Install candidate dependencies from lockfile
+        run: npm ci --ignore-scripts
+      - name: Install pinned OpenAPI breaking-check binary
+        run: npm rebuild @pb33f/openapi-changes --workspace=@ca-meta/contracts
+      - name: Lint workspaces
+        run: npm run lint
+      - name: Typecheck workspaces
+        run: npm run typecheck
+      - name: Test Angular, API and contracts
+        run: npm test -- --watch=false
+      - name: Build candidate workspaces
+        run: npm run build
+      - name: Check M1.10 governance sources without generating files
+        run: |
+          python3 -B tools/m1-10/check_governance.py
+          python3 -B -m unittest discover -s tools/m1-10 -p 'test_*.py' -v
+
+  mariadb:
+    name: m2-08-mariadb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      CI: 'true'
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Set up Node 24.22.2
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.2
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Pin npm and verify toolchain
+        run: |
+          npm install --global npm@11.19.1
+          test "$(node --version)" = "v${NODE_VERSION}"
+          test "$(npm --version)" = "${NPM_VERSION}"
+      - name: Install candidate dependencies from lockfile
+        run: npm ci --ignore-scripts
+      - name: Install pinned OpenAPI breaking-check binary
+        run: npm rebuild @pb33f/openapi-changes --workspace=@ca-meta/contracts
+      - name: Run migrations and isolation fixtures against disposable MariaDB
+        run: pwsh -NoLogo -NoProfile -File tools/m2-03/run-mariadb-tests.ps1
+      - name: Run durable-work recovery fixtures against disposable MariaDB
+        run: pwsh -NoLogo -NoProfile -File tools/m2-05/run-mariadb-tests.ps1
+
+  security:
+    name: m2-08-security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout candidate history for branch-relative scans
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node 24.22.2
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.2
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Pin npm and verify toolchain
+        run: |
+          npm install --global npm@11.19.1
+          test "$(node --version)" = "v${NODE_VERSION}"
+          test "$(npm --version)" = "${NPM_VERSION}"
+      - name: Checkout comparison base
+        if: github.event_name != 'push' || github.event.before != '0000000000000000000000000000000000000000'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.event.repository.default_branch }}
+          path: audit-base
+          persist-credentials: false
+      - name: Record exact comparison-base SHA
+        id: audit-base
+        if: github.event_name != 'push' || github.event.before != '0000000000000000000000000000000000000000'
+        run: echo "sha=$(git -C audit-base rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Use the parent commit as the first-push comparison base
+        id: audit-base-initial
+        if: github.event_name == 'push' && github.event.before == '0000000000000000000000000000000000000000'
+        run: |
+          base_sha="$(git rev-parse HEAD^)"
+          base_path="$RUNNER_TEMP/ca-meta-m2-08-audit-base"
+          git worktree add --detach "$base_path" "$base_sha"
+          echo "sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "path=$base_path" >> "$GITHUB_OUTPUT"
+      - name: Run secret scanner and its negative fixture
+        env:
+          M2_08_BASE_SHA: ${{ steps.audit-base.outputs.sha || steps.audit-base-initial.outputs.sha }}
+        run: node tools/m2-08/scan-secrets.mjs
+      - name: Compare npm dependency findings and produce package report
+        env:
+          M2_08_AUDIT_BASE: ${{ steps.audit-base-initial.outputs.path || format('{0}/audit-base', github.workspace) }}
+          M2_08_BASE_SHA: ${{ steps.audit-base.outputs.sha || steps.audit-base-initial.outputs.sha }}
+        run: node tools/m2-08/scan-npm-audit.mjs
+      - name: Produce package license inventory
+        run: node tools/m2-08/scan-licenses.mjs
+      - name: Upload sanitized security reports (14 days)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: m2-08-security-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/security/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Remove first-push comparison worktree
+        if: always() && steps.audit-base-initial.outputs.path != ''
+        env:
+          AUDIT_BASE_PATH: ${{ steps.audit-base-initial.outputs.path }}
+        run: git worktree remove --force "$AUDIT_BASE_PATH"
+
+  images:
+    name: m2-08-images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Build web and API images and run same-commit smoke
+        id: smoke
+        run: pwsh -NoLogo -NoProfile -File tools/m2-06/run-container-smoke.ps1 -KeepImages
+      - name: Prepare report directory
+        run: mkdir -p artifacts/security
+      - name: Scan web image vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        with:
+          image-ref: ${{ steps.smoke.outputs.web_image }}
+          format: json
+          output: artifacts/security/trivy-web.json
+          scanners: vuln
+          vuln-type: os,library
+          version: v0.76.1
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          hide-progress: true
+          timeout: 15m
+      - name: Scan API image vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        with:
+          image-ref: ${{ steps.smoke.outputs.api_image }}
+          format: json
+          output: artifacts/security/trivy-api.json
+          scanners: vuln
+          vuln-type: os,library
+          version: v0.76.1
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          hide-progress: true
+          timeout: 15m
+      - name: Remove only the two smoke image tags
+        if: always() && steps.smoke.outputs.web_image != '' && steps.smoke.outputs.api_image != ''
+        env:
+          WEB_IMAGE: ${{ steps.smoke.outputs.web_image }}
+          API_IMAGE: ${{ steps.smoke.outputs.api_image }}
+        run: docker image rm "$WEB_IMAGE" "$API_IMAGE"
+      - name: Upload sanitized image reports (14 days)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: m2-08-images-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/security/trivy-*.json
+          if-no-files-found: warn
+          retention-days: 14

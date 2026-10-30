@@ -6,17 +6,23 @@ $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ca-meta-m205-$runId"
 $initSqlPath = Join-Path $tempRoot 'init.sql'
 $composeFile = Join-Path $PSScriptRoot 'compose.yaml'
 $keepEnvironment = $env:M2_05_KEEP_ENVIRONMENT -eq '1'
+$isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
 $runtimeDirectory = $env:M2_NODE_RUNTIME_DIR
-if ([string]::IsNullOrWhiteSpace($runtimeDirectory)) { $runtimeDirectory = Join-Path $env:LOCALAPPDATA 'Codex\runtimes\node-v24.22.2' }
-$nodeCommand = Join-Path $runtimeDirectory 'node.exe'
-$npmCommand = Join-Path $runtimeDirectory 'npm.cmd'
-if (-not (Test-Path -LiteralPath $nodeCommand) -or -not (Test-Path -LiteralPath $npmCommand)) {
-  throw 'Set M2_NODE_RUNTIME_DIR to the approved Node 24.22.2/npm 11.19.1 runtime directory.'
+if ($isWindows) {
+  if ([string]::IsNullOrWhiteSpace($runtimeDirectory)) { $runtimeDirectory = Join-Path $env:LOCALAPPDATA 'Codex\runtimes\node-v24.22.2' }
+  $nodeCommand = Join-Path $runtimeDirectory 'node.exe'
+  $npmCommand = Join-Path $runtimeDirectory 'npm.cmd'
+  if (-not (Test-Path -LiteralPath $nodeCommand) -or -not (Test-Path -LiteralPath $npmCommand)) {
+    throw 'Set M2_NODE_RUNTIME_DIR to the approved Node 24.22.2/npm 11.19.1 runtime directory.'
+  }
+  $env:Path = "$runtimeDirectory;$env:Path"
+} else {
+  $nodeCommand = (Get-Command node -ErrorAction Stop).Source
+  $npmCommand = (Get-Command npm -ErrorAction Stop).Source
 }
 $nodeVersion = (& $nodeCommand --version).Trim()
 $npmVersion = (& $npmCommand --version).Trim()
 if ($nodeVersion -ne 'v24.22.2' -or $npmVersion -ne '11.19.1') { throw "M2.05 harness requires Node v24.22.2/npm 11.19.1; found $nodeVersion/$npmVersion." }
-$env:Path = "$runtimeDirectory;$env:Path"
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
 $listener.Start()
 $dbPort = $listener.LocalEndpoint.Port

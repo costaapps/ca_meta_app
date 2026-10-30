@@ -1,3 +1,7 @@
+param(
+  [switch] $KeepImages
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -283,6 +287,8 @@ try {
 
   Write-Output "M2.06 smoke run: $runId"
   Write-Output "Candidate: $ociRevision"
+  Write-Output "Web image: $webImage"
+  Write-Output "API image: $apiImage"
   Write-Output 'Building images from the npm lockfile with digest-pinned ECR Public bases.'
 
   Invoke-Docker -Arguments @('build', '--file', 'infra/docker/web.Dockerfile', '--build-arg', "OCI_VERSION=$ociVersion", '--build-arg', "OCI_REVISION=$ociRevision", '--tag', $webImage, '.') | Out-Null
@@ -455,6 +461,10 @@ if (fs.existsSync('/workspace/backend') || found) process.exit(43);
   Assert-True ($workerExit -eq 0) 'Worker did not exit cleanly after SIGTERM.'
 
   Write-Output 'PASS: image build, SPA/cache/proxy/limits, runtime config, non-root/read-only, layer checks, API SIGTERM, worker command/SIGTERM.'
+  if ($KeepImages -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_OUTPUT)) {
+    Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "web_image=$webImage"
+    Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "api_image=$apiImage"
+  }
 }
 catch {
   Write-Warning $_.Exception.Message
@@ -478,6 +488,7 @@ finally {
     }
   }
   foreach ($resource in $createdImages) {
+    if ($KeepImages -and $exitCode -eq 0) { continue }
     $current = & docker image inspect $resource.Name 2>$null
     if ($LASTEXITCODE -eq 0) {
       $info = @($current | ConvertFrom-Json)[0]

@@ -1,0 +1,11 @@
+{
+  "name": "cross-tenant-asset-configuration-reference",
+  "description": "An asset owned by tenant B must not reference tenant A's app configuration.",
+  "tenantA": "primary",
+  "tenantB": "other",
+  "appConfigurationTenant": "primary",
+  "assetTenant": "other",
+  "readTenant": "other",
+  "targetAsset": 10000,
+  "expectedMariaDbError": "ER_NO_REFERENCED_ROW_2"
+}
