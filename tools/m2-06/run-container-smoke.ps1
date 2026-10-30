@@ -12,9 +12,11 @@ $webImage = "ca-meta-web:m206-$suffix"
 $apiImage = "ca-meta-api:m206-$suffix"
 $ociVersion = '0.0.0-m2-06'
 $ociRevision = (& git -C $repoRoot rev-parse HEAD).Trim()
-$createdContainers = [System.Collections.Generic.List[string]]::new()
-$createdImages = [System.Collections.Generic.List[string]]::new()
+$createdContainers = [System.Collections.Generic.List[object]]::new()
+$createdImages = [System.Collections.Generic.List[object]]::new()
 $createdNetwork = $null
+$layerScanRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ca-meta-m206-layer-scan-$runId"
+$layerScanCreated = $false
 $exitCode = 0
 $httpClient = [System.Net.Http.HttpClient]::new()
 
@@ -69,6 +71,105 @@ function Get-ContainerInfo {
   return @($json | ConvertFrom-Json)[0]
 }
 
+function Test-AppLayerPath {
+  param([Parameter(Mandatory)][string] $Name, [Parameter(Mandatory)][ValidateSet('web', 'api')][string] $ImageKind)
+  $path = $Name.Replace('\', '/').TrimStart('/')
+  $webApp = if ($ImageKind -eq 'web') {
+    $path.StartsWith('usr/share/nginx/html/', [System.StringComparison]::OrdinalIgnoreCase) -or
+      $path.StartsWith('etc/nginx/', [System.StringComparison]::OrdinalIgnoreCase) -or
+      $path -eq 'usr/local/bin/web-entrypoint.sh'
+  } else {
+    $false
+  }
+  $apiWorkspace = $ImageKind -eq 'api' -and $path.StartsWith('workspace/', [System.StringComparison]::OrdinalIgnoreCase)
+  $apiAppContent = $apiWorkspace -and ($path.StartsWith('workspace/apps/api/', [System.StringComparison]::OrdinalIgnoreCase) -or
+    $path.StartsWith('workspace/packages/contracts/', [System.StringComparison]::OrdinalIgnoreCase))
+  if (-not $webApp -and -not $apiWorkspace) { return }
+
+  $sensitivePath = $path -match '(^|/)\.env(?:\..*)?$' -or
+    $path -match '(^|/)backend(?:/|$)' -or
+    $path -match '(^|/)connect(?:_old)?\.php$'
+  $appArtifact = ($webApp -and ($path -match '\.(?:key|pem|map)$')) -or
+    ($apiAppContent -and ($path -match '\.(?:key|pem)$' -or $path -match '^workspace/apps/api/dist/.*\.map$'))
+  if ($sensitivePath -or $appArtifact) {
+    throw "Prohibited application path found in a final image layer ($ImageKind)."
+  }
+}
+
+function Test-AppTextContent {
+  param([Parameter(Mandatory)][string] $Name, [Parameter(Mandatory)][string] $Content, [Parameter(Mandatory)][ValidateSet('web', 'api')][string] $ImageKind)
+  $path = $Name.Replace('\', '/')
+  $inApp = if ($ImageKind -eq 'web') {
+    $path -match '^(?:usr/share/nginx/html/|etc/nginx/|usr/local/bin/web-entrypoint\.sh$)'
+  } else {
+    $path -match '^(?:workspace/apps/api/|workspace/packages/contracts/|workspace/image-metadata\.json$)'
+  }
+  if (-not $inApp) { return }
+
+  $credentialPattern = '(?i)-----BEGIN (?:(?:RSA|EC|OPENSSH|DSA) )?PRIVATE KEY-----|\bEA[A-Za-z0-9]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|\b(?:META_APP_SECRET|META_ACCESS_TOKEN|API_DATABASE_PASSWORD|MARIADB_ROOT_PASSWORD)\s*[:=]\s*["'']?(?!change_me|replace_me|placeholder|synthetic_unused|your_|<)[A-Za-z0-9_./+=-]{8,}'
+  if ($Content -match $credentialPattern) {
+    throw "Credential marker found in a final image application file ($ImageKind); value suppressed."
+  }
+}
+
+function Test-ImageArchiveLayers {
+  param([Parameter(Mandatory)][string] $Image, [Parameter(Mandatory)][ValidateSet('web', 'api')][string] $ImageKind)
+  $archivePath = Join-Path $layerScanRoot "$ImageKind-image.tar"
+  Invoke-Docker -Arguments @('image', 'save', '--output', $archivePath, $Image) | Out-Null
+  $archiveStream = [System.IO.File]::OpenRead($archivePath)
+  $archiveReader = [System.Formats.Tar.TarReader]::new($archiveStream, $true)
+  $layerCount = 0
+  try {
+    while ($null -ne ($outerEntry = $archiveReader.GetNextEntry())) {
+      if ($null -eq $outerEntry.DataStream) { continue }
+      if ($outerEntry.Name -match '(^|/)layer\.tar$') {
+        $layerCount++
+        $layerPath = Join-Path $layerScanRoot "$ImageKind-layer-$layerCount.tar"
+        $layerOutput = [System.IO.File]::Create($layerPath)
+        try { $outerEntry.DataStream.CopyTo($layerOutput) } finally { $layerOutput.Dispose() }
+        $layerStream = [System.IO.File]::OpenRead($layerPath)
+        $layerReader = [System.Formats.Tar.TarReader]::new($layerStream, $true)
+        try {
+          while ($null -ne ($layerEntry = $layerReader.GetNextEntry())) {
+            Test-AppLayerPath -Name $layerEntry.Name -ImageKind $ImageKind
+            if ($null -eq $layerEntry.DataStream) { continue }
+            $textFile = $layerEntry.Name -match '(?i)(?:\.\w{1,12}|/json)$' -or $layerEntry.Name -match '(^|/)(?:Dockerfile|\.npmrc)$'
+            $appTextPath = if ($ImageKind -eq 'web') {
+              $layerEntry.Name -match '^(?:usr/share/nginx/html/|etc/nginx/|usr/local/bin/web-entrypoint\.sh$)'
+            } else {
+              $layerEntry.Name -match '^workspace/(?:apps/api/|packages/contracts/)'
+            }
+            if ($textFile -and $appTextPath) {
+              $reader = [System.IO.StreamReader]::new($layerEntry.DataStream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
+              try {
+                $content = $reader.ReadToEnd()
+                Test-AppTextContent -Name $layerEntry.Name -Content $content -ImageKind $ImageKind
+              } finally { $reader.Dispose() }
+            } else {
+              $layerEntry.DataStream.CopyTo([System.IO.Stream]::Null)
+            }
+          }
+        } finally {
+          $layerReader.Dispose()
+          $layerStream.Dispose()
+          Remove-Item -LiteralPath $layerPath -Force
+        }
+      } elseif ($outerEntry.Name -match '\.json$') {
+        $reader = [System.IO.StreamReader]::new($outerEntry.DataStream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
+        try {
+          $metadata = $reader.ReadToEnd()
+          Test-AppTextContent -Name 'workspace/image-metadata.json' -Content $metadata -ImageKind $ImageKind
+        } finally { $reader.Dispose() }
+      }
+    }
+  } finally {
+    $archiveReader.Dispose()
+    $archiveStream.Dispose()
+  }
+  Assert-True ($layerCount -gt 0) "Docker save returned no layers for the final $ImageKind image."
+  Write-Output "PASS: scanned $layerCount saved $ImageKind image layers for prohibited app paths and credential markers."
+}
+
 try {
   if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'Docker CLI is required.' }
   if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git is required to label the tested revision.' }
@@ -80,6 +181,14 @@ try {
   Assert-DockerNameFree -Kind network -Name $networkName
   foreach ($name in @($webImage, $apiImage)) { Assert-DockerNameFree -Kind image -Name $name }
 
+  $tempPath = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+  $resolvedLayerScanRoot = [System.IO.Path]::GetFullPath($layerScanRoot)
+  $expectedLayerScanRoot = [System.IO.Path]::GetFullPath((Join-Path $tempPath "ca-meta-m206-layer-scan-$runId"))
+  Assert-True ($resolvedLayerScanRoot -eq $expectedLayerScanRoot -and $runId -match '^[0-9a-f]{32}$') 'Layer scan path is outside its UUID temporary directory.'
+  Assert-True (-not (Test-Path -LiteralPath $resolvedLayerScanRoot)) 'Generated layer scan directory already exists; refusing to use or clean it.'
+  New-Item -ItemType Directory -Path $resolvedLayerScanRoot | Out-Null
+  $layerScanCreated = $true
+
   Write-Output "M2.06 smoke run: $runId"
   Write-Output "Candidate: $ociRevision"
   Write-Output 'Building images from the npm lockfile with digest-pinned ECR Public bases.'
@@ -87,9 +196,11 @@ try {
   Invoke-Docker -Arguments @('build', '--file', 'infra/docker/web.Dockerfile', '--build-arg', "OCI_VERSION=$ociVersion", '--build-arg', "OCI_REVISION=$ociRevision", '--tag', $webImage, '.') | Out-Null
   $webImageInfo = @(Invoke-Docker -Arguments @('image', 'inspect', $webImage) | ConvertFrom-Json)[0]
   $createdImages.Add([pscustomobject]@{ Name = $webImage; Id = $webImageInfo.Id })
+  Test-ImageArchiveLayers -Image $webImage -ImageKind web
   Invoke-Docker -Arguments @('build', '--file', 'infra/docker/api.Dockerfile', '--build-arg', "OCI_VERSION=$ociVersion", '--build-arg', "OCI_REVISION=$ociRevision", '--tag', $apiImage, '.') | Out-Null
   $apiImageInfo = @(Invoke-Docker -Arguments @('image', 'inspect', $apiImage) | ConvertFrom-Json)[0]
   $createdImages.Add([pscustomobject]@{ Name = $apiImage; Id = $apiImageInfo.Id })
+  Test-ImageArchiveLayers -Image $apiImage -ImageKind api
 
   $networkId = (Invoke-Docker -Arguments @('network', 'create', $networkName) | Out-String).Trim()
   Assert-True ($networkId -match '^[0-9a-f]{64}$') 'Docker did not confirm creation of the isolated network.'
@@ -165,7 +276,7 @@ try {
 
   $largeBody = [byte[]]::new(65_537)
   $tooLargeJson = Send-Http -Uri "$baseUri/api/v1/unused" -Method 'POST' -Body $largeBody -ContentType 'application/json'
-  Assert-True ($tooLargeJson.Status -eq 413) 'The API JSON limit must reject a 65,537-byte ordinary request.'
+  Assert-True ($tooLargeJson.Status -eq 413) 'The default NGINX proxy limit must reject a 65,537-byte ordinary API request.'
   $webhookOversizeForApi = Send-Http -Uri "$baseUri/api/v1/webhooks/meta/synthetic-config" -Method 'POST' -Body $largeBody
   Assert-True ($webhookOversizeForApi.Status -ne 413 -and $webhookOversizeForApi.Headers -match '(?im)^X-Request-Id:\s*[^\r\n]+') 'A 65,537-byte octet-stream webhook body must pass the NGINX proxy to the API.'
   $tooLargeWebhook = Send-Http -Uri "$baseUri/api/v1/webhooks/meta/synthetic-config" -Method 'POST' -Body ([byte[]]::new(1_048_577))
@@ -268,11 +379,27 @@ finally {
     }
   }
   foreach ($resource in $createdImages) {
-    $current = & docker image inspect $resource.Name 2>$null
+    $current = & docker image inspect $resource.Id 2>$null
     if ($LASTEXITCODE -eq 0) {
       $info = @($current | ConvertFrom-Json)[0]
-      if ($info.Id -eq $resource.Id) { & docker image rm $resource.Name *> $null }
-      else { Write-Warning 'Skipped an image tag that no longer identifies this smoke run.' }
+      if ($info.Id -eq $resource.Id) { & docker image rm $resource.Id *> $null }
+      else { Write-Warning 'Skipped an image ID that no longer identifies this smoke run.' }
+    }
+  }
+  if ($layerScanCreated) {
+    $tempPath = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $resolvedLayerScanRoot = [System.IO.Path]::GetFullPath($layerScanRoot)
+    $expectedLayerScanRoot = [System.IO.Path]::GetFullPath((Join-Path $tempPath "ca-meta-m206-layer-scan-$runId"))
+    if ($resolvedLayerScanRoot -eq $expectedLayerScanRoot -and $runId -match '^[0-9a-f]{32}$' -and
+        (Test-Path -LiteralPath $resolvedLayerScanRoot -PathType Container)) {
+      $attributes = [System.IO.File]::GetAttributes($resolvedLayerScanRoot)
+      if (-not ($attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        Remove-Item -LiteralPath $resolvedLayerScanRoot -Recurse -Force
+      } else {
+        Write-Warning 'Skipped temporary layer files because the UUID directory became a reparse point.'
+      }
+    } else {
+      Write-Warning 'Skipped temporary layer files because their UUID path no longer matches the created directory.'
     }
   }
   $httpClient.Dispose()
