@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
 ARG NGINX_IMAGE=public.ecr.aws/nginx/nginx-unprivileged:stable-alpine3.24@sha256:2daef144b574804198caccc4041819fa1801ecd5df2252a39646bfa2b1ff3bea
 
@@ -12,7 +11,7 @@ RUN npm ci --no-audit --fund=false
 
 COPY apps/web ./apps/web
 COPY packages/contracts ./packages/contracts
-RUN npm run build --workspace=@ca-meta/web -- --configuration=production --source-map=false \
+RUN npm run build --workspace=@ca-meta/web -- --configuration=production --source-map=false --base-href=/ \
     && find apps/web/dist/meta-integration/browser -type f -name '*.map' -delete
 
 FROM ${NGINX_IMAGE} AS runtime

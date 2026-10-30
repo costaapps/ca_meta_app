@@ -14,7 +14,7 @@ $ociVersion = '0.0.0-m2-06'
 $ociRevision = (& git -C $repoRoot rev-parse HEAD).Trim()
 $createdContainers = [System.Collections.Generic.List[string]]::new()
 $createdImages = [System.Collections.Generic.List[string]]::new()
-$networkCreated = $false
+$createdNetwork = $null
 $exitCode = 0
 $httpClient = [System.Net.Http.HttpClient]::new()
 
@@ -30,6 +30,12 @@ function Assert-True {
   if (-not $Condition) { throw $Message }
 }
 
+function Assert-DockerNameFree {
+  param([ValidateSet('container', 'network', 'image')][string] $Kind, [string] $Name)
+  & docker $Kind inspect $Name 2>$null | Out-Null
+  if ($LASTEXITCODE -eq 0) { throw "Generated Docker $Kind name is already in use." }
+}
+
 function Get-FreeLoopbackPort {
   $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
   $listener.Start()
@@ -37,18 +43,23 @@ function Get-FreeLoopbackPort {
 }
 
 function Send-Http {
-  param([string] $Uri, [string] $Method = 'GET', [byte[]] $Body)
+  param([string] $Uri, [string] $Method = 'GET', [byte[]] $Body, [string] $ContentType = 'application/octet-stream')
   $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::new($Method), $Uri)
   if ($null -ne $Body) {
     $request.Content = [System.Net.Http.ByteArrayContent]::new($Body)
-    $request.Content.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/octet-stream')
+    $request.Content.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($ContentType)
   }
-  $response = $httpClient.SendAsync($request).GetAwaiter().GetResult()
+  try {
+    $response = $httpClient.SendAsync($request).GetAwaiter().GetResult()
+  } catch [System.Net.Http.HttpRequestException] {
+    return [pscustomobject]@{ Status = 0; Body = ''; Headers = ''; Error = 'connection not ready' }
+  }
   $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
   [pscustomobject]@{
     Status = [int] $response.StatusCode
     Body = $text
     Headers = $response.Headers.ToString() + $response.Content.Headers.ToString()
+    Error = $null
   }
 }
 
@@ -65,18 +76,26 @@ try {
   $dirty = & git -C $repoRoot status --porcelain
   if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Run this harness from a clean Git worktree so image labels match the tested source.' }
   Invoke-Docker -Arguments @('info') | Out-Null
+  foreach ($name in @($webContainer, $apiContainer, $workerContainer)) { Assert-DockerNameFree -Kind container -Name $name }
+  Assert-DockerNameFree -Kind network -Name $networkName
+  foreach ($name in @($webImage, $apiImage)) { Assert-DockerNameFree -Kind image -Name $name }
 
   Write-Output "M2.06 smoke run: $runId"
   Write-Output "Candidate: $ociRevision"
   Write-Output 'Building images from the npm lockfile with digest-pinned ECR Public bases.'
 
-  $createdImages.Add($webImage)
   Invoke-Docker -Arguments @('build', '--file', 'infra/docker/web.Dockerfile', '--build-arg', "OCI_VERSION=$ociVersion", '--build-arg', "OCI_REVISION=$ociRevision", '--tag', $webImage, '.') | Out-Null
-  $createdImages.Add($apiImage)
+  $webImageInfo = @(Invoke-Docker -Arguments @('image', 'inspect', $webImage) | ConvertFrom-Json)[0]
+  $createdImages.Add([pscustomobject]@{ Name = $webImage; Id = $webImageInfo.Id })
   Invoke-Docker -Arguments @('build', '--file', 'infra/docker/api.Dockerfile', '--build-arg', "OCI_VERSION=$ociVersion", '--build-arg', "OCI_REVISION=$ociRevision", '--tag', $apiImage, '.') | Out-Null
+  $apiImageInfo = @(Invoke-Docker -Arguments @('image', 'inspect', $apiImage) | ConvertFrom-Json)[0]
+  $createdImages.Add([pscustomobject]@{ Name = $apiImage; Id = $apiImageInfo.Id })
 
-  Invoke-Docker -Arguments @('network', 'create', $networkName) | Out-Null
-  $networkCreated = $true
+  $networkId = (Invoke-Docker -Arguments @('network', 'create', $networkName) | Out-String).Trim()
+  Assert-True ($networkId -match '^[0-9a-f]{64}$') 'Docker did not confirm creation of the isolated network.'
+  $createdNetwork = [pscustomobject]@{ Name = $networkName; Id = $networkId }
+  $networkInfo = @(Invoke-Docker -Arguments @('network', 'inspect', $networkName) | ConvertFrom-Json)[0]
+  Assert-True ($networkInfo.Id -eq $networkId) 'The isolated network name resolved to an unexpected resource.'
   $webPort = Get-FreeLoopbackPort
 
   $apiEnvironment = @(
@@ -90,16 +109,21 @@ try {
     '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m', '--cap-drop=ALL', '--security-opt', 'no-new-privileges=true')
   foreach ($entry in $apiEnvironment) { $apiArgs += @('--env', $entry) }
   $apiArgs += $apiImage
-  $createdContainers.Add($apiContainer)
-  Invoke-Docker -Arguments $apiArgs | Out-Null
+  $apiId = (Invoke-Docker -Arguments $apiArgs | Out-String).Trim()
+  Assert-True ($apiId -match '^[0-9a-f]{64}$') 'Docker did not confirm creation of the API container.'
+  $createdContainers.Add([pscustomobject]@{ Name = $apiContainer; Id = $apiId })
+  Assert-True ((Get-ContainerInfo -Name $apiContainer).Id -eq $apiId) 'The API container name resolved to an unexpected resource.'
 
   $webArgs = @('run', '--detach', '--name', $webContainer, '--network', $networkName,
     '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m', '--cap-drop=ALL', '--security-opt', 'no-new-privileges=true',
     '--publish', "127.0.0.1:${webPort}:8080", '--env', 'WEB_PUBLIC_META_API_BASE_URL=/api', $webImage)
-  $createdContainers.Add($webContainer)
-  Invoke-Docker -Arguments $webArgs | Out-Null
+  $webId = (Invoke-Docker -Arguments $webArgs | Out-String).Trim()
+  Assert-True ($webId -match '^[0-9a-f]{64}$') 'Docker did not confirm creation of the web container.'
+  $createdContainers.Add([pscustomobject]@{ Name = $webContainer; Id = $webId })
+  Assert-True ((Get-ContainerInfo -Name $webContainer).Id -eq $webId) 'The web container name resolved to an unexpected resource.'
 
   $baseUri = "http://127.0.0.1:$webPort"
+  # Treat connection refusal as transient until the same bounded readiness deadline.
   $deadline = (Get-Date).AddSeconds(45)
   do {
     $probe = Send-Http -Uri "$baseUri/api/health"
@@ -118,18 +142,34 @@ try {
 
   $index = Send-Http -Uri "$baseUri/index.html"
   Assert-True ($index.Status -eq 200 -and $index.Headers -match '(?i)Cache-Control:\s*[^\r\n]*no-store') 'index.html must be uncached.'
+  Assert-True ($index.Body -match '<base href="/">') 'Container index must resolve Angular assets from the root.'
+  Assert-True ($index.Headers -match '(?im)^X-Content-Type-Options:\s*nosniff' -and $index.Headers -match '(?im)^Referrer-Policy:\s*no-referrer') 'index.html security headers are missing.'
   $runtimeConfig = Send-Http -Uri "$baseUri/runtime-config.js"
   Assert-True ($runtimeConfig.Status -eq 200 -and $runtimeConfig.Headers -match '(?i)Cache-Control:\s*[^\r\n]*no-store') 'Runtime config must be uncached.'
+  Assert-True ($runtimeConfig.Headers -match '(?im)^X-Content-Type-Options:\s*nosniff' -and $runtimeConfig.Headers -match '(?im)^Referrer-Policy:\s*no-referrer') 'Runtime config security headers are missing.'
   Assert-True ($runtimeConfig.Body -match '"metaApiBaseUrl":"/api"' -and $runtimeConfig.Body -notmatch '(?i)secret|token|password|dsn') 'Runtime config did not match its public allowlist.'
 
-  $assetMatch = [regex]::Match($index.Body, 'src="([^" ]+-[A-Za-z0-9_-]{8,}\.js)"')
-  Assert-True $assetMatch.Success 'Could not find a hashed Angular JavaScript asset in index.html.'
-  $asset = Send-Http -Uri "$baseUri/$($assetMatch.Groups[1].Value.TrimStart('/'))"
+  $callbackPath = '/setup/whatsapp/callback'
+  $callbackPage = Send-Http -Uri "$baseUri$callbackPath"
+  Assert-True ($callbackPage.Status -eq 200 -and $callbackPage.Body -match '<app-root') 'WhatsApp callback route failed on deep refresh.'
+  $baseMatch = [regex]::Match($callbackPage.Body, '<base href="([^"]+)"')
+  $assetMatch = [regex]::Match($callbackPage.Body, 'src="([^" ]+-[A-Za-z0-9_-]{8,}\.js)"')
+  Assert-True ($baseMatch.Success -and $assetMatch.Success) 'Deep route response lacks a root base or hashed Angular JavaScript asset.'
+  $documentUri = [System.Uri]::new("$baseUri$callbackPath")
+  $assetBaseUri = [System.Uri]::new($documentUri, $baseMatch.Groups[1].Value)
+  $assetUri = [System.Uri]::new($assetBaseUri, $assetMatch.Groups[1].Value)
+  Assert-True ($assetUri.AbsolutePath -eq "/$($assetMatch.Groups[1].Value.TrimStart('/'))") 'Deep route resolved its Angular bundle below the callback path.'
+  $asset = Send-Http -Uri $assetUri.AbsoluteUri
   Assert-True ($asset.Status -eq 200 -and $asset.Headers -match '(?i)Cache-Control:\s*[^\r\n]*immutable') 'Hashed Angular assets must have immutable caching.'
+  Assert-True ($asset.Headers -match '(?im)^X-Content-Type-Options:\s*nosniff' -and $asset.Headers -match '(?im)^Referrer-Policy:\s*no-referrer') 'Hashed bundle security headers are missing.'
 
   $largeBody = [byte[]]::new(65_537)
-  $tooLarge = Send-Http -Uri "$baseUri/api/v1/unused" -Method 'POST' -Body $largeBody
-  Assert-True ($tooLarge.Status -eq 413) 'Proxy must reject API bodies above 64 KiB.'
+  $tooLargeJson = Send-Http -Uri "$baseUri/api/v1/unused" -Method 'POST' -Body $largeBody -ContentType 'application/json'
+  Assert-True ($tooLargeJson.Status -eq 413) 'The API JSON limit must reject a 65,537-byte ordinary request.'
+  $webhookOversizeForApi = Send-Http -Uri "$baseUri/api/v1/webhooks/meta/synthetic-config" -Method 'POST' -Body $largeBody
+  Assert-True ($webhookOversizeForApi.Status -ne 413 -and $webhookOversizeForApi.Headers -match '(?im)^X-Request-Id:\s*[^\r\n]+') 'A 65,537-byte octet-stream webhook body must pass the NGINX proxy to the API.'
+  $tooLargeWebhook = Send-Http -Uri "$baseUri/api/v1/webhooks/meta/synthetic-config" -Method 'POST' -Body ([byte[]]::new(1_048_577))
+  Assert-True ($tooLargeWebhook.Status -eq 413) 'The NGINX webhook body limit must reject 1,048,577 bytes.'
 
   $webInfo = Get-ContainerInfo -Name $webContainer
   $apiInfo = Get-ContainerInfo -Name $apiContainer
@@ -145,10 +185,39 @@ try {
     Assert-True ($history -notmatch '(?i)API_DATABASE_PASSWORD|META_APP_SECRET|ACCESS_TOKEN|SECRET_KEY') "$imageName history contains a secret key."
   }
 
-  $webScan = 'if grep -R -q -E -i "META_APP_SECRET|ACCESS_TOKEN|API_DATABASE_PASSWORD|SECRET_KEY" /usr/share/nginx/html; then exit 41; fi; test -z "$(find /usr/share/nginx/html -type f -name "*.map" -print -quit)"; test ! -e /usr/share/nginx/html/backend'
-  Invoke-Docker -Arguments @('run', '--rm', '--network', 'none', '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=1m', '--entrypoint', '/bin/sh', $webImage, '-c', $webScan) | Out-Null
-  $apiScan = "const fs=require('node:fs'); if (fs.existsSync('/workspace/backend') || fs.readdirSync('/workspace/apps/api/dist',{recursive:true}).some(p=>p.endsWith('.map'))) process.exit(42);"
-  Invoke-Docker -Arguments @('run', '--rm', '--network', 'none', '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=1m', '--entrypoint', 'node', $apiImage, '-e', $apiScan) | Out-Null
+  $webScan = @'
+set -eu
+if grep -R -q -E -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' /usr/share/nginx/html /etc/nginx /usr/local/bin/web-entrypoint.sh; then exit 41; fi
+for root in /usr/share/nginx/html /etc/nginx; do
+  if find "$root" -type f \( -name '.env' -o -name '.env.*' -o -name '*.map' -o -name '*.key' -o -name '*.pem' \) -print -quit | grep -q .; then exit 42; fi
+done
+test ! -e /usr/share/nginx/html/backend
+'@
+  Invoke-Docker -Arguments @('exec', $webContainer, '/bin/sh', '-c', $webScan) | Out-Null
+  $apiScan = @'
+const fs = require('node:fs');
+const path = require('node:path');
+let found = false;
+function walk(root, relativeRoot = '') {
+  if (!fs.existsSync(root)) return;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const full = path.join(root, entry.name);
+    const relative = path.join(relativeRoot, entry.name);
+    if (entry.isDirectory()) {
+      if (/^backend(?:[/\\]|$)/i.test(relative)) found = true;
+      walk(full, relative);
+      continue;
+    }
+    if (/^\.env(?:\..*)?$/i.test(entry.name) || /\.(?:key|pem)$/i.test(entry.name)) found = true;
+    if (/^(?:connect|connect_old)\.php$/i.test(entry.name)) found = true;
+    if (/^apps[/\\]api[/\\]dist[/\\]/i.test(relative) && entry.name.endsWith('.map')) found = true;
+    if (/\.(?:js|cjs|json)$/i.test(entry.name) && /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(fs.readFileSync(full, 'utf8'))) found = true;
+  }
+}
+walk('/workspace');
+if (fs.existsSync('/workspace/backend') || found) process.exit(43);
+'@
+  Invoke-Docker -Arguments @('exec', $apiContainer, 'node', '-e', $apiScan) | Out-Null
 
   Invoke-Docker -Arguments @('stop', '--time', '10', $apiContainer) | Out-Null
   $apiExit = (Get-ContainerInfo -Name $apiContainer).State.ExitCode
@@ -158,8 +227,10 @@ try {
     '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m', '--cap-drop=ALL', '--security-opt', 'no-new-privileges=true')
   foreach ($entry in $apiEnvironment) { $workerArgs += @('--env', $entry) }
   $workerArgs += @($apiImage, 'node', 'dist/worker/main.js')
-  $createdContainers.Add($workerContainer)
-  Invoke-Docker -Arguments $workerArgs | Out-Null
+  $workerId = (Invoke-Docker -Arguments $workerArgs | Out-String).Trim()
+  Assert-True ($workerId -match '^[0-9a-f]{64}$') 'Docker did not confirm creation of the worker container.'
+  $createdContainers.Add([pscustomobject]@{ Name = $workerContainer; Id = $workerId })
+  Assert-True ((Get-ContainerInfo -Name $workerContainer).Id -eq $workerId) 'The worker container name resolved to an unexpected resource.'
   $workerDeadline = (Get-Date).AddSeconds(15)
   $workerLogs = ''
   do {
@@ -180,11 +251,30 @@ catch {
   $exitCode = 1
 }
 finally {
-  foreach ($containerName in $createdContainers) {
-    & docker rm --force $containerName *> $null
+  foreach ($resource in $createdContainers) {
+    $current = & docker container inspect $resource.Name 2>$null
+    if ($LASTEXITCODE -eq 0) {
+      $info = @($current | ConvertFrom-Json)[0]
+      if ($info.Id -eq $resource.Id) { & docker container rm --force $resource.Id *> $null }
+      else { Write-Warning 'Skipped a container name that no longer identifies this smoke run.' }
+    }
   }
-  if ($networkCreated) { & docker network rm $networkName *> $null }
-  foreach ($imageName in $createdImages) { & docker image rm $imageName *> $null }
+  if ($null -ne $createdNetwork) {
+    $current = & docker network inspect $createdNetwork.Name 2>$null
+    if ($LASTEXITCODE -eq 0) {
+      $info = @($current | ConvertFrom-Json)[0]
+      if ($info.Id -eq $createdNetwork.Id) { & docker network rm $createdNetwork.Id *> $null }
+      else { Write-Warning 'Skipped a network name that no longer identifies this smoke run.' }
+    }
+  }
+  foreach ($resource in $createdImages) {
+    $current = & docker image inspect $resource.Name 2>$null
+    if ($LASTEXITCODE -eq 0) {
+      $info = @($current | ConvertFrom-Json)[0]
+      if ($info.Id -eq $resource.Id) { & docker image rm $resource.Name *> $null }
+      else { Write-Warning 'Skipped an image tag that no longer identifies this smoke run.' }
+    }
+  }
   $httpClient.Dispose()
 }
 

@@ -24,13 +24,15 @@ The script requires a clean Git worktree so the OCI revision labels identify the
 
 Assertions cover:
 
-- `/setup`, `/channels`, `/templates`, and `/setup/callback` after direct navigation/refresh;
-- uncached `index.html` and runtime config, immutable hashed bundles, and no public source maps or PHP tree;
-- `/api/health` and `/api/v1/health` proxy to API liveness without routing the paths through the SPA; oversized API bodies receive 413;
+- `/setup`, `/channels`, `/templates`, `/setup/callback`, and the real `/setup/whatsapp/callback` route after direct navigation/refresh; the Angular image build uses root-relative asset URLs so deep refresh still loads the root bundle;
+- uncached `index.html` and runtime config, immutable hashed bundles with security headers, and no public source maps or PHP tree;
+- `/api/health` and `/api/v1/health` proxy to API liveness without routing the paths through the SPA; general JSON stays at 64 KiB and the signed-webhook NGINX path allows up to 1 MiB;
 - runtime config exposes only the versioned same-origin API path;
 - non-root image users, read-only rootfs at runtime, OCI version/revision labels, and no database/Meta secret keys in image environment or web bundle;
 - API and worker process exit after Docker sends SIGTERM.
 
-The script removes only its own named containers, UUID network, and temporary image tags. It does not create volumes, inspect or stop other projects, run global prune, contact Meta, or use production/staging data. The smoke does not prove live database readiness, provider permissions, or external callback routing; those remain distinct M2 gates.
+The webhook route is not implemented by the current API. The smoke sends `application/octet-stream` so Express's current 64 KiB JSON parser does not reject that request before routing: the 65,537-byte request must reach the API and receive a correlated non-413 response; 1,048,577 bytes must be rejected by NGINX. This proves the proxy limit and unchanged URI/body handling only; it does not implement or certify raw-body capture/signature verification. The general JSON 65,537-byte request exercises the API's current 64 KiB limit.
+
+The script removes only its own confirmed containers, UUID network, and temporary image tags. It verifies each generated name was free before creation and records only successfully created resource IDs for cleanup. It does not create volumes, inspect or stop other projects, run global prune, contact Meta, or use production/staging data. The smoke does not prove live database readiness, provider permissions, or external callback routing; those remain distinct M2 gates.
 
 The API image's healthcheck targets HTTP liveness. A Compose worker service using the same image must disable that HTTP healthcheck because its command does not listen on a port; its process lifecycle is verified by the SIGTERM smoke instead.
