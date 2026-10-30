@@ -206,6 +206,23 @@ function Assert-HttpStatus {
   }
 }
 
+function Get-WorkerStartEventCount {
+  $workerLogs = Invoke-Compose -Arguments @('logs', '--no-color', 'worker')
+  $logText = @($workerLogs.Output) -join "`n"
+  return [regex]::Matches($logText, '"event":"worker\.started"').Count
+}
+
+function Assert-WorkerRunning {
+  param([int]$MinimumStartCount = 1)
+  for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    $worker = Get-ContainerInfo -Service 'worker'
+    if ($worker.State.Status -ne 'running') { throw 'Worker did not remain running after startup.' }
+    if ((Get-WorkerStartEventCount) -ge $MinimumStartCount) { return }
+    Start-Sleep -Seconds 1
+  }
+  throw 'Worker did not emit the expected startup event within 30 seconds.'
+}
+
 try {
   if ($PSVersionTable.PSVersion -lt [version]'7.0') { throw 'Run this harness with PowerShell 7 or later.' }
   $dockerVersionOutput = & docker version --format '{{.Server.Version}}' 2>$null
@@ -301,7 +318,7 @@ try {
     }
 
     # Exercise the migration dependency before any API or worker is promoted; Compose starts the DB through migrate.
-    $bad = & docker compose --project-name $composeProject --env-file $migrationFailureEnvPath @composeFiles up --detach --wait --wait-timeout 45 api worker 2>&1
+    $bad = & docker compose --project-name $composeProject --env-file $migrationFailureEnvPath @composeFiles up --detach api worker 2>&1
     $badExitCode = $LASTEXITCODE
     if ($badExitCode -eq 0) { throw 'The deliberately unavailable migration target did not block service startup.' }
     $failedMigration = Get-ContainerInfo -Service 'migrate' -IncludeStopped
@@ -322,18 +339,7 @@ try {
 
     $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '180', 'web', 'api')
     $null = Invoke-Compose -Arguments @('up', '--detach', 'worker')
-    $workerStarted = $false
-    for ($attempt = 0; $attempt -lt 30; $attempt++) {
-      $worker = Get-ContainerInfo -Service 'worker'
-      if ($worker.State.Status -ne 'running') { throw 'Worker did not remain running after startup.' }
-      $workerLogs = Invoke-Compose -Arguments @('logs', '--no-color', 'worker')
-      if ((@($workerLogs.Output) -join "`n") -match '"event":"worker\.started"') {
-        $workerStarted = $true
-        break
-      }
-      Start-Sleep -Seconds 1
-    }
-    if (-not $workerStarted) { throw 'Worker did not emit its startup event within 30 seconds.' }
+    Assert-WorkerRunning
     Write-Output 'Development stack: web/API healthchecks passed; worker stayed running and emitted worker.started; migration and local MariaDB succeeded.'
 
     $baseUri = "http://127.0.0.1:$webPort"
@@ -395,7 +401,11 @@ SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_jobs WHERE id = '$jobId'), ':',
               (SELECT schema_version FROM ca_meta_schema_migrations ORDER BY schema_version DESC LIMIT 1));
 "@
     if ((Invoke-DbQuery -Sql $seedSql) -ne '1:3') { throw 'The synthetic queued job or schema-v3 ledger was not present after migration.' }
-    $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', '--force-recreate', '--no-deps', 'api', 'worker')
+    $workerStartCount = Get-WorkerStartEventCount
+    $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', '--force-recreate', '--no-deps', 'api')
+    $null = Invoke-Compose -Arguments @('up', '--detach', '--force-recreate', '--no-deps', 'worker')
+    Assert-WorkerRunning -MinimumStartCount ($workerStartCount + 1)
+    $workerStartCount = Get-WorkerStartEventCount
     $preserved = Invoke-DbQuery -Sql "SELECT CONCAT(status, ':', (SELECT MAX(schema_version) FROM ca_meta_schema_migrations)) FROM ca_meta_jobs WHERE id = '$jobId';"
     if ($preserved -ne 'QUEUED:3') { throw 'API/worker recreation did not preserve the synthetic job and schema-v3 data.' }
     Write-Output 'Persistence smoke: recreating API and worker preserved the queued job and schema v3.'
@@ -404,7 +414,8 @@ SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_jobs WHERE id = '$jobId'), ':',
       $null = Invoke-Compose -Arguments @('stop', 'database')
       Start-Sleep -Seconds 3
       $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', 'database')
-      $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', 'api', 'worker')
+      $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', 'api')
+      Assert-WorkerRunning -MinimumStartCount $workerStartCount
       Assert-HttpStatus -Uri "$baseUri/api/health" -ExpectedStatus 200
       Assert-HttpStatus -Uri "$baseUri/api/ready" -ExpectedStatus 200
       if ((Invoke-DbQuery -Sql "SELECT CONCAT(status, ':', (SELECT MAX(schema_version) FROM ca_meta_schema_migrations)) FROM ca_meta_jobs WHERE id = '$jobId';") -ne 'QUEUED:3') {
