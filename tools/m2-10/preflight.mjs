@@ -142,27 +142,31 @@ function validateResources(resources, evidenceMode) {
   return resources;
 }
 
-function validateJourneys(journeys) {
+function validateJourneys(journeys, resources, evidenceMode) {
   requireValue(Array.isArray(journeys) && journeys.length === requiredJourneys.size, 'Inventory must contain exactly four separate Meta journeys.');
   const seen = new Set();
   const seenVariants = new Set();
   for (const journey of journeys) {
-    requireExactKeys(journey, ['id', 'contractVariants', 'appConfigRef', 'availability'], 'Meta journey');
+    requireExactKeys(journey, ['id', 'variants'], 'Meta journey');
     requireValue(journey && typeof journey === 'object' && requiredJourneys.has(journey.id), 'Inventory contains an unknown Meta journey.');
     requireValue(!seen.has(journey.id), 'A Meta journey is duplicated.');
     seen.add(journey.id);
-    requireValue(Array.isArray(journey.contractVariants) && journey.contractVariants.length > 0, journey.id + ' has no explicit contract variant.');
+    requireValue(Array.isArray(journey.variants) && journey.variants.length > 0, journey.id + ' has no explicit contract variant.');
     const allowed = requiredJourneys.get(journey.id);
-    requireValue(journey.contractVariants.every((variant) => allowed.has(variant)), journey.id + ' uses a variant outside the OpenAPI contract.');
-    requireValue(new Set(journey.contractVariants).size === journey.contractVariants.length, journey.id + ' repeats a contract variant.');
-    for (const variant of journey.contractVariants) {
+    requireValue(journey.variants.length === allowed.size, journey.id + ' must record each contract variant independently.');
+    for (const variantRecord of journey.variants) {
+      requireExactKeys(variantRecord, ['contractVariant', 'appConfigRef', 'availability'], journey.id + ' variant record');
+      const variant = variantRecord.contractVariant;
+      requireValue(allowed.has(variant), journey.id + ' uses a variant outside the OpenAPI contract.');
       requireValue(!seenVariants.has(variant), 'A Meta contract variant is assigned to more than one journey.');
       seenVariants.add(variant);
+      requireReference(variantRecord.appConfigRef, journey.id + '.' + variant + '.appConfigRef', 'staging', evidenceMode);
+      requireValue(resources.staging.metaAppConfigRefs.includes(variantRecord.appConfigRef), journey.id + '.' + variant + ' must reference a staging Meta app-config resource.');
+      requireValue(!resources.production.metaAppConfigRefs.includes(variantRecord.appConfigRef), journey.id + '.' + variant + ' references a production Meta app-config resource; refusing to continue.');
+      requireValue(typeof variantRecord.availability === 'string' && variantRecord.availability.trim().length > 0, journey.id + '.' + variant + ' must state resource availability.');
+      requireValue(['Not confirmed', 'Synthetic only', 'Authorized'].includes(variantRecord.availability), journey.id + '.' + variant + ' availability must be explicit.');
     }
-    requireValue(journey.contractVariants.length === allowed.size && [...allowed].every((variant) => journey.contractVariants.includes(variant)), journey.id + ' must represent every contract variant assigned to this journey.');
-    requireValue(typeof journey.availability === 'string' && journey.availability.trim().length > 0, journey.id + ' must state resource availability.');
-    requireValue(['Not confirmed', 'Synthetic only', 'Authorized'].includes(journey.availability), journey.id + ' availability must be explicit.');
-    requireValue(typeof journey.appConfigRef === 'string' && journey.appConfigRef.length > 0, journey.id + ' must identify an opaque app-config reference or synthetic reference.');
+    requireValue([...allowed].every((variant) => journey.variants.some((entry) => entry.contractVariant === variant)), journey.id + ' is missing a required contract variant.');
   }
   const expectedVariantCount = [...requiredJourneys.values()].reduce((count, variants) => count + variants.size, 0);
   requireValue(seenVariants.size === expectedVariantCount, 'Inventory does not cover every required OpenAPI flow variant.');
@@ -210,11 +214,7 @@ export function validateStagingConfiguration(environment, manifestInput, lockTex
   requireValue(stagingOrigin.host !== productionOrigin.host, 'Staging and production public origins must be distinct.');
 
   validateResources(environment.resources, environment.evidenceMode);
-  validateJourneys(environment.journeys);
-  for (const journey of environment.journeys) {
-    requireValue(environment.resources.staging.metaAppConfigRefs.includes(journey.appConfigRef), journey.id + ' must reference a staging Meta app-config resource.');
-    requireValue(!environment.resources.production.metaAppConfigRefs.includes(journey.appConfigRef), journey.id + ' references a production Meta app-config resource; refusing to continue.');
-  }
+  validateJourneys(environment.journeys, environment.resources, environment.evidenceMode);
   validateRoutes(environment.routes);
   validateEvidence(environment.externalEvidence);
 
@@ -228,6 +228,7 @@ export function validateStagingConfiguration(environment, manifestInput, lockTex
     apiDigest: manifest.images.api.digest,
     schemaVersion: manifest.databaseSchema.version,
     journeyCount: requiredJourneys.size,
+    variantCount: [...requiredJourneys.values()].reduce((count, variants) => count + variants.size, 0),
     deploymentReady: false,
     readiness: 'Not confirmed; static preflight does not probe DNS, TLS, service availability, Meta or signature verification.',
     unverifiedEvidence: Object.keys(environment.externalEvidence),

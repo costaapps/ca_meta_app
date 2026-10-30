@@ -15,7 +15,14 @@ const manifest = JSON.parse(manifestText);
 // This isolated fixture scenario binds to its own synthetic release instead.
 process.env.SOURCE_REVISION = manifest.sourceRevision;
 const valid = validateStagingConfiguration(environment, manifest, lockText);
-if (valid.status !== 'configuration-valid-only' || valid.targetEnvironment !== 'staging' || valid.deploymentReady !== false) {
+if (
+  valid.status !== 'configuration-valid-only'
+  || valid.targetEnvironment !== 'staging'
+  || valid.deploymentReady !== false
+  || valid.journeyCount !== 4
+  || valid.variantCount !== 5
+  || valid.unverifiedEvidence.length === 0
+) {
   throw new Error('Synthetic staging inventory did not remain explicitly non-deployable.');
 }
 
@@ -29,5 +36,25 @@ try {
 }
 if (!rejected) throw new Error('Environment swap to production was not rejected.');
 
-console.log('M2.10 synthetic preflight passed: schema-v3 release binding checked; stage/production resources kept separate; production-target swap rejected.');
+const missingInstagramVariant = structuredClone(environment);
+missingInstagramVariant.journeys.find((journey) => journey.id === 'instagram').variants.pop();
+rejected = false;
+try {
+  validateStagingConfiguration(missingInstagramVariant, manifest, lockText);
+} catch {
+  rejected = true;
+}
+if (!rejected) throw new Error('An inventory missing an independent Instagram variant was accepted.');
+
+const productionInstagramReference = structuredClone(environment);
+productionInstagramReference.journeys.find((journey) => journey.id === 'instagram').variants[1].appConfigRef = environment.resources.production.metaAppConfigRefs[1];
+rejected = false;
+try {
+  validateStagingConfiguration(productionInstagramReference, manifest, lockText);
+} catch {
+  rejected = true;
+}
+if (!rejected) throw new Error('An Instagram variant using a production Meta app-config reference was accepted.');
+
+console.log('M2.10 synthetic preflight passed: schema-v3 release binding checked; four journeys and five independent variants validated; stage/production resources kept separate; missing Instagram variants, production references and target swaps rejected.');
 console.log('No DNS, TLS, network, Meta, credential, webhook-signature or production operation was performed.');

@@ -10,7 +10,7 @@ Run from the repository root:
 
     node tools/m2-10/run-preflight-smoke.mjs
 
-Expected result: the synthetic staging descriptor binds to the M2.09 release manifest and matching M2.07 release lock; all four Meta journeys remain distinct; staging resource references do not overlap the production fixture; and changing the target to production is rejected. Output explicitly says that no real deployment is eligible.
+Expected result: the synthetic staging descriptor binds to the M2.09 release manifest and matching M2.07 release lock; all four Meta journeys and five OpenAPI variants are recorded, with the two Instagram variants independently configured; staging resource references do not overlap the production fixture; and production target/resource swaps or a missing Instagram variant are rejected. Output explicitly says that no real deployment is eligible.
 
 The command only reads tracked fixtures. It performs no network requests, DNS lookup, Docker command, callback, Meta request or external write.
 

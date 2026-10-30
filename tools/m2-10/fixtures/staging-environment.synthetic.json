@@ -15,7 +15,8 @@
       "ingressRef": "fixture://staging/ingress",
       "metaAppConfigRefs": [
         "fixture://staging/meta-config/facebook",
-        "fixture://staging/meta-config/instagram",
+        "fixture://staging/meta-config/instagram-via-facebook-login",
+        "fixture://staging/meta-config/instagram-login",
         "fixture://staging/meta-config/whatsapp-exclusive",
         "fixture://staging/meta-config/whatsapp-coexistence"
       ]
@@ -27,7 +28,8 @@
       "ingressRef": "fixture://production/ingress",
       "metaAppConfigRefs": [
         "fixture://production/meta-config/facebook",
-        "fixture://production/meta-config/instagram",
+        "fixture://production/meta-config/instagram-via-facebook-login",
+        "fixture://production/meta-config/instagram-login",
         "fixture://production/meta-config/whatsapp-exclusive",
         "fixture://production/meta-config/whatsapp-coexistence"
       ]
@@ -58,27 +60,48 @@
   "journeys": [
     {
       "id": "facebook",
-      "contractVariants": ["FACEBOOK_LOGIN"],
-      "appConfigRef": "fixture://staging/meta-config/facebook",
-      "availability": "Not confirmed"
+      "variants": [
+        {
+          "contractVariant": "FACEBOOK_LOGIN",
+          "appConfigRef": "fixture://staging/meta-config/facebook",
+          "availability": "Not confirmed"
+        }
+      ]
     },
     {
       "id": "instagram",
-      "contractVariants": ["INSTAGRAM_VIA_FACEBOOK_LOGIN", "INSTAGRAM_LOGIN"],
-      "appConfigRef": "fixture://staging/meta-config/instagram",
-      "availability": "Not confirmed"
+      "variants": [
+        {
+          "contractVariant": "INSTAGRAM_VIA_FACEBOOK_LOGIN",
+          "appConfigRef": "fixture://staging/meta-config/instagram-via-facebook-login",
+          "availability": "Not confirmed"
+        },
+        {
+          "contractVariant": "INSTAGRAM_LOGIN",
+          "appConfigRef": "fixture://staging/meta-config/instagram-login",
+          "availability": "Not confirmed"
+        }
+      ]
     },
     {
       "id": "whatsapp-exclusive",
-      "contractVariants": ["WHATSAPP_CLOUD_API"],
-      "appConfigRef": "fixture://staging/meta-config/whatsapp-exclusive",
-      "availability": "Not confirmed"
+      "variants": [
+        {
+          "contractVariant": "WHATSAPP_CLOUD_API",
+          "appConfigRef": "fixture://staging/meta-config/whatsapp-exclusive",
+          "availability": "Not confirmed"
+        }
+      ]
     },
     {
       "id": "whatsapp-coexistence",
-      "contractVariants": ["WHATSAPP_COEXISTENCE"],
-      "appConfigRef": "fixture://staging/meta-config/whatsapp-coexistence",
-      "availability": "Not confirmed"
+      "variants": [
+        {
+          "contractVariant": "WHATSAPP_COEXISTENCE",
+          "appConfigRef": "fixture://staging/meta-config/whatsapp-coexistence",
+          "availability": "Not confirmed"
+        }
+      ]
     }
   ],
   "externalEvidence": {

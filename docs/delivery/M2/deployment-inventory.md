@@ -28,7 +28,7 @@ Keep the operator-filled copy outside the repository. Record opaque identifiers 
 | Journey | Config record needed | Runtime/test resources | Availability |
 |---|---|---|---|
 | Facebook | Facebook Login config selected server-side; no browser app secret | Authorized Page/test identity and callback/webhook config | Not confirmed |
-| Instagram | One explicitly selected variant per test: Instagram via Facebook Login or Instagram Login | Variant-appropriate authorized professional account and grant | Not confirmed |
+| Instagram | Separate configuration reference and availability record for `INSTAGRAM_VIA_FACEBOOK_LOGIN` and `INSTAGRAM_LOGIN`; select and assess each variant independently | Variant-appropriate authorized professional account and grant; the records may refer to the same Meta app only when the configuration owner confirms it supports both | Not confirmed |
 | WhatsApp exclusive | WHATSAPP_CLOUD_API config | Dedicated non-production WhatsApp test business/number, with consent before any message | Not confirmed |
 | WhatsApp Coexistence | WHATSAPP_COEXISTENCE config kept distinct from exclusive-number setup | Authorized active-app number, QR/consent and suitable Coexistence test resources | Not confirmed |
 

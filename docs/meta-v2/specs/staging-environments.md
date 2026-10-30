@@ -12,6 +12,7 @@ Prepare an environment matrix, deployment inventory and fail-closed preflight so
 - Staging database, secret-store, tenant-catalog and Meta app-config references are distinct from production. An app/account ID or secret value is never used as tenant authorization.
 - Deployment uses one verified M2.09 release manifest and an M2.07 digest-pinned release lock whose image digests, source SHA and schema compatibility fields exactly match. The current contract is schema v3.
 - Four product journeys remain separate: FACEBOOK_LOGIN, Instagram via Facebook Login and Instagram Login as separate variants within the Instagram journey, WHATSAPP_CLOUD_API and WHATSAPP_COEXISTENCE.
+- Every OpenAPI variant has its own configuration-reference and availability record; the Instagram variants can be assessed independently. A Meta app may serve both only when its owner confirms the approved configuration supports each variant.
 - Provider callback and webhook paths remain the canonical OpenAPI contract. They are not runtime endpoints until handlers and public ingress are independently implemented and verified.
 - App-level webhook challenge/field configuration and per-asset subscriptions are separate records and evidence gates.
 - Secrets are passed by opaque runtime references. No secret bytes or customer data enter this inventory.
