@@ -381,7 +381,7 @@ finally {
     }
   }
   foreach ($resource in $createdImages) {
-    $current = & docker image inspect $resource.Id 2>$null
+    $current = & docker image inspect $resource.Name 2>$null
     if ($LASTEXITCODE -eq 0) {
       $info = @($current | ConvertFrom-Json)[0]
       if ($info.Id -eq $resource.Id) { & docker image rm $resource.Name *> $null }
