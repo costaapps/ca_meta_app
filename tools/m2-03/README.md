@@ -1,6 +1,6 @@
 # M2.03 synthetic migration harness
 
-The harness starts a fresh MariaDB 11.8.8 Compose project for each run. The project name, volume, credentials, generated init SQL, and loopback port are unique to the run. Cleanup targets only that project name. It does not inspect or stop any other Compose project, including the preserved `db-migrations-mariadb-1` container.
+The harness starts a fresh MariaDB 11.8.8 Compose project for each run. The project name, volume, credentials, generated init SQL, and loopback port are unique to the run. Cleanup targets only that project name. It does not inspect or stop any other Compose project, including the preserved `db-migrations-mariadb-1` container. Its backup/restore check follows the current additive migration chain (v1, v2, and v3); the v1/v2 definitions and checksums remain unchanged.
 
 Prerequisites: Node 24.22.2, npm 11.19.1, Docker Engine, Docker Compose v2, and network access to the pinned MariaDB image on its first run. The PowerShell harness verifies those exact versions. It uses `%LOCALAPPDATA%\Codex\runtimes\node-v24.22.2` by default; set `M2_NODE_RUNTIME_DIR` to that runtime directory when it is elsewhere.
 

@@ -1,6 +1,7 @@
 import type { BackfillStep, MigrationStepContext, VersionedMigration } from './migration.types.js';
 import { assertExpectedColumns, tableColumns, tableExists } from './schema-inspection.js';
 import { migrationChecksum } from './migration-fingerprint.js';
+import { DURABLE_WORK_MIGRATION, DURABLE_WORK_TABLES } from './durable-work.js';
 
 function ddl(
   id: string,
@@ -253,6 +254,7 @@ const migrationsWithoutChecksums = [
     minimumSupportedApiVersion: 1,
     steps: [addExternalName, syncExternalNameOnInsert, syncExternalNameOnUpdate, backfillExternalName, validateExternalName],
   },
+  DURABLE_WORK_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -265,5 +267,6 @@ export const DOMAIN_TABLES = [
   'ca_meta_tenant_legacy_maps',
   'ca_meta_app_configurations',
   'ca_meta_assets',
+  ...DURABLE_WORK_TABLES,
 ] as const;
 
