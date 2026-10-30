@@ -287,6 +287,62 @@ paths:
         retries or resends. A new explicit user request is rate-limited and
         receives the same uniform response; delivery outcome is not disclosed.
         Provider delivery receipts/idempotency are Not confirmed.
+  /api/v1/auth/magic-links/confirm:
+    get:
+      operationId: showMagicLinkConfirmation
+      tags:
+        - Authentication
+      summary: Show an explicit sign-in confirmation page
+      description: Safe for email scanners. GET only renders a no-referrer, no-store
+        page with a deliberate POST action; it does not look up or consume the
+        link and never creates a session.
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          description: Temporary opaque link token. It is never logged or sent to analytics.
+          schema:
+            type: string
+            minLength: 43
+            maxLength: 128
+      responses:
+        "200":
+          description: Confirmation form only; no session or link state changes.
+          headers:
+            Referrer-Policy:
+              schema:
+                type: string
+                const: no-referrer
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            text/html:
+              schema:
+                type: string
+        default: *a9
+      x-external-effect: None. The matching POST performs the one-use operation.
+    head:
+      operationId: probeMagicLinkConfirmation
+      tags:
+        - Authentication
+      summary: Probe the confirmation page without consuming a link
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 43
+            maxLength: 128
+      responses:
+        "200":
+          description: Headers only; no session or link state changes.
+        default: *a9
+      x-external-effect: None.
   /api/v1/auth/magic-links/consume:
     post:
       operationId: consumeMagicLink
@@ -336,6 +392,13 @@ paths:
                     tenantContextRef: ctx_example_ref_02
                     contextVersion: 1
                     requestId: req_example_16
+                    availableTenants:
+                      - tenantRef: tenant_example_01
+                        roles:
+                          - viewer
+                      - tenantRef: tenant_example_02
+                        roles:
+                          - admin
         "400": *a1
         "401": *a2
         "404": *a3
@@ -2227,6 +2290,34 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        availableTenants:
+          type: array
+          description: Current ACTIVE memberships offered after magic-link sign-in. Each
+            selection is revalidated server-side.
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - tenantRef
+              - roles
+            properties:
+              tenantRef:
+                type: string
+                minLength: 1
+                maxLength: 128
+              roles:
+                type: array
+                minItems: 1
+                maxItems: 8
+                uniqueItems: true
+                items:
+                  type: string
+                  enum:
+                    - owner
+                    - admin
+                    - operator
+                    - viewer
     TenantSwitchRequest:
       type: object
       additionalProperties: false
