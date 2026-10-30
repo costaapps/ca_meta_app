@@ -48,7 +48,7 @@ services:
     command:
       - sh
       - -ec
-      - export API_DATABASE_PASSWORD="$$(cat /run/secrets/api_database_password)"; exec npm run start:dev --workspace=@ca-meta/api
+      - export API_DATABASE_PASSWORD="$$(cat /run/secrets/api_database_password)"; exec npm run start:dev --workspace=@ca-meta/api -- --config nest-cli.dev.json
     volumes:
       - ../apps/api:/workspace/apps/api
       - dev_api_node_modules:/workspace/apps/api/node_modules
@@ -84,7 +84,7 @@ services:
     command:
       - sh
       - -ec
-      - npm run build --workspace=@ca-meta/api; export MIGRATION_DATABASE_PASSWORD="$$(cat /run/secrets/migration_database_password)"; exec node apps/api/dist/database/migrations/cli.js deploy
+      - /usr/local/bin/ca-meta-build-api; export MIGRATION_DATABASE_PASSWORD="$$(cat /run/secrets/migration_database_password)"; exec node apps/api/dist/database/migrations/cli.js deploy
     volumes:
       - ../apps/api:/workspace/apps/api
       - dev_api_node_modules:/workspace/apps/api/node_modules

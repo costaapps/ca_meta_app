@@ -12,6 +12,8 @@ The script creates a UUID Compose project (`m207-...`), three synthetic random D
 
 Web and API source bind mounts use app-specific child volumes for `/workspace/apps/web/node_modules` and `/workspace/apps/api/node_modules`, seeded from the dev image. After changing `package-lock.json`, stop the stack, rebuild the image, then remove only `<project>_dev_api_node_modules` and `<project>_dev_web_node_modules` before restarting; keep `<project>_dev_mariadb_data`. See the [Compose runbook](../../docs/runbooks/compose-environments.md) for the scoped commands.
 
+API, worker, and migration share the project-scoped `dev_api_dist` volume. The migration uses `infra/dev/build-api.sh` and `apps/api/nest-cli.dev.json`: the script verifies that `dist` is the dedicated mount, removes only its children, and disables Nest's directory-removal behavior before compiling. The API watcher uses the same dev config without clearing the volume, so it and the worker consume the artifacts in that shared location.
+
 Cleanup removes only the UUID project created by this process, including its named volumes, the unique image tag still pointing to the image ID it built, and the exact temporary directory created for this run. The script verifies the directory still matches its generated UUID path beneath the OS temp root before recursive deletion. `down --volumes --remove-orphans` appears only in this test cleanup. Use `-KeepEnvironment` to retain one identified harness stack and image; the script prints its project and cleanup command. Do not pass any production environment file to this script.
 
 `infra/release-lock.env.example` is a template because M2.09 has not yet published image digests/provenance. A filled lock must pass this checker before production/staging promotion:

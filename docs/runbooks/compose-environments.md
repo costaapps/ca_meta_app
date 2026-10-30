@@ -29,6 +29,8 @@ O harness cria project name UUID `m207-*`, tag de imagem UUID, senhas sintética
 
 Para desenvolvimento interativo, use um nome de projeto diferente para cada stack, preencha uma cópia externa de `infra/env/compose.dev.env.example`, forneça três arquivos de senha aleatórios diferentes e defina os caminhos em `CA_META_*_FILE`. O exemplo não contém credenciais que funcionem. O dev web roda Angular dev-server com proxy `/api` → `api:3000`; API e worker montam `apps/api`/contratos. Volumes filhos `dev_web_node_modules` e `dev_api_node_modules` preservam as dependências instaladas na imagem sob os bind mounts de código.
 
+API, worker e migration compartilham `dev_api_dist`. Antes de compilar, `infra/dev/build-api.sh` confirma que `/workspace/apps/api/dist` é um diretório real e um mount dedicado, remove somente os itens filhos e executa Nest com `apps/api/nest-cli.dev.json` (`deleteOutDir: false`); isso preserva o mountpoint que Nest tentaria remover e deixa os artefatos no volume compartilhado. O watcher da API também usa essa configuração e não limpa o volume. Serialize novas migrations/builds locais: pare API e worker antes de recriar os artefatos, execute o gate de migration e só então inicie API/worker. Preserve `dev_api_dist` e `dev_mariadb_data`; não use remoção de volumes para atualizar código.
+
 Se `package-lock.json` mudar, pare a stack, reconstrua a imagem e remova somente os dois volumes de dependências para que sejam semeados novamente a partir da imagem. Exemplo para um projeto `ca-meta-dev`:
 
 ```powershell

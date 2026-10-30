@@ -11,7 +11,9 @@ RUN npm ci --no-audit --fund=false
 COPY apps/api ./apps/api
 COPY apps/web ./apps/web
 COPY packages/contracts ./packages/contracts
+COPY infra/dev/build-api.sh /usr/local/bin/ca-meta-build-api
 RUN mkdir -p /workspace/apps/api/dist \
+    && chmod 0755 /usr/local/bin/ca-meta-build-api \
     && chown -R node:node /workspace/apps/api /workspace/apps/web /workspace/packages/contracts
 
 USER node
