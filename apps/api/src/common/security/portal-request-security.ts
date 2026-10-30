@@ -103,9 +103,9 @@ export function portalRequestSecurityMiddleware(
           return;
         }
         try {
-          const exactTicketExchange = request.method === 'POST' && request.path === PORTAL_ENTRY_EXCHANGE_PATH &&
-            request.originalUrl === PORTAL_ENTRY_EXCHANGE_PATH;
-          const session = exactTicketExchange
+          const normalizedPath = request.path.toLowerCase().replace(/\/$/, '');
+          const ticketExchangeRequest = request.method === 'POST' && normalizedPath === PORTAL_ENTRY_EXCHANGE_PATH;
+          const session = ticketExchangeRequest
             ? await verifier.verify(sessionCookie, { touchLastSeen: false })
             : await verifier.verify(sessionCookie);
           const csrfCookie = readPortalCookie(oneHeader(request.headers.cookie), PORTAL_CSRF_COOKIE);

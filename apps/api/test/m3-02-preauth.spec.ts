@@ -307,7 +307,7 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
   assert.equal(JSON.stringify(context.logger.records).includes(signedTicket), false);
 });
 
-test('a ticket retry with active session cookies preserves CSRF checks and does not touch idle activity', async (t) => {
+test('ticket exchange aliases and rejected query strings do not touch active session idle activity', async (t) => {
   const context = await startApp(true);
   t.after(async () => context.app.close());
   const sessionRef = 'a406aaf4-837a-45d7-9f93-4db17920668d';
@@ -330,13 +330,14 @@ test('a ticket retry with active session cookies preserves CSRF checks and does 
   };
   const before = { ...context.sessionActivity };
   const signedTicket = ticketFor(context.privateKey);
-  const response = await fetch(`${context.baseUrl}/api/v1/auth/exchanges`, {
+  const retryHeaders = {
+    ...sameOriginHeaders(context.origin),
+    cookie: `__Host-meta_preauth=${markerCookie}; ${PORTAL_SESSION_COOKIE}=${activeSessionCookie}; ${PORTAL_CSRF_COOKIE}=${activeCsrfToken}`,
+    'x-csrf-token': activeCsrfToken,
+  };
+  const response = await fetch(`${context.baseUrl}/API/V1/Auth/Exchanges/`, {
     method: 'POST',
-    headers: {
-      ...sameOriginHeaders(context.origin),
-      cookie: `__Host-meta_preauth=${markerCookie}; ${PORTAL_SESSION_COOKIE}=${activeSessionCookie}; ${PORTAL_CSRF_COOKIE}=${activeCsrfToken}`,
-      'x-csrf-token': activeCsrfToken,
-    },
+    headers: retryHeaders,
     body: JSON.stringify({ ticket: signedTicket, challengeRef: 'synthetic-browser-challenge-1234' }),
   });
 
@@ -347,10 +348,19 @@ test('a ticket retry with active session cookies preserves CSRF checks and does 
   assert.equal(context.sessionIssuer.issueCalls, 1);
   assert.equal(context.sessionIssuer.issueOptions[0]?.ticketSha256,
     createHash('sha256').update(signedTicket, 'utf8').digest('hex'), 'the retry reaches issuance with the exact compact ticket digest');
+
+  const queryResponse = await fetch(`${context.baseUrl}/api/v1/auth/exchanges?unexpected=1`, {
+    method: 'POST',
+    headers: retryHeaders,
+    body: JSON.stringify({ ticket: signedTicket, challengeRef: 'synthetic-browser-challenge-1234' }),
+  });
+  assert.equal(queryResponse.status, 400, 'the controller still rejects query strings');
+  assert.equal(queryResponse.headers.get('set-cookie'), null);
   assert.deepEqual(context.sessionVerifierCalls, [
     { cookieValue: activeSessionCookie, touchLastSeen: false },
     { cookieValue: activeSessionCookie, touchLastSeen: false },
-  ], 'both the HTTP middleware and exchange service verify the prior cookie without touching activity');
+    { cookieValue: activeSessionCookie, touchLastSeen: false },
+  ], 'the middleware and exchange service verify router-equivalent paths without touching activity');
   assert.deepEqual(context.sessionActivity, before, 'idle_expires_at and last_seen_at remain unchanged');
 });
 
