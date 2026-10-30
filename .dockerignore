@@ -1,0 +1,52 @@
+# Repository history and generated/local tool output
+.git
+.angular
+**/.angular
+node_modules
+**/node_modules
+dist
+**/dist
+dist-test
+**/dist-test
+coverage
+**/coverage
+logs/
+**/logs/
+data/
+**/data/
+uploads/
+**/uploads/
+backups/
+**/backups/
+*.sqlite*
+*.db
+*.dump
+.sass-cache
+**/.sass-cache
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Local configuration and credentials. Keep the explicitly named example only.
+.env
+.env.*
+**/.env
+**/.env.*
+*.env
+**/*.env
+!infra/docker/env.example
+**/*.pem
+**/*.key
+**/*secret*
+**/*credential*
+
+# PHP legacy/local tree is not part of the new web/API images.
+backend/
+
+# Local data and developer state
+.orchestrator/
+**/__pycache__/
+**/*.py[cod]
+**/.DS_Store
+**/Thumbs.db

@@ -1,11 +1,11 @@
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
-import { Injectable } from '@angular/core';
+import { Inject, Injectable } from '@angular/core';
 import type { ErrorAction, ErrorCode, ErrorEnvelope, paths } from '@ca-meta/contracts';
 import { ERROR_ACTIONS } from '@ca-meta/contracts/error-actions';
 import { ERROR_CODES } from '@ca-meta/contracts/error-codes';
 import { ERROR_POLICIES } from '@ca-meta/contracts/error-policies';
 import { catchError, map, Observable, throwError } from 'rxjs';
-import { environment } from '../../../environments/environment';
+import { META_API_BASE_URL } from '../config/public-runtime-config';
 
 type HealthResponse = paths['/health']['get']['responses']['200']['content']['application/json'];
 type ReadinessResponse = paths['/ready']['get']['responses']['200']['content']['application/json'];
@@ -64,9 +64,14 @@ function responseRequestId(headers: HttpHeaders): string {
  */
 @Injectable({ providedIn: 'root' })
 export class MetaApiClientService {
-  private readonly baseUrl = environment.metaApiBaseUrl.replace(/\/+$/, '');
+  private readonly baseUrl: string;
 
-  constructor(private readonly http: HttpClient) {}
+  constructor(
+    private readonly http: HttpClient,
+    @Inject(META_API_BASE_URL) baseUrl: string,
+  ) {
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
+  }
 
   getHealth(): Observable<HealthResponse> {
     return this.get('/health', isHealthResponse);
