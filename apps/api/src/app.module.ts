@@ -17,6 +17,7 @@ import { PortalPreAuthService } from './identity/portal-session.service.js';
 import { PortalSessionVerifier } from './identity/identity.trust.js';
 import { AbuseLimitService } from './common/security/abuse-limits.js';
 import { MetaAssetsModule } from './meta-assets/meta-assets.module.js';
+import { MagicLinkModule } from './auth/magic-link.module.js';
 
 @Module({})
 export class ApiModule {
@@ -39,7 +40,13 @@ export class ApiModule {
       : AuthExchangeModule.register();
     return {
       module: ApiModule,
-      imports: [HealthModule.register(environment), MetaAssetsModule.register(environment), identityModule, authExchangeModule],
+      imports: [
+        HealthModule.register(environment),
+        MetaAssetsModule.register(environment),
+        identityModule,
+        authExchangeModule,
+        MagicLinkModule.register(environment),
+      ],
       providers: [
         { provide: STRUCTURED_LOGGER, useClass: ConsoleStructuredLogger },
         { provide: CLOCK, useClass: SystemMonotonicClock },

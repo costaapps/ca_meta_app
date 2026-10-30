@@ -9,12 +9,12 @@ MetaAssetsModule.register(environment) is defined in apps/api/src/meta-assets/me
 Integration wiring:
 
 1. Import META_ASSETS_MIGRATION and META_ASSETS_TABLES from apps/api/src/database/migrations/meta-assets.js.
-2. Append META_ASSETS_MIGRATION after M3.04 v5 and M3.02 v6 in migrationsWithoutChecksums; the integrated migration sequence is schema versions 1–7.
+2. The M3.06 package appends META_ASSETS_MIGRATION after M3.04 v5 and M3.02 v6 in migrationsWithoutChecksums. M3.06 owns schema v7; after M3.03 is integrated, the current sequence is versions 1–8.
 3. Include ...META_ASSETS_TABLES in DOMAIN_TABLES.
 4. Replace the root JobsModule.register(environment) with MetaAssetsModule.register(environment) (it re-exports JobsModule) and import MetaAssetsModule from ./meta-assets/meta-assets.module.js.
 5. Preserve the M3.04 session provider/migration and M3.02 retry migration/version checksums.
 
-This preparation branch predates the v5/v6 package commits, so its temporary registry sequence is [1, 2, 3, 4, 7]. Rebase must insert the existing M3.04 v5 and M3.02 v6 migrations before M3.06; do not add replacement migrations here.
+Historical note: the M3.06 preparation branch predated v5/v6; the current integrated registry preserves M3.04 v5, M3.02 v6, M3.06 v7 and M3.03 v8 in order. Do not use the historical preparation sequence [1, 2, 3, 4, 7].
 
 ## Tenant and evidence rules
 
@@ -53,7 +53,7 @@ From the repository root, with the project Node runtime on PATH:
 Expected result: strict API/test compilation and the focused M3.06 Node test file pass. No database, provider account or production resource is needed for these unit checks. The generated API dist and dist-test directories are ignored build output.
 After these checks, run tools/m3-06/cleanup.ps1 to remove only those two local output directories; it refuses linked or out-of-worktree targets.
 
-The gated database test is `apps/api/test/m3-06-meta-assets.integration.spec.ts`. It runs in the existing M2.05/M3 disposable MariaDB profile when `M2_DURABLE_WORK_TEST=1`, calls the migration runner, then covers concurrent upsert/shared assets, confirmed scopes and grants, typed Instagram-to-Page relation persistence, omitted-grants preservation versus explicit revocation, cross-tenant FK rejection and quarantine, exact external IDs above 2^53, and rollback after outbox staging. The integrated migration registry must run through M3.06 v7.
+The gated database test is `apps/api/test/m3-06-meta-assets.integration.spec.ts`. It runs in the existing M2.05/M3 disposable MariaDB profile when `M2_DURABLE_WORK_TEST=1`, calls the migration runner, then covers concurrent upsert/shared assets, confirmed scopes and grants, typed Instagram-to-Page relation persistence, omitted-grants preservation versus explicit revocation, cross-tenant FK rejection and quarantine, exact external IDs above 2^53, and rollback after outbox staging. The current integrated migration registry runs through M3.03 v8 with M3.06 v7 intact.
 
 After the profile has compiled the API test tree and started its disposable database, run:
 

@@ -44,6 +44,7 @@ function matchesHash(value: string, digest: string): boolean {
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const META_WEBHOOK_INGRESS_PATH = /^\/api\/v1\/webhooks\/meta\/[A-Za-z0-9_-]{1,128}$/;
 const PORTAL_ENTRY_EXCHANGE_PATH = '/api/v1/auth/exchanges';
+const MAGIC_LINK_CONSUME_PATH = '/api/v1/auth/magic-links/consume';
 
 /** Exact-origin CORS plus same-origin Fetch Metadata and synchronizer-token checks on authenticated writes. */
 export function portalRequestSecurityMiddleware(
@@ -93,6 +94,13 @@ export function portalRequestSecurityMiddleware(
       const fetchSite = oneHeader(request.headers['sec-fetch-site']);
       if (!origin || !isExactOrigin(origin, environment.allowedOrigins) || origin !== requestHostOrigin || fetchSite !== 'same-origin') {
         fail(response, request, 'ORIGIN_NOT_ALLOWED', HttpStatus.FORBIDDEN);
+        return;
+      }
+
+      // A deliberate one-use link POST is pre-authenticated by its token and exact Origin.
+      // An existing portal cookie must not make a native HTML confirmation form require a CSRF header.
+      if (request.method === 'POST' && request.path === MAGIC_LINK_CONSUME_PATH) {
+        next();
         return;
       }
 
