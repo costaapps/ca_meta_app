@@ -114,61 +114,119 @@ function Test-AppTextContent {
   }
 }
 
+function Test-ImageLayerStream {
+  param([Parameter(Mandatory)][System.IO.Stream] $Stream, [Parameter(Mandatory)][ValidateSet('web', 'api')][string] $ImageKind)
+  $layerReader = [System.Formats.Tar.TarReader]::new($Stream, $true)
+  try {
+    while ($null -ne ($layerEntry = $layerReader.GetNextEntry())) {
+      Test-AppLayerPath -Name $layerEntry.Name -ImageKind $ImageKind
+      if ($null -eq $layerEntry.DataStream) { continue }
+
+      $textFile = $layerEntry.Name -match '(?i)(?:\.\w{1,12}|/json)$' -or $layerEntry.Name -match '(^|/)(?:Dockerfile|\.npmrc)$'
+      $appTextPath = if ($ImageKind -eq 'web') {
+        $layerEntry.Name -match '^(?:usr/share/nginx/html/|etc/nginx/|usr/local/bin/web-entrypoint\.sh$)'
+      } else {
+        $layerEntry.Name -match '^workspace/(?:apps/api/|packages/contracts/)'
+      }
+      if ($textFile -and $appTextPath) {
+        $reader = [System.IO.StreamReader]::new($layerEntry.DataStream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
+        try {
+          $content = $reader.ReadToEnd()
+          Test-AppTextContent -Name $layerEntry.Name -Content $content -ImageKind $ImageKind
+        } finally { $reader.Dispose() }
+      } else {
+        $layerEntry.DataStream.CopyTo([System.IO.Stream]::Null)
+      }
+    }
+  } finally {
+    $layerReader.Dispose()
+  }
+}
+
 function Test-ImageArchiveLayers {
   param([Parameter(Mandatory)][string] $Image, [Parameter(Mandatory)][ValidateSet('web', 'api')][string] $ImageKind)
   $archivePath = Join-Path $layerScanRoot "$ImageKind-image.tar"
   Invoke-Docker -Arguments @('image', 'save', '--output', $archivePath, $Image) | Out-Null
+
+  $manifestText = $null
   $archiveStream = [System.IO.File]::OpenRead($archivePath)
   $archiveReader = [System.Formats.Tar.TarReader]::new($archiveStream, $true)
-  $layerCount = 0
   try {
     while ($null -ne ($outerEntry = $archiveReader.GetNextEntry())) {
       if ($null -eq $outerEntry.DataStream) { continue }
-      if ($outerEntry.Name -match '(^|/)layer\.tar$') {
-        $layerCount++
-        $layerPath = Join-Path $layerScanRoot "$ImageKind-layer-$layerCount.tar"
-        $layerOutput = [System.IO.File]::Create($layerPath)
-        try { $outerEntry.DataStream.CopyTo($layerOutput) } finally { $layerOutput.Dispose() }
-        $layerStream = [System.IO.File]::OpenRead($layerPath)
-        $layerReader = [System.Formats.Tar.TarReader]::new($layerStream, $true)
-        try {
-          while ($null -ne ($layerEntry = $layerReader.GetNextEntry())) {
-            Test-AppLayerPath -Name $layerEntry.Name -ImageKind $ImageKind
-            if ($null -eq $layerEntry.DataStream) { continue }
-            $textFile = $layerEntry.Name -match '(?i)(?:\.\w{1,12}|/json)$' -or $layerEntry.Name -match '(^|/)(?:Dockerfile|\.npmrc)$'
-            $appTextPath = if ($ImageKind -eq 'web') {
-              $layerEntry.Name -match '^(?:usr/share/nginx/html/|etc/nginx/|usr/local/bin/web-entrypoint\.sh$)'
-            } else {
-              $layerEntry.Name -match '^workspace/(?:apps/api/|packages/contracts/)'
-            }
-            if ($textFile -and $appTextPath) {
-              $reader = [System.IO.StreamReader]::new($layerEntry.DataStream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
-              try {
-                $content = $reader.ReadToEnd()
-                Test-AppTextContent -Name $layerEntry.Name -Content $content -ImageKind $ImageKind
-              } finally { $reader.Dispose() }
-            } else {
-              $layerEntry.DataStream.CopyTo([System.IO.Stream]::Null)
-            }
-          }
-        } finally {
-          $layerReader.Dispose()
-          $layerStream.Dispose()
-          Remove-Item -LiteralPath $layerPath -Force
-        }
+      if ($outerEntry.Name -eq 'manifest.json') {
+        $reader = [System.IO.StreamReader]::new($outerEntry.DataStream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
+        try { $manifestText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        Test-AppTextContent -Name 'workspace/image-metadata.json' -Content $manifestText -ImageKind $ImageKind
       } elseif ($outerEntry.Name -match '\.json$') {
         $reader = [System.IO.StreamReader]::new($outerEntry.DataStream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
         try {
           $metadata = $reader.ReadToEnd()
           Test-AppTextContent -Name 'workspace/image-metadata.json' -Content $metadata -ImageKind $ImageKind
         } finally { $reader.Dispose() }
+      } else {
+        $outerEntry.DataStream.CopyTo([System.IO.Stream]::Null)
       }
     }
   } finally {
     $archiveReader.Dispose()
     $archiveStream.Dispose()
   }
-  Assert-True ($layerCount -gt 0) "Docker save returned no layers for the final $ImageKind image."
+
+  Assert-True (-not [string]::IsNullOrWhiteSpace($manifestText)) "Docker save returned no manifest for the final $ImageKind image."
+  $manifestEntries = @($manifestText | ConvertFrom-Json)
+  $manifestEntry = $manifestEntries | Select-Object -First 1
+  Assert-True ($null -ne $manifestEntry.Config -and @($manifestEntry.Layers).Count -gt 0) "Docker save manifest is incomplete for the final $ImageKind image."
+  $configReference = ([string] $manifestEntry.Config).Replace('\', '/').TrimStart('/')
+  $layerReferences = @($manifestEntry.Layers | ForEach-Object { ([string] $_).Replace('\', '/').TrimStart('/') })
+
+  $archiveStream = [System.IO.File]::OpenRead($archivePath)
+  $archiveReader = [System.Formats.Tar.TarReader]::new($archiveStream, $true)
+  $layerCount = 0
+  $configScanned = $false
+  try {
+    while ($null -ne ($outerEntry = $archiveReader.GetNextEntry())) {
+      if ($null -eq $outerEntry.DataStream) { continue }
+      $entryName = ([string] $outerEntry.Name).Replace('\', '/').TrimStart('/')
+      if ($entryName -eq $configReference) {
+        $reader = [System.IO.StreamReader]::new($outerEntry.DataStream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
+        try {
+          $configMetadata = $reader.ReadToEnd()
+          Test-AppTextContent -Name 'workspace/image-metadata.json' -Content $configMetadata -ImageKind $ImageKind
+        } finally { $reader.Dispose() }
+        $configScanned = $true
+      } elseif ($layerReferences -contains $entryName) {
+        $layerCount++
+        $layerPath = Join-Path $layerScanRoot "$ImageKind-layer-$layerCount.blob"
+        $layerOutput = [System.IO.File]::Create($layerPath)
+        try { $outerEntry.DataStream.CopyTo($layerOutput) } finally { $layerOutput.Dispose() }
+        $layerStream = [System.IO.File]::OpenRead($layerPath)
+        $header = [byte[]]::new(2)
+        $headerBytes = $layerStream.Read($header, 0, 2)
+        $layerStream.Position = 0
+        $compressedStream = $null
+        try {
+          if ($headerBytes -eq 2 -and $header[0] -eq 31 -and $header[1] -eq 139) {
+            $compressedStream = [System.IO.Compression.GZipStream]::new($layerStream, [System.IO.Compression.CompressionMode]::Decompress, $true)
+            Test-ImageLayerStream -Stream $compressedStream -ImageKind $ImageKind
+          } else {
+            Test-ImageLayerStream -Stream $layerStream -ImageKind $ImageKind
+          }
+        } finally {
+          if ($null -ne $compressedStream) { $compressedStream.Dispose() }
+          $layerStream.Dispose()
+          Remove-Item -LiteralPath $layerPath -Force
+        }
+      } else {
+        $outerEntry.DataStream.CopyTo([System.IO.Stream]::Null)
+      }
+    }
+  } finally {
+    $archiveReader.Dispose()
+    $archiveStream.Dispose()
+  }
+  Assert-True ($layerCount -eq $layerReferences.Count) "Docker save returned an incomplete layer set for the final $ImageKind image."
+  Assert-True $configScanned "Docker save config metadata was not found for the final $ImageKind image."
   Write-Output "PASS: scanned $layerCount saved $ImageKind image layers for prohibited app paths and credential markers."
 }
 
