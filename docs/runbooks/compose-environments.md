@@ -27,7 +27,21 @@ pwsh -NoProfile -File tools/m2-07/run-compose-smoke.ps1
 
 O harness cria project name UUID `m207-*`, tag de imagem UUID, senhas sintéticas temporárias, MariaDB e volumes próprios; valida o gate de falha de migration, stack local, ingress, ausência de portas em serviços internos, schema/job persistido, recriação de API/worker e recuperação de uma parada curta do MariaDB. Não usa o container `db-migrations-mariadb-1`, banco externo, credencial real ou endpoint Meta. O teardown remove somente o projeto UUID do harness, a tag de imagem criada se ela ainda aponta ao ID construído nesta execução, e sua pasta temporária confirmada; ali, `down --volumes --remove-orphans` é limitado aos recursos recém-criados. `-KeepEnvironment` preserva esse projeto identificado para inspeção; a saída mostra o comando específico de cleanup.
 
-Para desenvolvimento interativo, use um nome de projeto diferente para cada stack, preencha uma cópia externa de `infra/env/compose.dev.env.example`, forneça três arquivos de senha aleatórios diferentes e defina os caminhos em `CA_META_*_FILE`. O exemplo não contém credenciais que funcionem. O dev web roda Angular dev-server com proxy `/api` → `api:3000`; API e worker montam `apps/api`/contratos. As dependências npm vêm do dev image (`/workspace/node_modules`), sem volume nomeado que possa ocultar a instalação feita por `npm ci`. Se `package-lock.json` mudar, reconstrua o image compartilhado pela stack antes de subir os serviços: `docker compose --project-name ca-meta-dev --env-file C:\secure\ca-meta\compose.dev.env --file infra/compose.yaml --file infra/compose.dev.yaml build api`. Esse rebuild não recria nem remove o volume `dev_mariadb_data`; preserve-o se quiser manter dados.
+Para desenvolvimento interativo, use um nome de projeto diferente para cada stack, preencha uma cópia externa de `infra/env/compose.dev.env.example`, forneça três arquivos de senha aleatórios diferentes e defina os caminhos em `CA_META_*_FILE`. O exemplo não contém credenciais que funcionem. O dev web roda Angular dev-server com proxy `/api` → `api:3000`; API e worker montam `apps/api`/contratos. Volumes filhos `dev_web_node_modules` e `dev_api_node_modules` preservam as dependências instaladas na imagem sob os bind mounts de código.
+
+Se `package-lock.json` mudar, pare a stack, reconstrua a imagem e remova somente os dois volumes de dependências para que sejam semeados novamente a partir da imagem. Exemplo para um projeto `ca-meta-dev`:
+
+```powershell
+$project = 'ca-meta-dev'
+$devEnv = 'C:\secure\ca-meta\compose.dev.env'
+$composeFiles = @('--file', 'infra/compose.yaml', '--file', 'infra/compose.dev.yaml')
+docker compose --project-name $project --env-file $devEnv @composeFiles down
+docker compose --project-name $project --env-file $devEnv @composeFiles build api
+docker volume rm 'ca-meta-dev_dev_api_node_modules' 'ca-meta-dev_dev_web_node_modules'
+docker compose --project-name $project --env-file $devEnv @composeFiles up --detach --wait web api worker
+```
+
+O `down` não usa `--volumes`; `docker volume rm` cita somente volumes de dependências do projeto. O volume `ca-meta-dev_dev_mariadb_data` permanece anexado e não deve ser removido se quiser manter os dados.
 
 ## Preparar a primeira promoção
 

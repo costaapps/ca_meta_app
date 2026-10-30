@@ -254,12 +254,19 @@ try {
     }
     Write-Output 'Production model: managed DB only, web ingress published, API/worker/migration private, shared DB endpoint, readiness healthcheck, valid release lock, and DB passwords absent.'
 
-    # Exercise the migration dependency before any API or worker is promoted.
-    # The first dev up builds the shared image and starts the DB only as the migration dependency.
-    $bad = & docker compose --project-name $composeProject --env-file $migrationFailureEnvPath @composeFiles up --build --detach --wait --wait-timeout 45 api worker 2>&1
-    $badExitCode = $LASTEXITCODE
+    # Build before any service start so nested app node_modules volumes seed from the image.
+    $devImageBuildOutput = & docker compose --project-name $composeProject --env-file $composeEnvPath @composeFiles build api 2>&1
+    $devImageBuildExitCode = $LASTEXITCODE
     $imageInspect = & docker image inspect --format '{{.Id}}' $imageReference 2>$null
-    if ($LASTEXITCODE -eq 0) { $createdImageId = "$imageInspect".Trim() }
+    $imageInspectExitCode = $LASTEXITCODE
+    if ($imageInspectExitCode -eq 0) { $createdImageId = "$imageInspect".Trim() }
+    if ($devImageBuildExitCode -ne 0 -or -not $createdImageId) {
+      throw 'The isolated development image could not be built before the migration gate scenario.'
+    }
+
+    # Exercise the migration dependency before any API or worker is promoted; Compose starts the DB through migrate.
+    $bad = & docker compose --project-name $composeProject --env-file $migrationFailureEnvPath @composeFiles up --detach --wait --wait-timeout 45 api worker 2>&1
+    $badExitCode = $LASTEXITCODE
     if ($badExitCode -eq 0) { throw 'The deliberately unavailable migration target did not block service startup.' }
     $failedMigration = Get-ContainerInfo -Service 'migrate' -IncludeStopped
     if ($failedMigration.State.Status -ne 'exited' -or [int]$failedMigration.State.ExitCode -eq 0) {
