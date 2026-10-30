@@ -205,7 +205,11 @@
         "issuer": { "const": "GitHub Actions / Sigstore" },
         "predicateType": { "type": "string", "minLength": 1 },
         "verified": { "const": true },
-        "url": { "type": "string", "format": "uri" }
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "GitHub attestation summary URL, or the release workflow run URL containing exact-source verification of a previously existing attestation."
+        }
       }
     }
   }

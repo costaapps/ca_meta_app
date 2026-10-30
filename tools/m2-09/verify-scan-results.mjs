@@ -31,7 +31,7 @@ export function validateScanResults(results, expected, reportHashes = undefined)
     if (!actual || !target || actual.subjectName !== target.subjectName || actual.imageReference !== target.imageReference || actual.digest !== target.digest || actual.sourceRevision !== expected.sourceRevision) {
       reject(`${kind} scan report identity does not match the image name, reference and digest outputs from build-images.`);
     }
-    if (!/^sha256:[0-9a-f]{64}$/.test(actual.archiveSha256 ?? '') || actual.report !== `trivy-${kind}.json` || !/^[0-9a-f]{64}$/.test(actual.reportSha256 ?? '')) {
+    if (!/^[0-9a-f]{64}$/.test(actual.archiveSha256 ?? '') || actual.report !== `trivy-${kind}.json` || !/^[0-9a-f]{64}$/.test(actual.reportSha256 ?? '')) {
       reject(`${kind} scan report evidence is incomplete.`);
     }
     const imageNamespace = actual.subjectName.split('/')[1];

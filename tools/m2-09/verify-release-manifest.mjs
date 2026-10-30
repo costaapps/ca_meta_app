@@ -72,7 +72,7 @@ export function validateManifest(manifest) {
   validateImage(manifest.images?.web, 'web', manifest.sourceRevision);
   validateImage(manifest.images?.api, 'api', manifest.sourceRevision);
   requireValue(manifest.images.web.name !== manifest.images.api.name, 'Web and API must use distinct repositories.');
-  requireValue(manifest.images.web.name.split('/')[2] === manifest.images.api.name.split('/')[2], 'Web and API must use the same Docker Hub namespace.');
+  requireValue(manifest.images.web.name.split('/')[1] === manifest.images.api.name.split('/')[1], 'Web and API must use the same Docker Hub namespace.');
   requireValue(manifest.images.web.digest !== manifest.images.api.digest, 'Web and API must have distinct image digests.');
   requireValue(manifest.worker?.image === manifest.images.api.reference, 'Worker must use the exact API image digest.');
   requireValue(JSON.stringify(manifest.worker?.command) === JSON.stringify(workerCommand), 'Worker command differs from the M2.07 Compose contract.');

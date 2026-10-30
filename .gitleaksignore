@@ -1,0 +1,2 @@
+# False positive: generic-api-key flags the negative-case assertion error template; no credential is present.
+74af0136f1b1fd69b2142b12489bd9bc771ab2d8:tools/m2-09/test-release-contract.mjs:generic-api-key:41

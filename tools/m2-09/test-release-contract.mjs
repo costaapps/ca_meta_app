@@ -38,7 +38,7 @@ function expectReject(name, action, expectedText) {
     cases.push(`${name}: PASS (rejected)`);
     return;
   }
-  throw new Error(`${name} was incorrectly accepted.`);
+  throw new Error(`${name} failed to reject an invalid manifest.`);
 }
 
 expectPass('complete synthetic manifest', () => validateManifest(structuredClone(fixture)));
