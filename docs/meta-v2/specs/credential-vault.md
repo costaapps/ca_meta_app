@@ -29,7 +29,7 @@ From the repository root after `npm ci --ignore-scripts` and the normal contract
 
 ```powershell
 npm exec --workspace=@ca-meta/api -- tsc -p tsconfig.test.json
-node --test apps/api/dist-test/test/m3-07-credential-vault.spec.js apps/api/dist-test/test/m3-07-credential-vault-migration.spec.js
+node --test apps/api/dist-test/test/m3-07-credential-vault.spec.js apps/api/dist-test/test/m3-07-credential-vault-migration.spec.js apps/api/dist-test/test/migration-unit.spec.js
 pwsh -NoLogo -NoProfile -File tools/m2-05/run-mariadb-tests.ps1
 ```
 
