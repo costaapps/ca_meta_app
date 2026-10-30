@@ -197,6 +197,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
+                    sessionRef: 91b2ef8b-2763-4dca-b3d4-845f7223949d
                     principalRef: principal_example_01
                     tenantRef: tenant_example_01
                     roles:
@@ -315,6 +316,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
+                    sessionRef: 91b2ef8b-2763-4dca-b3d4-845f7223949d
                     principalRef: principal_example_01
                     tenantRef: tenant_example_01
                     roles:
@@ -343,7 +345,9 @@ paths:
         only. Membership is revalidated server-side. No token, cookie value,
         authorization code, ciphertext or provider credential is returned. CSRF
         material, if bootstrapped, is delivered as a separate cookie/header
-        protocol and is not a DTO field.
+        protocol and is not a DTO field. `sessionRef` is a public opaque
+        selector for revocation and authorizes nothing without the current
+        server session, principal and tenant.
       security: *a10
       responses:
         "200":
@@ -356,6 +360,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
+                    sessionRef: 91b2ef8b-2763-4dca-b3d4-845f7223949d
                     principalRef: principal_example_01
                     tenantRef: tenant_example_01
                     roles:
@@ -385,6 +390,7 @@ paths:
           $ref: "#/components/responses/Unavailable"
         default: &a21
           $ref: "#/components/responses/UnexpectedError"
+      x-abuse-limit-policy: SESSION_STATUS
   /api/v1/session/tenant-switch:
     post:
       operationId: switchTenantContext
@@ -425,6 +431,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
+                    sessionRef: 91b2ef8b-2763-4dca-b3d4-845f7223949d
                     principalRef: principal_example_01
                     tenantRef: tenant_example_02
                     roles:
@@ -474,6 +481,41 @@ paths:
         "503": *a20
         default: *a21
       x-external-effect: Revokes the current server-side portal session.
+  /api/v1/sessions/{id}:
+    delete:
+      operationId: revokeAuthorizedPortalSession
+      tags:
+        - Session
+      summary: Revoke an authorized portal session
+      description: Requires a current verified portal session, exact Origin, CSRF, and
+        same-origin Fetch Metadata. The target must belong to the same
+        server-resolved principal and tenant as the actor. The request cannot
+        select a tenant; a session UUID alone is not authorization. Missing and
+        unowned sessions receive the same safe denial.
+      security: *a10
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Session identifier; authorization is resolved from the current
+            server session.
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Completed without a response body
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "409": *a15
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: Revokes a session belonging to the current verified principal and tenant.
   /api/v1/integrations/flows:
     get:
       operationId: listIntegrationFlows
@@ -2136,6 +2178,11 @@ components:
         - contextVersion
         - requestId
       properties:
+        sessionRef:
+          type: string
+          format: uuid
+          description: Public opaque selector only; never a credential and insufficient to
+            authorize revocation.
         principalRef:
           type: string
           minLength: 1

@@ -6,7 +6,18 @@ import { MysqlIdentityRepository } from './mysql-identity.repository.js';
 import { IDENTITY_ADMINISTRATION_REPOSITORY } from './identity-administration.repository.js';
 import { IdentityAdministrationService } from './identity-administration.service.js';
 import { MysqlIdentityAdministrationRepository } from './mysql-identity-administration.repository.js';
-import { PlatformIdentityAdminAuthority } from './identity.trust.js';
+import { PlatformIdentityAdminAuthority, PortalSessionVerifier } from './identity.trust.js';
+import { MysqlPortalSessionStore } from './mysql-portal-session.store.js';
+import {
+  MysqlPortalSessionService,
+  PORTAL_SESSION_STORE,
+  PortalPreAuthService,
+  PortalSessionIssuer,
+} from './portal-session.service.js';
+import { PortalSessionController } from './portal-session.controller.js';
+import { PortalSessionsController } from './portal-sessions.controller.js';
+import { PortalSessionGuard } from './portal-session.guard.js';
+import { AbuseLimitService, MysqlAbuseLimitService } from '../common/security/abuse-limits.js';
 
 @Module({})
 export class IdentityModule {
@@ -14,6 +25,32 @@ export class IdentityModule {
     return {
       module: IdentityModule,
       providers: [
+        {
+          provide: PORTAL_SESSION_STORE,
+          useFactory: () => new MysqlPortalSessionStore(environment),
+        },
+        {
+          provide: PortalSessionVerifier,
+          useFactory: (store: MysqlPortalSessionStore) => new PortalSessionVerifier(store),
+          inject: [PORTAL_SESSION_STORE],
+        },
+        {
+          provide: MysqlPortalSessionService,
+          useFactory: (store: MysqlPortalSessionStore, contexts: TenantContextService) =>
+            new MysqlPortalSessionService(store, contexts, environment.portalSessionRecoveryKey),
+          inject: [PORTAL_SESSION_STORE, TenantContextService],
+        },
+        { provide: PortalPreAuthService, useExisting: MysqlPortalSessionService },
+        { provide: PortalSessionIssuer, useExisting: MysqlPortalSessionService },
+        {
+          provide: PortalSessionGuard,
+          useFactory: (sessions: PortalSessionVerifier) => new PortalSessionGuard(sessions),
+          inject: [PortalSessionVerifier],
+        },
+        {
+          provide: AbuseLimitService,
+          useFactory: () => new MysqlAbuseLimitService(environment.database),
+        },
         {
           provide: IDENTITY_REPOSITORY,
           useFactory: () => new MysqlIdentityRepository(environment.database),
@@ -49,7 +86,9 @@ export class IdentityModule {
         },
       ],
       exports: [TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService,
-        IdentityAdministrationService, PlatformIdentityAdminAuthority],
+        IdentityAdministrationService, PlatformIdentityAdminAuthority, PortalSessionVerifier,
+        PortalSessionIssuer, PortalPreAuthService, AbuseLimitService],
+      controllers: [PortalSessionController, PortalSessionsController],
     };
   }
 }

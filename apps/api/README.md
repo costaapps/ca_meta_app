@@ -1,11 +1,12 @@
 # Nest API workspace
 
-The API is an independent NestJS 12 application. It has no Meta integration, identity/session
-flow, business module, migration, or startup database side effect. /health is process liveness;
+The API is an independent NestJS 12 application. It has no Meta integration or provider
+credential handling. It contains the portal session and identity boundaries; /health is process liveness;
 /ready checks only the essential MariaDB connection. Success returns { "status": "ok" }.
 Dependency failure returns HTTP 503 with the canonical OpenAPI Unavailable ErrorEnvelope.
 Business routes use /api/v1 and are denied by the global guard unless a route is explicitly
-marked public. The only production public routes in this package are the two OpenAPI health routes.
+marked public. Session routes also have an explicit portal-session guard; they are not anonymous.
+The health routes are the only unguarded public routes.
 
 ## Toolchain and commands
 
@@ -35,6 +36,8 @@ only invalid or missing field names.
 | API_PORT | Explicit TCP port 1–65535; 0 only for development/test ephemeral binding |
 | API_BIND_ADDRESS | Explicit IPv4 or IPv6 address; tests must bind loopback |
 | API_ALLOWED_HOSTS | Required comma-separated exact DNS host/IP allowlist; no wildcard or port |
+| API_ALLOWED_ORIGINS | Exact browser origins with scheme/host/port; required in staging/production, empty denies browser origins in development/test; no wildcard |
+| API_PORTAL_SESSION_RECOVERY_KEY | Protected random value of at least 32 bytes; required and stable across replicas in staging/production, ephemeral in development/test |
 | API_TRUSTED_PROXIES | none or a comma-separated list of specific IP/CIDR values |
 | API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON | Optional JSON array of exact `{ "issuer", "subject" }` pairs; empty/unset denies platform identity administration |
 | API_DATABASE_HOST | Explicit host/IP; tests accept only 127.0.0.1 or ::1 |
@@ -48,6 +51,16 @@ API_ALLOWED_HOSTS is fail-closed in every environment: list only exact hosts ass
 environment. An incoming Host may include its request port; the middleware compares the parsed
 host against the explicit allowlist. Configure no placeholder production domain. Example used by
 local tests and harnesses only: 127.0.0.1,localhost.
+
+Portal session cookies are host-only `__Host-` cookies with `Secure`, `Path=/`, and `SameSite=Lax`;
+the session cookie is `HttpOnly`. CSRF and tenant-context references use separate host-only cookies
+and are sent in `X-CSRF-Token` and `X-Tenant-Context` headers. Only exact configured origins receive
+credentialed CORS headers. Mutations require exact same-origin `Origin` and
+`Sec-Fetch-Site: same-origin`; requests with a portal session also require the matching session-bound
+CSRF cookie/header. The initial idle/absolute expiry values are 30 minutes/eight hours; product
+and operational policy are **Not confirmed**.
+The real Suite4 iframe/browser cookie topology is **Not confirmed**; the implemented cookie policy
+supports the first-party/top-level path and does not certify cross-site embedding.
 
 API_TRUSTED_PROXIES=none disables Express proxy trust. Wildcard ranges such as 0.0.0.0/0,
 ::/0, expanded unspecified IPv6, and IPv4-mapped IPv6 ranges covering all IPv4 are rejected.

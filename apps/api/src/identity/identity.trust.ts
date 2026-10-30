@@ -19,6 +19,8 @@ export interface VerifiedPortalSession {
   readonly tenantId: string;
   readonly contextVersion: number;
   readonly contextRefHash: string;
+  /** Stored hash for the synchronizer token; the token itself is never persisted. */
+  readonly csrfTokenHash: string;
 }
 
 export interface VerifiedIdentityAssertion {
@@ -52,11 +54,17 @@ export interface StoredPortalSession {
   readonly tenantId: string;
   readonly contextVersion: number;
   readonly contextRefHash: string;
+  readonly csrfTokenHash: string;
 }
 
 export interface PortalSessionStore {
   /** The adapter must return only a live server-side session for this digest. */
-  findActiveBySecretHash(secretHash: Uint8Array): Promise<StoredPortalSession | undefined>;
+  findActiveBySecretHash(secretHash: Uint8Array, options?: { readonly touchLastSeen?: boolean }): Promise<StoredPortalSession | undefined>;
+}
+
+export interface PortalSessionVerificationOptions {
+  /** Set false for rate-limited status reads; the route refreshes activity only after its quota passes. */
+  readonly touchLastSeen?: boolean;
 }
 
 export interface PersistedJobContextRecord {
@@ -99,14 +107,15 @@ export function isVerifiedPersistedJobContext(value: unknown): value is Verified
 export class PortalSessionVerifier {
   constructor(private readonly store: PortalSessionStore) {}
 
-  async verify(cookieValue: string | undefined): Promise<VerifiedPortalSession | undefined> {
+  async verify(cookieValue: string | undefined, options: PortalSessionVerificationOptions = {}): Promise<VerifiedPortalSession | undefined> {
     if (!cookieValue || cookieValue.length < 32 || cookieValue.length > 512) return undefined;
     const secretHash = createHash('sha256').update(cookieValue, 'utf8').digest();
-    const row = await this.store.findActiveBySecretHash(secretHash);
+    const row = await this.store.findActiveBySecretHash(secretHash, options);
     if (!row || !row.sessionId || !row.principalId || !row.tenantId ||
       !Number.isSafeInteger(row.contextVersion) || row.contextVersion < 1 || !/^[a-f0-9]{64}$/.test(row.contextRefHash)) {
       return undefined;
     }
+    if (!/^[a-f0-9]{64}$/.test(row.csrfTokenHash)) return undefined;
     const result = Object.freeze({ ...row }) as VerifiedPortalSession;
     verifiedPortalSessions.add(result);
     return result;

@@ -331,7 +331,8 @@ try {
 
   $apiEnvironment = @(
     'NODE_ENV=production', 'API_PORT=3000', 'API_BIND_ADDRESS=0.0.0.0',
-    'API_ALLOWED_HOSTS=127.0.0.1,localhost', 'API_TRUSTED_PROXIES=none',
+    'API_ALLOWED_HOSTS=127.0.0.1,localhost', 'API_ALLOWED_ORIGINS=https://127.0.0.1,https://localhost',
+    'API_PORTAL_SESSION_RECOVERY_KEY=synthetic-test-session-recovery-key-32-bytes-minimum', 'API_TRUSTED_PROXIES=none',
     'API_DATABASE_HOST=127.0.0.1', 'API_DATABASE_PORT=3306', 'API_DATABASE_NAME=ca_meta_m206',
     'API_DATABASE_USER=synthetic_unused', 'API_DATABASE_PASSWORD=synthetic_unused',
     'API_DATABASE_CONNECT_TIMEOUT_MS=1000'

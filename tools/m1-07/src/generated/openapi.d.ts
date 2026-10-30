@@ -89,7 +89,7 @@ export interface paths {
         };
         /**
          * Read the current session context
-         * @description Returns public identity, current tenant context and role names only. Membership is revalidated server-side. No token, cookie value, authorization code, ciphertext or provider credential is returned. CSRF material, if bootstrapped, is delivered as a separate cookie/header protocol and is not a DTO field.
+         * @description Returns public identity, current tenant context and role names only. Membership is revalidated server-side. No token, cookie value, authorization code, ciphertext or provider credential is returned. CSRF material, if bootstrapped, is delivered as a separate cookie/header protocol and is not a DTO field. `sessionRef` is a public opaque selector for revocation and authorizes nothing without the current server session, principal and tenant.
          */
         readonly get: operations["getSession"];
         readonly put?: never;
@@ -135,6 +135,26 @@ export interface paths {
          */
         readonly post: operations["logoutSession"];
         readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/sessions/{id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /**
+         * Revoke an authorized portal session
+         * @description Requires a current verified portal session, exact Origin, CSRF, and same-origin Fetch Metadata. The target must belong to the same server-resolved principal and tenant as the actor. The request cannot select a tenant; a session UUID alone is not authorization. Missing and unowned sessions receive the same safe denial.
+         */
+        readonly delete: operations["revokeAuthorizedPortalSession"];
         readonly options?: never;
         readonly head?: never;
         readonly patch?: never;
@@ -670,6 +690,11 @@ export interface components {
             readonly linkToken: string;
         };
         readonly SessionContext: {
+            /**
+             * Format: uuid
+             * @description Public opaque selector only; never a credential and insufficient to authorize revocation.
+             */
+            readonly sessionRef?: string;
             readonly principalRef: string;
             readonly tenantRef: string;
             readonly roles: readonly ("owner" | "admin" | "operator" | "viewer")[];
@@ -1358,6 +1383,44 @@ export interface operations {
             readonly 412: components["responses"]["PreconditionFailed"];
             readonly 413: components["responses"]["PayloadTooLarge"];
             readonly 422: components["responses"]["Unprocessable"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly revokeAuthorizedPortalSession: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /**
+                 * @description Exact configured browser Origin; wildcard matching is forbidden.
+                 * @example https://portal.example.invalid
+                 */
+                readonly Origin: components["parameters"]["Origin"];
+                /** @description Must match the configured exact-origin topology; cross-site, missing or invalid values fail. */
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                /** @description Session-bound anti-CSRF value; not a DTO property and not sufficient without the session cookie. */
+                readonly "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            readonly path: {
+                /** @description Session identifier; authorization is resolved from the current server session. */
+                readonly id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Completed without a response body */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 409: components["responses"]["Conflict"];
             readonly 429: components["responses"]["TooManyRequests"];
             readonly 503: components["responses"]["Unavailable"];
             readonly default: components["responses"]["UnexpectedError"];
