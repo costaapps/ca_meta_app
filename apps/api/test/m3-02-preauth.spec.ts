@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
@@ -12,7 +12,7 @@ import { STRUCTURED_LOGGER, type StructuredLogRecord, type StructuredLogger } fr
 import { DATABASE_READINESS_PORT, type DatabaseReadinessPort } from '../src/database/database-readiness.port.js';
 import { PortalSessionVerifier } from '../src/identity/identity.trust.js';
 import type { VerifiedIdentityAssertion } from '../src/identity/identity.trust.js';
-import { PortalPreAuthService, PortalSessionIssuer, type IssuedPortalSession, type PortalSessionIssueOptions, type StartedPortalPreAuth, type VerifiedPortalPreAuth } from '../src/identity/portal-session.service.js';
+import { PORTAL_CSRF_COOKIE, PORTAL_SESSION_COOKIE, PortalPreAuthService, PortalSessionIssuer, type IssuedPortalSession, type PortalSessionIssueOptions, type StartedPortalPreAuth, type VerifiedPortalPreAuth } from '../src/identity/portal-session.service.js';
 import { CLOCK, type MonotonicClock } from '../src/common/time/clock.port.js';
 import { GracefulExpressAdapter } from '../src/http/graceful-express-adapter.js';
 import { configureHttpBoundaries } from '../src/http-boundaries.js';
@@ -21,6 +21,9 @@ import { validateEnvironment } from '../src/config/environment.js';
 const ISSUER = 'https://suite4.synthetic.invalid/portal';
 const AUDIENCE = 'https://portal.synthetic.invalid';
 const markerCookie = 'synthetic-preauth-cookie-never-in-json';
+const activeSessionCookie = 'synthetic-active-session-cookie-value-12345678901234567890';
+const activeCsrfToken = 'synthetic-active-csrf-token-value-12345678901234567890';
+const verifiedPreAuth = Object.freeze({}) as VerifiedPortalPreAuth;
 
 class CapturingLogger implements StructuredLogger {
   readonly records: StructuredLogRecord[] = [];
@@ -62,18 +65,22 @@ class FakePreAuth extends PortalPreAuthService {
   }
   async verifyBrowserBinding(): Promise<VerifiedPortalPreAuth | undefined> {
     this.verifyCalls += 1;
-    return undefined;
+    return verifiedPreAuth;
   }
 }
 
 class FakeSessionIssuer extends PortalSessionIssuer {
   issueCalls = 0;
+  readonly issueOptions: PortalSessionIssueOptions[] = [];
+  issueResult: IssuedPortalSession | undefined;
   async issueFromVerifiedAssertion(
     _assertion: VerifiedIdentityAssertion,
     _requestedTenantId: string,
-    _options: PortalSessionIssueOptions,
+    options: PortalSessionIssueOptions,
   ): Promise<IssuedPortalSession> {
     this.issueCalls += 1;
+    this.issueOptions.push(options);
+    if (this.issueResult) return this.issueResult;
     throw new Error('Session issuance must not run in this test.');
   }
 }
@@ -118,6 +125,8 @@ async function startApp(portalTicketEnabled: boolean): Promise<{
   readonly abuseLimits: FakeAbuseLimits;
   readonly preAuth: FakePreAuth;
   readonly sessionIssuer: FakeSessionIssuer;
+  readonly sessionVerifierCalls: { readonly cookieValue: string | undefined; readonly touchLastSeen: boolean | undefined }[];
+  readonly sessionActivity: { idleExpiresAt: string; lastSeenAt: string };
   readonly logger: CapturingLogger;
 }> {
   const port = await findLoopbackPort();
@@ -150,6 +159,29 @@ async function startApp(portalTicketEnabled: boolean): Promise<{
   const abuseLimits = new FakeAbuseLimits();
   const preAuth = new FakePreAuth();
   const sessionIssuer = new FakeSessionIssuer();
+  const sessionVerifierCalls: { cookieValue: string | undefined; touchLastSeen: boolean | undefined }[] = [];
+  const sessionActivity = {
+    idleExpiresAt: '2028-05-01T12:30:00.000Z',
+    lastSeenAt: '2028-05-01T12:00:00.000Z',
+  };
+  const sessionVerifier = {
+    async verify(cookieValue: string | undefined, options?: { readonly touchLastSeen?: boolean }) {
+      sessionVerifierCalls.push({ cookieValue, touchLastSeen: options?.touchLastSeen });
+      if (cookieValue !== activeSessionCookie) return undefined;
+      if (options?.touchLastSeen !== false) {
+        sessionActivity.lastSeenAt = new Date().toISOString();
+        sessionActivity.idleExpiresAt = new Date(Date.now() + 30 * 60_000).toISOString();
+      }
+      return {
+        sessionId: 'a406aaf4-837a-45d7-9f93-4db17920668d',
+        principalId: 'synthetic-principal-id',
+        tenantId: 'synthetic-tenant',
+        contextVersion: 1,
+        contextRefHash: 'd'.repeat(64),
+        csrfTokenHash: createHash('sha256').update(activeCsrfToken, 'utf8').digest('hex'),
+      };
+    },
+  };
   const logger = new CapturingLogger();
   const moduleRef = await Test.createTestingModule({ imports: [ApiModule.register(environment)] })
     .overrideProvider(DATABASE_READINESS_PORT).useValue(new FakeReadiness())
@@ -158,14 +190,17 @@ async function startApp(portalTicketEnabled: boolean): Promise<{
     .overrideProvider(PortalPreAuthService).useValue(preAuth)
     .overrideProvider(AbuseLimitService).useValue(abuseLimits)
     .overrideProvider(PortalSessionIssuer).useValue(sessionIssuer)
-    .overrideProvider(PortalSessionVerifier).useValue({ verify: async () => undefined })
+    .overrideProvider(PortalSessionVerifier).useValue(sessionVerifier)
     .compile();
 
   const app = moduleRef.createNestApplication(new GracefulExpressAdapter(), { bodyParser: false });
   configureHttpBoundaries(app, environment);
   await app.init();
   await app.listen(port, '127.0.0.1');
-  return { app, baseUrl: `http://127.0.0.1:${port}`, origin, privateKey: keyPair.privateKey, abuseLimits, preAuth, sessionIssuer, logger };
+  return {
+    app, baseUrl: `http://127.0.0.1:${port}`, origin, privateKey: keyPair.privateKey,
+    abuseLimits, preAuth, sessionIssuer, sessionVerifierCalls, sessionActivity, logger,
+  };
 }
 
 function sameOriginHeaders(origin: string): Record<string, string> {
@@ -270,6 +305,53 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
   assert.deepEqual(context.abuseLimits.calls[2]?.dimensions, { ip: '127.0.0.1' });
   assert.deepEqual(context.abuseLimits.calls[4]?.dimensions, { ip: '127.0.0.1', actor: `${ISSUER}\0synthetic-subject` });
   assert.equal(JSON.stringify(context.logger.records).includes(signedTicket), false);
+});
+
+test('a ticket retry with active session cookies preserves CSRF checks and does not touch idle activity', async (t) => {
+  const context = await startApp(true);
+  t.after(async () => context.app.close());
+  const sessionRef = 'a406aaf4-837a-45d7-9f93-4db17920668d';
+  const contextRef = 'synthetic-next-context-reference';
+  context.sessionIssuer.issueResult = {
+    sessionId: sessionRef,
+    sessionCookie: 'synthetic-rotated-session-cookie-value-12345678901234567890',
+    csrfToken: 'synthetic-rotated-csrf-token-value-12345678901234567890',
+    contextRef,
+    tenantId: 'synthetic-tenant',
+    expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+    publicContext: {
+      sessionRef,
+      principalRef: 'synthetic-principal-reference',
+      roles: ['viewer'],
+      tenantRef: 'synthetic-tenant',
+      tenantContextRef: contextRef,
+      contextVersion: 1,
+    },
+  };
+  const before = { ...context.sessionActivity };
+  const signedTicket = ticketFor(context.privateKey);
+  const response = await fetch(`${context.baseUrl}/api/v1/auth/exchanges`, {
+    method: 'POST',
+    headers: {
+      ...sameOriginHeaders(context.origin),
+      cookie: `__Host-meta_preauth=${markerCookie}; ${PORTAL_SESSION_COOKIE}=${activeSessionCookie}; ${PORTAL_CSRF_COOKIE}=${activeCsrfToken}`,
+      'x-csrf-token': activeCsrfToken,
+    },
+    body: JSON.stringify({ ticket: signedTicket, challengeRef: 'synthetic-browser-challenge-1234' }),
+  });
+
+  assert.equal(response.status, 201);
+  assert.equal((await response.json() as { sessionRef: string }).sessionRef, sessionRef);
+  assert.ok(response.headers.get('set-cookie')?.includes(`${PORTAL_SESSION_COOKIE}=`));
+  assert.equal(context.preAuth.verifyCalls, 1);
+  assert.equal(context.sessionIssuer.issueCalls, 1);
+  assert.equal(context.sessionIssuer.issueOptions[0]?.ticketSha256,
+    createHash('sha256').update(signedTicket, 'utf8').digest('hex'), 'the retry reaches issuance with the exact compact ticket digest');
+  assert.deepEqual(context.sessionVerifierCalls, [
+    { cookieValue: activeSessionCookie, touchLastSeen: false },
+    { cookieValue: activeSessionCookie, touchLastSeen: false },
+  ], 'both the HTTP middleware and exchange service verify the prior cookie without touching activity');
+  assert.deepEqual(context.sessionActivity, before, 'idle_expires_at and last_seen_at remain unchanged');
 });
 
 test('without issuer/key configuration, preauth remains available and ticket exchange fails closed', async (t) => {
