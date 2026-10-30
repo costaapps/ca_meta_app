@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24.22.2-trixie-slim@sha256:54f84b4cf8432b21aaffd5d3ce8d41e12cea0d10d33c09d2f3c9879d49d6b446
 FROM ${NODE_IMAGE}
 
 WORKDIR /workspace

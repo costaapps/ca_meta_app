@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24.22.2-trixie-slim@sha256:54f84b4cf8432b21aaffd5d3ce8d41e12cea0d10d33c09d2f3c9879d49d6b446
 
 FROM ${NODE_IMAGE} AS build
 WORKDIR /workspace
@@ -31,6 +31,10 @@ LABEL org.opencontainers.image.title="CA Meta API" \
       org.opencontainers.image.source="https://github.com/costaapps/ca_meta_app" \
       org.opencontainers.image.version="${OCI_VERSION}" \
       org.opencontainers.image.revision="${OCI_REVISION}"
+
+# Package managers are build-time tooling; the runtime only needs Node and application dependencies.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 ENV NODE_ENV=production \
     API_PORT=3000 \
