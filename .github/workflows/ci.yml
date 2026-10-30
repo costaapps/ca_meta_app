@@ -139,10 +139,10 @@ jobs:
           npm install --global npm@11.19.1
           test "$(node --version)" = "v${NODE_VERSION}"
           test "$(npm --version)" = "${NPM_VERSION}"
-      - name: Checkout comparison base (PR target, push predecessor, or default branch)
+      - name: Checkout comparison base (PR target, M2 milestone, push predecessor, or default branch)
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ github.event.pull_request.base.sha || (github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.event.repository.default_branch }}
+          ref: ${{ github.event.pull_request.base.sha || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/desktop/m2-') && 'desktop/milestone-m2') || (github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.event.repository.default_branch }}
           path: audit-base
           persist-credentials: false
       - name: Record exact comparison-base SHA
