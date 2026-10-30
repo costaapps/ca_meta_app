@@ -1,6 +1,6 @@
 # ADR-006 · Compose ingress network
 
-Status: accepted for M2.07 implementation. Issue/spec: [M2.07 / #29](https://github.com/costaapps/ca_meta_app/issues/29), [Compose environments](../specs/compose-environments.md). Functional owner role: DevOps / delivery engineering. Runtime evidence SHA: `5d84eb3f3b9cf3615ef4b0f78f389842b665d571`; see [M2.07 evidence](../../delivery/M2/packages/M2.07-evidence.md).
+Status: accepted for M2.07 implementation. Issue/spec: [M2.07 / #29](https://github.com/costaapps/ca_meta_app/issues/29), [Compose environments](../specs/compose-environments.md). Functional owner role: DevOps / delivery engineering. Runtime evidence SHA: `979d29ef0fe0550b572bc254e632fdb12b68ed89`; see [M2.07 evidence](../../delivery/M2/packages/M2.07-evidence.md).
 
 ## Contexto comprovado
 
@@ -31,7 +31,7 @@ The change enables ingress at the Docker host; it does not configure TLS, a reve
 
 ## Prova, implantação e recuperação
 
-The coordinator ran `pwsh -NoProfile -File tools/m2-07/run-compose-smoke.ps1` on runtime candidate `5d84eb3f3b9cf3615ef4b0f78f389842b665d571`; it exited 0. The smoke checks loopback web ingress, internal API health/readiness, absence of other published ports, migration gating, data persistence and local DB restart. Exact environment, project cleanup and result are recorded in M2 delivery evidence. It does not prove external firewall behavior. `DOCKER_INSECURE_NO_IPTABLES_RAW` is set in the local daemon environment, so LAN isolation remains **Not confirmed**.
+The coordinator ran `pwsh -NoProfile -File tools/m2-07/run-compose-smoke.ps1` on runtime candidate `979d29ef0fe0550b572bc254e632fdb12b68ed89`; it exited 0. The smoke checks loopback web ingress, internal API health/readiness, absence of other published ports, migration gating, data persistence and local DB restart. Exact environment, project cleanup and result are recorded in M2 delivery evidence. It does not prove external firewall behavior. `DOCKER_INSECURE_NO_IPTABLES_RAW` is set in the local daemon environment, so LAN isolation remains **Not confirmed**.
 
 ## Revisão futura
 
