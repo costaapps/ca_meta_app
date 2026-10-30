@@ -40,7 +40,9 @@ $composeFiles = @('--file', 'infra/compose.yaml', '--file', 'infra/compose.dev.y
 docker compose --project-name $project --env-file $devEnv @composeFiles down
 docker compose --project-name $project --env-file $devEnv @composeFiles build api
 docker volume rm 'ca-meta-dev_dev_api_node_modules' 'ca-meta-dev_dev_web_node_modules'
-docker compose --project-name $project --env-file $devEnv @composeFiles up --detach --wait web api worker
+docker compose --project-name $project --env-file $devEnv @composeFiles up --detach --wait web api
+docker compose --project-name $project --env-file $devEnv @composeFiles up --detach worker
+docker compose --project-name $project --env-file $devEnv @composeFiles ps worker
 ```
 
 O `down` não usa `--volumes`; `docker volume rm` cita somente volumes de dependências do projeto. O volume `ca-meta-dev_dev_mariadb_data` permanece anexado e não deve ser removido se quiser manter os dados.
@@ -82,11 +84,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Image pull failed; do not promote.' }
 docker compose --project-name ca-meta-prod --env-file $envFile --env-file $lockFile @composeFiles up --force-recreate --exit-code-from migrate migrate
 if ($LASTEXITCODE -ne 0) { throw 'Migration failed; leave the current application release in place.' }
 
-docker compose --project-name ca-meta-prod --env-file $envFile --env-file $lockFile @composeFiles up --detach --wait --wait-timeout 180 web api worker
+docker compose --project-name ca-meta-prod --env-file $envFile --env-file $lockFile @composeFiles up --detach worker
+if ($LASTEXITCODE -ne 0) { throw 'Worker process failed to start; follow rollback guidance.' }
+
+docker compose --project-name ca-meta-prod --env-file $envFile --env-file $lockFile @composeFiles ps worker
+docker compose --project-name ca-meta-prod --env-file $envFile --env-file $lockFile @composeFiles up --detach --wait --wait-timeout 180 web api
 if ($LASTEXITCODE -ne 0) { throw 'Application health gate failed; follow rollback guidance.' }
 ```
 
-The API container healthcheck gates on `/ready` and derives its `Host` header from the first trimmed hostname in `API_ALLOWED_HOSTS`; keep that allowlist exact and non-empty. The web harness checks both API liveness (`/health`) and readiness (`/ready`).
+The API container healthcheck gates on `/ready` and derives its `Host` header from the first trimmed hostname in `API_ALLOWED_HOSTS`; keep that allowlist exact and non-empty. Compose `--wait` is used for web/API healthchecks. The worker intentionally has no HTTP healthcheck, so start it separately and verify its process is running and its startup log is present. The web harness checks both API liveness (`/health`) and readiness (`/ready`).
 
 Use `config --quiet` only in ordinary terminal/CI output. Docker Compose can read host files while resolving a Compose model; never redirect or paste a full resolved model, `docker inspect` secret data or secret-store output to shared logs. The explicit one-off `up --force-recreate --exit-code-from migrate migrate` must exit 0 before the app promotion command is reached. It leaves the successful migration container as the completion record consumed by `api`/`worker` dependencies. The base Compose also declares those services dependent on `migrate` with `service_completed_successfully`; on failure, the command exits nonzero and no promotion command runs. Preserve logs with sensitive values redacted; investigate and repair/forward-fix before retrying.
 
@@ -97,7 +103,7 @@ Use `config --quiet` only in ordinary terminal/CI output. Docker Compose can rea
 1. Retain the currently deployed release lock, config version/reference and compatible DB backup/point-in-time recovery marker. Never include secret bytes in that record.
 2. Obtain a new complete lock with immutable image digests and matching source SHA. Run the lock checker and Compose `config --quiet` under the protected environment.
 3. Pull the new web/API digests. Confirm the database backup and that the target schema is in the candidate API's declared compatibility bounds.
-4. Run the one-off `up --force-recreate --exit-code-from migrate migrate` and check its exit status. Only then run `up --detach --wait` for web/API/worker. The service dependency also prevents API/worker start if migration fails.
+4. Run the one-off `up --force-recreate --exit-code-from migrate migrate` and check its exit status. Only then start the worker separately and confirm its process/log state; run `up --detach --wait` for web/API healthchecks. The service dependency also prevents API/worker start if migration fails.
 5. Check web ingress, API `/health` and `/ready`, worker process/log state, queue backlog, DB connectivity, and release provenance through the approved observability path. M2.07 does not choose SLO thresholds or certify external Meta callbacks.
 
 Do not use `docker compose down --volumes`, `docker volume prune`, or recreate a DB volume during routine update. Updating API/worker containers leaves the DB host and jobs in MariaDB intact. For a local dev stack, the project-prefixed `dev_mariadb_data` named volume survives API/worker rebuild and `down` without `--volumes`.

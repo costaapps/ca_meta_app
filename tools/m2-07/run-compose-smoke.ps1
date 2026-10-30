@@ -300,8 +300,21 @@ try {
     }
     Write-Output 'Migration gate: failed preflight prevented API and worker startup.'
 
-    $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '180', 'web', 'api', 'worker')
-    Write-Output 'Development stack: web, API, worker, one-off migration, and local MariaDB started.'
+    $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '180', 'web', 'api')
+    $null = Invoke-Compose -Arguments @('up', '--detach', 'worker')
+    $workerStarted = $false
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+      $worker = Get-ContainerInfo -Service 'worker'
+      if ($worker.State.Status -ne 'running') { throw 'Worker did not remain running after startup.' }
+      $workerLogs = Invoke-Compose -Arguments @('logs', '--no-color', 'worker')
+      if ((@($workerLogs.Output) -join "`n") -match '"event":"worker\.started"') {
+        $workerStarted = $true
+        break
+      }
+      Start-Sleep -Seconds 1
+    }
+    if (-not $workerStarted) { throw 'Worker did not emit its startup event within 30 seconds.' }
+    Write-Output 'Development stack: web/API healthchecks passed; worker stayed running and emitted worker.started; migration and local MariaDB succeeded.'
 
     $baseUri = "http://127.0.0.1:$webPort"
     Assert-HttpStatus -Uri "$baseUri/healthz" -ExpectedStatus 200
