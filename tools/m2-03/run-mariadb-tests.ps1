@@ -97,13 +97,13 @@ try {
   if ([string]::IsNullOrWhiteSpace($containerId)) { throw 'Synthetic restore could not find its own MariaDB container.' }
   Invoke-Checked -FilePath 'docker' -ArgumentList @('cp', $backupPath, "${containerId}:/tmp/m2-03-synthetic-backup.sql")
   Invoke-Checked -FilePath 'docker' -ArgumentList @('compose', '-p', $composeProject, '-f', $composeFile, 'exec', '-T', '-e', "MYSQL_PWD=$rootPassword", 'mariadb', 'mariadb', '--user=root', '--database=ca_meta_m203_restore', '--execute', 'SOURCE /tmp/m2-03-synthetic-backup.sql')
-  $restoreQuery = "SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_assets),'|',(SELECT COUNT(*) FROM ca_meta_schema_migrations WHERE state='APPLIED'),'|',(SELECT COUNT(*) FROM ca_meta_assets WHERE HEX(external_id)='3030302d3132337c5a61c5bcc3b3c582c48720f09fa7aa'),'|',(SELECT COUNT(*) FROM ca_meta_assets WHERE id='00000000-0000-4000-8000-000000010000' AND DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s.%f')='2026-10-29 12:34:56.123456'),'|',(SELECT COUNT(*) FROM ca_meta_schema_migrations WHERE schema_version IN (1,2,3)))"
+  $restoreQuery = "SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_assets),'|',(SELECT COUNT(*) FROM ca_meta_schema_migrations WHERE state='APPLIED'),'|',(SELECT COUNT(*) FROM ca_meta_assets WHERE HEX(external_id)='3030302d3132337c5a61c5bcc3b3c582c48720f09fa7aa'),'|',(SELECT COUNT(*) FROM ca_meta_assets WHERE id='00000000-0000-4000-8000-000000010000' AND DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s.%f')='2026-10-29 12:34:56.123456'),'|',(SELECT COUNT(*) FROM ca_meta_schema_migrations WHERE schema_version IN (1,2,3,4)))"
   $restoreSummary = & docker compose -p $composeProject -f $composeFile exec -T -e "MYSQL_PWD=$rootPassword" mariadb mariadb --user=root --database=ca_meta_m203_restore --batch --skip-column-names --execute $restoreQuery
   if ($LASTEXITCODE -ne 0) { throw "Synthetic database restore verification failed with exit code $LASTEXITCODE." }
-  if (($restoreSummary -join '').Trim() -ne '10005|3|2|1|3') {
+  if (($restoreSummary -join '').Trim() -ne '10005|4|2|1|4') {
     throw 'Synthetic database restore did not preserve the expected rows, Unicode IDs, UTC precision, and migration ledger.'
   }
-  Write-Output 'Synthetic backup/restore verified: 10005 assets, 3 applied versions, UTF-8 external ID bytes, and DATETIME(6) preserved.'
+  Write-Output 'Synthetic backup/restore verified: 10005 assets, 4 applied versions, UTF-8 external ID bytes, and DATETIME(6) preserved.'
 } finally {
   if (-not $keepEnvironment) {
     & docker compose -p $composeProject -f $composeFile down --volumes --remove-orphans

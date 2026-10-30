@@ -152,6 +152,75 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
 
     await deployMigrations(environment, [additive]);
     await deployMigrations(environment);
+    const identityTimestamp = '2026-10-30 12:00:00.000000';
+    const identityUserId = uuid(70_001);
+    const identityServiceId = uuid(70_002);
+    await admin.query(
+      `INSERT INTO ca_meta_principals (id, kind, issuer, subject, status, created_at, updated_at)
+       VALUES (?, 'USER', 'https://issuer.synthetic.invalid', 'subject-synthetic-001', 'ACTIVE', ?, ?),
+              (?, 'SERVICE', 'https://issuer.synthetic.invalid', 'service-synthetic-001', 'ACTIVE', ?, ?)`,
+      [identityUserId, identityTimestamp, identityTimestamp, identityServiceId, identityTimestamp, identityTimestamp],
+    );
+    await admin.query(
+      `INSERT INTO ca_meta_memberships
+       (tenant_id, principal_id, principal_kind, roles, status, created_at, updated_at)
+       VALUES (?, ?, 'USER', JSON_ARRAY('owner'), 'ACTIVE', ?, ?),
+              (?, ?, 'USER', JSON_ARRAY('viewer'), 'ACTIVE', ?, ?)`,
+      [tenantA, identityUserId, identityTimestamp, identityTimestamp, tenantB, identityUserId, identityTimestamp, identityTimestamp],
+    );
+    await admin.query(
+      `INSERT INTO ca_meta_service_identity_scopes
+       (tenant_id, principal_id, principal_kind, scope, status, created_at)
+       VALUES (?, ?, 'SERVICE', 'CREDENTIAL_USE', 'ACTIVE', ?)`,
+      [tenantA, identityServiceId, identityTimestamp],
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO ca_meta_memberships
+         (tenant_id, principal_id, principal_kind, roles, status, created_at, updated_at)
+         VALUES (?, ?, 'USER', JSON_ARRAY('operator'), 'ACTIVE', ?, ?)`,
+        [tenantA, identityServiceId, identityTimestamp, identityTimestamp],
+      ),
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO ca_meta_service_identity_scopes
+         (tenant_id, principal_id, principal_kind, scope, status, created_at)
+         VALUES (?, ?, 'SERVICE', 'CREDENTIAL_USE', 'ACTIVE', ?)`,
+        [tenantA, identityUserId, identityTimestamp],
+      ),
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO ca_meta_memberships
+         (tenant_id, principal_id, principal_kind, roles, status, created_at, updated_at)
+         VALUES (?, ?, 'USER', JSON_ARRAY(), 'ACTIVE', ?, ?)`,
+        [tenantA, uuid(70_003), identityTimestamp, identityTimestamp],
+      ),
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO ca_meta_principals (id, kind, issuer, subject, status, created_at, updated_at)
+         VALUES (?, 'USER', 'https://issuer.synthetic.invalid', 'subject-synthetic-001', 'ACTIVE', ?, ?)`,
+        [uuid(70_004), identityTimestamp, identityTimestamp],
+      ),
+    );
+
+    // Two companies may share a legacy database; a tenant-scoped lookup cannot use the other company's mapping.
+    await admin.query(
+      `INSERT INTO ca_meta_tenant_legacy_maps
+       (id, tenant_id, legacy_database_id, legacy_company_id, environment, created_at)
+       VALUES (?, ?, 'synthetic-db-shared', 'synthetic-company-a', 'test', ?),
+              (?, ?, 'synthetic-db-shared', 'synthetic-company-b', 'test', ?)`,
+      [uuid(70_005), tenantA, identityTimestamp, uuid(70_006), tenantB, identityTimestamp],
+    );
+    const foreignLegacyMapping = await queryRows<{ count: string | number }>(admin,
+      `SELECT COUNT(*) AS count FROM ca_meta_tenant_legacy_maps
+       WHERE tenant_id = ? AND legacy_database_id = ? AND legacy_company_id = ? AND environment = ?`,
+      [tenantA, 'synthetic-db-shared', 'synthetic-company-b', 'test'],
+    );
+    assert.equal(Number(foreignLegacyMapping[0]?.count), 0);
+
     const backfillRows = await queryRows<{ count: string | number }>(admin,
       'SELECT COUNT(*) AS count FROM ca_meta_assets WHERE external_name IS NULL OR BINARY external_name <> BINARY display_name',
     );
@@ -330,7 +399,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     }
 
     const applied = await readMigrationStatus(environment);
-    assert.equal(applied.migrations.length, 3);
+    assert.equal(applied.migrations.length, 4);
     assert.ok(applied.migrations.every((migration) => migration.state === 'APPLIED' && migration.checksumMatches));
 
     const runtime = await createConnection(connectionOptions);
