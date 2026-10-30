@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, develop, 'desktop/milestone-*']
   push:
-    branches: [main, develop, 'desktop/milestone-*', 'desktop/m2-*']
+    branches: [main, develop, 'desktop/milestone-*']
   workflow_dispatch:
 
 permissions:

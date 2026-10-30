@@ -1,6 +1,6 @@
 # M2.08 CI and security checks
 
-This package adds the candidate CI and its local, reproducible entry points. It does not publish images, deploy, call Meta, or require production secrets. CI uses `pull_request`, `push`, and manual dispatch with `contents: read`; it does not use `pull_request_target`. No repository secret is referenced. Fork PRs run with GitHub's read-only workflow token and cannot publish or deploy.
+This package adds the candidate CI and its local, reproducible entry points. It does not publish images, deploy, call Meta, or require production secrets. CI uses `pull_request`, pushes to `main`, `develop` and `desktop/milestone-*`, and manual dispatch with `contents: read`; it does not use `pull_request_target`. Package branches run their candidate checks on the PR event to avoid duplicating the same suite on every branch push. No repository secret is referenced. Fork PRs run with GitHub's read-only workflow token and cannot publish or deploy.
 
 ## Toolchain and local checks
 
