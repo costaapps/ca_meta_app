@@ -12,7 +12,8 @@ Integration wiring:
 2. The M3.06 package appends META_ASSETS_MIGRATION after M3.04 v5 and M3.02 v6 in migrationsWithoutChecksums. M3.06 owns schema v7; after M3.03 and M3.07 are integrated, the current sequence is versions 1–9 (M3.03 v8, M3.07 v9).
 3. Include ...META_ASSETS_TABLES in DOMAIN_TABLES.
 4. Replace the root JobsModule.register(environment) with MetaAssetsModule.register(environment) (it re-exports JobsModule) and import MetaAssetsModule from ./meta-assets/meta-assets.module.js.
-5. Preserve the M3.04 session provider/migration and M3.02 retry migration/version checksums.
+5. M3.07 appends META_CREDENTIAL_VAULT_MIGRATION as schema v9 after M3.03 v8, and includes ...META_CREDENTIAL_VAULT_TABLES in DOMAIN_TABLES.
+6. Preserve the M3.04 session provider/migration and M3.02 retry migration/version checksums.
 
 Historical note: the M3.06 preparation branch predated v5/v6; the current integrated registry preserves M3.04 v5, M3.02 v6, M3.06 v7, M3.03 v8 and M3.07 v9 in order. Do not use the historical preparation sequence [1, 2, 3, 4, 7].
 
