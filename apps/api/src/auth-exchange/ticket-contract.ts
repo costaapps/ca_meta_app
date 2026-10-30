@@ -41,7 +41,7 @@ export interface PortalSessionIssueOptions {
 }
 
 export interface PortalSessionPublicContext {
-  readonly sessionRef?: string;
+  readonly sessionRef: string;
   readonly principalRef: string;
   readonly tenantRef: string;
   readonly roles: readonly MembershipRole[];
@@ -97,6 +97,7 @@ export const AUTH_EXCHANGE_SESSION_VERIFIER = Symbol('AUTH_EXCHANGE_SESSION_VERI
 export const AUTH_EXCHANGE_COOKIE_WRITER = Symbol('AUTH_EXCHANGE_COOKIE_WRITER');
 export const AUTH_EXCHANGE_ALLOWED_ORIGINS = Symbol('AUTH_EXCHANGE_ALLOWED_ORIGINS');
 export const AUTH_EXCHANGE_ABUSE_LIMIT = Symbol('AUTH_EXCHANGE_ABUSE_LIMIT');
+export const AUTH_EXCHANGE_TEST_LOOPBACK_ORIGINS = Symbol('AUTH_EXCHANGE_TEST_LOOPBACK_ORIGINS');
 
 export const PRE_AUTH_COOKIE_NAME = '__Host-ca_meta_pre_auth';
 export const PORTAL_SESSION_COOKIE_NAME = '__Host-ca_meta_portal';
@@ -106,6 +107,8 @@ export interface AuthExchangeModuleOptions {
   readonly configuration: TicketExchangeConfiguration;
   readonly trustedKeySet: TrustedTicketKeySet;
   readonly allowedOrigins: readonly string[];
+  /** Enabled only for exact loopback origins when NODE_ENV=test. */
+  readonly allowInsecureLoopbackOrigins?: boolean;
   readonly preAuthServiceToken: InjectionToken;
   readonly sessionIssuerToken: InjectionToken;
   readonly sessionVerifierToken: InjectionToken;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { test } from 'node:test';
 import type { Response } from 'express';
-import { UnauthorizedException } from '@nestjs/common';
+import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { IdentityDeniedError } from '../src/identity/identity.errors.js';
 import {
   isVerifiedIdentityAssertion,
@@ -137,7 +137,7 @@ class FakeSessions implements PortalSessionIssuerPort {
       tenantId: requestedTenantId,
       expiresAt: new Date(NOW + 3_600_000).toISOString(),
       publicContext: {
-        ...(this.sessionRef !== undefined ? { sessionRef: this.sessionRef } : {}),
+        sessionRef: this.sessionRef as string,
         principalRef: 'principal-reference-pseudonymous',
         tenantRef: requestedTenantId,
         roles,
@@ -292,6 +292,7 @@ test('a valid existing session proof is passed only as a rotation capability', a
         tenantId: 'tenant-a',
         contextVersion: 4,
         contextRefHash: 'd'.repeat(64),
+        csrfTokenHash: 'e'.repeat(64),
       };
     },
   });
@@ -354,16 +355,19 @@ test('stable rate-limit boundary code maps to 429 with a safe Retry-After', asyn
   assert.equal(cookieWriter.setCalls, 0);
 });
 
-test('sessionRef is optional for older issuers and malformed values fail before cookies are written', async () => {
+test('sessionRef is required and malformed values fail before cookies are written', async () => {
   const withoutSessionRef = new FakeSessions();
   withoutSessionRef.sessionRef = undefined;
-  const legacyService = makeService({ sessions: withoutSessionRef }).service;
-  const legacyResult = await legacyService.exchange(
-    { ticket: makeTicket(), challengeRef: 'preauth-reference-123' },
-    context(),
-    makeResponse().response,
+  const noRef = makeService({ sessions: withoutSessionRef });
+  await assert.rejects(
+    noRef.service.exchange(
+      { ticket: makeTicket(), challengeRef: 'preauth-reference-123' },
+      context(),
+      makeResponse().response,
+    ),
+    (error: unknown) => error instanceof ServiceUnavailableException,
   );
-  assert.equal('sessionRef' in legacyResult, false);
+  assert.equal(noRef.cookieWriter.setCalls, 0);
 
   const malformedSessions = new FakeSessions();
   malformedSessions.sessionRef = 'not-an-opaque-session-uuid';

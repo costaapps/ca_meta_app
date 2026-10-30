@@ -26,7 +26,7 @@ export interface ExchangeRequest {
 }
 
 export interface SessionContextResponse {
-  readonly sessionRef?: string;
+  readonly sessionRef: string;
   readonly principalRef: string;
   readonly tenantRef: string;
   readonly roles: readonly MembershipRole[];
@@ -96,7 +96,7 @@ function readCookie(context: ExchangeRequestContext, name: string): string | und
   return found;
 }
 
-function normalizedOrigins(origins: readonly string[]): ReadonlySet<string> {
+function normalizedOrigins(origins: readonly string[], allowInsecureLoopbackOrigins: boolean): ReadonlySet<string> {
   const result = new Set<string>();
   for (const value of origins) {
     let parsed: URL;
@@ -105,12 +105,14 @@ function normalizedOrigins(origins: readonly string[]): ReadonlySet<string> {
     } catch {
       throw new Error('Auth exchange origin configuration is invalid.');
     }
-    if (parsed.protocol !== 'https:' || parsed.origin !== value || parsed.username || parsed.password || parsed.hash) {
+    const localHttpOrigin = allowInsecureLoopbackOrigins && parsed.protocol === 'http:' &&
+      ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+    if ((!localHttpOrigin && parsed.protocol !== 'https:') || parsed.origin !== value || parsed.username || parsed.password || parsed.hash) {
       throw new Error('Auth exchange origin configuration is invalid.');
     }
     result.add(value);
   }
-  if (result.size === 0) throw new Error('Auth exchange requires at least one configured HTTPS origin.');
+  if (result.size === 0) throw new Error('Auth exchange requires at least one configured origin.');
   return result;
 }
 
@@ -126,7 +128,7 @@ function safePublicContext(issued: IssuedPortalSession, requestId: string): Sess
   const sessionRef = context?.sessionRef;
   if (
     !context ||
-    (sessionRef !== undefined && (typeof sessionRef !== 'string' || !SESSION_REF_PATTERN.test(sessionRef))) ||
+    typeof sessionRef !== 'string' || !SESSION_REF_PATTERN.test(sessionRef) ||
     !context.principalRef || context.principalRef.length > 128 ||
     !context.tenantRef || context.tenantRef !== issued.tenantId || context.tenantRef.length > 128 ||
     !context.tenantContextRef || context.tenantContextRef.length < 16 || context.tenantContextRef.length > 512 ||
@@ -138,7 +140,7 @@ function safePublicContext(issued: IssuedPortalSession, requestId: string): Sess
     unavailable();
   }
   return Object.freeze({
-    ...(sessionRef !== undefined ? { sessionRef } : {}),
+    sessionRef,
     principalRef: context.principalRef,
     tenantRef: context.tenantRef,
     roles: Object.freeze([...roles]),
@@ -162,9 +164,10 @@ export class TicketExchangeService {
     private readonly abuseLimit: PortalExchangeAbuseLimitPort,
     private readonly cookieWriter: AuthExchangeCookieWriter,
     now: () => number = Date.now,
+    allowInsecureLoopbackOrigins = false,
   ) {
     this.verifier = new SignedEntryTicketVerifier(configuration, keySet, now);
-    this.allowedOrigins = normalizedOrigins(allowedOrigins);
+    this.allowedOrigins = normalizedOrigins(allowedOrigins, allowInsecureLoopbackOrigins);
   }
 
   async exchange(value: unknown, context: ExchangeRequestContext, response: Response): Promise<SessionContextResponse> {

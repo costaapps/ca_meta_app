@@ -87,8 +87,10 @@ paths:
       summary: Start browser-bound pre-authentication
       description: Public before a portal session. Requires an exact allowlisted
         Origin, matching Fetch Metadata, and an HttpOnly pre-auth cookie bound
-        to the server-created challenge. The challenge is for the trusted Suite4
-        portal-entry handoff, not a Meta provider code.
+        to the server-created challenge. The challenge is for a trusted
+        portal-entry handoff, not a Meta provider code. The current runtime
+        supports PORTAL_TOP_LEVEL only; SUITE4_EMBED is reserved for M3.05 and
+        is rejected with 400.
       security: []
       parameters:
         - $ref: "#/components/parameters/Origin"
@@ -104,15 +106,16 @@ paths:
               sanitized:
                 summary: Sanitized request example
                 value:
-                  entryMode: SUITE4_EMBED
+                  entryMode: PORTAL_TOP_LEVEL
                   returnRoute: connections
       responses:
         "201":
           description: Sanitized success example
           headers:
             Set-Cookie:
-              description: Host-only Secure HttpOnly pre-auth cookie; no Domain attribute.
-                Cookie value is not in the response body.
+              description: Host-only Secure HttpOnly `__Host-ca_meta_pre_auth` cookie with
+                SameSite=Lax; no Domain attribute. Cookie value is not in the
+                response body.
               schema:
                 type: string
           content:
@@ -158,7 +161,9 @@ paths:
         membership, issuer and audience must match atomically. The `tenant`
         claim is revalidated; `company_uuid` is ignored. Set-Cookie returns the
         opaque portal session; the JSON DTO contains no session cookie, Meta
-        credential, or ticket.
+        credential, or ticket. When the trusted issuer or server-configured
+        public key set is unavailable, the endpoint returns a safe 503 and
+        issues no session.
       security:
         - preAuthCookie: []
       parameters:
@@ -182,7 +187,8 @@ paths:
           description: Sanitized success example
           headers:
             Set-Cookie:
-              description: Opaque host-only Secure HttpOnly portal session cookie.
+              description: Opaque host-only Secure HttpOnly `__Host-ca_meta_portal` portal
+                session cookie.
               schema:
                 type: string
             Cache-Control:
@@ -1887,13 +1893,13 @@ components:
     portalSession:
       type: apiKey
       in: cookie
-      name: __Host-meta_portal
+      name: __Host-ca_meta_portal
       description: Opaque host-only Secure HttpOnly portal session. The cookie value
         is never a DTO field.
     preAuthCookie:
       type: apiKey
       in: cookie
-      name: __Host-meta_preauth
+      name: __Host-ca_meta_pre_auth
       description: Browser-bound pre-auth cookie, distinct from the portal session and
         from any provider code.
   parameters:
@@ -2171,6 +2177,7 @@ components:
       type: object
       additionalProperties: false
       required:
+        - sessionRef
         - principalRef
         - tenantRef
         - roles

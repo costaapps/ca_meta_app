@@ -352,6 +352,7 @@ test('configuration validation requires typed fields, reports names only, and re
     assert.equal(parsed.trustedProxyCidrs, false);
     assert.deepEqual(parsed.allowedHosts, ['127.0.0.1', 'localhost']);
     assert.equal(parsed.database.password, 'synthetic-marker-value');
+    assert.equal(parsed.portalEntryTicket, undefined);
     assert.deepEqual(parsed.identity?.platformIdentityAdmins, []);
     assert.deepEqual(validateEnvironment({
       ...valid,
@@ -386,6 +387,15 @@ test('configuration validation requires typed fields, reports names only, and re
     assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_HOSTS: '*.example.test' }), /API_ALLOWED_HOSTS/);
     assert.throws(() => validateEnvironment({ ...valid, API_DATABASE_PASSWORD: '   ' }), /API_DATABASE_PASSWORD/);
     assert.throws(() => validateEnvironment({ ...valid, API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON: '[{"issuer":"x"}]' }), /API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON/);
+    assert.throws(
+      () => validateEnvironment({ ...valid, API_PORTAL_ENTRY_TICKET_ISSUER: 'https://suite4.synthetic.invalid/portal' }),
+      (error: unknown) => {
+        assert.ok(error instanceof EnvironmentValidationError);
+        assert.ok(error.fieldNames.includes('API_PORTAL_ENTRY_TICKET_AUDIENCE'));
+        assert.ok(error.fieldNames.includes('API_PORTAL_ENTRY_TICKET_PUBLIC_KEYS_JSON'));
+        return true;
+      },
+    );
     assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_ORIGINS: 'https://*.example.test' }), /API_ALLOWED_ORIGINS/);
     assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_ORIGINS: 'http://portal.example.test' }), /API_ALLOWED_ORIGINS/);
     assert.deepEqual(validateEnvironment({ ...valid, API_ALLOWED_ORIGINS: '', API_PORTAL_SESSION_RECOVERY_KEY: '' }).allowedOrigins, []);

@@ -16,6 +16,12 @@
 - M3.01 denial transactions roll back without persisting a security event. M3.10 must add the contract-required safe authorization-denial event path without leaking cross-tenant identifiers.
 - Adding migration version 4 updates the executable M2.03 restore assertion and M2.07 current-schema smoke expectation. This keeps those existing consumers aligned with the new migration ledger without changing their acceptance criteria.
 
+## M3.02 ticket exchange and bootstrap boundary
+
+- The API wires the M3.02 exchange to one `IdentityModule` instance: the M3.04 pre-auth service, session issuer/verifier, abuse-limit service and session-cookie writer remain the runtime providers. Public RSA keys are configured on the server by unique `kid`; a ticket cannot select a URL or key source. Issuer, audience, and at least one public key are all-or-none. If all are absent, unrelated API routes still start, the pre-auth endpoint remains available for the independent direct-link flow, and exchange returns a safe 503 without issuing a session. Partial or invalid configuration rejects startup with field names only.
+- `POST /api/v1/auth/preauth` creates only a top-level browser binding, is exact-origin/Fetch-Metadata protected and consumes the `PORTAL_PREAUTH` IP quota. It returns the challenge reference and expiration, while the browser cookie remains HttpOnly and is never placed in JSON. It does not assert identity or membership. `SUITE4_EMBED` is explicitly reserved and rejected until M3.05 implements the distinct parent/window handshake and recovery behavior.
+- Production/staging exchange origins remain exact HTTPS origins and use the existing same-origin middleware. The local HTTP loopback allowance is derived only from `NODE_ENV=test`; no development or production bypass is enabled. This profile does not certify real Suite4 claims, key ownership/rotation, origins, or browser cookie behavior.
+
 ## External evidence
 
 Local issuer, principal, tenant and membership fixtures prove only code behavior for those inputs. They do not establish the Suite4 subject mapping, active membership, roles, cookie topology or deployed business ownership. Meta permissions/assets and staging operations are not exercised by M3.01.

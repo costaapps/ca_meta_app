@@ -25,6 +25,21 @@ M3.04 handoff: `IdentityDeniedError` currently maps to HTTP 500 in the shared ex
 
 M3.10 handoff: authorization denials currently roll back and do not persist a safe security event; add the denial event path required by the accepted identity contract, with no cross-tenant identifiers.
 
+## M3.02 / #38 candidate handoff
+
+Candidate branch `desktop/m3-02` is based on `desktop/milestone-m3` SHA `c217285e3a4bbee96d0506d5acf8852dd0027cdb`. Runtime wiring reuses one `IdentityModule.register(environment)` dynamic instance and connects the M3.04 pre-auth/session/abuse-limit providers and session cookie writer. `POST /api/v1/auth/preauth` is available independently of Suite4 ticket configuration, creates a top-level browser binding, applies the pre-auth quota, sets only the HttpOnly cookie, and returns no cookie value. `SUITE4_EMBED` remains rejected pending M3.05. Ticket exchange remains registered and returns a safe 503 if issuer/key configuration is absent; issuer, audience and a static RS256 public-key set by `kid` are optional all-or-none server configuration. Production origins remain HTTPS and exact; HTTP loopback is permitted only in the `NODE_ENV=test` profile. The canonical OpenAPI and generated consumers use `__Host-ca_meta_pre_auth` and `__Host-ca_meta_portal`, and `sessionRef` is required in session responses.
+
+Local evidence on Windows PowerShell with Node `v24.22.2` / npm `11.19.1`:
+
+- `npx tsc -p apps/api/tsconfig.test.json` — passed after adding the M3.04-required synthetic `csrfTokenHash` to an existing session-verifier fixture.
+- `node --test apps/api/dist-test/test/m3-02-auth-exchange.spec.js apps/api/dist-test/test/m3-02-preauth.spec.js apps/api/dist-test/test/api-boundaries.spec.js` — 50 passed, 0 failed, 5 skipped. The skips are existing POSIX SIGTERM subprocess cases unavailable on Windows. Coverage includes runtime top-level pre-auth, embed rejection, no-config fail-closed exchange, and safe 429 with `Retry-After: 60` and no session/cookie issuance.
+- `npm run lint --workspace=@ca-meta/api` — passed for 64 TypeScript source files.
+- `npm run check:generated --prefix tools/m1-07`, `npm run check:generated --workspace=@ca-meta/contracts`, and both corresponding `lint` commands — passed. `npm run test:contract --workspace=@ca-meta/contracts` — 5 passed.
+- `npm run check:breaking --prefix tools/m1-07` and `npm run check:breaking --workspace=@ca-meta/contracts` — both report seven breaking changes against their frozen v1 baseline: `sessionRef` becomes required in `SessionContext`, exchange, magic-link consume, session read, and tenant switch responses; the two cookie security-scheme names change to the required `__Host-ca_meta_*` names. These are the requested M3.04/OpenAPI alignment changes; the baseline/version decision remains with the coordinator. No baseline or validation gate was edited.
+- An initial test TypeScript compile exposed the missing synthetic `csrfTokenHash`; the fixture was corrected and the compile above passed. The scoped `tools/m1-07` dependencies were installed with `npm ci --prefix tools/m1-07 --ignore-scripts` and its OpenAPI changes dependency was rebuilt locally to run the breaking check.
+
+The package tests use synthetic keys, origins, memberships and session services. No external Suite4 issuer, key ownership/rotation, membership mapping, or production/browser cookie deployment was verified; those remain **Not confirmed**. The fake concurrency test is not a database race proof. The coordinator still needs a disposable MariaDB integration using two independent connections to race the same ticket JTI and pre-auth challenge through the integrated M3.02/M3.04 persistence path, asserting at most one session/cookie and correct consumption/recovery. Package PR/CI and milestone integration remain coordinator-owned.
+
 ## M3.01 implementation summary
 
 - Adds Principal, Membership, and separate service-identity scope migration version 4, with kind checks, tenant/principal foreign keys and exact issuer/subject uniqueness.
