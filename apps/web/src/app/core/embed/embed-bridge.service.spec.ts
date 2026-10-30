@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import '@angular/compiler';
 import { of } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpClient } from '@angular/common/http';
