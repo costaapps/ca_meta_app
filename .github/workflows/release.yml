@@ -107,6 +107,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          shopt -s inherit_errexit
           export DOCKER_CONFIG="$RUNNER_TEMP/m2-09-docker-config"
           cleanup_registry_credentials() {
             docker logout >/dev/null 2>&1 || true
@@ -151,8 +152,9 @@ jobs:
           }
 
           write_image_scan_input() {
-            local kind="$1" name="$2" digest reused ref
+            local kind="$1" name="$2" values_path="$3" digest reused ref
             local version_digest sha_digest candidate metadata labels provenance_path sbom_path archive_path archive_sha
+            set -euo pipefail
             version_digest="$(inspect_digest "$name:$SEMVER")"
             sha_digest="$(inspect_digest "$name:sha-$SOURCE_REVISION")"
             if [[ -n "$version_digest" && -n "$sha_digest" && "$version_digest" != "$sha_digest" ]]; then
@@ -215,21 +217,25 @@ jobs:
               --arg sha256 "$archive_sha" \
               '{subjectName:$subjectName,imageReference:$imageReference,digest:$digest,sourceRevision:$sourceRevision,archive:$archive,sha256:$sha256}' \
               > "$RUNNER_TEMP/m2-09-$kind-scan-input.json"
-            printf '%s\n' "$digest" "$ref" "$name" "$reused"
+            printf '%s\n' "$digest" "$ref" "$name" "$reused" > "$values_path"
           }
 
           docker buildx version >&2
           SEMVER="${RELEASE_TAG#v}"
-          WEB_VALUES="$(write_image_scan_input web "docker.io/$DOCKERHUB_NAMESPACE/ca-meta-web")"
-          API_VALUES="$(write_image_scan_input api "docker.io/$DOCKERHUB_NAMESPACE/ca-meta-api")"
-          WEB_DIGEST="$(printf '%s\n' "$WEB_VALUES" | sed -n '1p')"
-          WEB_IMAGE_REF="$(printf '%s\n' "$WEB_VALUES" | sed -n '2p')"
-          WEB_SUBJECT_NAME="$(printf '%s\n' "$WEB_VALUES" | sed -n '3p')"
-          WEB_REUSED="$(printf '%s\n' "$WEB_VALUES" | sed -n '4p')"
-          API_DIGEST="$(printf '%s\n' "$API_VALUES" | sed -n '1p')"
-          API_IMAGE_REF="$(printf '%s\n' "$API_VALUES" | sed -n '2p')"
-          API_SUBJECT_NAME="$(printf '%s\n' "$API_VALUES" | sed -n '3p')"
-          API_REUSED="$(printf '%s\n' "$API_VALUES" | sed -n '4p')"
+          WEB_VALUES_FILE="$RUNNER_TEMP/m2-09-web-resolved.txt"
+          API_VALUES_FILE="$RUNNER_TEMP/m2-09-api-resolved.txt"
+          write_image_scan_input web "docker.io/$DOCKERHUB_NAMESPACE/ca-meta-web" "$WEB_VALUES_FILE"
+          write_image_scan_input api "docker.io/$DOCKERHUB_NAMESPACE/ca-meta-api" "$API_VALUES_FILE"
+          mapfile -t WEB_VALUES < "$WEB_VALUES_FILE"
+          mapfile -t API_VALUES < "$API_VALUES_FILE"
+          WEB_DIGEST="${WEB_VALUES[0]}"
+          WEB_IMAGE_REF="${WEB_VALUES[1]}"
+          WEB_SUBJECT_NAME="${WEB_VALUES[2]}"
+          WEB_REUSED="${WEB_VALUES[3]}"
+          API_DIGEST="${API_VALUES[0]}"
+          API_IMAGE_REF="${API_VALUES[1]}"
+          API_SUBJECT_NAME="${API_VALUES[2]}"
+          API_REUSED="${API_VALUES[3]}"
           jq -n --arg sourceRevision "$SOURCE_REVISION" \
             --slurpfile web "$RUNNER_TEMP/m2-09-web-scan-input.json" \
             --slurpfile api "$RUNNER_TEMP/m2-09-api-scan-input.json" \
@@ -442,6 +448,7 @@ jobs:
           API_DIGEST: ${{ needs.build-images.outputs.api_digest }}
         run: |
           set -euo pipefail
+          shopt -s inherit_errexit
           export DOCKER_CONFIG="$RUNNER_TEMP/m2-09-docker-config"
           cleanup_registry_credentials() {
             docker logout >/dev/null 2>&1 || true
