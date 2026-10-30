@@ -172,12 +172,16 @@ function Assert-HttpStatus {
 
 try {
   if ($PSVersionTable.PSVersion -lt [version]'7.0') { throw 'Run this harness with PowerShell 7 or later.' }
-  $dockerVersion = (& docker version --format '{{.Server.Version}}' 2>$null | Select-Object -First 1)
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dockerVersion)) {
+  $dockerVersionOutput = & docker version --format '{{.Server.Version}}' 2>$null
+  $dockerVersionExitCode = $LASTEXITCODE
+  $dockerVersion = $dockerVersionOutput | Select-Object -First 1
+  if ($dockerVersionExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($dockerVersion)) {
     throw 'Docker Engine is unavailable to this shell. Start the authorized local Docker service and retry.'
   }
-  $composeVersion = (& docker compose version --short 2>$null | Select-Object -First 1)
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($composeVersion)) {
+  $composeVersionOutput = & docker compose version --short 2>$null
+  $composeVersionExitCode = $LASTEXITCODE
+  $composeVersion = $composeVersionOutput | Select-Object -First 1
+  if ($composeVersionExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($composeVersion)) {
     throw 'Docker Compose v2 is required.'
   }
   if ($composeVersion -notmatch '^v?(\d+)\.(\d+)\.(\d+)') { throw 'Could not read the Docker Compose semantic version.' }
@@ -355,14 +359,17 @@ SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_jobs WHERE id = '$jobId'), ':',
   if (-not $KeepEnvironment) {
     $cleanupExit = 0
     if ([System.IO.File]::Exists($composeEnvPath)) {
-      & docker compose --project-name $composeProject --env-file $composeEnvPath @composeFiles down --volumes --remove-orphans 2>$null | Out-Null
+      $cleanupOutput = & docker compose --project-name $composeProject --env-file $composeEnvPath @composeFiles down --volumes --remove-orphans 2>$null
       $cleanupExit = $LASTEXITCODE
+      $null = $cleanupOutput
     }
     if ($createdImageId) {
       $currentImageId = & docker image inspect --format '{{.Id}}' $imageReference 2>$null
       if ($LASTEXITCODE -eq 0 -and "$currentImageId".Trim() -eq $createdImageId) {
-        & docker image rm $imageReference 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Warning "Could not remove only the harness image tag $imageReference." }
+        $imageRemoveOutput = & docker image rm $imageReference 2>$null
+        $imageRemoveExit = $LASTEXITCODE
+        $null = $imageRemoveOutput
+        if ($imageRemoveExit -ne 0) { Write-Warning "Could not remove only the harness image tag $imageReference." }
       }
     }
     $tempParent = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
