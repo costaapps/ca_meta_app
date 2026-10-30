@@ -276,12 +276,12 @@ try {
   Assert-True ($asset.Status -eq 200 -and $asset.Headers -match '(?i)Cache-Control:\s*[^\r\n]*immutable') 'Hashed Angular assets must have immutable caching.'
   Assert-True ($asset.Headers -match '(?im)^X-Content-Type-Options:\s*nosniff' -and $asset.Headers -match '(?im)^Referrer-Policy:\s*no-referrer') 'Hashed bundle security headers are missing.'
 
-  $largeBody = [byte[]]::new(65_537)
+  $largeBody = [byte[]]::new(65537)
   $tooLargeJson = Send-Http -Uri "$baseUri/api/v1/unused" -Method 'POST' -Body $largeBody -ContentType 'application/json'
   Assert-True ($tooLargeJson.Status -eq 413) 'The default NGINX proxy limit must reject a 65,537-byte ordinary API request.'
   $webhookOversizeForApi = Send-Http -Uri "$baseUri/api/v1/webhooks/meta/synthetic-config" -Method 'POST' -Body $largeBody
   Assert-True ($webhookOversizeForApi.Status -ne 413 -and $webhookOversizeForApi.Headers -match '(?im)^X-Request-Id:\s*[^\r\n]+') 'A 65,537-byte octet-stream webhook body must pass the NGINX proxy to the API.'
-  $tooLargeWebhook = Send-Http -Uri "$baseUri/api/v1/webhooks/meta/synthetic-config" -Method 'POST' -Body ([byte[]]::new(1_048_577))
+  $tooLargeWebhook = Send-Http -Uri "$baseUri/api/v1/webhooks/meta/synthetic-config" -Method 'POST' -Body ([byte[]]::new(1048577))
   Assert-True ($tooLargeWebhook.Status -eq 413) 'The NGINX webhook body limit must reject 1,048,577 bytes.'
 
   $webInfo = Get-ContainerInfo -Name $webContainer
