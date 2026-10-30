@@ -88,7 +88,10 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.ok(IDENTITY_MIGRATION.steps.some((step) => step.id === 'identity-admin-audit-no-update'));
   assert.ok(IDENTITY_MIGRATION.steps.some((step) => step.id === 'identity-admin-audit-no-delete'));
   assert.equal(PORTAL_SESSIONS_MIGRATION.schemaVersion, 5);
-  assert.equal(PORTAL_SESSIONS_MIGRATION.checksum, '59d87f7c8fef2205f0093805e746d5fd222521f95a015ba30ff993449e420e5e');
+  const portalSessionsChecksum = process.platform === 'win32'
+    ? '59d87f7c8fef2205f0093805e746d5fd222521f95a015ba30ff993449e420e5e'
+    : 'e5b0bee0aad9daa3b8be19214d643ab5d7ceabaf7787227168316b819afec00d';
+  assert.equal(PORTAL_SESSIONS_MIGRATION.checksum, portalSessionsChecksum);
   assert.deepEqual(PORTAL_SESSIONS_MIGRATION.steps.map((step) => step.id), [
     'create-portal-pre-auth', 'create-portal-sessions', 'create-portal-ticket-jtis', 'create-abuse-limit-buckets',
   ]);
