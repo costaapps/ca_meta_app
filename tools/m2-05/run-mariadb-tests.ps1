@@ -110,6 +110,15 @@ try {
       '--test-reporter-destination=artifacts/test-results/m2-05-durable-work.lcov.info',
       'apps/api/dist-test/test/durable-work.integration.spec.js'
     )
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
+      '--test',
+      '--experimental-test-coverage',
+      '--test-reporter=junit',
+      '--test-reporter=lcov',
+      '--test-reporter-destination=artifacts/test-results/m3-06-meta-assets.junit.xml',
+      '--test-reporter-destination=artifacts/test-results/m3-06-meta-assets.lcov.info',
+      'apps/api/dist-test/test/m3-06-meta-assets.integration.spec.js'
+    )
   } finally { Pop-Location }
 } finally {
   if (-not $keepEnvironment) {
