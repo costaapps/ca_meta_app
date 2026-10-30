@@ -74,7 +74,10 @@
             }
           },
           "options": {
+            "proxyConfig": "proxy.conf.json",
             "allowedHosts": [
+              "localhost",
+              "127.0.0.1",
               "structures-stages-federal-consumer.trycloudflare.com"
             ]
           },

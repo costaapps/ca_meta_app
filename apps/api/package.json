@@ -5,6 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node dist/main.js",
+    "start:dev": "nest start --watch",
     "start:worker": "node dist/worker/main.js",
     "build": "nest build",
     "migrate:deploy": "node dist/database/migrations/cli.js deploy",

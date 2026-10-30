@@ -1,0 +1,150 @@
+services:
+  web:
+    image: local/ca-meta-dev:${DEV_IMAGE_TAG:-m2-07}
+    read_only: false
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+    command:
+      - npm
+      - run
+      - start
+      - --workspace=@ca-meta/web
+      - --
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    volumes:
+      - ../apps/web:/workspace/apps/web
+      - dev_web_node_modules:/workspace/apps/web/node_modules
+      - ../packages/contracts:/workspace/packages/contracts
+    networks:
+      - edge
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8080/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 3s
+      start_period: 20s
+      retries: 5
+
+  api:
+    image: local/ca-meta-dev:${DEV_IMAGE_TAG:-m2-07}
+    build:
+      context: ..
+      dockerfile: infra/docker/dev.Dockerfile
+    read_only: false
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+    command:
+      - sh
+      - -ec
+      - export API_DATABASE_PASSWORD="$$(cat /run/secrets/api_database_password)"; exec npm run start:dev --workspace=@ca-meta/api -- --config nest-cli.dev.json
+    volumes:
+      - ../apps/api:/workspace/apps/api
+      - dev_api_node_modules:/workspace/apps/api/node_modules
+      - dev_api_dist:/workspace/apps/api/dist
+      - ../packages/contracts:/workspace/packages/contracts
+
+  worker:
+    image: local/ca-meta-dev:${DEV_IMAGE_TAG:-m2-07}
+    read_only: false
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+    command:
+      - sh
+      - -ec
+      - export API_DATABASE_PASSWORD="$$(cat /run/secrets/api_database_password)"; exec node apps/api/dist/worker/main.js
+    volumes:
+      - ../apps/api:/workspace/apps/api
+      - dev_api_node_modules:/workspace/apps/api/node_modules
+      - dev_api_dist:/workspace/apps/api/dist
+      - ../packages/contracts:/workspace/packages/contracts
+
+  migrate:
+    image: local/ca-meta-dev:${DEV_IMAGE_TAG:-m2-07}
+    read_only: false
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+    command:
+      - sh
+      - -ec
+      - /usr/local/bin/ca-meta-build-api; export MIGRATION_DATABASE_PASSWORD="$$(cat /run/secrets/migration_database_password)"; exec node apps/api/dist/database/migrations/cli.js deploy
+    volumes:
+      - ../apps/api:/workspace/apps/api
+      - dev_api_node_modules:/workspace/apps/api/node_modules
+      - dev_api_dist:/workspace/apps/api/dist
+      - ../packages/contracts:/workspace/packages/contracts
+    depends_on:
+      database:
+        condition: service_healthy
+
+  database:
+    image: mariadb:11.8.8@sha256:d9f7eb2637296652f24b484afd5d246f759f49f5babcadc6a9e344c9acb75fbf
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${API_DATABASE_NAME:?Set the development database name}
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+    secrets:
+      - source: api_database_password
+        target: api_database_password
+      - source: migration_database_password
+        target: migration_database_password
+      - source: dev_database_root_password
+        target: mariadb_root_password
+    volumes:
+      - dev_mariadb_data:/var/lib/mysql
+      - ./dev/init-users.sh:/docker-entrypoint-initdb.d/50-create-users.sh:ro
+    networks:
+      - internal
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          set -eu;
+          umask 077;
+          defaults_file="$$(mktemp /tmp/ca-meta-mariadb-health.XXXXXX)";
+          trap 'rm -f "$$defaults_file"' EXIT;
+          trap 'exit 129' HUP;
+          trap 'exit 130' INT;
+          trap 'exit 143' TERM;
+          {
+            printf '%s\n' '[client]' 'user=root' 'protocol=socket';
+            printf 'password=%s\n' "$$(cat /run/secrets/mariadb_root_password)";
+          } > "$$defaults_file";
+          chmod 600 "$$defaults_file";
+          mariadb-admin --defaults-extra-file="$$defaults_file" --protocol=socket --user=root ping --silent
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+
+secrets:
+  dev_database_root_password:
+    file: ${CA_META_DEV_DB_ROOT_PASSWORD_FILE:?Harness/operator must supply a disposable local DB root-password file}
+
+volumes:
+  dev_mariadb_data:
+  dev_api_dist:
+  dev_api_node_modules:
+  dev_web_node_modules:
