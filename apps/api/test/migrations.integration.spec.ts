@@ -262,8 +262,9 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
         identityService.bootstrapTenant(platformActor, assertionVerifier.verify('different-bootstrap-owner'), legacyMapping, bootKey),
         IdentityAdministrationConflictError,
       );
-      const bootstrapLegacyMap = await queryRows<{ legacy_database_id: string; legacy_company_id: string; environment: string }>(admin,
-        `SELECT legacy_database_id, legacy_company_id, environment FROM ca_meta_tenant_legacy_maps WHERE tenant_id = ?`, [boot.tenantId],
+      const bootstrapLegacyMap = await queryRows<{ legacyDatabaseId: string; legacyCompanyId: string; environment: string }>(admin,
+        `SELECT legacy_database_id AS legacyDatabaseId, legacy_company_id AS legacyCompanyId, environment
+         FROM ca_meta_tenant_legacy_maps WHERE tenant_id = ?`, [boot.tenantId],
       );
       assert.deepEqual(bootstrapLegacyMap, [{ ...legacyMapping }]);
 
