@@ -36,6 +36,7 @@ only invalid or missing field names.
 | API_BIND_ADDRESS | Explicit IPv4 or IPv6 address; tests must bind loopback |
 | API_ALLOWED_HOSTS | Required comma-separated exact DNS host/IP allowlist; no wildcard or port |
 | API_TRUSTED_PROXIES | none or a comma-separated list of specific IP/CIDR values |
+| API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON | Optional JSON array of exact `{ "issuer", "subject" }` pairs; empty/unset denies platform identity administration |
 | API_DATABASE_HOST | Explicit host/IP; tests accept only 127.0.0.1 or ::1 |
 | API_DATABASE_PORT | Explicit TCP port 1–65535 |
 | API_DATABASE_NAME | 1–64 letters, digits, or underscores |
@@ -51,6 +52,12 @@ local tests and harnesses only: 127.0.0.1,localhost.
 API_TRUSTED_PROXIES=none disables Express proxy trust. Wildcard ranges such as 0.0.0.0/0,
 ::/0, expanded unspecified IPv6, and IPv4-mapped IPv6 ranges covering all IPv4 are rejected.
 Configure only specific ingress addresses controlled by the deployment operator.
+
+M3.01 exposes identity provisioning only as an internal service, with no public controller. Creating
+the first tenant requires a session assertion verified by a trusted server adapter and an exact pair
+in `API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON`; an empty setting fails closed. Tenant membership
+changes require a current verified portal session and live owner/admin membership. The initial
+operator identity, trusted issuer, and production configuration procedure are **Not confirmed**. Bootstrap writes the opaque legacy `IdDatabase + IdCompany + environment` mapping with the tenant and owner membership in one transaction; production ownership/authorization for that mapping is **Not confirmed**.
 
 Requests accept X-Request-Id only when it is a UUID v4; otherwise the server generates one.
 Every response returns X-Request-Id; error responses also return the canonical OpenAPI error

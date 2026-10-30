@@ -4,6 +4,7 @@ import { MigrationEnvironmentError, readMigrationEnvironment } from '../src/data
 import { migrationStepChecksum } from '../src/database/migrations/migration-fingerprint.js';
 import { MIGRATIONS } from '../src/database/migrations/migrations.js';
 import { DURABLE_WORK_MIGRATION } from '../src/database/migrations/durable-work.js';
+import { IDENTITY_MIGRATION } from '../src/database/migrations/identity.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -44,8 +45,8 @@ test('migration configuration rejects runtime account reuse and privileged built
 });
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
-  assert.equal(MIGRATIONS.length, 3);
-  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3]);
+  assert.equal(MIGRATIONS.length, 4);
+  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4]);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -62,6 +63,28 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   ]);
   assert.ok(DURABLE_WORK_MIGRATION.steps[0]?.definition.includes('ix_ca_meta_job_ambiguous_expired'));
   assert.ok(DURABLE_WORK_MIGRATION.steps[0]?.definition.includes('ix_ca_meta_job_tenant_resource_active'));
+  assert.equal(IDENTITY_MIGRATION.id, '202610300001-principals-memberships');
+  assert.deepEqual(IDENTITY_MIGRATION.steps.map((step) => step.id), [
+    'create-principals', 'create-tenant-memberships', 'create-service-identity-scopes',
+    'create-identity-admin-audit', 'identity-admin-audit-no-update', 'identity-admin-audit-no-delete',
+  ]);
+  const membershipStep = IDENTITY_MIGRATION.steps.find((step) => step.id === 'create-tenant-memberships');
+  const serviceScopeStep = IDENTITY_MIGRATION.steps.find((step) => step.id === 'create-service-identity-scopes');
+  assert.ok(membershipStep && 'sql' in membershipStep);
+  assert.ok(serviceScopeStep && 'sql' in serviceScopeStep);
+  assert.ok(membershipStep.sql.includes('PRIMARY KEY (tenant_id, principal_id)'));
+  assert.ok(membershipStep.sql.includes("CHECK (principal_kind = 'USER')"));
+  for (const role of ['owner', 'admin', 'operator', 'viewer']) {
+    assert.ok(membershipStep.sql.includes(`JSON_CONTAINS(roles, JSON_QUOTE('${role}'))`));
+  }
+  assert.ok(serviceScopeStep.sql.includes("CHECK (principal_kind = 'SERVICE')"));
+  assert.ok(membershipStep.sql.includes('FOREIGN KEY (principal_kind, principal_id)'));
+  const adminAuditStep = IDENTITY_MIGRATION.steps.find((step) => step.id === 'create-identity-admin-audit');
+  assert.ok(adminAuditStep && 'sql' in adminAuditStep);
+  assert.ok(adminAuditStep.sql.includes('uq_ca_meta_identity_admin_idem'));
+  assert.ok(adminAuditStep.sql.includes('request_hash'));
+  assert.ok(IDENTITY_MIGRATION.steps.some((step) => step.id === 'identity-admin-audit-no-update'));
+  assert.ok(IDENTITY_MIGRATION.steps.some((step) => step.id === 'identity-admin-audit-no-delete'));
 });
 
 test('migration fingerprints detect definition configuration and callback drift', () => {

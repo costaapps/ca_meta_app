@@ -3,10 +3,21 @@ import { fork } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createConnection, type Connection } from 'mysql2/promise';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
 import { MIGRATION_STEP_LEDGER, deployMigrations, migrationLockName, readMigrationStatus } from '../src/database/migrations/migration-runner.js';
 import { MIGRATIONS } from '../src/database/migrations/migrations.js';
+import { IdentityAdministrationService } from '../src/identity/identity-administration.service.js';
+import { IdentityAdministrationConflictError } from '../src/identity/mysql-identity-administration.repository.js';
+import { MysqlIdentityAdministrationRepository } from '../src/identity/mysql-identity-administration.repository.js';
+import { MysqlIdentityRepository } from '../src/identity/mysql-identity.repository.js';
+import { TenantContextService, hashTenantContextReference } from '../src/identity/identity.service.js';
+import { IdentityAssertionVerifier, PlatformIdentityAdminAuthority, PortalSessionVerifier } from '../src/identity/identity.trust.js';
+
+class SyntheticAssertionVerifier extends IdentityAssertionVerifier {
+  verify(subject: string) { return this.issueVerifiedAssertion('https://issuer.synthetic.invalid', subject); }
+}
 
 const enabled = process.env.M2_MIGRATION_TEST === '1';
 const UUID_PREFIX = '00000000-0000-4000-8000-';
@@ -152,6 +163,216 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
 
     await deployMigrations(environment, [additive]);
     await deployMigrations(environment);
+    const identityTimestamp = '2026-10-30 12:00:00.000000';
+    const identityUserId = uuid(70_001);
+    const identityServiceId = uuid(70_002);
+    await admin.query(
+      `INSERT INTO ca_meta_principals (id, kind, issuer, subject, status, created_at, updated_at)
+       VALUES (?, 'USER', 'https://issuer.synthetic.invalid', 'subject-synthetic-001', 'ACTIVE', ?, ?),
+              (?, 'SERVICE', 'https://issuer.synthetic.invalid', 'service-synthetic-001', 'ACTIVE', ?, ?)`,
+      [identityUserId, identityTimestamp, identityTimestamp, identityServiceId, identityTimestamp, identityTimestamp],
+    );
+    await admin.query(
+      `INSERT INTO ca_meta_memberships
+       (tenant_id, principal_id, principal_kind, roles, status, created_at, updated_at)
+       VALUES (?, ?, 'USER', JSON_ARRAY('owner'), 'ACTIVE', ?, ?),
+              (?, ?, 'USER', JSON_ARRAY('viewer'), 'ACTIVE', ?, ?)`,
+      [tenantA, identityUserId, identityTimestamp, identityTimestamp, tenantB, identityUserId, identityTimestamp, identityTimestamp],
+    );
+    await admin.query(
+      `INSERT INTO ca_meta_service_identity_scopes
+       (tenant_id, principal_id, principal_kind, scope, status, created_at)
+       VALUES (?, ?, 'SERVICE', 'CREDENTIAL_USE', 'ACTIVE', ?)`,
+      [tenantA, identityServiceId, identityTimestamp],
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO ca_meta_memberships
+         (tenant_id, principal_id, principal_kind, roles, status, created_at, updated_at)
+         VALUES (?, ?, 'USER', JSON_ARRAY('operator'), 'ACTIVE', ?, ?)`,
+        [tenantA, identityServiceId, identityTimestamp, identityTimestamp],
+      ),
+    );
+    await admin.query(
+      `INSERT INTO ca_meta_principals (id, kind, issuer, subject, status, created_at, updated_at)
+       VALUES (?, 'USER', 'https://issuer.synthetic.invalid', 'subject-invalid-role-check', 'ACTIVE', ?, ?)`,
+      [uuid(70_007), identityTimestamp, identityTimestamp],
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO ca_meta_memberships
+         (tenant_id, principal_id, principal_kind, roles, status, created_at, updated_at)
+         VALUES (?, ?, 'USER', JSON_ARRAY('platform_admin'), 'ACTIVE', ?, ?)`,
+        [tenantA, uuid(70_007), identityTimestamp, identityTimestamp],
+      ),
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO ca_meta_service_identity_scopes
+         (tenant_id, principal_id, principal_kind, scope, status, created_at)
+         VALUES (?, ?, 'SERVICE', 'CREDENTIAL_USE', 'ACTIVE', ?)`,
+        [tenantA, identityUserId, identityTimestamp],
+      ),
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO ca_meta_memberships
+         (tenant_id, principal_id, principal_kind, roles, status, created_at, updated_at)
+         VALUES (?, ?, 'USER', JSON_ARRAY(), 'ACTIVE', ?, ?)`,
+        [tenantA, uuid(70_003), identityTimestamp, identityTimestamp],
+      ),
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO ca_meta_principals (id, kind, issuer, subject, status, created_at, updated_at)
+         VALUES (?, 'USER', 'https://issuer.synthetic.invalid', 'subject-synthetic-001', 'ACTIVE', ?, ?)`,
+        [uuid(70_004), identityTimestamp, identityTimestamp],
+      ),
+    );
+
+    // Provisioning and membership changes execute through trusted internal capabilities and commit their audit rows atomically.
+    const runtimeDatabase = {
+      host: environment.database.host,
+      port: environment.database.port,
+      name: environment.database.name,
+      user: environment.apiDatabaseUser,
+      password: process.env.M2_API_DATABASE_PASSWORD ?? '',
+      connectTimeoutMs: environment.database.connectTimeoutMs,
+    };
+    const identityRepository = new MysqlIdentityRepository(runtimeDatabase);
+    const adminRepository = new MysqlIdentityAdministrationRepository(runtimeDatabase);
+    try {
+      const assertionVerifier = new SyntheticAssertionVerifier();
+      const platformAssertion = assertionVerifier.verify('synthetic-platform-administrator');
+      const targetOwner = assertionVerifier.verify('synthetic-bootstrap-owner');
+      const authority = new PlatformIdentityAdminAuthority([{
+        issuer: 'https://issuer.synthetic.invalid', subject: 'synthetic-platform-administrator',
+      }]);
+      const platformActor = authority.verify(platformAssertion);
+      const identityService = new IdentityAdministrationService(adminRepository, new TenantContextService(identityRepository));
+      const legacyMapping = {
+        legacyDatabaseId: 'synthetic-bootstrap-db', legacyCompanyId: 'synthetic-bootstrap-company', environment: 'test' as const,
+      };
+      const bootKey = uuid(71_001);
+      const boot = await identityService.bootstrapTenant(platformActor, targetOwner, legacyMapping, bootKey);
+      const bootReplay = await identityService.bootstrapTenant(platformActor, targetOwner, legacyMapping, bootKey);
+      assert.equal(bootReplay.tenantId, boot.tenantId);
+      assert.equal(bootReplay.replayed, true);
+      await assert.rejects(
+        identityService.bootstrapTenant(platformActor, assertionVerifier.verify('different-bootstrap-owner'), legacyMapping, bootKey),
+        IdentityAdministrationConflictError,
+      );
+      const bootstrapLegacyMap = await queryRows<{ legacyDatabaseId: string; legacyCompanyId: string; environment: string }>(admin,
+        `SELECT legacy_database_id AS legacyDatabaseId, legacy_company_id AS legacyCompanyId, environment
+         FROM ca_meta_tenant_legacy_maps WHERE tenant_id = ?`, [boot.tenantId],
+      );
+      assert.deepEqual(bootstrapLegacyMap, [{ ...legacyMapping }]);
+
+      const contextRef = 'synthetic-integration-context-ref-owner';
+      const cookie = 'synthetic-integration-session-cookie-with-enough-entropy';
+      const cookieHash = createHash('sha256').update(cookie, 'utf8').digest();
+      const portalSession = await new PortalSessionVerifier({
+        async findActiveBySecretHash(hash) {
+          if (!Buffer.from(hash).equals(cookieHash)) return undefined;
+          return {
+            sessionId: uuid(71_002), principalId: identityUserId, tenantId: tenantA,
+            contextVersion: 1, contextRefHash: hashTenantContextReference(contextRef),
+          };
+        },
+      }).verify(cookie);
+      assert.ok(portalSession);
+      const targetMember = assertionVerifier.verify('synthetic-member-to-admin');
+      const grantKey = uuid(71_003);
+      const granted = await identityService.grantMembership(
+        portalSession, contextRef, targetMember, 'admin', 'MEMBERSHIP_GRANT', grantKey,
+      );
+      const grantReplay = await identityService.grantMembership(
+        portalSession, contextRef, targetMember, 'admin', 'MEMBERSHIP_GRANT', grantKey,
+      );
+      assert.equal(grantReplay.replayed, true);
+      assert.equal(grantReplay.principalId, granted.principalId);
+
+      const adminContextRef = 'synthetic-integration-context-ref-admin';
+      const adminCookie = 'synthetic-integration-admin-cookie-with-enough-entropy';
+      const adminCookieHash = createHash('sha256').update(adminCookie, 'utf8').digest();
+      const adminSession = await new PortalSessionVerifier({
+        async findActiveBySecretHash(hash) {
+          if (!Buffer.from(hash).equals(adminCookieHash)) return undefined;
+          return {
+            sessionId: uuid(71_004), principalId: granted.principalId as string, tenantId: tenantA,
+            contextVersion: 1, contextRefHash: hashTenantContextReference(adminContextRef),
+          };
+        },
+      }).verify(adminCookie);
+      assert.ok(adminSession);
+      const adminScope = await new TenantContextService(identityRepository).resolveCurrent(adminSession, adminContextRef);
+      await assert.rejects(
+        identityService.grantMembership(
+          adminSession, adminContextRef, assertionVerifier.verify('synthetic-escalation-target'), 'admin',
+          'MEMBERSHIP_GRANT', uuid(71_005),
+        ),
+      );
+      // Repository direct calls still enforce role policy and preserve privileged target memberships.
+      await assert.rejects(adminRepository.execute({
+        action: 'GRANT_MEMBERSHIP', actor: adminSession, scope: adminScope, target: targetMember, role: 'viewer',
+        reasonCode: 'ROLE_CHANGE', idempotencyKey: uuid(71_007), requestHash: 'c'.repeat(64),
+      }));
+      const ownerScope = await new TenantContextService(identityRepository).resolveCurrent(portalSession, contextRef);
+      await assert.rejects(adminRepository.execute({
+        action: 'GRANT_MEMBERSHIP', actor: portalSession, scope: ownerScope,
+        target: assertionVerifier.verify('subject-synthetic-001'), role: 'operator',
+        reasonCode: 'ROLE_CHANGE', idempotencyKey: uuid(71_008), requestHash: 'd'.repeat(64),
+      }));
+      const noEscalationAudit = await queryRows<{ count: string | number }>(admin,
+        'SELECT COUNT(*) AS count FROM ca_meta_identity_admin_audit WHERE idempotency_key IN (?, ?, ?, ?)',
+        [uuid(71_005), uuid(71_007), uuid(71_008), uuid(71_009)],
+      );
+      assert.equal(Number(noEscalationAudit[0]?.count), 0);
+
+      const revoked = await identityService.revokeMembership(portalSession, contextRef, granted.principalId as string, uuid(71_006));
+      const revokedMember = await queryRows<{ status: string; revoked_at: string | null }>(admin,
+        'SELECT status, revoked_at FROM ca_meta_memberships WHERE tenant_id = ? AND principal_id = ?',
+        [tenantA, revoked.principalId],
+      );
+      assert.equal(revokedMember[0]?.status, 'REVOKED');
+      assert.ok(revokedMember[0]?.revoked_at);
+
+      const adminAudit = await queryRows<{ action: string; authority_kind: string; reason_code: string; request_hash: string; actor_ref: string }>(admin,
+        `SELECT action, authority_kind, reason_code, request_hash, actor_ref
+         FROM ca_meta_identity_admin_audit WHERE idempotency_key IN (?, ?, ?, ?, ?, ?, ?) ORDER BY action`,
+        [bootKey, grantKey, uuid(71_005), uuid(71_006), uuid(71_007), uuid(71_008), uuid(71_009)],
+      );
+      assert.equal(adminAudit.length, 3, 'denied escalation is not recorded as a successful provisioning command');
+      assert.ok(adminAudit.some((row) => row.action === 'BOOTSTRAP_TENANT' && row.authority_kind === 'PLATFORM_IDENTITY_ADMIN' && row.reason_code === 'INITIAL_PROVISIONING'));
+      assert.ok(adminAudit.some((row) => row.action === 'GRANT_MEMBERSHIP' && row.authority_kind === 'TENANT_OWNER' && row.reason_code === 'MEMBERSHIP_GRANT'));
+      assert.ok(adminAudit.some((row) => row.action === 'REVOKE_MEMBERSHIP' && row.reason_code === 'MEMBERSHIP_REVOCATION'));
+      assert.ok(adminAudit.every((row) => /^[a-f0-9]{64}$/.test(row.actor_ref) && /^[a-f0-9]{64}$/.test(row.request_hash)));
+      const auditColumns = await queryRows<{ column_name: string }>(admin,
+        `SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()
+         AND table_name = 'ca_meta_identity_admin_audit' ORDER BY ordinal_position`,
+      );
+      assert.ok(!auditColumns.some((row) => /subject|token|cookie|secret/i.test(row.column_name)));
+      await assert.rejects(admin.query('UPDATE ca_meta_identity_admin_audit SET reason_code = \'ROLE_CHANGE\' WHERE idempotency_key = ?', [grantKey]));
+      await assert.rejects(admin.query('DELETE FROM ca_meta_identity_admin_audit WHERE idempotency_key = ?', [grantKey]));
+    } finally {
+      await Promise.all([identityRepository.onApplicationShutdown(), adminRepository.onApplicationShutdown()]);
+    }
+
+    // Two companies may share a legacy database; a tenant-scoped lookup cannot use the other company's mapping.
+    await admin.query(
+      `INSERT INTO ca_meta_tenant_legacy_maps
+       (id, tenant_id, legacy_database_id, legacy_company_id, environment, created_at)
+       VALUES (?, ?, 'synthetic-db-shared', 'synthetic-company-a', 'test', ?),
+              (?, ?, 'synthetic-db-shared', 'synthetic-company-b', 'test', ?)`,
+      [uuid(70_005), tenantA, identityTimestamp, uuid(70_006), tenantB, identityTimestamp],
+    );
+    const foreignLegacyMapping = await queryRows<{ count: string | number }>(admin,
+      `SELECT COUNT(*) AS count FROM ca_meta_tenant_legacy_maps
+       WHERE tenant_id = ? AND legacy_database_id = ? AND legacy_company_id = ? AND environment = ?`,
+      [tenantA, 'synthetic-db-shared', 'synthetic-company-b', 'test'],
+    );
+    assert.equal(Number(foreignLegacyMapping[0]?.count), 0);
+
     const backfillRows = await queryRows<{ count: string | number }>(admin,
       'SELECT COUNT(*) AS count FROM ca_meta_assets WHERE external_name IS NULL OR BINARY external_name <> BINARY display_name',
     );
@@ -330,7 +551,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     }
 
     const applied = await readMigrationStatus(environment);
-    assert.equal(applied.migrations.length, 3);
+    assert.equal(applied.migrations.length, 4);
     assert.ok(applied.migrations.every((migration) => migration.state === 'APPLIED' && migration.checksumMatches));
 
     const runtime = await createConnection(connectionOptions);

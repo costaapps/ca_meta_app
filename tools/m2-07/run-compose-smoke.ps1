@@ -418,7 +418,7 @@ SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_jobs WHERE id = '$jobId'), ':',
       Assert-WorkerRunning
       Assert-HttpStatus -Uri "$baseUri/api/health" -ExpectedStatus 200
       Assert-HttpStatus -Uri "$baseUri/api/ready" -ExpectedStatus 200
-      if ((Invoke-DbQuery -Sql "SELECT CONCAT(status, ':', (SELECT MAX(schema_version) FROM ca_meta_schema_migrations)) FROM ca_meta_jobs WHERE id = '$jobId';") -ne 'QUEUED:3') {
+      if ((Invoke-DbQuery -Sql "SELECT CONCAT(status, ':', (SELECT MAX(schema_version) FROM ca_meta_schema_migrations)) FROM ca_meta_jobs WHERE id = '$jobId';") -ne 'QUEUED:4') {
         throw 'The queued job was lost after a temporary database stop/restart.'
       }
       Write-Output 'Database recovery smoke: the stack recovered after a local DB restart and retained the queued job.'
