@@ -153,6 +153,10 @@ export function validateAuthorizationUpsert(command: AuthorizationUpsertCommand)
   if (command.evidence !== undefined && !isVerifiedMetaEvidence(command.evidence)) {
     throw new MetaAssetsInputError('Authorization evidence was not issued by a trusted provider adapter.');
   }
+  const commandObservation = normalizedIsoObservation(command.observedAt);
+  if (command.evidence && normalizedIsoObservation(command.evidence.observedAt) !== commandObservation) {
+    throw new MetaAssetsInputError('Authorization evidence time must match the command observation time.');
+  }
   if (command.grantedScopes.length > 256 || command.grantedScopes.some((scope) => !validOpaqueName(scope, 128))) {
     throw new MetaAssetsInputError('Granted scope list is invalid.');
   }
@@ -185,6 +189,9 @@ export function validateAuthorizationUpsert(command: AuthorizationUpsertCommand)
     }
     if (asset.evidence !== undefined && !isVerifiedMetaEvidence(asset.evidence)) {
       throw new MetaAssetsInputError('Asset evidence was not issued by a trusted provider adapter.');
+    }
+    if (asset.evidence && normalizedIsoObservation(asset.evidence.observedAt) !== commandObservation) {
+      throw new MetaAssetsInputError('Asset evidence time must match the command observation time.');
     }
     if (!asset.evidence && (asset.grants !== undefined || (asset.relations?.length ?? 0) > 0)) {
       throw new MetaAssetsInputError('Asset grants and relations require provider verification.');
@@ -246,3 +253,7 @@ function validOpaqueName(value: string, maxLength: number): boolean {
 
 function isUuid(value: string): boolean { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
 function isIsoDate(value: string): boolean { return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(value) && Number.isFinite(Date.parse(value)); }
+function normalizedIsoObservation(value: string): string {
+  const fraction = value.match(/\.(\d{1,6})Z$/)?.[1] ?? '';
+  return new Date(value).toISOString().slice(0, 19) + '.' + fraction.padEnd(6, '0') + 'Z';
+}

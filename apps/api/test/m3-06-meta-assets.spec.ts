@@ -44,6 +44,24 @@ test('verified provider evidence is a runtime capability and stores only a diges
   );
 });
 
+test('verified authorization and asset evidence timestamps must match the command observation', () => {
+  assert.doesNotThrow(() => validateAuthorizationUpsert(command({
+    evidence: evidence(), observedAt: '2026-10-30T12:00:00.000000Z',
+  })));
+  assert.throws(() => validateAuthorizationUpsert(command({
+    evidence: evidence(), observedAt: '2026-10-30T12:00:01.000Z',
+  })), MetaAssetsInputError);
+  const authorizationProof = evidence();
+  const staleAssetProof = issueVerifiedMetaEvidence({
+    source: 'META_API', observedAt: '2026-10-30T11:59:59.999999Z',
+    observationRef: 'stale-asset-observation-synthetic-001',
+  });
+  assert.throws(() => validateAuthorizationUpsert(command({
+    evidence: authorizationProof,
+    assets: [{ kind: 'FACEBOOK_PAGE', externalId: 'page-0001', evidence: staleAssetProof }],
+  })), MetaAssetsInputError);
+});
+
 test('browser claims cannot become granted scopes or confirmed authorization/asset data', () => {
   assert.throws(() => validateAuthorizationUpsert(command({ grantedScopes: ['whatsapp_business_messaging'] })), MetaAssetsInputError);
   assert.throws(() => validateAuthorizationUpsert(command({
