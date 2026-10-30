@@ -71,6 +71,31 @@ function Get-ContainerInfo {
   return @($json | ConvertFrom-Json)[0]
 }
 
+function Get-SafeStartupEvents {
+  param([Parameter(Mandatory)][string] $Name)
+  $events = [System.Collections.Generic.List[string]]::new()
+  foreach ($line in @(Invoke-Docker -Arguments @('logs', '--tail', '30', $Name))) {
+    $message = [string] $line
+    try {
+      $record = $message | ConvertFrom-Json -ErrorAction Stop
+      if ($record.event -eq 'configuration.invalid') {
+        $fields = @($record.fields | Where-Object { $_ -match '^[A-Z][A-Z0-9_]{0,127}$' })
+        $events.Add("configuration.invalid(fields=$($fields -join ','))")
+      } elseif ($record.event -in @('api.started', 'api.startup_failed')) {
+        $events.Add([string] $record.event)
+      }
+    } catch {
+      if ($message -match '^nginx: \[(?:emerg|alert|crit)\]') {
+        $events.Add('nginx.startup_error(details withheld)')
+      } elseif ($message -ceq 'Invalid public runtime configuration.') {
+        $events.Add('web.runtime_config_invalid')
+      }
+    }
+  }
+  if ($events.Count -eq 0) { return 'none' }
+  return ($events | Select-Object -Unique) -join ';'
+}
+
 function Test-AppLayerPath {
   param([Parameter(Mandatory)][string] $Name, [Parameter(Mandatory)][ValidateSet('web', 'api')][string] $ImageKind)
   $path = $Name.Replace('\', '/').TrimStart('/')
@@ -305,7 +330,9 @@ try {
     $apiState = Get-ContainerInfo -Name $apiContainer
     $webState = Get-ContainerInfo -Name $webContainer
     $apiHealth = if ($apiState.State.Health) { $apiState.State.Health.Status } else { 'not-configured' }
-    throw "API liveness did not pass through the web proxy (HTTP=$($probe.Status); bodyOk=$($probe.Body -match '"status"\s*:\s*"ok"'); api=$($apiState.State.Status)/$($apiState.State.ExitCode)/$apiHealth; web=$($webState.State.Status)/$($webState.State.ExitCode))."
+    $apiEvents = Get-SafeStartupEvents -Name $apiContainer
+    $webEvents = Get-SafeStartupEvents -Name $webContainer
+    throw "API liveness did not pass through the web proxy (HTTP=$($probe.Status); bodyOk=$($probe.Body -match '"status"\s*:\s*"ok"'); api=$($apiState.State.Status)/$($apiState.State.ExitCode)/$apiHealth/$apiEvents; web=$($webState.State.Status)/$($webState.State.ExitCode)/$webEvents)."
   }
   Assert-True ($probe.Headers -match '(?im)^X-Request-Id:\s*[^\r\n]+') 'API response correlation header was not preserved.'
   $versionedHealth = Send-Http -Uri "$baseUri/api/v1/health"
