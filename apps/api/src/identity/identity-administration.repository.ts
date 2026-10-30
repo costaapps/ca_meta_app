@@ -7,12 +7,36 @@ export type IdentityAdministrationReason =
   | 'ROLE_CHANGE'
   | 'MEMBERSHIP_REVOCATION';
 
+const ASSIGNABLE_MEMBERSHIP_ROLES = new Set(['admin', 'operator', 'viewer']);
+
+export function isAssignableMembershipRole(value: unknown): value is 'admin' | 'operator' | 'viewer' {
+  return typeof value === 'string' && ASSIGNABLE_MEMBERSHIP_ROLES.has(value);
+}
+
+export interface LegacyTenantMappingInput {
+  readonly legacyDatabaseId: string;
+  readonly legacyCompanyId: string;
+  readonly environment: 'development' | 'test' | 'staging' | 'production';
+}
+
+export function isLegacyTenantMappingInput(value: unknown): value is LegacyTenantMappingInput {
+  if (typeof value !== 'object' || value === null) return false;
+  const mapping = value as Record<string, unknown>;
+  const databaseId = mapping.legacyDatabaseId;
+  const companyId = mapping.legacyCompanyId;
+  const environment = mapping.environment;
+  return typeof databaseId === 'string' && databaseId.length >= 1 && databaseId.length <= 128 && /^[\x20-\x7e]+$/.test(databaseId) &&
+    typeof companyId === 'string' && companyId.length >= 1 && companyId.length <= 191 && !/[\u0000-\u001f\u007f]/u.test(companyId) &&
+    (environment === 'development' || environment === 'test' || environment === 'staging' || environment === 'production');
+}
+
 export type IdentityAdministrationCommand =
   | {
       readonly action: 'BOOTSTRAP_TENANT';
       readonly actor: VerifiedPlatformIdentityAdmin;
       readonly target: VerifiedIdentityAssertion;
       readonly tenantId: string;
+      readonly legacyMapping: LegacyTenantMappingInput;
       readonly reasonCode: IdentityAdministrationReason;
       readonly idempotencyKey: string;
       readonly requestHash: string;

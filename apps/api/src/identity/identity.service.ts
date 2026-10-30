@@ -2,9 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { IdentityDeniedError } from './identity.errors.js';
 import type { IdentityRepository } from './identity.repository.js';
 import {
-  isAuthorizedTenantScope,
   isVerifiedServiceTenantScope,
-  makeAuthorizedTenantScope,
   makeVerifiedServiceTenantScope,
   type AuthorizedTenantScope,
   type MembershipRole,
@@ -17,6 +15,28 @@ import {
 import { isVerifiedPortalSession, type VerifiedPortalSession } from './identity.trust.js';
 
 const ALLOWED_ROLES = new Set<MembershipRole>(['owner', 'admin', 'operator', 'viewer']);
+const authorizedTenantScopes = new WeakSet<object>();
+
+interface AuthorizedTenantScopeInput {
+  readonly principalId: string;
+  readonly sessionId: string;
+  readonly tenantId: string;
+  readonly roles: readonly MembershipRole[];
+  readonly membershipVersion: number;
+  readonly contextVersion: number;
+}
+
+/** A scope is valid only when minted inside this trusted context resolver module. */
+export function isAuthorizedTenantScope(value: unknown): value is AuthorizedTenantScope {
+  return typeof value === 'object' && value !== null && authorizedTenantScopes.has(value);
+}
+
+function makeAuthorizedTenantScope(input: AuthorizedTenantScopeInput): AuthorizedTenantScope {
+  const roles = Object.freeze([...input.roles]);
+  const scope = Object.freeze({ ...input, roles }) as AuthorizedTenantScope;
+  authorizedTenantScopes.add(scope);
+  return scope;
+}
 
 function validContextVersion(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 1;

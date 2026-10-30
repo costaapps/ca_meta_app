@@ -153,7 +153,11 @@ const memberships = createTableStep(
     PRIMARY KEY (tenant_id, principal_id),
     KEY ix_ca_meta_memberships_principal_status (principal_id, status),
     CONSTRAINT ck_ca_meta_membership_user CHECK (principal_kind = 'USER'),
-    CONSTRAINT ck_ca_meta_membership_roles CHECK (JSON_VALID(roles) AND JSON_TYPE(roles) = 'ARRAY' AND JSON_LENGTH(roles) BETWEEN 1 AND 4),
+    CONSTRAINT ck_ca_meta_membership_roles CHECK (
+      JSON_VALID(roles) AND JSON_TYPE(roles) = 'ARRAY' AND JSON_LENGTH(roles) BETWEEN 1 AND 4 AND
+      JSON_LENGTH(roles) = JSON_CONTAINS(roles, JSON_QUOTE('owner')) + JSON_CONTAINS(roles, JSON_QUOTE('admin')) +
+        JSON_CONTAINS(roles, JSON_QUOTE('operator')) + JSON_CONTAINS(roles, JSON_QUOTE('viewer'))
+    ),
     CONSTRAINT ck_ca_meta_membership_status CHECK (status IN ('INVITED', 'ACTIVE', 'REVOKED', 'SUSPENDED')),
     CONSTRAINT fk_ca_meta_membership_tenant FOREIGN KEY (tenant_id) REFERENCES ca_meta_tenants (id)
       ON UPDATE RESTRICT ON DELETE RESTRICT,

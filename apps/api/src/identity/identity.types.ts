@@ -43,7 +43,7 @@ export type ServiceScope =
   | 'WEBHOOK_ROUTE'
   | 'MAGIC_LINK_DELIVERY';
 
-const tenantScopeBrand: unique symbol = Symbol('authorized-tenant-scope');
+declare const tenantScopeBrand: unique symbol;
 const serviceScopeBrand: unique symbol = Symbol('verified-service-tenant-scope');
 
 /**
@@ -84,15 +84,6 @@ export interface VerifiedServiceTenantScope {
   readonly principalId: string;
   readonly tenantId: string;
   readonly scopes: readonly ServiceScope[];
-}
-
-export function isAuthorizedTenantScope(value: unknown): value is AuthorizedTenantScope {
-  return typeof value === 'object' && value !== null && tenantScopeBrand in value;
-}
-
-export function makeAuthorizedTenantScope(input: Omit<AuthorizedTenantScope, typeof tenantScopeBrand>): AuthorizedTenantScope {
-  const roles = Object.freeze([...input.roles]);
-  return Object.freeze({ ...input, roles, [tenantScopeBrand]: true as const });
 }
 
 export function isVerifiedServiceTenantScope(value: unknown): value is VerifiedServiceTenantScope {

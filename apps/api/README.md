@@ -57,7 +57,7 @@ M3.01 exposes identity provisioning only as an internal service, with no public 
 the first tenant requires a session assertion verified by a trusted server adapter and an exact pair
 in `API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON`; an empty setting fails closed. Tenant membership
 changes require a current verified portal session and live owner/admin membership. The initial
-operator identity, trusted issuer, and production configuration procedure are **Not confirmed**.
+operator identity, trusted issuer, and production configuration procedure are **Not confirmed**. Bootstrap writes the opaque legacy `IdDatabase + IdCompany + environment` mapping with the tenant and owner membership in one transaction; production ownership/authorization for that mapping is **Not confirmed**.
 
 Requests accept X-Request-Id only when it is a UUID v4; otherwise the server generates one.
 Every response returns X-Request-Id; error responses also return the canonical OpenAPI error

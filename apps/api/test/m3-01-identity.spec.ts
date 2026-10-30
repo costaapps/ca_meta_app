@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import { IdentityDeniedError } from '../src/identity/identity.errors.js';
 import { IdentityAdministrationService } from '../src/identity/identity-administration.service.js';
+import type { LegacyTenantMappingInput } from '../src/identity/identity-administration.repository.js';
 import type { IdentityAdministrationCommand, IdentityAdministrationRepository, IdentityAdministrationResult } from '../src/identity/identity-administration.repository.js';
 import {
   IdentityAssertionVerifier,
@@ -12,7 +13,7 @@ import {
   type VerifiedIdentityAssertion,
   type VerifiedPortalSession,
 } from '../src/identity/identity.trust.js';
-import { IdentityAdministrationConflictError } from '../src/identity/mysql-identity-administration.repository.js';
+import { IdentityAdministrationConflictError, MysqlIdentityAdministrationRepository } from '../src/identity/mysql-identity-administration.repository.js';
 import type { IdentityRepository, LegacyTenantMapping } from '../src/identity/identity.repository.js';
 import {
   hashTenantContextReference,
@@ -21,10 +22,12 @@ import {
   ServiceTenantAuthorizationService,
   TenantAuthorizationService,
   TenantContextService,
+  isAuthorizedTenantScope,
   tenantScopePredicate,
   tenantScopedIdPredicate,
 } from '../src/identity/identity.service.js';
 import type {
+  AuthorizedTenantScope,
   MembershipRole,
   PrincipalIdentity,
   ServiceTenantGrant,
@@ -140,6 +143,7 @@ class SyntheticAssertionVerifier extends IdentityAssertionVerifier {
 class FakeIdentityAdministrationRepository implements IdentityAdministrationRepository {
   readonly commands: IdentityAdministrationCommand[] = [];
   readonly auditEvents: Array<{ readonly action: string; readonly actorRef: string; readonly reasonCode: string; readonly idempotencyKey: string; readonly requestHash: string }> = [];
+  readonly legacyMappings: LegacyTenantMappingInput[] = [];
   readonly members = new Map<string, { readonly principalId: string; role: string; status: string }>();
   private readonly idempotency = new Map<string, { readonly requestHash: string; readonly result: IdentityAdministrationResult }>();
 
@@ -154,6 +158,7 @@ class FakeIdentityAdministrationRepository implements IdentityAdministrationRepo
     }
     let result: IdentityAdministrationResult;
     if (command.action === 'BOOTSTRAP_TENANT') {
+      this.legacyMappings.push(command.legacyMapping);
       result = { tenantId: command.tenantId, principalId: `created-${command.target.subject}`, replayed: false };
     } else if (command.action === 'GRANT_MEMBERSHIP') {
       const digest = createHash('sha256').update(command.target.subject).digest('hex');
@@ -240,6 +245,10 @@ test('resource IDs and duplicate provider IDs never override the tenant-scoped p
     values: [assetB.internalId, tenantA],
   });
   assert.deepEqual(tenantScopePredicate(scopeA), { sql: 'tenant_id = ?', values: [tenantA] });
+  const forgedScope = { ...scopeA, roles: ['owner'] } as unknown as AuthorizedTenantScope;
+  assert.equal(isAuthorizedTenantScope(forgedScope), false);
+  await assert.rejects(authorization.authorize(forgedScope, 'RESOURCE_READ', tenantA), IdentityDeniedError);
+  assert.throws(() => tenantScopedIdPredicate(forgedScope, 'asset-a'), IdentityDeniedError);
   await assert.rejects(
     Promise.resolve().then(() => tenantScopePredicate({ tenantId: tenantB } as never)),
     (error: unknown) => error instanceof IdentityDeniedError,
@@ -328,14 +337,18 @@ test('platform bootstrap fails closed until explicit allowlist authority and is 
   const actor = authority.verify(platformIdentity);
   const repository = new FakeIdentityAdministrationRepository();
   const service = new IdentityAdministrationService(repository, new TenantContextService(new FakeIdentityRepository()));
-  const first = await service.bootstrapTenant(actor, subject, '00000000-0000-4000-8000-000000000001');
-  const replay = await service.bootstrapTenant(actor, subject, '00000000-0000-4000-8000-000000000001');
+  const mapping: LegacyTenantMappingInput = {
+    legacyDatabaseId: 'synthetic-db-1', legacyCompanyId: 'synthetic-company-1', environment: 'test',
+  };
+  const first = await service.bootstrapTenant(actor, subject, mapping, '00000000-0000-4000-8000-000000000001');
+  const replay = await service.bootstrapTenant(actor, subject, mapping, '00000000-0000-4000-8000-000000000001');
   assert.equal(first.tenantId, replay.tenantId);
   assert.equal(first.replayed, false);
   assert.equal(replay.replayed, true);
   assert.equal(repository.commands.length, 2);
   assert.ok(repository.commands.every((command) => command.action === 'BOOTSTRAP_TENANT' && command.reasonCode === 'INITIAL_PROVISIONING'));
-  await assert.rejects(service.bootstrapTenant(actor, assertions.verify('different-owner-subject'), '00000000-0000-4000-8000-000000000001'), IdentityAdministrationConflictError);
+  await assert.rejects(service.bootstrapTenant(actor, assertions.verify('different-owner-subject'), mapping, '00000000-0000-4000-8000-000000000001'), IdentityAdministrationConflictError);
+  assert.deepEqual(repository.legacyMappings, [mapping]);
   assert.ok(!JSON.stringify(repository.auditEvents).includes(platformIdentity.subject));
   assert.ok(!JSON.stringify(repository.auditEvents).includes(subject.subject));
 });
@@ -352,6 +365,12 @@ test('membership admin operation denies escalation, records replay identity and 
   const replay = await service.grantMembership(actor, 'synthetic-context-ref-admin-grant', assertion, 'admin', 'MEMBERSHIP_GRANT', key);
   assert.equal(replay.replayed, true);
   assert.equal(granted.principalId, replay.principalId);
+  const commandCount = adminRepository.commands.length;
+  await assert.rejects(
+    service.grantMembership(actor, 'synthetic-context-ref-admin-grant', assertion, 'owner' as never, 'ROLE_CHANGE', '00000000-0000-4000-8000-000000000006'),
+    IdentityDeniedError,
+  );
+  assert.equal(adminRepository.commands.length, commandCount, 'runtime role spoof is denied before repository execution');
 
   identities.memberships.set(tenantA, membership(tenantA, ['admin']));
   await assert.rejects(
@@ -371,4 +390,22 @@ test('membership admin operation denies escalation, records replay identity and 
   assert.equal(lastCommand?.action, 'REVOKE_MEMBERSHIP');
   assert.equal(lastCommand?.reasonCode, 'MEMBERSHIP_REVOCATION');
   assert.ok(!JSON.stringify(adminRepository.auditEvents).includes(assertion.subject));
+
+  const scope = await new TenantContextService(identities).resolveCurrent(actor, 'synthetic-context-ref-admin-grant');
+  const databaseRepository = new MysqlIdentityAdministrationRepository({
+    host: '127.0.0.1', port: 3306, name: 'synthetic', user: 'synthetic', password: 'synthetic', connectTimeoutMs: 100,
+  });
+  try {
+    await assert.rejects(databaseRepository.execute({
+      action: 'GRANT_MEMBERSHIP', actor, scope, target: assertion, role: 'owner' as never,
+      reasonCode: 'ROLE_CHANGE', idempotencyKey: '00000000-0000-4000-8000-000000000007', requestHash: 'a'.repeat(64),
+    }), IdentityDeniedError);
+    const forgedScope = { ...scope, roles: Object.freeze(['owner']) } as unknown as AuthorizedTenantScope;
+    await assert.rejects(databaseRepository.execute({
+      action: 'GRANT_MEMBERSHIP', actor, scope: forgedScope, target: assertion, role: 'viewer',
+      reasonCode: 'ROLE_CHANGE', idempotencyKey: '00000000-0000-4000-8000-000000000008', requestHash: 'b'.repeat(64),
+    }), IdentityDeniedError);
+  } finally {
+    await databaseRepository.onApplicationShutdown();
+  }
 });

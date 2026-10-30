@@ -74,6 +74,9 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.ok(serviceScopeStep && 'sql' in serviceScopeStep);
   assert.ok(membershipStep.sql.includes('PRIMARY KEY (tenant_id, principal_id)'));
   assert.ok(membershipStep.sql.includes("CHECK (principal_kind = 'USER')"));
+  for (const role of ['owner', 'admin', 'operator', 'viewer']) {
+    assert.ok(membershipStep.sql.includes(`JSON_CONTAINS(roles, JSON_QUOTE('${role}'))`));
+  }
   assert.ok(serviceScopeStep.sql.includes("CHECK (principal_kind = 'SERVICE')"));
   assert.ok(membershipStep.sql.includes('FOREIGN KEY (principal_kind, principal_id)'));
   const adminAuditStep = IDENTITY_MIGRATION.steps.find((step) => step.id === 'create-identity-admin-audit');

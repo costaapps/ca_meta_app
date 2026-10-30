@@ -8,7 +8,8 @@ import type {
   IdentityAdministrationRepository,
   IdentityAdministrationResult,
 } from './identity-administration.repository.js';
-import { isAuthorizedTenantScope } from './identity.types.js';
+import { isAssignableMembershipRole, isLegacyTenantMappingInput } from './identity-administration.repository.js';
+import { isAuthorizedTenantScope } from './identity.service.js';
 import {
   isVerifiedIdentityAssertion,
   isVerifiedPlatformIdentityAdmin,
@@ -96,8 +97,10 @@ export class MysqlIdentityAdministrationRepository implements IdentityAdministra
 
   private isTrustedCommand(command: IdentityAdministrationCommand): boolean {
     if (command.action === 'BOOTSTRAP_TENANT') {
-      return isVerifiedPlatformIdentityAdmin(command.actor) && isVerifiedIdentityAssertion(command.target);
+      return isVerifiedPlatformIdentityAdmin(command.actor) && isVerifiedIdentityAssertion(command.target) &&
+        isLegacyTenantMappingInput(command.legacyMapping);
     }
+    if (command.action === 'GRANT_MEMBERSHIP' && !isAssignableMembershipRole(command.role)) return false;
     return isVerifiedPortalSession(command.actor) && isAuthorizedTenantScope(command.scope) &&
       command.scope.principalId === command.actor.principalId && command.scope.tenantId === command.actor.tenantId &&
       (command.action === 'REVOKE_MEMBERSHIP' || isVerifiedIdentityAssertion(command.target));
@@ -144,6 +147,13 @@ export class MysqlIdentityAdministrationRepository implements IdentityAdministra
           `INSERT INTO ca_meta_memberships
            (tenant_id, principal_id, principal_kind, roles, status, version, created_at, updated_at)
            VALUES (?, ?, 'USER', JSON_ARRAY('owner'), 'ACTIVE', 1, ?, ?)`, [tenantId, targetPrincipalId, now, now],
+        );
+        await connection.execute(
+          `INSERT INTO ca_meta_tenant_legacy_maps
+           (id, tenant_id, legacy_database_id, legacy_company_id, environment, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [randomUUID(), tenantId, command.legacyMapping.legacyDatabaseId, command.legacyMapping.legacyCompanyId,
+            command.legacyMapping.environment, now],
         );
       } else {
         tenantId = command.scope.tenantId;
@@ -231,9 +241,12 @@ export class MysqlIdentityAdministrationRepository implements IdentityAdministra
       [tenantId, principalId],
     );
     const existing = rows[0];
-    if (existing && roles(existing.roles).includes('owner') && role !== 'owner') {
-      const owners = await this.activeOwners(connection, tenantId);
-      if (owners <= 1) throw new IdentityDeniedError();
+    if (existing) {
+      const existingRoles = roles(existing.roles);
+      if (existingRoles.includes('owner') ||
+        (existingRoles.includes('admin') && role !== 'admin')) {
+        throw new IdentityDeniedError();
+      }
     }
     const now = currentTime();
     if (existing) {

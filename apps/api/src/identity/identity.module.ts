@@ -49,7 +49,7 @@ export class IdentityModule {
         },
       ],
       exports: [IDENTITY_REPOSITORY, TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService,
-        IDENTITY_ADMINISTRATION_REPOSITORY, IdentityAdministrationService, PlatformIdentityAdminAuthority],
+        IdentityAdministrationService, PlatformIdentityAdminAuthority],
     };
   }
 }

@@ -193,6 +193,19 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
         [tenantA, identityServiceId, identityTimestamp, identityTimestamp],
       ),
     );
+    await admin.query(
+      `INSERT INTO ca_meta_principals (id, kind, issuer, subject, status, created_at, updated_at)
+       VALUES (?, 'USER', 'https://issuer.synthetic.invalid', 'subject-invalid-role-check', 'ACTIVE', ?, ?)`,
+      [uuid(70_007), identityTimestamp, identityTimestamp],
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO ca_meta_memberships
+         (tenant_id, principal_id, principal_kind, roles, status, created_at, updated_at)
+         VALUES (?, ?, 'USER', JSON_ARRAY('platform_admin'), 'ACTIVE', ?, ?)`,
+        [tenantA, uuid(70_007), identityTimestamp, identityTimestamp],
+      ),
+    );
     await assert.rejects(
       admin.query(
         `INSERT INTO ca_meta_service_identity_scopes
@@ -237,15 +250,22 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
       }]);
       const platformActor = authority.verify(platformAssertion);
       const identityService = new IdentityAdministrationService(adminRepository, new TenantContextService(identityRepository));
+      const legacyMapping = {
+        legacyDatabaseId: 'synthetic-bootstrap-db', legacyCompanyId: 'synthetic-bootstrap-company', environment: 'test' as const,
+      };
       const bootKey = uuid(71_001);
-      const boot = await identityService.bootstrapTenant(platformActor, targetOwner, bootKey);
-      const bootReplay = await identityService.bootstrapTenant(platformActor, targetOwner, bootKey);
+      const boot = await identityService.bootstrapTenant(platformActor, targetOwner, legacyMapping, bootKey);
+      const bootReplay = await identityService.bootstrapTenant(platformActor, targetOwner, legacyMapping, bootKey);
       assert.equal(bootReplay.tenantId, boot.tenantId);
       assert.equal(bootReplay.replayed, true);
       await assert.rejects(
-        identityService.bootstrapTenant(platformActor, assertionVerifier.verify('different-bootstrap-owner'), bootKey),
+        identityService.bootstrapTenant(platformActor, assertionVerifier.verify('different-bootstrap-owner'), legacyMapping, bootKey),
         IdentityAdministrationConflictError,
       );
+      const bootstrapLegacyMap = await queryRows<{ legacy_database_id: string; legacy_company_id: string; environment: string }>(admin,
+        `SELECT legacy_database_id, legacy_company_id, environment FROM ca_meta_tenant_legacy_maps WHERE tenant_id = ?`, [boot.tenantId],
+      );
+      assert.deepEqual(bootstrapLegacyMap, [{ ...legacyMapping }]);
 
       const contextRef = 'synthetic-integration-context-ref-owner';
       const cookie = 'synthetic-integration-session-cookie-with-enough-entropy';
@@ -284,14 +304,27 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
         },
       }).verify(adminCookie);
       assert.ok(adminSession);
+      const adminScope = await new TenantContextService(identityRepository).resolveCurrent(adminSession, adminContextRef);
       await assert.rejects(
         identityService.grantMembership(
           adminSession, adminContextRef, assertionVerifier.verify('synthetic-escalation-target'), 'admin',
           'MEMBERSHIP_GRANT', uuid(71_005),
         ),
       );
+      // Repository direct calls still enforce role policy and preserve privileged target memberships.
+      await assert.rejects(adminRepository.execute({
+        action: 'GRANT_MEMBERSHIP', actor: adminSession, scope: adminScope, target: targetMember, role: 'viewer',
+        reasonCode: 'ROLE_CHANGE', idempotencyKey: uuid(71_007), requestHash: 'c'.repeat(64),
+      }));
+      const ownerScope = await new TenantContextService(identityRepository).resolveCurrent(portalSession, contextRef);
+      await assert.rejects(adminRepository.execute({
+        action: 'GRANT_MEMBERSHIP', actor: portalSession, scope: ownerScope,
+        target: assertionVerifier.verify('subject-synthetic-001'), role: 'operator',
+        reasonCode: 'ROLE_CHANGE', idempotencyKey: uuid(71_008), requestHash: 'd'.repeat(64),
+      }));
       const noEscalationAudit = await queryRows<{ count: string | number }>(admin,
-        'SELECT COUNT(*) AS count FROM ca_meta_identity_admin_audit WHERE idempotency_key = ?', [uuid(71_005)],
+        'SELECT COUNT(*) AS count FROM ca_meta_identity_admin_audit WHERE idempotency_key IN (?, ?, ?, ?)',
+        [uuid(71_005), uuid(71_007), uuid(71_008), uuid(71_009)],
       );
       assert.equal(Number(noEscalationAudit[0]?.count), 0);
 
@@ -305,8 +338,8 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
 
       const adminAudit = await queryRows<{ action: string; authority_kind: string; reason_code: string; request_hash: string; actor_ref: string }>(admin,
         `SELECT action, authority_kind, reason_code, request_hash, actor_ref
-         FROM ca_meta_identity_admin_audit WHERE idempotency_key IN (?, ?, ?, ?) ORDER BY action`,
-        [bootKey, grantKey, uuid(71_005), uuid(71_006)],
+         FROM ca_meta_identity_admin_audit WHERE idempotency_key IN (?, ?, ?, ?, ?, ?, ?) ORDER BY action`,
+        [bootKey, grantKey, uuid(71_005), uuid(71_006), uuid(71_007), uuid(71_008), uuid(71_009)],
       );
       assert.equal(adminAudit.length, 3, 'denied escalation is not recorded as a successful provisioning command');
       assert.ok(adminAudit.some((row) => row.action === 'BOOTSTRAP_TENANT' && row.authority_kind === 'PLATFORM_IDENTITY_ADMIN' && row.reason_code === 'INITIAL_PROVISIONING'));

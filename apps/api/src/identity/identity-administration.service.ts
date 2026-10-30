@@ -1,8 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { IdentityDeniedError } from './identity.errors.js';
-import type { IdentityAdministrationRepository, IdentityAdministrationReason } from './identity-administration.repository.js';
-import { isAuthorizedTenantScope } from './identity.types.js';
-import { TenantContextService } from './identity.service.js';
+import {
+  isAssignableMembershipRole,
+  isLegacyTenantMappingInput,
+  type IdentityAdministrationRepository,
+  type IdentityAdministrationReason,
+  type LegacyTenantMappingInput,
+} from './identity-administration.repository.js';
+import { isAuthorizedTenantScope, TenantContextService } from './identity.service.js';
 import {
   isVerifiedIdentityAssertion,
   isVerifiedPlatformIdentityAdmin,
@@ -37,14 +42,19 @@ export class IdentityAdministrationService {
   async bootstrapTenant(
     actor: VerifiedPlatformIdentityAdmin,
     target: VerifiedIdentityAssertion,
+    legacyMapping: LegacyTenantMappingInput,
     idempotencyKey: string,
   ) {
     if (!isVerifiedPlatformIdentityAdmin(actor)) throw new IdentityDeniedError();
     assertCommandInputs(target, idempotencyKey, 'INITIAL_PROVISIONING');
+    if (!isLegacyTenantMappingInput(legacyMapping)) throw new IdentityDeniedError();
     return this.repository.execute({
-      action: 'BOOTSTRAP_TENANT', actor, target, tenantId: randomUUID(),
+      action: 'BOOTSTRAP_TENANT', actor, target, tenantId: randomUUID(), legacyMapping,
       reasonCode: 'INITIAL_PROVISIONING', idempotencyKey,
-      requestHash: requestHash(['BOOTSTRAP_TENANT', target.issuer, target.subject, 'owner', 'INITIAL_PROVISIONING']),
+      requestHash: requestHash([
+        'BOOTSTRAP_TENANT', target.issuer, target.subject, 'owner', 'INITIAL_PROVISIONING',
+        legacyMapping.legacyDatabaseId, legacyMapping.legacyCompanyId, legacyMapping.environment,
+      ]),
     });
   }
 
@@ -57,6 +67,7 @@ export class IdentityAdministrationService {
     idempotencyKey: string,
   ) {
     if (!isVerifiedPortalSession(actor)) throw new IdentityDeniedError();
+    if (!isAssignableMembershipRole(role)) throw new IdentityDeniedError();
     assertCommandInputs(target, idempotencyKey, reasonCode);
     const scope = await this.contexts.resolveCurrent(actor, contextRef);
     if (!isAuthorizedTenantScope(scope) || (!scope.roles.includes('owner') && !scope.roles.includes('admin'))) {
