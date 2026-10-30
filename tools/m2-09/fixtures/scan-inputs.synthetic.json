@@ -1,0 +1,21 @@
+{
+  "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
+  "images": {
+    "web": {
+      "subjectName": "docker.io/synthetic/ca-meta-web",
+      "imageReference": "docker.io/synthetic/ca-meta-web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
+      "archive": "web.tar",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "api": {
+      "subjectName": "docker.io/synthetic/ca-meta-api",
+      "imageReference": "docker.io/synthetic/ca-meta-api@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
+      "archive": "api.tar",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  }
+}
