@@ -46,6 +46,12 @@ Local checks on Windows PowerShell with Node `v24.22.2` / npm `11.19.1`:
 
 The package tests use synthetic keys, origins and memberships only. Real Suite4 issuer/key ownership/rotation, claims, membership mapping, browser handoff/cookies and production origins remain **Not confirmed**. The package branch has not yet been pushed; PR/CI and milestone integration remain coordinator-owned.
 
+### Exact-SHA review correction (pending final DB gate)
+
+Review of the prior candidate `158472020915ff0cb59ddfc1b6e86767a3ff574c` found that the earlier recovery path matched issuer/JTI and browser binding but not the compact signed ticket bytes. The M3.02 follow-up now carries only `SHA-256(compactTicket)` and compares it with the consumed-JTI row before recovery. A different valid signed ticket reusing the same JTI and identity/challenge/browser fields is denied. Appended migration `202610300004-exact-ticket-retry-binding` is schema v6; it adds nullable `ticket_sha256` to existing `ca_meta_portal_ticket_jtis` rows. Rows created before this migration have no reconstructable digest and fail closed for retries. The M3.06 assets migration currently numbered v6 must be rebased and assigned v7 by its owner; M2.07's historical schema-v3 release lock stays unchanged.
+
+The exchange also verifies any prior portal cookie with `touchLastSeen: false`, and the opt-in MariaDB case compares `idle_expires_at` and `last_seen_at` across retry. Runtime ticket bounds now match the local profile: subject ≤128, tenant ≤48, session_iss ≤128, base64url JTI 16–256, and base64url preauth challenge 32–128. Only M1.08's synthetic walkthrough and focused source tests are intended in this package run. Do not treat the older MariaDB pass above as evidence for this changed migration/hash path; the coordinator will run the opt-in race spec once on the integrated candidate. This branch has not rerun MariaDB or Docker.
+
 ## M3.01 implementation summary
 
 - Adds Principal, Membership, and separate service-identity scope migration version 4, with kind checks, tenant/principal foreign keys and exact issuer/subject uniqueness.

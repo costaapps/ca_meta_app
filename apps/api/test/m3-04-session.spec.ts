@@ -188,7 +188,13 @@ test('pre-auth binding is browser-specific; exchange is recoverable only for the
   const assertion = assertions.verify();
   const jti = hash('synthetic-ticket-jti-1');
   const challengeHash = hash(firstChallenge.challengeRef);
-  const options = { ticketJtiSha256: jti, ticketExpiresAt: new Date(Date.now() + 30_000), ticketChallengeSha256: challengeHash, preAuth };
+  const options = {
+    ticketJtiSha256: jti,
+    ticketSha256: hash('synthetic-compact-ticket-1'),
+    ticketExpiresAt: new Date(Date.now() + 30_000),
+    ticketChallengeSha256: challengeHash,
+    preAuth,
+  };
   const issued = await sessions.issueFromVerifiedAssertion(assertion, tenantA, options);
   const retry = await sessions.issueFromVerifiedAssertion(assertion, tenantA, options);
   assert.equal(retry.sessionId, issued.sessionId);
@@ -206,6 +212,7 @@ test('pre-auth binding is browser-specific; exchange is recoverable only for the
   assert.ok(nextPreAuth);
   const nextIssued = await sessions.issueFromVerifiedAssertion(assertion, tenantB, {
     ticketJtiSha256: hash('synthetic-ticket-jti-2'),
+    ticketSha256: hash('synthetic-compact-ticket-2'),
     ticketExpiresAt: new Date(Date.now() + 30_000),
     ticketChallengeSha256: hash(nextChallenge.challengeRef),
     preAuth: nextPreAuth,
@@ -378,6 +385,7 @@ test('DELETE session revokes only an owned same-tenant session; logout still rev
   assert.ok(preAuth);
   const issued = await sessions.issueFromVerifiedAssertion(assertions.verify(), tenantA, {
     ticketJtiSha256: hash('delete-session-jti'),
+    ticketSha256: hash('synthetic-delete-ticket'),
     ticketExpiresAt: new Date(Date.now() + 30_000),
     ticketChallengeSha256: hash(started.challengeRef),
     preAuth,
@@ -421,6 +429,7 @@ test('DELETE session revokes only an owned same-tenant session; logout still rev
   assert.ok(logoutPreAuth);
   const logoutIssued = await sessions.issueFromVerifiedAssertion(assertions.verify(), tenantA, {
     ticketJtiSha256: hash('logout-session-jti'),
+    ticketSha256: hash('synthetic-logout-ticket'),
     ticketExpiresAt: new Date(Date.now() + 30_000),
     ticketChallengeSha256: hash(logoutChallenge.challengeRef),
     preAuth: logoutPreAuth,
@@ -449,6 +458,7 @@ test('GET session consumes SESSION_STATUS quota with verified principal, tenant,
   assert.ok(preAuth);
   const issued = await sessions.issueFromVerifiedAssertion(assertions.verify(), tenantA, {
     ticketJtiSha256: hash('session-status-jti'),
+    ticketSha256: hash('synthetic-session-status-ticket'),
     ticketExpiresAt: new Date(Date.now() + 30_000),
     ticketChallengeSha256: hash(challenge.challengeRef),
     preAuth,

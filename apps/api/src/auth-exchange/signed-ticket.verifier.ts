@@ -28,6 +28,8 @@ export interface ValidatedEntryTicket {
   readonly assertion: VerifiedIdentityAssertion;
   readonly requestedTenantId: string;
   readonly ticketJtiSha256: string;
+  /** Hash of the compact signed ticket; raw ticket material is never persisted. */
+  readonly ticketSha256: string;
   readonly ticketExpiresAt: Date;
   readonly ticketChallengeSha256: string;
 }
@@ -209,6 +211,11 @@ function boundedString(value: unknown, maximumLength: number): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= maximumLength && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
+function boundedBase64Url(value: unknown, minimumLength: number, maximumLength: number): value is string {
+  return typeof value === 'string' && value.length >= minimumLength && value.length <= maximumLength &&
+    /^[A-Za-z0-9_-]+$/.test(value);
+}
+
 function validTicketRoles(value: unknown): value is readonly MembershipRole[] {
   return Array.isArray(value) && value.length > 0 && value.length <= 8 &&
     value.every((role): role is MembershipRole => typeof role === 'string' && ALLOWED_ROLES.has(role as MembershipRole)) &&
@@ -234,11 +241,11 @@ function parseClaims(value: unknown, configuration: TicketExchangeConfiguration,
     !exactAudience(value.aud, configuration.audience) ||
     value.purpose !== 'META_PORTAL_ENTRY' ||
     !Number.isSafeInteger(value.ver) || value.ver !== 1 ||
-    !boundedString(value.sub, 255) ||
-    !boundedString(value.tenant, 255) ||
-    !boundedString(value.session_iss, 512) ||
-    !boundedString(value.jti, 255) ||
-    !boundedString(value.preauth_challenge, 512) ||
+    !boundedString(value.sub, 128) ||
+    !boundedString(value.tenant, 48) ||
+    !boundedString(value.session_iss, 128) ||
+    !boundedBase64Url(value.jti, 16, 256) ||
+    !boundedBase64Url(value.preauth_challenge, 32, 128) ||
     !validTicketRoles(value.roles) ||
     !Number.isSafeInteger(value.iat) ||
     !Number.isSafeInteger(value.exp)
@@ -329,6 +336,7 @@ export class SignedEntryTicketVerifier {
       assertion,
       requestedTenantId: claims.tenant,
       ticketJtiSha256: createHash('sha256').update(claims.iss, 'utf8').update('\0').update(claims.jti, 'utf8').digest('hex'),
+      ticketSha256: createHash('sha256').update(ticket, 'utf8').digest('hex'),
       // Keep the JTI tombstone through the final instant at which skew still permits acceptance.
       ticketExpiresAt: new Date((claims.exp + this.configuration.clockSkewSeconds) * 1000),
       ticketChallengeSha256: createHash('sha256').update(claims.preauth_challenge, 'utf8').digest('hex'),

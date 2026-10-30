@@ -6,6 +6,7 @@ import { MIGRATIONS } from '../src/database/migrations/migrations.js';
 import { DURABLE_WORK_MIGRATION } from '../src/database/migrations/durable-work.js';
 import { IDENTITY_MIGRATION } from '../src/database/migrations/identity.js';
 import { PORTAL_SESSIONS_MIGRATION } from '../src/database/migrations/portal-sessions.js';
+import { TICKET_RETRY_MIGRATION } from '../src/database/migrations/ticket-retry.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -46,8 +47,8 @@ test('migration configuration rejects runtime account reuse and privileged built
 });
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
-  assert.equal(MIGRATIONS.length, 5);
-  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5]);
+  assert.equal(MIGRATIONS.length, 6);
+  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6]);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -98,6 +99,14 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.ok(sessionStep.sql.includes('absolute_expires_at'));
   const ticketStep = PORTAL_SESSIONS_MIGRATION.steps.find((step) => step.id === 'create-portal-ticket-jtis');
   assert.ok(ticketStep && 'sql' in ticketStep && ticketStep.sql.includes('PRIMARY KEY (issuer, jti_hash)'));
+  assert.equal(TICKET_RETRY_MIGRATION.id, '202610300004-exact-ticket-retry-binding');
+  assert.equal(TICKET_RETRY_MIGRATION.schemaVersion, 6);
+  assert.deepEqual(TICKET_RETRY_MIGRATION.steps.map((step) => step.id), ['add-exact-portal-ticket-hash']);
+  const ticketHashStep = TICKET_RETRY_MIGRATION.steps[0];
+  assert.ok(ticketHashStep && 'sql' in ticketHashStep);
+  assert.ok(ticketHashStep.sql.includes('ticket_sha256 CHAR(64)'));
+  assert.ok(ticketHashStep.sql.includes('NULL'));
+  assert.ok(ticketHashStep.definition.includes('store only SHA-256'));
 });
 
 test('migration fingerprints detect definition configuration and callback drift', () => {

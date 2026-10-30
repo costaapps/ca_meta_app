@@ -34,6 +34,8 @@ export interface PortalPreAuthServicePort {
 
 export interface PortalSessionIssueOptions {
   readonly ticketJtiSha256: string;
+  /** Lowercase SHA-256 of the exact compact signed ticket; never the raw ticket. */
+  readonly ticketSha256: string;
   readonly ticketExpiresAt: Date;
   readonly ticketChallengeSha256: string;
   readonly preAuth: VerifiedPortalPreAuth;
@@ -69,7 +71,7 @@ export abstract class PortalSessionIssuerPort {
 }
 
 export interface PortalSessionVerifierPort {
-  verify(cookieValue: string | undefined): Promise<VerifiedPortalSession | undefined>;
+  verify(cookieValue: string | undefined, options?: { readonly touchLastSeen?: boolean }): Promise<VerifiedPortalSession | undefined>;
 }
 
 export interface PortalExchangeAbuseLimitPort {

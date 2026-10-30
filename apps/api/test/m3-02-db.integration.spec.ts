@@ -90,7 +90,13 @@ function encoded(value: string): string {
   return Buffer.from(value, 'utf8').toString('base64url');
 }
 
-function makeTicket(tenantId: string, subject: string, challengeRef: string, jti: string): string {
+function makeTicket(
+  tenantId: string,
+  subject: string,
+  challengeRef: string,
+  jti: string,
+  extraClaims: Readonly<Record<string, unknown>> = {},
+): string {
   const issuedAt = Math.floor(Date.now() / 1000) - 3;
   const header = encoded(JSON.stringify({ alg: 'RS256', kid: 'm3-02-db-synthetic', typ: 'JWT' }));
   const claims = encoded(JSON.stringify({
@@ -106,18 +112,19 @@ function makeTicket(tenantId: string, subject: string, challengeRef: string, jti
     iat: issuedAt,
     exp: issuedAt + 45,
     preauth_challenge: challengeRef,
+    ...extraClaims,
   }));
   const signingInput = `${header}.${claims}`;
   const signature = sign('RSA-SHA256', Buffer.from(signingInput, 'ascii'), pair.privateKey).toString('base64url');
   return `${signingInput}.${signature}`;
 }
 
-function exchangeContext(cookieValue: string): ExchangeRequestContext {
+function exchangeContext(cookieValue: string, portalSessionCookie?: string): ExchangeRequestContext {
   return {
     headers: {
       origin,
       'sec-fetch-site': 'same-origin',
-      cookie: `${PRE_AUTH_COOKIE_NAME}=${cookieValue}`,
+      cookie: `${PRE_AUTH_COOKIE_NAME}=${cookieValue}${portalSessionCookie ? `; ${PORTAL_SESSION_COOKIE_NAME}=${portalSessionCookie}` : ''}`,
     },
     requestId: randomUUID(),
     clientIp: '127.0.0.1',
@@ -131,6 +138,11 @@ async function queryRows<T>(connection: Connection, sql: string, values: unknown
 
 function sessionCookie(cookies: readonly string[]): string | undefined {
   return cookies.find((value) => value.startsWith(`${PORTAL_SESSION_COOKIE_NAME}=`))?.split(';', 1)[0];
+}
+
+function sessionCookieValue(cookies: readonly string[]): string | undefined {
+  const cookie = sessionCookie(cookies);
+  return cookie?.slice(`${PORTAL_SESSION_COOKIE_NAME}=`.length);
 }
 
 test('MariaDB persists one ticket session and recovers only for its original browser binding', {
@@ -240,21 +252,57 @@ test('MariaDB persists one ticket session and recovers only for its original bro
       [attemptA.sessionRef, principalId, tenantId],
     );
     assert.deepEqual(persistedSessions, [{ id: attemptA.sessionRef }], 'concurrent exchanges persist exactly one session');
-    const persistedTicket = await queryRows<{ session_id: string; pre_auth_id: string }>(admin,
-      'SELECT session_id, pre_auth_id FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?',
+    const persistedTicket = await queryRows<{ session_id: string; pre_auth_id: string; ticket_sha256: string | null }>(admin,
+      'SELECT session_id, pre_auth_id, ticket_sha256 FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?',
       [issuer, jtiHash],
     );
     assert.equal(persistedTicket.length, 1, 'one JTI row records the committed exchange');
     assert.equal(persistedTicket[0]?.session_id, attemptA.sessionRef);
+    assert.equal(persistedTicket[0]?.ticket_sha256, createHash('sha256').update(ticket, 'utf8').digest('hex'));
+    assert.notEqual(persistedTicket[0]?.ticket_sha256, ticket, 'the compact ticket itself is never stored');
 
+    const sessionSecret = sessionCookieValue(responseA.cookies);
+    assert.ok(sessionSecret);
+    const idleBeforeRetry = await queryRows<{ idle_expires_at: string; last_seen_at: string }>(admin,
+      'SELECT idle_expires_at, last_seen_at FROM ca_meta_portal_sessions WHERE id = ?', [attemptA.sessionRef],
+    );
     const recoveredResponse = captureResponse();
-    const recovered = await exchangeA.exchange(value, exchangeContext(started.cookieValue), recoveredResponse.response);
+    const recovered = await exchangeA.exchange(value, exchangeContext(started.cookieValue, sessionSecret), recoveredResponse.response);
     assert.equal(recovered.sessionRef, attemptA.sessionRef, 'an exact response-loss retry returns the same session');
     assert.equal(sessionCookie(recoveredResponse.cookies), sessionCookie(responseA.cookies));
+    assert.deepEqual(await queryRows<{ idle_expires_at: string; last_seen_at: string }>(admin,
+      'SELECT idle_expires_at, last_seen_at FROM ca_meta_portal_sessions WHERE id = ?', [attemptA.sessionRef],
+    ), idleBeforeRetry, 'a recovery retry does not touch or extend the session idle expiry');
     assert.deepEqual(await queryRows<{ id: string }>(admin,
       'SELECT id FROM ca_meta_portal_sessions WHERE principal_id = ? AND tenant_id = ? AND revoked_at IS NULL',
       [principalId, tenantId],
     ), [{ id: attemptA.sessionRef }], 'an exact retry creates no additional session');
+
+    const originalClaims = JSON.parse(Buffer.from(ticket.split('.')[1] ?? '', 'base64url').toString('utf8')) as Record<string, unknown>;
+    const changedTicket = makeTicket(tenantId, subject, started.challengeRef, jti, {
+      ...originalClaims,
+      session_iss: 'different-session-issuer-still-within-profile',
+    });
+    assert.notEqual(changedTicket, ticket);
+    const changedClaims = JSON.parse(Buffer.from(changedTicket.split('.')[1] ?? '', 'base64url').toString('utf8')) as Record<string, unknown>;
+    for (const claim of ['iss', 'sub', 'tenant', 'jti', 'preauth_challenge', 'iat', 'exp']) {
+      assert.equal(changedClaims[claim], originalClaims[claim], `${claim} remains the same on the different compact ticket`);
+    }
+    assert.notEqual(changedClaims.session_iss, originalClaims.session_iss);
+    const changedTicketResponse = captureResponse();
+    await assert.rejects(
+      exchangeA.exchange({ ticket: changedTicket, challengeRef: started.challengeRef },
+        exchangeContext(started.cookieValue, sessionSecret), changedTicketResponse.response),
+      UnauthorizedException,
+    );
+    assert.equal(changedTicketResponse.cookies.length, 0, 'a different signed ticket reusing the same JTI and browser binding cannot recover');
+    assert.deepEqual(await queryRows<{ ticket_sha256: string | null }>(admin,
+      'SELECT ticket_sha256 FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?', [issuer, jtiHash],
+    ), [{ ticket_sha256: createHash('sha256').update(ticket, 'utf8').digest('hex') }], 'the original ticket digest remains authoritative');
+    assert.deepEqual(await queryRows<{ id: string }>(admin,
+      'SELECT id FROM ca_meta_portal_sessions WHERE principal_id = ? AND tenant_id = ? AND revoked_at IS NULL',
+      [principalId, tenantId],
+    ), [{ id: attemptA.sessionRef }], 'the different compact ticket creates no session');
 
     await admin.query(
       'UPDATE ca_meta_portal_sessions SET idle_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE id = ?',

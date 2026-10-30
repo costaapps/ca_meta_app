@@ -222,7 +222,8 @@ export class TicketExchangeService {
     const priorCookie = readCookie(context, PORTAL_SESSION_COOKIE_NAME);
     if (priorCookie) {
       try {
-        priorSession = await this.sessionVerifier.verify(priorCookie);
+        // Exact recovery must not extend the existing session's idle lifetime.
+        priorSession = await this.sessionVerifier.verify(priorCookie, { touchLastSeen: false });
       } catch {
         unavailable();
       }
@@ -230,6 +231,7 @@ export class TicketExchangeService {
 
     const options: PortalSessionIssueOptions = Object.freeze({
       ticketJtiSha256: ticket.ticketJtiSha256,
+      ticketSha256: ticket.ticketSha256,
       ticketExpiresAt: ticket.ticketExpiresAt,
       ticketChallengeSha256: ticket.ticketChallengeSha256,
       preAuth,

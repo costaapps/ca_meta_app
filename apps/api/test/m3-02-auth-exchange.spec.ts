@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { test } from 'node:test';
 import type { Response } from 'express';
 import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
@@ -153,9 +153,11 @@ class FakeSessions implements PortalSessionIssuerPort {
 
 class FakeSessionVerifier implements PortalSessionVerifierPort {
   readonly seen: (string | undefined)[] = [];
+  readonly verificationOptions: ({ readonly touchLastSeen?: boolean } | undefined)[] = [];
   result?: VerifiedPortalSession;
-  async verify(cookie: string | undefined): Promise<VerifiedPortalSession | undefined> {
+  async verify(cookie: string | undefined, options?: { readonly touchLastSeen?: boolean }): Promise<VerifiedPortalSession | undefined> {
     this.seen.push(cookie);
+    this.verificationOptions.push(options);
     return this.result;
   }
 }
@@ -249,9 +251,10 @@ function makeService(options: {
 
 test('valid signed ticket creates a session with only server membership roles in the DTO', async () => {
   const { service, sessions, preAuth, abuseLimit, cookieWriter } = makeService();
+  const ticket = makeTicket();
   const { response, headers } = makeResponse();
   const result = await service.exchange(
-    { ticket: makeTicket(), challengeRef: 'preauth-reference-123' },
+    { ticket, challengeRef: 'preauth-reference-123' },
     context(),
     response,
   );
@@ -268,9 +271,13 @@ test('valid signed ticket creates a session with only server membership roles in
   assert.equal(sessions.requestedTenants[0], 'tenant-a');
   assert.equal(isVerifiedIdentityAssertion(sessions.assertions[0]), true);
   assert.equal(sessions.options[0].preAuth, verifiedPreAuth);
-  assert.equal(Object.keys(sessions.options[0]).some((key) => /ticket|roles/i.test(key) && key !== 'ticketJtiSha256' && key !== 'ticketExpiresAt' && key !== 'ticketChallengeSha256'), false);
+  assert.equal(Object.keys(sessions.options[0]).some((key) => /ticket|roles/i.test(key) && ![
+    'ticketJtiSha256', 'ticketSha256', 'ticketExpiresAt', 'ticketChallengeSha256',
+  ].includes(key)), false);
   assert.match(sessions.options[0].ticketJtiSha256, /^[a-f0-9]{64}$/);
   assert.notEqual(sessions.options[0].ticketJtiSha256, RAW_JTI);
+  assert.equal(sessions.options[0].ticketSha256, createHash('sha256').update(ticket, 'utf8').digest('hex'));
+  assert.notEqual(sessions.options[0].ticketSha256, ticket);
   assert.equal(sessions.options[0].ticketChallengeSha256.length, 64);
   assert.equal(preAuth.calls.length, 1);
   assert.equal(preAuth.calls[0].cookie, PREAUTH_COOKIE);
@@ -330,6 +337,7 @@ test('a valid existing session proof is passed only as a rotation capability', a
     makeResponse().response,
   );
   assert.equal(sessionVerifier.seen[0], SESSION_COOKIE);
+  assert.deepEqual(sessionVerifier.verificationOptions[0], { touchLastSeen: false });
   assert.equal(sessions.options[0].priorSession, prior);
 });
 
@@ -470,9 +478,17 @@ test('issuer, audience, tenant, subject, JTI, challenge, role, and time claims a
     ['malformed ticket roles', { roles: 'owner' }],
     ['duplicate ticket roles', { roles: ['owner', 'owner'] }],
     ['wrong tenant type', { tenant: 14 }],
+    ['oversized subject', { sub: 's'.repeat(129) }],
     ['empty subject', { sub: '' }],
+    ['oversized tenant', { tenant: 't'.repeat(49) }],
     ['missing JTI', { jti: undefined }],
+    ['short JTI', { jti: 'j'.repeat(15) }],
+    ['oversized JTI', { jti: 'j'.repeat(257) }],
+    ['non-base64url JTI', { jti: `${'j'.repeat(15)}!` }],
     ['missing challenge', { preauth_challenge: undefined }],
+    ['short preauth challenge', { preauth_challenge: 'c'.repeat(31) }],
+    ['oversized preauth challenge', { preauth_challenge: 'c'.repeat(129) }],
+    ['non-base64url preauth challenge', { preauth_challenge: `${'c'.repeat(31)}!` }],
     ['missing roles claim', { roles: undefined }],
     ['expired ticket beyond skew', { exp: now - 6 }],
     ['future issued-at beyond skew', { iat: now + 6 }],

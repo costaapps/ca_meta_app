@@ -41,6 +41,7 @@ interface PrincipalMembershipRow extends RowDataPacket {
 interface TicketRow extends RowDataPacket {
   pre_auth_id: string;
   session_id: string;
+  ticket_sha256: string | null;
   ticket_expires_at: string;
 }
 
@@ -180,7 +181,7 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
       }
 
       const [ticketRows] = await connection.execute<TicketRow[]>(
-        `SELECT pre_auth_id, session_id, ticket_expires_at
+        `SELECT pre_auth_id, session_id, ticket_sha256, ticket_expires_at
          FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ? AND ticket_expires_at > UTC_TIMESTAMP(6) LIMIT 1`,
         [input.assertion.issuer, input.ticketJtiSha256],
       );
@@ -232,9 +233,9 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
       );
       const [ticketInsert] = await connection.execute<ResultSetHeader>(
         `INSERT INTO ca_meta_portal_ticket_jtis
-         (issuer, jti_hash, pre_auth_id, session_id, ticket_expires_at, consumed_at)
-         VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`,
-        [input.assertion.issuer, input.ticketJtiSha256, preAuth.id, input.sessionId, input.ticketExpiresAt],
+         (issuer, jti_hash, ticket_sha256, pre_auth_id, session_id, ticket_expires_at, consumed_at)
+         VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`,
+        [input.assertion.issuer, input.ticketJtiSha256, input.ticketSha256, preAuth.id, input.sessionId, input.ticketExpiresAt],
       );
       if (ticketInsert.affectedRows !== 1) throw new IdentityDeniedError();
       const [expiryRows] = await connection.execute<ExpiryRow[]>(
@@ -272,7 +273,7 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
     ticket: TicketRow,
     preAuth: PreAuthRow,
   ): Promise<PortalSessionRecord> {
-    if (ticket.pre_auth_id !== preAuth.id || preAuth.consumed_at === null) {
+    if (ticket.pre_auth_id !== preAuth.id || ticket.ticket_sha256 !== input.ticketSha256 || preAuth.consumed_at === null) {
       throw new IdentityDeniedError();
     }
     const [rows] = await connection.execute<ActiveSessionRow[]>(

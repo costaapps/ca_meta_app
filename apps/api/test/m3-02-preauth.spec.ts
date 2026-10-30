@@ -54,7 +54,7 @@ class FakePreAuth extends PortalPreAuthService {
   async begin(): Promise<StartedPortalPreAuth> {
     this.beginCalls += 1;
     return Object.freeze({
-      challengeRef: 'synthetic-browser-challenge-123',
+      challengeRef: 'synthetic-browser-challenge-1234',
       cookieValue: markerCookie,
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
       entryMode: 'PORTAL_TOP_LEVEL',
@@ -104,7 +104,7 @@ function ticketFor(privateKey: KeyObject): string {
     jti: 'synthetic-one-use-jti',
     iat: now,
     exp: now + 30,
-    preauth_challenge: 'synthetic-browser-challenge-123',
+    preauth_challenge: 'synthetic-browser-challenge-1234',
   })).toString('base64url');
   const signingInput = `${header}.${claims}`;
   return `${signingInput}.${sign('RSA-SHA256', Buffer.from(signingInput, 'ascii'), privateKey).toString('base64url')}`;
@@ -223,12 +223,13 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
       ...sameOriginHeaders(context.origin),
       cookie: '__Host-meta_preauth=synthetic-browser-cookie-value-12345678901234567890',
     },
-    body: JSON.stringify({ ticket: 'synthetic-not-a-valid-ticket', challengeRef: 'synthetic-browser-challenge-123' }),
+    body: JSON.stringify({ ticket: 'synthetic-not-a-valid-ticket', challengeRef: 'synthetic-browser-challenge-1234' }),
   });
-  assert.equal(attemptLimited.status, 429);
+  const attemptError = await attemptLimited.json();
+  assert.equal(attemptLimited.status, 429, `unexpected exchange rate-limit response: ${JSON.stringify(attemptError)}`);
   assert.equal(attemptLimited.headers.get('retry-after'), '60');
   assert.equal(attemptLimited.headers.get('set-cookie'), null);
-  assert.deepEqual(await attemptLimited.json(), {
+  assert.deepEqual(attemptError, {
     code: 'RATE_LIMITED',
     safeMessage: 'Too many requests. Try again later.',
     requestId: attemptLimited.headers.get('x-request-id'),
@@ -247,7 +248,7 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
       ...sameOriginHeaders(context.origin),
       cookie: '__Host-meta_preauth=synthetic-browser-cookie-value-12345678901234567890',
     },
-    body: JSON.stringify({ ticket: signedTicket, challengeRef: 'synthetic-browser-challenge-123' }),
+    body: JSON.stringify({ ticket: signedTicket, challengeRef: 'synthetic-browser-challenge-1234' }),
   });
   assert.equal(exchange.status, 429);
   assert.equal(exchange.headers.get('retry-after'), '60');
