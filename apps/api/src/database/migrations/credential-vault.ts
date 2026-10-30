@@ -171,8 +171,8 @@ const createCredentialAccessAudit = {
 
 const steps = [createCredentialSecrets, createCredentialRotations, createCredentialAccessAudit] as const;
 const migration = {
-  id: '202610300009-credential-vault',
-  schemaVersion: 9,
+  id: '202610300010-credential-vault',
+  schemaVersion: 10,
   minimumSupportedApiVersion: 1,
   steps,
 } as const;

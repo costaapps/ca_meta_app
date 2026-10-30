@@ -50,8 +50,8 @@ test('migration configuration rejects runtime account reuse and privileged built
 });
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
-  assert.equal(MIGRATIONS.length, 9);
-  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.equal(MIGRATIONS.length, 10);
+  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -71,9 +71,10 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(IDENTITY_MIGRATION.id, '202610300001-principals-memberships');
   assert.equal(META_ASSETS_MIGRATION.schemaVersion, 7);
   assert.equal(MAGIC_LINKS_MIGRATION.schemaVersion, 8);
-  assert.equal(META_CREDENTIAL_VAULT_MIGRATION.schemaVersion, 9);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 3]?.id, META_ASSETS_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 2]?.id, MAGIC_LINKS_MIGRATION.id);
+  assert.equal(META_CREDENTIAL_VAULT_MIGRATION.schemaVersion, 10);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 4]?.id, META_ASSETS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 3]?.id, MAGIC_LINKS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 2]?.schemaVersion, 9);
   assert.equal(MIGRATIONS[MIGRATIONS.length - 1]?.id, META_CREDENTIAL_VAULT_MIGRATION.id);
   assert.ok(META_ASSETS_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.ok(MAGIC_LINK_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));

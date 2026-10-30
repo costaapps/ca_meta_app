@@ -13,7 +13,7 @@ Status: proposed M3.07 implementation; exact-candidate validation pending. Produ
 
 ## Persistence
 
-Migration `202610300009-credential-vault` (schema version 9, after M3.03 v8) adds:
+Migration `202610300010-credential-vault` (schema version 10, after M3.05 session entry-mode v9) adds:
 
 - `ca_meta_credential_secrets`: binary envelope and duplicated context protected by a composite foreign key to credential metadata.
 - `ca_meta_credential_rotations`: one versioned rotation state per target key, with resumable cursor and expiring lease.
