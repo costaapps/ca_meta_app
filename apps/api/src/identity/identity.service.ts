@@ -11,11 +11,13 @@ import {
   type VerifiedServiceTenantScope,
 } from './identity.types.js';
 import {
+  isVerifiedIdentityAssertion,
   isVerifiedPersistedJobContext,
   isVerifiedPortalSession,
   isVerifiedServiceCredential,
   type VerifiedPersistedJobContext,
   type VerifiedPortalSession,
+  type VerifiedIdentityAssertion,
   type VerifiedServiceCredential,
 } from './identity.trust.js';
 
@@ -117,6 +119,24 @@ export class TenantContextService {
       roles: membership.roles,
       membershipVersion: membership.version,
       contextVersion: session.contextVersion,
+    });
+  }
+
+  /** Validate first-login identity and membership without treating request tenant IDs as authority. */
+  async resolveInitialTenantForIdentity(
+    assertion: VerifiedIdentityAssertion,
+    requestedTenantId: string,
+  ): Promise<{ readonly principalId: string; readonly tenantId: string; readonly roles: readonly MembershipRole[]; readonly membershipVersion: number }> {
+    if (!isVerifiedIdentityAssertion(assertion) || !requestedTenantId) throw new IdentityDeniedError();
+    const principal = await this.repository.findPrincipalByIssuerSubject(assertion.issuer, assertion.subject);
+    if (!principal || principal.kind !== 'USER' || principal.status !== 'ACTIVE') throw new IdentityDeniedError();
+    const membership = await this.repository.findMembership(principal.id, requestedTenantId);
+    assertCurrentMembership(membership, principal.id, requestedTenantId);
+    return Object.freeze({
+      principalId: principal.id,
+      tenantId: membership.tenantId,
+      roles: Object.freeze([...membership.roles]),
+      membershipVersion: membership.version,
     });
   }
 

@@ -150,7 +150,9 @@ const TEST_ENVIRONMENT: ApiEnvironment = {
   port: 0,
   bindAddress: '127.0.0.1',
   allowedHosts: ['127.0.0.1', 'localhost'],
+  allowedOrigins: ['http://127.0.0.1', 'http://localhost'],
   trustedProxyCidrs: false,
+  portalSessionRecoveryKey: 'synthetic-test-session-recovery-key-32-bytes-minimum',
   database: {
     host: '127.0.0.1',
     port: 3306,
@@ -315,6 +317,7 @@ test('configuration validation requires typed fields, reports names only, and re
     API_PORT: '0',
     API_BIND_ADDRESS: '127.0.0.1',
     API_ALLOWED_HOSTS: '127.0.0.1,localhost',
+    API_ALLOWED_ORIGINS: 'http://127.0.0.1,http://localhost',
     API_TRUSTED_PROXIES: 'none',
     API_DATABASE_HOST: '127.0.0.1',
     API_DATABASE_PORT: '3306',
@@ -322,6 +325,7 @@ test('configuration validation requires typed fields, reports names only, and re
     API_DATABASE_USER: 'synthetic_user',
     API_DATABASE_PASSWORD: 'synthetic-marker-value',
     API_DATABASE_CONNECT_TIMEOUT_MS: '250',
+    API_PORTAL_SESSION_RECOVERY_KEY: 'synthetic-test-session-recovery-key-32-bytes-minimum',
   };
 
   await t.test('accepts a complete explicit configuration', () => {
@@ -365,6 +369,16 @@ test('configuration validation requires typed fields, reports names only, and re
     assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_HOSTS: '*.example.test' }), /API_ALLOWED_HOSTS/);
     assert.throws(() => validateEnvironment({ ...valid, API_DATABASE_PASSWORD: '   ' }), /API_DATABASE_PASSWORD/);
     assert.throws(() => validateEnvironment({ ...valid, API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON: '[{"issuer":"x"}]' }), /API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON/);
+    assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_ORIGINS: 'https://*.example.test' }), /API_ALLOWED_ORIGINS/);
+    assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_ORIGINS: 'http://portal.example.test' }), /API_ALLOWED_ORIGINS/);
+    assert.deepEqual(validateEnvironment({ ...valid, API_ALLOWED_ORIGINS: '', API_PORTAL_SESSION_RECOVERY_KEY: '' }).allowedOrigins, []);
+    const production = { ...valid, NODE_ENV: 'production', API_PORT: '3000', API_BIND_ADDRESS: '0.0.0.0',
+      API_ALLOWED_HOSTS: 'portal.example.test', API_ALLOWED_ORIGINS: '', API_PORTAL_SESSION_RECOVERY_KEY: '' };
+    assert.throws(
+      () => validateEnvironment(production),
+      (error: unknown) => error instanceof EnvironmentValidationError &&
+        error.fieldNames.includes('API_ALLOWED_ORIGINS') && error.fieldNames.includes('API_PORTAL_SESSION_RECOVERY_KEY'),
+    );
   });
 });
 

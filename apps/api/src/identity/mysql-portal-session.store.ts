@@ -1,0 +1,369 @@
+import { Injectable, type OnApplicationShutdown } from '@nestjs/common';
+import { createPool, type Pool, type PoolConnection, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
+import type { ApiEnvironment } from '../config/environment.js';
+import { parseMembershipRoles } from './mysql-identity.repository.js';
+import type { MembershipRole } from './identity.types.js';
+import type { StoredPortalSession, VerifiedPortalSession } from './identity.trust.js';
+import { IdentityDeniedError } from './identity.errors.js';
+import type { PortalPreAuthRecord, PortalSessionIssueRecord, PortalSessionRecord, PortalSessionStore } from './portal-session.service.js';
+
+interface PreAuthRow extends RowDataPacket {
+  id: string;
+  challenge_hash: string;
+  browser_cookie_hash: string;
+  entry_mode: string;
+  expires_at: string;
+  consumed_at: string | null;
+}
+
+interface ActiveSessionRow extends RowDataPacket {
+  id: string;
+  principal_id: string;
+  tenant_id: string;
+  context_version: number | string;
+  context_ref_hash: string;
+  csrf_token_hash: string;
+  secret_hash?: string;
+  idle_expires_at: string;
+  absolute_expires_at: string;
+}
+
+interface PrincipalMembershipRow extends RowDataPacket {
+  principal_id: string;
+  principal_kind: string;
+  principal_status: string;
+  tenant_id: string;
+  tenant_status: string;
+  membership_status: string;
+  roles: unknown;
+}
+
+interface TicketRow extends RowDataPacket {
+  pre_auth_id: string;
+  session_id: string;
+  ticket_expires_at: string;
+}
+
+interface ExpiryRow extends RowDataPacket { readonly absolute_expires_at: string; }
+
+function dateValue(value: string): Date {
+  return new Date(`${value.replace(' ', 'T')}Z`);
+}
+
+function safeRoles(value: unknown): readonly MembershipRole[] {
+  try {
+    return parseMembershipRoles(value);
+  } catch {
+    throw new IdentityDeniedError();
+  }
+}
+
+function validMembership(row: PrincipalMembershipRow | undefined, requestedTenantId: string): row is PrincipalMembershipRow {
+  return !!row && row.tenant_id === requestedTenantId && row.principal_kind === 'USER' &&
+    row.principal_status === 'ACTIVE' && row.tenant_status === 'ACTIVE' && row.membership_status === 'ACTIVE';
+}
+
+async function rollback(connection: PoolConnection): Promise<void> {
+  await connection.rollback().catch(() => undefined);
+}
+
+@Injectable()
+export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicationShutdown {
+  private readonly pool: Pool;
+
+  constructor(environment: ApiEnvironment['database']) {
+    this.pool = createPool({
+      host: environment.host,
+      port: environment.port,
+      database: environment.name,
+      user: environment.user,
+      password: environment.password,
+      connectTimeout: environment.connectTimeoutMs,
+      connectionLimit: 10,
+      waitForConnections: true,
+      queueLimit: 100,
+      multipleStatements: false,
+      charset: 'utf8mb4',
+      dateStrings: true,
+      timezone: 'Z',
+    });
+  }
+
+  async createPreAuth(input: Omit<PortalPreAuthRecord, 'consumedAt' | 'expiresAt'>): Promise<Date> {
+    await this.pool.execute(
+      `INSERT INTO ca_meta_portal_pre_auth
+       (id, challenge_hash, browser_cookie_hash, entry_mode, created_at, expires_at, consumed_at)
+       VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6), DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 5 MINUTE), NULL)`,
+      [input.id, input.challengeHash, input.browserCookieHash, input.entryMode],
+    );
+    const [rows] = await this.pool.execute<ExpiryRow[]>(
+      'SELECT expires_at AS absolute_expires_at FROM ca_meta_portal_pre_auth WHERE id = ? LIMIT 1', [input.id],
+    );
+    const expiry = rows[0]?.absolute_expires_at;
+    if (!expiry) throw new Error('Portal pre-auth expiry could not be read back.');
+    return dateValue(expiry);
+  }
+
+  async findPreAuth(challengeHash: string, browserCookieHash: string): Promise<PortalPreAuthRecord | undefined> {
+    const [rows] = await this.pool.execute<PreAuthRow[]>(
+      `SELECT id, challenge_hash, browser_cookie_hash, entry_mode, expires_at, consumed_at
+       FROM ca_meta_portal_pre_auth
+       WHERE challenge_hash = ? AND browser_cookie_hash = ? AND expires_at > UTC_TIMESTAMP(6)
+       LIMIT 1`,
+      [challengeHash, browserCookieHash],
+    );
+    const row = rows[0];
+    if (!row || (row.entry_mode !== 'PORTAL_TOP_LEVEL' && row.entry_mode !== 'SUITE4_EMBED')) return undefined;
+    return Object.freeze({
+      id: row.id,
+      challengeHash: row.challenge_hash,
+      browserCookieHash: row.browser_cookie_hash,
+      entryMode: row.entry_mode,
+      expiresAt: dateValue(row.expires_at),
+      ...(row.consumed_at ? { consumedAt: dateValue(row.consumed_at) } : {}),
+    });
+  }
+
+  async createOrRecoverSession(input: PortalSessionIssueRecord): Promise<PortalSessionRecord> {
+    const connection = await this.pool.getConnection();
+    await connection.beginTransaction();
+    try {
+      const [preAuthRows] = await connection.execute<PreAuthRow[]>(
+        `SELECT id, challenge_hash, browser_cookie_hash, entry_mode, expires_at, consumed_at
+         FROM ca_meta_portal_pre_auth WHERE id = ? AND expires_at > UTC_TIMESTAMP(6) FOR UPDATE`,
+        [input.preAuth.id],
+      );
+      const preAuth = preAuthRows[0];
+      if (!preAuth || preAuth.challenge_hash !== input.preAuth.challengeHash ||
+        preAuth.browser_cookie_hash !== input.preAuth.browserBindingHash ||
+        preAuth.entry_mode !== input.preAuth.entryMode) {
+        throw new IdentityDeniedError();
+      }
+
+      const [ticketRows] = await connection.execute<TicketRow[]>(
+        `SELECT pre_auth_id, session_id, ticket_expires_at
+         FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ? AND ticket_expires_at > UTC_TIMESTAMP(6) LIMIT 1`,
+        [input.assertion.issuer, input.ticketJtiSha256],
+      );
+      const existingTicket = ticketRows[0];
+      if (existingTicket) {
+        const recovered = await this.recoverSession(connection, input, existingTicket, preAuth);
+        await connection.commit();
+        return recovered;
+      }
+      const [validityRows] = await connection.execute<Array<RowDataPacket & { ticket_live: number }>>(
+        'SELECT (? > UTC_TIMESTAMP(6)) AS ticket_live', [input.ticketExpiresAt],
+      );
+      if (preAuth.consumed_at !== null || Number(validityRows[0]?.ticket_live ?? 0) !== 1) throw new IdentityDeniedError();
+
+      const [membershipRows] = await connection.execute<PrincipalMembershipRow[]>(
+        `SELECT p.id AS principal_id, p.kind AS principal_kind, p.status AS principal_status,
+                t.id AS tenant_id, t.status AS tenant_status, m.status AS membership_status, m.roles
+         FROM ca_meta_principals AS p
+         INNER JOIN ca_meta_memberships AS m ON m.principal_id = p.id AND m.principal_kind = p.kind
+         INNER JOIN ca_meta_tenants AS t ON t.id = m.tenant_id
+         WHERE p.issuer = ? AND p.subject = ? AND p.kind = 'USER' AND p.status = 'ACTIVE'
+           AND m.tenant_id = ? AND m.status = 'ACTIVE' AND t.status = 'ACTIVE'
+         LIMIT 1 FOR UPDATE`,
+        [input.assertion.issuer, input.assertion.subject, input.requestedTenantId],
+      );
+      const membership = membershipRows[0];
+      if (!validMembership(membership, input.requestedTenantId)) throw new IdentityDeniedError();
+      const roles = safeRoles(membership.roles);
+      if (input.priorSession) {
+        await connection.execute(
+          `UPDATE ca_meta_portal_sessions SET revoked_at = UTC_TIMESTAMP(6)
+           WHERE id = ? AND revoked_at IS NULL`,
+          [input.priorSession.sessionId],
+        );
+      }
+      await connection.execute(
+        `INSERT INTO ca_meta_portal_sessions
+         (id, principal_id, tenant_id, secret_hash, csrf_token_hash, context_ref_hash, context_version,
+          created_at, last_seen_at, idle_expires_at, absolute_expires_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6),
+                 DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 30 MINUTE), DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 8 HOUR), NULL)`,
+        [input.sessionId, membership.principal_id, membership.tenant_id, input.sessionCookieHash,
+          input.csrfTokenHash, input.contextRefHash],
+      );
+      await connection.execute(
+        `UPDATE ca_meta_portal_pre_auth SET consumed_at = UTC_TIMESTAMP(6)
+         WHERE id = ? AND consumed_at IS NULL`,
+        [preAuth.id],
+      );
+      const [ticketInsert] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO ca_meta_portal_ticket_jtis
+         (issuer, jti_hash, pre_auth_id, session_id, ticket_expires_at, consumed_at)
+         VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`,
+        [input.assertion.issuer, input.ticketJtiSha256, preAuth.id, input.sessionId, input.ticketExpiresAt],
+      );
+      if (ticketInsert.affectedRows !== 1) throw new IdentityDeniedError();
+      const [expiryRows] = await connection.execute<ExpiryRow[]>(
+        'SELECT absolute_expires_at FROM ca_meta_portal_sessions WHERE id = ? LIMIT 1', [input.sessionId],
+      );
+      const absoluteExpiresAt = expiryRows[0]?.absolute_expires_at;
+      if (!absoluteExpiresAt) throw new Error('Portal session expiry could not be read back.');
+      await connection.commit();
+      return Object.freeze({
+        sessionId: input.sessionId,
+        principalId: membership.principal_id,
+        tenantId: membership.tenant_id,
+        contextVersion: 1,
+        contextRefHash: input.contextRefHash,
+        csrfTokenHash: input.csrfTokenHash,
+        roles,
+        sessionCookie: input.sessionCookie,
+        csrfToken: input.csrfToken,
+        contextRef: input.contextRef,
+        expiresAt: dateValue(absoluteExpiresAt).toISOString(),
+      });
+    } catch (error) {
+      await rollback(connection);
+      const mysqlError = error as NodeJS.ErrnoException;
+      if (mysqlError.code === 'ER_DUP_ENTRY' || mysqlError.code === 'ER_DUP_KEY') throw new IdentityDeniedError();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  private async recoverSession(
+    connection: PoolConnection,
+    input: PortalSessionIssueRecord,
+    ticket: TicketRow,
+    preAuth: PreAuthRow,
+  ): Promise<PortalSessionRecord> {
+    if (ticket.pre_auth_id !== preAuth.id || preAuth.consumed_at === null) {
+      throw new IdentityDeniedError();
+    }
+    const [rows] = await connection.execute<ActiveSessionRow[]>(
+      `SELECT id, principal_id, tenant_id, context_version, context_ref_hash, csrf_token_hash, secret_hash,
+              idle_expires_at, absolute_expires_at
+       FROM ca_meta_portal_sessions
+       WHERE id = ? AND revoked_at IS NULL AND idle_expires_at > UTC_TIMESTAMP(6)
+         AND absolute_expires_at > UTC_TIMESTAMP(6) FOR UPDATE`,
+      [ticket.session_id],
+    );
+    const session = rows[0];
+    if (!session || session.secret_hash !== input.sessionCookieHash || Number(session.context_version) !== 1 || session.tenant_id !== input.requestedTenantId ||
+      session.context_ref_hash !== input.contextRefHash || session.csrf_token_hash !== input.csrfTokenHash) {
+      throw new IdentityDeniedError();
+    }
+    const [membershipRows] = await connection.execute<PrincipalMembershipRow[]>(
+      `SELECT p.id AS principal_id, p.kind AS principal_kind, p.status AS principal_status,
+              t.id AS tenant_id, t.status AS tenant_status, m.status AS membership_status, m.roles
+       FROM ca_meta_principals AS p
+       INNER JOIN ca_meta_memberships AS m ON m.principal_id = p.id AND m.principal_kind = p.kind
+       INNER JOIN ca_meta_tenants AS t ON t.id = m.tenant_id
+       WHERE p.id = ? AND p.issuer = ? AND p.subject = ? AND p.kind = 'USER' AND p.status = 'ACTIVE'
+         AND m.tenant_id = ? AND m.status = 'ACTIVE' AND t.status = 'ACTIVE'
+       LIMIT 1 FOR UPDATE`,
+      [session.principal_id, input.assertion.issuer, input.assertion.subject, input.requestedTenantId],
+    );
+    const membership = membershipRows[0];
+    if (!validMembership(membership, input.requestedTenantId)) throw new IdentityDeniedError();
+    return Object.freeze({
+      sessionId: session.id,
+      principalId: session.principal_id,
+      tenantId: session.tenant_id,
+      contextVersion: 1,
+      contextRefHash: session.context_ref_hash,
+      csrfTokenHash: session.csrf_token_hash,
+      roles: safeRoles(membership.roles),
+      sessionCookie: input.sessionCookie,
+      csrfToken: input.csrfToken,
+      contextRef: input.contextRef,
+      expiresAt: dateValue(session.absolute_expires_at).toISOString(),
+    });
+  }
+
+  async findActiveBySecretHash(secretHash: Uint8Array): Promise<StoredPortalSession | undefined> {
+    const digest = Buffer.from(secretHash).toString('hex');
+    await this.pool.execute(
+      `UPDATE ca_meta_portal_sessions
+       SET last_seen_at = UTC_TIMESTAMP(6), idle_expires_at = LEAST(absolute_expires_at, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 30 MINUTE))
+       WHERE secret_hash = ? AND revoked_at IS NULL AND idle_expires_at > UTC_TIMESTAMP(6)
+         AND absolute_expires_at > UTC_TIMESTAMP(6)`, [digest],
+    );
+    const [rows] = await this.pool.execute<ActiveSessionRow[]>(
+      `SELECT id, principal_id, tenant_id, context_version, context_ref_hash, csrf_token_hash
+       FROM ca_meta_portal_sessions WHERE secret_hash = ? AND revoked_at IS NULL
+         AND idle_expires_at > UTC_TIMESTAMP(6) AND absolute_expires_at > UTC_TIMESTAMP(6) LIMIT 1`, [digest],
+    );
+    const row = rows[0];
+    if (!row) return undefined;
+    return Object.freeze({
+      sessionId: row.id,
+      principalId: row.principal_id,
+      tenantId: row.tenant_id,
+      contextVersion: Number(row.context_version),
+      contextRefHash: row.context_ref_hash,
+      csrfTokenHash: row.csrf_token_hash,
+    });
+  }
+
+  async changeContext(input: {
+    readonly session: VerifiedPortalSession;
+    readonly requestedTenantId: string;
+    readonly contextRef: string;
+    readonly contextRefHash: string;
+    readonly csrfTokenHash: string;
+  }): Promise<{ readonly contextVersion: number; readonly roles: readonly MembershipRole[] }> {
+    const connection = await this.pool.getConnection();
+    await connection.beginTransaction();
+    try {
+      const [sessionRows] = await connection.execute<ActiveSessionRow[]>(
+      `SELECT id, principal_id, tenant_id, context_version, context_ref_hash, csrf_token_hash,
+                idle_expires_at, absolute_expires_at
+         FROM ca_meta_portal_sessions WHERE id = ? AND revoked_at IS NULL
+           AND idle_expires_at > UTC_TIMESTAMP(6) AND absolute_expires_at > UTC_TIMESTAMP(6) FOR UPDATE`,
+        [input.session.sessionId],
+      );
+      const session = sessionRows[0];
+      if (!session || session.principal_id !== input.session.principalId || session.tenant_id !== input.session.tenantId ||
+        Number(session.context_version) !== input.session.contextVersion || session.context_ref_hash !== input.session.contextRefHash) {
+        throw new IdentityDeniedError('CONTEXT_CHANGED');
+      }
+      const [membershipRows] = await connection.execute<PrincipalMembershipRow[]>(
+        `SELECT p.id AS principal_id, p.kind AS principal_kind, p.status AS principal_status,
+                t.id AS tenant_id, t.status AS tenant_status, m.status AS membership_status, m.roles
+         FROM ca_meta_principals AS p
+         INNER JOIN ca_meta_memberships AS m ON m.principal_id = p.id AND m.principal_kind = p.kind
+         INNER JOIN ca_meta_tenants AS t ON t.id = m.tenant_id
+         WHERE p.id = ? AND p.kind = 'USER' AND p.status = 'ACTIVE' AND m.tenant_id = ?
+           AND m.status = 'ACTIVE' AND t.status = 'ACTIVE' LIMIT 1 FOR UPDATE`,
+        [session.principal_id, input.requestedTenantId],
+      );
+      const membership = membershipRows[0];
+      if (!validMembership(membership, input.requestedTenantId)) throw new IdentityDeniedError();
+      const roles = safeRoles(membership.roles);
+      await connection.execute(
+        `UPDATE ca_meta_portal_sessions
+         SET tenant_id = ?, context_version = context_version + 1, context_ref_hash = ?, csrf_token_hash = ?,
+             last_seen_at = UTC_TIMESTAMP(6), idle_expires_at = LEAST(absolute_expires_at, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 30 MINUTE))
+         WHERE id = ? AND context_version = ? AND tenant_id = ? AND context_ref_hash = ? AND revoked_at IS NULL`,
+        [input.requestedTenantId, input.contextRefHash, input.csrfTokenHash, input.session.sessionId,
+          input.session.contextVersion, input.session.tenantId, input.session.contextRefHash],
+      );
+      await connection.commit();
+      return Object.freeze({ contextVersion: input.session.contextVersion + 1, roles });
+    } catch (error) {
+      await rollback(connection);
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async revokeSession(sessionId: string, principalId: string): Promise<boolean> {
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE ca_meta_portal_sessions SET revoked_at = UTC_TIMESTAMP(6)
+       WHERE id = ? AND principal_id = ? AND revoked_at IS NULL`, [sessionId, principalId],
+    );
+    return result.affectedRows === 1;
+  }
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.pool.end();
+  }
+}

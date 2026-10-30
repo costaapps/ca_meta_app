@@ -19,6 +19,8 @@ export interface VerifiedPortalSession {
   readonly tenantId: string;
   readonly contextVersion: number;
   readonly contextRefHash: string;
+  /** Stored hash for the synchronizer token; the token itself is never persisted. */
+  readonly csrfTokenHash: string;
 }
 
 export interface VerifiedIdentityAssertion {
@@ -52,6 +54,7 @@ export interface StoredPortalSession {
   readonly tenantId: string;
   readonly contextVersion: number;
   readonly contextRefHash: string;
+  readonly csrfTokenHash: string;
 }
 
 export interface PortalSessionStore {
@@ -107,6 +110,7 @@ export class PortalSessionVerifier {
       !Number.isSafeInteger(row.contextVersion) || row.contextVersion < 1 || !/^[a-f0-9]{64}$/.test(row.contextRefHash)) {
       return undefined;
     }
+    if (!/^[a-f0-9]{64}$/.test(row.csrfTokenHash)) return undefined;
     const result = Object.freeze({ ...row }) as VerifiedPortalSession;
     verifiedPortalSessions.add(result);
     return result;

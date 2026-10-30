@@ -115,7 +115,9 @@ const environment: ApiEnvironment = {
   port: 0,
   bindAddress: '127.0.0.1',
   allowedHosts: ['127.0.0.1'],
+  allowedOrigins: ['http://127.0.0.1'],
   trustedProxyCidrs: false,
+  portalSessionRecoveryKey: 'synthetic-test-session-recovery-key-32-bytes-minimum',
   database: {
     host: '127.0.0.1',
     port: 3306,

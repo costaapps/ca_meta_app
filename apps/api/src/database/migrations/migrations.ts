@@ -3,6 +3,7 @@ import { assertExpectedColumns, tableColumns, tableExists } from './schema-inspe
 import { migrationChecksum } from './migration-fingerprint.js';
 import { DURABLE_WORK_MIGRATION, DURABLE_WORK_TABLES } from './durable-work.js';
 import { IDENTITY_MIGRATION } from './identity.js';
+import { PORTAL_SESSIONS_MIGRATION, PORTAL_SESSION_TABLES } from './portal-sessions.js';
 
 function ddl(
   id: string,
@@ -257,6 +258,7 @@ const migrationsWithoutChecksums = [
   },
   DURABLE_WORK_MIGRATION,
   IDENTITY_MIGRATION,
+  PORTAL_SESSIONS_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -273,6 +275,7 @@ export const DOMAIN_TABLES = [
   'ca_meta_memberships',
   'ca_meta_service_identity_scopes',
   'ca_meta_identity_admin_audit',
+  ...PORTAL_SESSION_TABLES,
   ...DURABLE_WORK_TABLES,
 ] as const;
 

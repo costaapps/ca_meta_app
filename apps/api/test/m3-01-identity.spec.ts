@@ -133,6 +133,7 @@ async function sessionFor(tenantId: string, contextRef: string, contextVersion =
         tenantId,
         contextVersion,
         contextRefHash: hashTenantContextReference(contextRef),
+        csrfTokenHash: 'a'.repeat(64),
       };
     },
   }).verify(cookie);
@@ -321,7 +322,8 @@ test('service authorization uses tenant-scoped service scopes and never human me
     services.authorize({ principalId: humanId, tenantId: tenantA, scopes: ['CREDENTIAL_USE'] } as never, 'CREDENTIAL_USE', tenantA),
   );
   const contextModule = IdentityModule.register({
-    nodeEnv: 'test', port: 0, bindAddress: '127.0.0.1', allowedHosts: ['localhost'], trustedProxyCidrs: false,
+    nodeEnv: 'test', port: 0, bindAddress: '127.0.0.1', allowedHosts: ['localhost'], allowedOrigins: ['http://localhost'], trustedProxyCidrs: false,
+    portalSessionRecoveryKey: 'synthetic-test-session-recovery-key-32-bytes-minimum',
     database: { host: '127.0.0.1', port: 3306, name: 'synthetic', user: 'synthetic', password: 'not-a-secret', connectTimeoutMs: 100 },
   });
   assert.ok(contextModule.exports);
@@ -356,7 +358,7 @@ test('portal context rejects a forged DTO and only the server session verifier i
   const contexts = new TenantContextService(new FakeIdentityRepository());
   const forged = {
     sessionId: 'server-session-forged', principalId: humanId, tenantId: tenantA,
-    contextVersion: 1, contextRefHash: hashTenantContextReference(contextRef),
+    contextVersion: 1, contextRefHash: hashTenantContextReference(contextRef), csrfTokenHash: 'a'.repeat(64),
   } as VerifiedPortalSession;
   assert.equal(isVerifiedPortalSession(forged), false);
   await assert.rejects(contexts.resolveCurrent(forged, contextRef), IdentityDeniedError);
