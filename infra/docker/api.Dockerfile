@@ -43,6 +43,7 @@ COPY --from=production-dependencies --chown=node:node /workspace/apps/api/packag
 COPY --from=build --chown=node:node /workspace/apps/api/dist ./dist
 COPY --from=production-dependencies --chown=node:node /workspace/packages/contracts/package.json /workspace/packages/contracts/package.json
 COPY --from=build --chown=node:node /workspace/packages/contracts/src /workspace/packages/contracts/src
+COPY --from=build --chown=node:node /workspace/packages/contracts/events /workspace/packages/contracts/events
 
 USER node
 EXPOSE 3000

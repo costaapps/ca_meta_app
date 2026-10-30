@@ -74,18 +74,25 @@ function Get-ContainerInfo {
 function Get-SafeStartupEvents {
   param([Parameter(Mandatory)][string] $Name)
   $events = [System.Collections.Generic.List[string]]::new()
-  foreach ($line in @(Invoke-Docker -Arguments @('logs', '--tail', '30', $Name))) {
+  # Capture both docker logs streams locally; only allowlisted event names leave this function.
+  $logLines = @(& docker logs --tail 30 $Name 2>&1 | ForEach-Object { [string] $_ })
+  foreach ($line in $logLines) {
     $message = [string] $line
+    if ($message -match '(?i)(?:Cannot find module|Cannot find package|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND)') {
+      $events.Add('node.module_resolution_error')
+    }
     try {
       $record = $message | ConvertFrom-Json -ErrorAction Stop
       if ($record.event -eq 'configuration.invalid') {
         $fields = @($record.fields | Where-Object { $_ -match '^[A-Z][A-Z0-9_]{0,127}$' })
         $events.Add("configuration.invalid(fields=$($fields -join ','))")
-      } elseif ($record.event -in @('api.started', 'api.startup_failed')) {
+      } elseif ($record.event -in @('api.started', 'api.startup_failed', 'worker.started')) {
         $events.Add([string] $record.event)
       }
     } catch {
-      if ($message -match '^nginx: \[(?:emerg|alert|crit)\]') {
+      if ($message -match '^nginx: \[emerg\]') {
+        $events.Add('nginx.emerg')
+      } elseif ($message -match '^nginx: \[(?:alert|crit)\]') {
         $events.Add('nginx.startup_error(details withheld)')
       } elseif ($message -ceq 'Invalid public runtime configuration.') {
         $events.Add('web.runtime_config_invalid')
@@ -435,14 +442,14 @@ if (fs.existsSync('/workspace/backend') || found) process.exit(43);
   $createdContainers.Add([pscustomobject]@{ Name = $workerContainer; Id = $workerId })
   Assert-True ((Get-ContainerInfo -Name $workerContainer).Id -eq $workerId) 'The worker container name resolved to an unexpected resource.'
   $workerDeadline = (Get-Date).AddSeconds(15)
-  $workerLogs = ''
+  $workerEvents = 'none'
   do {
-    $workerLogs = (Invoke-Docker -Arguments @('logs', $workerContainer) 2>$null | Out-String)
+    $workerEvents = Get-SafeStartupEvents -Name $workerContainer
     $workerState = Get-ContainerInfo -Name $workerContainer
-    if ($workerLogs -match 'worker.started' -or -not $workerState.State.Running) { break }
+    if ($workerEvents -match 'worker.started' -or -not $workerState.State.Running) { break }
     Start-Sleep -Milliseconds 250
   } while ((Get-Date) -lt $workerDeadline)
-  Assert-True ($workerLogs -match 'worker.started' -and $workerState.State.Running) 'Worker command did not reach its idle loop.'
+  Assert-True ($workerEvents -match 'worker.started' -and $workerState.State.Running) "Worker command did not reach its idle loop (safe startup events: $workerEvents)."
   Invoke-Docker -Arguments @('stop', '--time', '10', $workerContainer) | Out-Null
   $workerExit = (Get-ContainerInfo -Name $workerContainer).State.ExitCode
   Assert-True ($workerExit -eq 0) 'Worker did not exit cleanly after SIGTERM.'
