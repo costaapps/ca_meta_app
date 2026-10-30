@@ -5,6 +5,22 @@ import type { ConfiguredTicketPublicKey } from '../auth-exchange/configured-tick
 
 export type RuntimeEnvironment = 'development' | 'test' | 'staging' | 'production';
 
+export class CredentialKeyRingConfiguration {
+  readonly #keys = new Map<string, Buffer>();
+  readonly #activeVersion: string;
+
+  constructor(activeVersion: string, keys: readonly { readonly version: string; readonly key: Buffer }[]) {
+    this.#activeVersion = activeVersion;
+    for (const entry of keys) this.#keys.set(entry.version, Buffer.from(entry.key));
+  }
+
+  activeVersion(): string { return this.#activeVersion; }
+  keyFor(version: string): Buffer | undefined {
+    const key = this.#keys.get(version);
+    return key ? Buffer.from(key) : undefined;
+  }
+}
+
 export interface ApiEnvironment {
   readonly nodeEnv: RuntimeEnvironment;
   readonly port: number;
@@ -26,6 +42,8 @@ export interface ApiEnvironment {
     readonly connectTimeoutMs: number;
   };
   readonly portalSessionRecoveryKey: string;
+  /** Optional runtime-only key ring. Missing keys intentionally disable credential operations. */
+  readonly credentialKeyRing?: CredentialKeyRingConfiguration;
   /** Absent configuration disables Suite4 ticket exchange without disabling other API routes. */
   readonly portalEntryTicket?: {
     readonly configuration: TicketExchangeConfiguration;
@@ -272,6 +290,41 @@ function platformIdentityAdminsField(source: NodeJS.ProcessEnv, invalid: string[
   }
 }
 
+function credentialKeyRingField(source: NodeJS.ProcessEnv, invalid: string[]): CredentialKeyRingConfiguration | undefined {
+  const field = 'API_CREDENTIAL_KEYRING_JSON';
+  const value = source[field];
+  if (value === undefined || value.trim() === '') return undefined;
+  const keys: Array<{ version: string; key: Buffer }> = [];
+  try {
+    if (Buffer.byteLength(value, 'utf8') > 128 * 1024) throw new Error();
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error();
+    if (Object.keys(parsed).some((name) => name !== 'activeVersion' && name !== 'keys')) throw new Error();
+    const activeVersion = Reflect.get(parsed, 'activeVersion');
+    const sourceKeys = Reflect.get(parsed, 'keys');
+    if (typeof activeVersion !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(activeVersion) ||
+        typeof sourceKeys !== 'object' || sourceKeys === null || Array.isArray(sourceKeys)) throw new Error();
+    const entries = Object.entries(sourceKeys as Record<string, unknown>);
+    if (entries.length === 0 || entries.length > 20) throw new Error();
+    for (const [version, encoded] of entries) {
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(version) || typeof encoded !== 'string' || encoded.length > 128) throw new Error();
+      const key = Buffer.from(encoded, 'base64');
+      if (key.length !== 32 || key.toString('base64') !== encoded) {
+        key.fill(0);
+        throw new Error();
+      }
+      keys.push({ version, key });
+    }
+    if (!keys.some(({ version }) => version === activeVersion)) throw new Error();
+    return new CredentialKeyRingConfiguration(activeVersion, keys);
+  } catch {
+    invalid.push(field);
+    return undefined;
+  } finally {
+    for (const entry of keys) entry.key.fill(0);
+  }
+}
+
 function portalEntryTicketField(
   source: NodeJS.ProcessEnv,
   nodeEnv: string,
@@ -401,6 +454,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     : randomBytes(32).toString('base64url');
   if (Buffer.byteLength(portalSessionRecoveryKey, 'utf8') < 32) invalid.push('API_PORTAL_SESSION_RECOVERY_KEY');
   const platformIdentityAdmins = platformIdentityAdminsField(source, invalid);
+  const credentialKeyRing = credentialKeyRingField(source, invalid);
 
   if (invalid.length > 0) {
     const fieldNames = [...new Set([...REQUIRED_FIELDS.filter((name) => source[name] === undefined || source[name]?.trim() === ''), ...invalid])];
@@ -417,6 +471,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     portalSessionIdleTimeoutSeconds,
     portalSessionAbsoluteTimeoutSeconds,
     portalSessionRecoveryKey,
+    ...(credentialKeyRing ? { credentialKeyRing } : {}),
     ...(portalEntryTicket ? { portalEntryTicket } : {}),
     database: {
       host,
