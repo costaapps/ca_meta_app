@@ -100,5 +100,23 @@ expectReject(
   },
   'web scan report identity does not match',
 );
+expectReject(
+  'scan result report checksum must match the report artifact',
+  () => {
+    const divergent = structuredClone(scanResultsFixture);
+    divergent.images.web.reportSha256 = '9999999999999999999999999999999999999999999999999999999999999999';
+    validateScanResults(divergent, expectedScan, scanReportHashes);
+  },
+  'web scan report checksum does not match scan-results.json',
+);
+expectReject(
+  'scan result image source revision must match the build output',
+  () => {
+    const divergent = structuredClone(scanResultsFixture);
+    divergent.images.web.sourceRevision = 'fedcba9876543210fedcba9876543210fedcba98';
+    validateScanResults(divergent, expectedScan, scanReportHashes);
+  },
+  'web scan report identity does not match',
+);
 
 console.log(cases.join('\n'));
