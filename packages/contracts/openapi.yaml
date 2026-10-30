@@ -33,6 +33,14 @@ x-public-routes:
     path: /api/v1/auth/magic-links
     purpose: Uniform, rate-limited request for an already-invited identity; never
       creates membership.
+  - method: GET
+    path: /api/v1/auth/magic-links/confirm
+    purpose: Public scanner-safe confirmation page; its short-lived link token is
+      the capability, and GET never consumes or creates a session.
+  - method: HEAD
+    path: /api/v1/auth/magic-links/confirm
+    purpose: Public scanner probe; HEAD never looks up or consumes a link and never
+      creates a session.
   - method: POST
     path: /api/v1/auth/magic-links/consume
     purpose: Explicit one-use magic-link confirmation; GET/HEAD never consume it.
