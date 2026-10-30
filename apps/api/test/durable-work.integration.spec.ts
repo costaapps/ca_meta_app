@@ -807,8 +807,10 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     const tenantCombinedClaimScan = tenantCombinedClaimPlan.find((row) => row.table === 'ca_meta_jobs');
     const tenantCombinedClaimKey = tenantCombinedClaimScan?.key ?? '';
     const tenantCombinedClaimDiagnostic = JSON.stringify(tenantCombinedClaimPlan);
+    // The optimizer may use the global expired-lease range for the combined OR; the row bound below still guards backlog scans.
     assert.ok(
       tenantCombinedClaimKey.includes('ix_ca_meta_job_claim_ready') ||
+        tenantCombinedClaimKey.includes('ix_ca_meta_job_claim_expired') ||
         tenantCombinedClaimKey.includes('ix_ca_meta_job_tenant_claim_'),
       `combined tenant claim lookup uses a selective ready/tenant index: ${tenantCombinedClaimDiagnostic}`,
     );
