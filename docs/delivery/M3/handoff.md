@@ -2,7 +2,7 @@
 
 ## Current stage
 
-M3.01/#25 preserves implementation commit `bd4d87f493c35f0b3da98efd8d06c92ebd48bdc3` and has corrective commits `a7339237ba794395b85245254d118117bdff4f18`, `e66f3bc44e15b5be558dce8d8965bef7fa7bf81a`, `a35303834d8564c8bfca49555b7a3cb10783f8ec`, and `37aa2077d7f4a25eada346e1ba792725252a3b6a` on `desktop/m3-01`, based on `89f44ced872226afecc71b195b8c0e0cd6311179`. Current branch HEAD is `a9888a2954da6f4c5ffbbcc8aa0ffe995a0c27f3`, a handoff-only update after the tested source SHA. The package is not integrated into `desktop/milestone-m3` and no PR exists. Security review passed on current HEAD; functional review and GitHub operations remain with the coordinator.
+M3.01/#25 preserves implementation commit `bd4d87f493c35f0b3da98efd8d06c92ebd48bdc3` and has corrective commits `a7339237ba794395b85245254d118117bdff4f18`, `e66f3bc44e15b5be558dce8d8965bef7fa7bf81a`, `a35303834d8564c8bfca49555b7a3cb10783f8ec`, and `37aa2077d7f4a25eada346e1ba792725252a3b6a` on `desktop/m3-01`, based on `89f44ced872226afecc71b195b8c0e0cd6311179`; subsequent commits contain only documentation/evidence updates. Source and security reviews found no remaining code blocker; they record production job authorization as pending M3.08. The package is not integrated into `desktop/milestone-m3` and no PR exists. GitHub operations remain with the coordinator.
 
 The API worktree used Node `v24.22.2` and npm `11.19.1`. A lockfile install completed with 674 packages. Original focused checks passed before review. The corrective work was also validated on Node `v24.22.2` / npm `11.19.1` with:
 
@@ -34,4 +34,8 @@ M3.10 handoff: authorization denials currently roll back and do not persist a sa
 
 ## Next action
 
-The coordinator reviews the committed branch head, runs the focused MariaDB migration harness in the prepared disposable database, obtains independent source/security review, fixes blocking findings, then opens and squash-integrates the package PR into `desktop/milestone-m3` after real CI checks pass.
+The coordinator obtained independent source/security review and ran the focused MariaDB integration on candidate `a353038`; no source or migration changes followed that database validation. Open the package PR after the remaining GitHub metadata check, wait for required CI, then squash-integrate to `desktop/milestone-m3`. Keep issue #25 open until M3.08 supplies active-claim job authorization and the remaining external gates are confirmed.
+
+## Job authorization status
+
+`PersistedJobContextVerifier` is currently an integration port plus synthetic test store. There is no production adapter that resolves an existing M2 `ClaimedJob` against its active persisted claim/lease; `ca_meta_jobs` and `ClaimedJob` carry no principal ID. M3.01 therefore does not claim production authorization of existing jobs. M3.08 must connect job ID + claim token to the authoritative active lease and an authenticated service identity before job authorization is considered complete. Until then, the M3.01 job criterion remains pending.
