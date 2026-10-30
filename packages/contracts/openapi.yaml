@@ -2171,7 +2171,6 @@ components:
       type: object
       additionalProperties: false
       required:
-        - sessionRef
         - principalRef
         - tenantRef
         - roles

@@ -154,7 +154,7 @@ function allowedOriginsField(value: string, nodeEnv: string, invalid: string[]):
         ? ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
         : false;
       if (
-        url.origin !== entry || url.username || url.password || url.pathname !== '/' || url.search || url.hash ||
+        entry.includes('*') || url.origin !== entry || url.username || url.password || url.pathname !== '/' || url.search || url.hash ||
         (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopbackHttp))
       ) return undefined;
       return url.origin;

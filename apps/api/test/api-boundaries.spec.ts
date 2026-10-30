@@ -4,7 +4,7 @@ import { Test } from '@nestjs/testing';
 import { IsString, MaxLength } from 'class-validator';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { connect as netConnect } from 'node:net';
+import { createServer, connect as netConnect } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { request as httpRequest } from 'node:http';
 import { fork } from 'node:child_process';
@@ -279,7 +279,18 @@ function waitForChildMessage(
     child.once('exit', onExit);
   });
 }
-async function startBoundaryApp(): Promise<{
+async function findLoopbackPort(): Promise<number> {
+  const reservation = createServer();
+  await new Promise<void>((resolve, reject) => {
+    reservation.once('error', reject);
+    reservation.listen(0, '127.0.0.1', resolve);
+  });
+  const address = reservation.address() as AddressInfo;
+  await new Promise<void>((resolve, reject) => reservation.close((error) => error ? reject(error) : resolve()));
+  return address.port;
+}
+
+async function startBoundaryApp(exactOrigin = false): Promise<{
   readonly baseUrl: string;
   readonly app: INestApplication;
   readonly database: FakeDatabaseReadiness;
@@ -287,12 +298,16 @@ async function startBoundaryApp(): Promise<{
   readonly state: ProbeStateValue;
   readonly clock: FakeMonotonicClock;
 }> {
+  const port = exactOrigin ? await findLoopbackPort() : 0;
+  const environment: ApiEnvironment = exactOrigin
+    ? { ...TEST_ENVIRONMENT, port, allowedOrigins: [`http://127.0.0.1:${port}`] }
+    : TEST_ENVIRONMENT;
   const database = new FakeDatabaseReadiness();
   const logger = new CapturingLogger();
   const state = new ProbeStateValue();
   const clock = new FakeMonotonicClock();
   const module = await Test.createTestingModule({
-    imports: [ApiModule.register(TEST_ENVIRONMENT)],
+    imports: [ApiModule.register(environment)],
     controllers: [BoundaryProbeController],
     providers: [{ provide: PROBE_STATE, useValue: state }],
   })
@@ -305,9 +320,9 @@ async function startBoundaryApp(): Promise<{
     .compile();
 
   const app = module.createNestApplication(new GracefulExpressAdapter(), { bodyParser: false });
-  configureHttpBoundaries(app, TEST_ENVIRONMENT);
+  configureHttpBoundaries(app, environment);
   await app.init();
-  await app.listen(0, TEST_ENVIRONMENT.bindAddress);
+  await app.listen(environment.port, environment.bindAddress);
   const address = app.getHttpServer().address() as AddressInfo;
   return { baseUrl: `http://127.0.0.1:${address.port}`, app, database, logger, state, clock };
 }
@@ -452,12 +467,17 @@ test('the private route is denied and request IDs are returned in headers and er
 });
 
 test('strict DTO validation rejects extra fields, malformed JSON, and oversized bodies safely', async (t) => {
-  const context = await startBoundaryApp();
+  const context = await startBoundaryApp(true);
   t.after(() => context.app.close());
+  const browserWriteHeaders = {
+    'Content-Type': 'application/json',
+    Origin: context.baseUrl,
+    'Sec-Fetch-Site': 'same-origin',
+  };
 
   const valid = await fetch(`${context.baseUrl}/api/v1/probe/validation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: browserWriteHeaders,
     body: JSON.stringify({ value: 'okay' }),
   });
   assert.equal(valid.status, 201);
@@ -466,7 +486,7 @@ test('strict DTO validation rejects extra fields, malformed JSON, and oversized 
 
   const extra = await fetch(`${context.baseUrl}/api/v1/probe/validation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: browserWriteHeaders,
     body: JSON.stringify({ value: 'okay', unexpected: 'private-field' }),
   });
   assert.equal(extra.status, 400);
@@ -476,7 +496,7 @@ test('strict DTO validation rejects extra fields, malformed JSON, and oversized 
 
   const malformed = await fetch(`${context.baseUrl}/api/v1/probe/validation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Request-Id': 'also-not-valid' },
+    headers: { ...browserWriteHeaders, 'X-Request-Id': 'also-not-valid' },
     body: '{"value":',
   });
   assert.equal(malformed.status, 400);
@@ -485,7 +505,7 @@ test('strict DTO validation rejects extra fields, malformed JSON, and oversized 
 
   const oversized = await fetch(`${context.baseUrl}/api/v1/probe/validation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: browserWriteHeaders,
     body: JSON.stringify({ value: 'x'.repeat(70_000) }),
   });
   assert.equal(oversized.status, 413);

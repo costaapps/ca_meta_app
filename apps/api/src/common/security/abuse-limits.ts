@@ -84,7 +84,7 @@ export class MysqlAbuseLimitService extends AbuseLimitService implements OnAppli
           [policy.windowSeconds, policy.windowSeconds],
         );
         const windowStart = windowRows[0]?.window_start;
-        if (!windowStart) throw new Error('Database did not return an abuse limit window.');
+        if (!windowStart) throw new Error('Database did not return an abuse limit period.');
         await connection.execute(
         `INSERT INTO ca_meta_abuse_limit_buckets
          (policy, dimension_hash, window_start, request_count, updated_at)

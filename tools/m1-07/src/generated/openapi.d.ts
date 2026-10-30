@@ -694,7 +694,7 @@ export interface components {
              * Format: uuid
              * @description Public opaque selector only; never a credential and insufficient to authorize revocation.
              */
-            readonly sessionRef: string;
+            readonly sessionRef?: string;
             readonly principalRef: string;
             readonly tenantRef: string;
             readonly roles: readonly ("owner" | "admin" | "operator" | "viewer")[];

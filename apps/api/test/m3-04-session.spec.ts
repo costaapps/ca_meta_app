@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { test } from 'node:test';
 import { portalRequestSecurityMiddleware } from '../src/common/security/portal-request-security.js';
@@ -31,7 +31,7 @@ import {
 const tenantA = 'tenant-a';
 const tenantB = 'tenant-b';
 const principalId = 'principal-1';
-const recoveryKey = 'synthetic-test-key-that-is-at-least-32-bytes-long';
+const recoveryKey = randomBytes(32).toString('base64url');
 
 function membership(tenantId: string, roles: readonly MembershipRole[] = ['operator']): TenantMembership {
   return {
