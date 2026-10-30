@@ -12,6 +12,7 @@
     "packages/*"
   ],
   "overrides": {
+    "ajv": "8.20.0",
     "@angular-devkit/core": {
       "picomatch": "4.0.7"
     },
