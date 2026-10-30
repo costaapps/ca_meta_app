@@ -365,10 +365,10 @@ try {
     $runtimeRepresentations += @($logs.Output)
     foreach ($secretValue in $runtimeSecretValues) {
       if ($secretValue.Length -gt 0 -and (@($runtimeRepresentations) -join "`n").Contains($secretValue)) {
-        throw 'A synthetic DB password appeared in container environment, command configuration, or stack logs.'
+        throw 'A synthetic DB password appeared in Docker container Env/Cmd/Entrypoint configuration or stack logs.'
       }
     }
-    Write-Output 'Secret smoke: runtime passwords were absent from container environment, command configuration, and stack logs.'
+    Write-Output 'Secret smoke: password bytes were absent from Docker container Env/Cmd/Entrypoint config fields and stack logs.'
 
     $web = Get-ContainerInfo -Service 'web'
     $published = @($web.NetworkSettings.Ports.'8080/tcp')
