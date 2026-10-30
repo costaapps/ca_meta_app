@@ -17,9 +17,12 @@ Coordinator wiring after M3.04 lands:
 ## Tenant and evidence rules
 
 - All Meta external identifiers remain opaque strings (VARCHAR, up to 512 characters); leading zeroes and values above JavaScript's safe integer range are preserved.
+- Persisted asset kinds are allowlisted to `WHATSAPP_PHONE_NUMBER`, `WHATSAPP_BUSINESS_ACCOUNT`, `INSTAGRAM_BUSINESS_ACCOUNT`, `INSTAGRAM_CREATOR_ACCOUNT` and `FACEBOOK_PAGE`; unknown kinds are rejected until a versioned extension contract defines their storage and retention.
 - The asset table's natural key remains tenant + app configuration + environment + provider + kind + external ID. Reauthorization reuses the same tenant asset row and preserves its internal ID.
 - display_name is a local display field and is never overwritten by this provider upsert. Confirmed provider names update external_name.
 - Browser claims create a CLAIMED relation and cannot write granted scopes, asset grants, typed relations, provider authorization IDs or a verified global ownership claim. Existing confirmed scopes and authorization state are preserved on a browser-only observation.
+- An omitted asset `grants` field preserves that authorization's current grants; an explicit empty list revokes all of them. Asset history snapshots record the effective grant set after the update.
+- Authorization observations older than the stored `observed_at` (compared at microsecond precision) are rejected before writes, even if a caller omits `expectedVersion`.
 - Only trusted provider adapters can issue the in-process VerifiedMetaEvidence capability. Its reference is stored as a SHA-256 digest; the provider payload/reference is not stored.
 - The first verified claim reserves the app/provider/environment/kind/external-ID identity. A claim from another tenant is stored in that tenant's quarantine with CROSS_TENANT_VERIFIED_OWNER; it does not create or reassign an asset. The owning tenant ID is not copied into the quarantined candidate. Cross-tenant fanout remains disallowed until product evidence changes this policy.
 - Same-tenant assets may be related to multiple authorizations. PHONE_TO_ACCOUNT and INSTAGRAM_TO_PAGE are verified relation types; an Instagram account does not require a Facebook relation.
@@ -48,7 +51,7 @@ From the repository root, with the project Node runtime on PATH:
 Expected result: strict API/test compilation and the focused M3.06 Node test file pass. No database, provider account or production resource is needed for these unit checks. The generated API dist and dist-test directories are ignored build output.
 After these checks, run tools/m3-06/cleanup.ps1 to remove only those two local output directories; it refuses linked or out-of-worktree targets.
 
-The gated database test is `apps/api/test/m3-06-meta-assets.integration.spec.ts`. It runs in the existing M2.05/M3 disposable MariaDB profile when `M2_DURABLE_WORK_TEST=1`, calls the migration runner, then covers concurrent upsert/shared assets, cross-tenant FK rejection and quarantine, exact external IDs above 2^53, and rollback after outbox staging. The profile must use the integrated migration registry through M3.06 v6.
+The gated database test is `apps/api/test/m3-06-meta-assets.integration.spec.ts`. It runs in the existing M2.05/M3 disposable MariaDB profile when `M2_DURABLE_WORK_TEST=1`, calls the migration runner, then covers concurrent upsert/shared assets, confirmed scopes and grants, typed Instagram-to-Page relation persistence, omitted-grants preservation versus explicit revocation, cross-tenant FK rejection and quarantine, exact external IDs above 2^53, and rollback after outbox staging. The profile must use the integrated migration registry through M3.06 v6.
 
 After the profile has compiled the API test tree and started its disposable database, run:
 

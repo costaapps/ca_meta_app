@@ -6,6 +6,7 @@ import { MysqlMetaAssetsRepository } from '../src/meta-assets/mysql-meta-assets.
 import {
   assetIdentityHash,
   issueVerifiedMetaEvidence,
+  MetaAssetsConflictError,
   MetaAssetsInputError,
   serializeAuthorizationReadModel,
   validateAuthorizationUpsert,
@@ -49,7 +50,16 @@ test('browser claims cannot become granted scopes or confirmed authorization/ass
     assets: [{ kind: 'WHATSAPP_PHONE_NUMBER', externalId: '000123', evidence: evidence() }],
   })), MetaAssetsInputError);
   assert.throws(() => validateAuthorizationUpsert(command({
+    assets: [{ kind: 'FACEBOOK_PAGE', externalId: 'page-0001', grants: [] }],
+  })), MetaAssetsInputError);
+  assert.throws(() => validateAuthorizationUpsert(command({
     providerAuthorizationId: 'provider-auth-ref',
+  })), MetaAssetsInputError);
+});
+
+test('asset kinds must come from the supported Meta domain allowlist', () => {
+  assert.throws(() => validateAuthorizationUpsert(command({
+    assets: [{ kind: 'UNSUPPORTED_PROVIDER_OBJECT' as never, externalId: 'opaque-object-01' }],
   })), MetaAssetsInputError);
 });
 
@@ -149,4 +159,92 @@ test('outbox intent remains staged when the enclosing commit fails', async () =>
   assert.equal(staged[0]?.length, 1);
   assert.equal(committed.length, 0);
   assert.equal(active?.length, 1);
+});
+
+test('an omitted asset grant snapshot preserves current grants and history', async () => {
+  const assetId = '00000000-0000-4000-8000-000000000004';
+  const proof = evidence();
+  const queries: Array<{ sql: string; parameters: unknown[] }> = [];
+  let historySnapshot: string | undefined;
+  const existingAuthorization = {
+    id: authorizationId, tenant_id: tenantId, app_configuration_id: appConfigurationId,
+    provider: 'META', environment: 'test', provider_authorization_id: null,
+    authorization_state: 'ACTIVE', version: '1', observed_at: '2026-10-30 12:00:00.000000',
+  };
+  const database = {
+    async getDataSource() {
+      return {
+        async transaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+          const manager = {
+            async query(sql: string, parameters: unknown[] = []) {
+              queries.push({ sql, parameters });
+              if (sql.startsWith('SELECT')) {
+                if (sql.includes('FROM ca_meta_authorizations')) return [existingAuthorization];
+                if (sql.includes('FROM ca_meta_app_configurations')) return [{ app_external_id: '001-app' }];
+                if (sql.includes('FROM ca_meta_asset_identity_claims')) return [{
+                  provider: 'META', app_external_id: '001-app', environment: 'test', asset_kind: 'FACEBOOK_PAGE',
+                  external_id: 'page-0001', tenant_id: tenantId, asset_id: assetId,
+                  app_configuration_id: appConfigurationId, verification_ref_hash: 'a'.repeat(64),
+                }];
+                if (sql.includes('FROM ca_meta_assets')) return [{
+                  id: assetId, display_name: 'Local name', external_name: 'Provider name', version: '4', updated_at: '2026-10-30 12:00:00.000000',
+                }];
+                if (sql.includes('FROM ca_meta_asset_authorizations')) return [{
+                  verification_state: 'VERIFIED', verification_source: 'META_API', version: '2',
+                }];
+                if (sql.includes('FROM ca_meta_asset_grants')) return [{
+                  grant_name: 'pages_read_engagement', status: 'GRANTED', version: '3',
+                }];
+                if (sql.includes('FROM ca_meta_authorization_scopes')) return [];
+                throw new Error('Unexpected SELECT in omitted-grants test: ' + sql);
+              }
+              if (sql.includes('INSERT INTO ca_meta_asset_history')) historySnapshot = String(parameters[5]);
+              return [{ affectedRows: 1 }];
+            },
+          } as unknown as EntityManager;
+          return work(manager);
+        },
+      };
+    },
+  };
+  const repository = new MysqlMetaAssetsRepository(database as never, {
+    async appendWithin() { return; },
+  });
+
+  await repository.upsert(command({
+    evidence: proof,
+    assets: [{ kind: 'FACEBOOK_PAGE', externalId: 'page-0001', evidence: proof }],
+  }));
+
+  assert.equal(queries.some(({ sql }) => sql.startsWith('UPDATE ca_meta_asset_grants')), false);
+  assert.deepEqual(JSON.parse(historySnapshot ?? '{}').grants, ['pages_read_engagement']);
+});
+
+test('older verified authorization observations cannot overwrite newer state', async () => {
+  const queries: string[] = [];
+  const database = {
+    async getDataSource() {
+      return {
+        async transaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+          const manager = {
+            async query(sql: string) {
+              queries.push(sql);
+              return [{
+                id: authorizationId, tenant_id: tenantId, app_configuration_id: appConfigurationId,
+                provider: 'META', environment: 'test', provider_authorization_id: null,
+                authorization_state: 'ACTIVE', version: '2', observed_at: '2026-10-30 12:00:00.000001',
+              }];
+            },
+          } as unknown as EntityManager;
+          return work(manager);
+        },
+      };
+    },
+  };
+  const repository = new MysqlMetaAssetsRepository(database as never, { async appendWithin() { return; } });
+  await assert.rejects(repository.upsert(command({
+    evidence: evidence(),
+    observedAt: '2026-10-30T12:00:00.000000Z',
+  })), MetaAssetsConflictError);
+  assert.equal(queries.length, 1, 'a stale snapshot is rejected before any write');
 });

@@ -50,10 +50,6 @@ interface AssetAuthorizationRow {
 }
 interface OutboxAppender { appendWithin(manager: EntityManager, event: unknown): Promise<unknown> }
 
-const BASE_ASSET_KINDS = new Set([
-  'WHATSAPP_PHONE_NUMBER', 'WHATSAPP_BUSINESS_ACCOUNT',
-  'INSTAGRAM_BUSINESS_ACCOUNT', 'INSTAGRAM_CREATOR_ACCOUNT', 'FACEBOOK_PAGE',
-]);
 const GRANTABLE_RELATIONS: Readonly<Record<AssetRelationType, { source: readonly string[]; target: readonly string[] }>> = {
   PHONE_TO_ACCOUNT: { source: ['WHATSAPP_PHONE_NUMBER'], target: ['WHATSAPP_BUSINESS_ACCOUNT'] },
   INSTAGRAM_TO_PAGE: { source: ['INSTAGRAM_BUSINESS_ACCOUNT', 'INSTAGRAM_CREATOR_ACCOUNT'], target: ['FACEBOOK_PAGE'] },
@@ -61,7 +57,13 @@ const GRANTABLE_RELATIONS: Readonly<Record<AssetRelationType, { source: readonly
 
 function mysqlDate(value: string): string {
   const iso = new Date(value).toISOString();
-  return iso.slice(0, 19) + '.' + iso.slice(20, 23) + '000';
+  const fraction = value.match(/\.(\d{1,6})Z$/)?.[1] ?? '';
+  return iso.slice(0, 19).replace('T', ' ') + '.' + fraction.padEnd(6, '0');
+}
+function normalizedMysqlDate(value: string | Date): string {
+  if (value instanceof Date) return mysqlDate(value.toISOString());
+  if (value.includes('T')) return mysqlDate(value.endsWith('Z') ? value : value + 'Z');
+  return value.includes('.') ? value : value + '.000000';
 }
 function dateString(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : new Date(value.replace(' ', 'T') + (value.includes('Z') ? '' : 'Z')).toISOString();
@@ -119,13 +121,18 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     const source = sourceOf(authEvidence);
     const providerAuthorizationId = authEvidence ? command.providerAuthorizationId ?? null : null;
     const existingAuthRows = await manager.query(
-      'SELECT id, tenant_id, app_configuration_id, provider, environment, provider_authorization_id, authorization_state, version, observed_at FROM ca_meta_authorizations WHERE tenant_id = ? AND id = ? FOR UPDATE',
+      `SELECT id, tenant_id, app_configuration_id, provider, environment, provider_authorization_id, authorization_state, version,
+       DATE_FORMAT(observed_at, '%Y-%m-%d %H:%i:%s.%f') AS observed_at
+       FROM ca_meta_authorizations WHERE tenant_id = ? AND id = ? FOR UPDATE`,
       [command.tenantId, command.authorizationId],
     ) as AuthorizationRow[];
     const currentAuth = existingAuthRows[0];
     if (currentAuth && (currentAuth.app_configuration_id !== command.appConfigurationId ||
         currentAuth.provider !== command.provider || currentAuth.environment !== command.environment)) {
       throw new MetaAssetsConflictError('Authorization reference is already bound to a different tenant context.');
+    }
+    if (currentAuth && timestamp < normalizedMysqlDate(currentAuth.observed_at)) {
+      throw new MetaAssetsConflictError('Stale authorization observation cannot replace newer state.');
     }
     const authorizationState = authEvidence ? command.state : currentAuth?.authorization_state ?? 'UNKNOWN';
     const authVersion = currentAuth ? asVersion(currentAuth.version) + 1 : 1;
@@ -182,7 +189,6 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
           verificationState: assetResult.result.verificationState,
         });
         if (asset.legacyReferences?.length) await this.persistLegacyReferences(manager, command, assetResult.result.assetRef, asset.legacyReferences, timestamp);
-        if (evidence) await this.persistAssetGrants(manager, command, asset, assetResult.result.assetRef, timestamp, evidence.source);
       }
     }
     for (const asset of command.assets) {
@@ -413,11 +419,12 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
       );
     }
 
+    const currentGrants = await this.persistAssetGrants(manager, command, input, asset.id, timestamp, evidence?.source);
     const assetVersion = nextVersion;
     const snapshot = {
       assetRef: asset.id, kind: input.kind, externalId: input.externalId,
       externalName: evidence ? input.externalName ?? asset.external_name : asset.external_name,
-      verificationState, verificationSource, grants: evidence ? safeScopeSnapshot(input.grants ?? []) : [],
+      verificationState, verificationSource, grants: currentGrants,
     };
     await manager.query(
       'INSERT INTO ca_meta_asset_history (id, tenant_id, asset_id, version, source, snapshot_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -474,13 +481,15 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     }
   }
   private async persistAssetGrants(manager: EntityManager, command: AuthorizationUpsertCommand, asset: AssetClaimInput,
-    assetId: string, timestamp: string, source: EvidenceSource): Promise<void> {
+    assetId: string, timestamp: string, source: EvidenceSource | undefined): Promise<readonly string[]> {
     const existing = await manager.query(
       'SELECT grant_name, status, version FROM ca_meta_asset_grants WHERE tenant_id = ? AND authorization_id = ? AND asset_id = ? FOR UPDATE',
       [command.tenantId, command.authorizationId, assetId],
     ) as Array<{ grant_name: string; status: string; version: string | number }>;
-    const grants = new Set(asset.grants ?? []);
-    const stored = new Set(existing.map((row) => row.grant_name));
+    const granted = existing.filter((row) => row.status === 'GRANTED').map((row) => row.grant_name);
+    if (asset.grants === undefined) return safeScopeSnapshot(granted);
+    if (source === undefined) throw new MetaAssetsConflictError('Asset grants require trusted provider evidence.');
+    const grants = new Set(asset.grants);
     for (const grant of grants) {
       const row = existing.find((candidate) => candidate.grant_name === grant);
       if (!row) {
@@ -504,6 +513,7 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
         );
       }
     }
+    return safeScopeSnapshot([...grants]);
   }
 
   private async persistRelation(manager: EntityManager, command: AuthorizationUpsertCommand, sourceInput: AssetClaimInput,

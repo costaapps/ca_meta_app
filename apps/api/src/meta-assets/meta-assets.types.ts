@@ -4,11 +4,21 @@ export type MetaEnvironment = 'development' | 'test' | 'staging' | 'production';
 export type AuthorizationState = 'ACTIVE' | 'PARTIAL' | 'REAUTH_REQUIRED' | 'UNKNOWN' | 'REVOKED' | 'DISCONNECTED';
 export type AssetVerificationState = 'CLAIMED' | 'VERIFIED' | 'QUARANTINED';
 export type AssetRelationType = 'PHONE_TO_ACCOUNT' | 'INSTAGRAM_TO_PAGE';
+export type MetaAssetKind = 'WHATSAPP_PHONE_NUMBER' | 'WHATSAPP_BUSINESS_ACCOUNT' |
+  'INSTAGRAM_BUSINESS_ACCOUNT' | 'INSTAGRAM_CREATOR_ACCOUNT' | 'FACEBOOK_PAGE';
 export type SubscriptionState = 'UNKNOWN' | 'PENDING' | 'ACTIVE' | 'FAILED' | 'REMOVED';
 export type ProjectionState = 'UNKNOWN' | 'PENDING' | 'SYNCED' | 'STALE' | 'FAILED';
 export type EvidenceSource = 'META_API' | 'SIGNED_WEBHOOK';
 
 const verifiedEvidence = new WeakSet<object>();
+const supportedAssetKinds: ReadonlySet<string> = new Set([
+  'WHATSAPP_PHONE_NUMBER', 'WHATSAPP_BUSINESS_ACCOUNT',
+  'INSTAGRAM_BUSINESS_ACCOUNT', 'INSTAGRAM_CREATOR_ACCOUNT', 'FACEBOOK_PAGE',
+]);
+
+export function isMetaAssetKind(value: string): value is MetaAssetKind {
+  return supportedAssetKinds.has(value);
+}
 
 /** Capability object issued only by trusted provider adapters. Browser input never maps to this type. */
 export interface VerifiedMetaEvidence {
@@ -153,12 +163,12 @@ export function validateAuthorizationUpsert(command: AuthorizationUpsertCommand)
   if (command.actor.kind === 'USER' && command.assets.some((asset) => (asset.legacyReferences?.length ?? 0) > 0)) {
     throw new MetaAssetsInputError('Legacy references can only be attached by a service or system actor.');
   }
-  if (!command.evidence && (command.providerAuthorizationId != null || command.assets.some((asset) => asset.evidence !== undefined || (asset.grants?.length ?? 0) > 0 || (asset.relations?.length ?? 0) > 0))) {
+  if (!command.evidence && (command.providerAuthorizationId != null || command.assets.some((asset) => asset.evidence !== undefined || asset.grants !== undefined || (asset.relations?.length ?? 0) > 0))) {
     throw new MetaAssetsInputError('Provider authorization and asset grants require trusted provider evidence.');
   }
   const externalIds = new Set<string>();
   for (const asset of command.assets) {
-    if (!validOpaqueName(asset.kind, 32) || !validOpaqueName(asset.externalId, 512)) {
+    if (!isMetaAssetKind(asset.kind) || !validOpaqueName(asset.externalId, 512)) {
       throw new MetaAssetsInputError('Asset kind or external identifier is invalid.');
     }
     const naturalKey = `${asset.kind}\u0000${asset.externalId}`;
@@ -176,7 +186,7 @@ export function validateAuthorizationUpsert(command: AuthorizationUpsertCommand)
     if (asset.evidence !== undefined && !isVerifiedMetaEvidence(asset.evidence)) {
       throw new MetaAssetsInputError('Asset evidence was not issued by a trusted provider adapter.');
     }
-    if (!asset.evidence && ((asset.grants?.length ?? 0) > 0 || (asset.relations?.length ?? 0) > 0)) {
+    if (!asset.evidence && (asset.grants !== undefined || (asset.relations?.length ?? 0) > 0)) {
       throw new MetaAssetsInputError('Asset grants and relations require provider verification.');
     }
     if ((asset.grants ?? []).some((grant) => !validOpaqueName(grant, 128))) {

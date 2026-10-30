@@ -11,6 +11,7 @@ import { OutboxService } from '../src/outbox/outbox-service.js';
 import { MysqlMetaAssetsRepository } from '../src/meta-assets/mysql-meta-assets.repository.js';
 import {
   issueVerifiedMetaEvidence,
+  type AssetClaimInput,
   type AuthorizationUpsertCommand,
 } from '../src/meta-assets/meta-assets.types.js';
 
@@ -28,8 +29,26 @@ function command(input: {
   readonly appConfigurationId: string;
   readonly authorizationId: string;
   readonly externalId?: string;
+  readonly grants?: readonly string[];
+  readonly includeInstagramRelation?: boolean;
 }): AuthorizationUpsertCommand {
   const proof = evidence();
+  const assets: AssetClaimInput[] = input.externalId === undefined ? [] : [{
+    kind: 'FACEBOOK_PAGE',
+    externalId: input.externalId,
+    externalName: 'Synthetic Page',
+    evidence: proof,
+    ...(input.grants === undefined ? {} : { grants: input.grants }),
+  }];
+  if (input.externalId !== undefined && input.includeInstagramRelation) {
+    assets.push({
+      kind: 'INSTAGRAM_BUSINESS_ACCOUNT',
+      externalId: 'ig-business-synthetic-001',
+      externalName: 'Synthetic Instagram',
+      evidence: proof,
+      relations: [{ type: 'INSTAGRAM_TO_PAGE', targetExternalId: input.externalId }],
+    });
+  }
   return {
     tenantId: input.tenantId,
     authorizationId: input.authorizationId,
@@ -39,13 +58,7 @@ function command(input: {
     state: 'ACTIVE',
     grantedScopes: ['pages_show_list'],
     evidence: proof,
-    assets: input.externalId === undefined ? [] : [{
-      kind: 'FACEBOOK_PAGE',
-      externalId: input.externalId,
-      externalName: 'Synthetic Page',
-      evidence: proof,
-      grants: ['pages_read_engagement'],
-    }],
+    assets,
     actor: { kind: 'SERVICE', ref: 'm3-06-mariadb-test' },
     correlationId: `m3-06-correlation-${randomUUID()}`,
     observedAt: timestamp,
@@ -94,8 +107,8 @@ test('M3.06 MariaDB tenant-safe asset upserts, constraints, string IDs and outbo
     const repository = new MysqlMetaAssetsRepository(database, outbox);
 
     const concurrentResults = await Promise.all([
-      repository.upsert(command({ tenantId: tenantA, appConfigurationId: appA, authorizationId: concurrentAuthorization, externalId })),
-      repository.upsert(command({ tenantId: tenantA, appConfigurationId: appA, authorizationId: concurrentAuthorization, externalId })),
+      repository.upsert(command({ tenantId: tenantA, appConfigurationId: appA, authorizationId: concurrentAuthorization, externalId, grants: ['pages_read_engagement'] })),
+      repository.upsert(command({ tenantId: tenantA, appConfigurationId: appA, authorizationId: concurrentAuthorization, externalId, grants: ['pages_read_engagement'] })),
     ]);
     assert.deepEqual(concurrentResults.map((result) => result.version).sort(), [1, 2]);
     const firstAssetRef = concurrentResults[0]?.assets[0]?.assetRef;
@@ -104,8 +117,10 @@ test('M3.06 MariaDB tenant-safe asset upserts, constraints, string IDs and outbo
 
     const sharedResult = await repository.upsert(command({
       tenantId: tenantA, appConfigurationId: appA, authorizationId: sharedAuthorization, externalId,
+      grants: ['pages_manage_metadata'], includeInstagramRelation: true,
     }));
     assert.equal(sharedResult.assets[0]?.assetRef, firstAssetRef, 'a second authorization in the tenant reuses the same asset');
+    assert.equal(sharedResult.assets[1]?.verificationState, 'VERIFIED');
     const assetRows = await dataSource.query(
       'SELECT id, external_id FROM ca_meta_assets WHERE tenant_id = ? AND app_configuration_id = ? AND asset_kind = \'FACEBOOK_PAGE\' AND external_id = ?',
       [tenantA, appA, externalId],
@@ -117,6 +132,55 @@ test('M3.06 MariaDB tenant-safe asset upserts, constraints, string IDs and outbo
       [tenantA, firstAssetRef],
     ) as Array<{ authorization_id: string }>;
     assert.equal(links.length, 2, 'the same tenant asset may be linked to two authorizations');
+    const grantedScopes = await dataSource.query(
+      'SELECT scope_name FROM ca_meta_authorization_scopes WHERE tenant_id = ? AND authorization_id = ? AND status = \'GRANTED\'',
+      [tenantA, concurrentAuthorization],
+    ) as Array<{ scope_name: string }>;
+    assert.deepEqual(grantedScopes.map((row) => row.scope_name), ['pages_show_list']);
+    const assetGrants = await dataSource.query(
+      'SELECT grant_name FROM ca_meta_asset_grants WHERE tenant_id = ? AND authorization_id = ? AND asset_id = ? AND status = \'GRANTED\'',
+      [tenantA, concurrentAuthorization, firstAssetRef],
+    ) as Array<{ grant_name: string }>;
+    assert.deepEqual(assetGrants.map((row) => row.grant_name), ['pages_read_engagement']);
+    const relationRows = await dataSource.query(
+      'SELECT relation_type, target_asset_id FROM ca_meta_asset_relations WHERE tenant_id = ? AND source_asset_id = ?',
+      [tenantA, sharedResult.assets[1]?.assetRef],
+    ) as Array<{ relation_type: string; target_asset_id: string }>;
+    assert.deepEqual(relationRows, [{ relation_type: 'INSTAGRAM_TO_PAGE', target_asset_id: firstAssetRef }]);
+
+    await repository.upsert(command({
+      tenantId: tenantA, appConfigurationId: appA, authorizationId: concurrentAuthorization, externalId,
+    }));
+    const preservedGrants = await dataSource.query(
+      'SELECT grant_name FROM ca_meta_asset_grants WHERE tenant_id = ? AND authorization_id = ? AND asset_id = ? AND status = \'GRANTED\'',
+      [tenantA, concurrentAuthorization, firstAssetRef],
+    ) as Array<{ grant_name: string }>;
+    assert.deepEqual(preservedGrants.map((row) => row.grant_name), ['pages_read_engagement'], 'omitted grants preserve the current grant set');
+    const omittedHistory = await dataSource.query(
+      'SELECT snapshot_json FROM ca_meta_asset_history WHERE tenant_id = ? AND asset_id = ? ORDER BY version DESC LIMIT 1',
+      [tenantA, firstAssetRef],
+    ) as Array<{ snapshot_json: string | { grants: readonly string[] } }>;
+    const omittedSnapshot = typeof omittedHistory[0]?.snapshot_json === 'string'
+      ? JSON.parse(omittedHistory[0].snapshot_json) as { grants: readonly string[] }
+      : omittedHistory[0]?.snapshot_json;
+    assert.deepEqual(omittedSnapshot?.grants, ['pages_read_engagement'], 'history records the preserved current grant set');
+
+    await repository.upsert(command({
+      tenantId: tenantA, appConfigurationId: appA, authorizationId: concurrentAuthorization, externalId, grants: [],
+    }));
+    const revokedGrants = await dataSource.query(
+      'SELECT grant_name FROM ca_meta_asset_grants WHERE tenant_id = ? AND authorization_id = ? AND asset_id = ? AND status = \'GRANTED\'',
+      [tenantA, concurrentAuthorization, firstAssetRef],
+    ) as Array<{ grant_name: string }>;
+    assert.deepEqual(revokedGrants, [], 'an explicit empty grant set revokes all grants');
+    const revokedHistory = await dataSource.query(
+      'SELECT snapshot_json FROM ca_meta_asset_history WHERE tenant_id = ? AND asset_id = ? ORDER BY version DESC LIMIT 1',
+      [tenantA, firstAssetRef],
+    ) as Array<{ snapshot_json: string | { grants: readonly string[] } }>;
+    const revokedSnapshot = typeof revokedHistory[0]?.snapshot_json === 'string'
+      ? JSON.parse(revokedHistory[0].snapshot_json) as { grants: readonly string[] }
+      : revokedHistory[0]?.snapshot_json;
+    assert.deepEqual(revokedSnapshot?.grants, [], 'history records the explicit revocation');
     const readModels = await repository.listReadModels({ tenantId: tenantA, appConfigurationId: appA, environment: 'test' });
     const listedAsset = readModels.flatMap((authorization) => authorization.assets).find((asset) => asset.assetRef === firstAssetRef);
     assert.equal(listedAsset?.externalId, externalId);
