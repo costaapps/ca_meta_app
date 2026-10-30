@@ -126,9 +126,9 @@ test('legacy asset references remain opaque, tenant-mapped strings and are servi
   })));
   assert.equal(typeof reference.legacyAssetRef, 'string');
 });
-test('M3.06 migration reserves schema version 6 and uses tenant-context foreign keys without global upsert reassignment', () => {
-  assert.equal(META_ASSETS_MIGRATION.schemaVersion, 6);
-  assert.equal(META_ASSETS_MIGRATION.id, '202610300003-meta-assets-grants-relations');
+test('M3.06 migration reserves schema version 7 and uses tenant-context foreign keys without global upsert reassignment', () => {
+  assert.equal(META_ASSETS_MIGRATION.schemaVersion, 7);
+  assert.equal(META_ASSETS_MIGRATION.id, '202610300005-meta-assets-grants-relations');
   assert.match(META_ASSETS_MIGRATION.checksum, /^[a-f0-9]{64}$/);
   const sql = META_ASSETS_MIGRATION.steps.filter((step) => 'sql' in step).map((step) => step.sql).join('\n');
   assert.match(sql, /FOREIGN KEY \(tenant_id, authorization_id, app_configuration_id, provider, environment\)/);

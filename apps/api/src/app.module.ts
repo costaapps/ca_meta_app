@@ -8,7 +8,6 @@ import { RequestDrainInterceptor } from './common/http/request-drain.interceptor
 import { DenyByDefaultGuard } from './common/security/deny-by-default.guard.js';
 import { CLOCK, SystemMonotonicClock } from './common/time/clock.port.js';
 import { HealthModule } from './health/health.module.js';
-import { JobsModule } from './jobs/jobs.module.js';
 import { IdentityModule } from './identity/identity.module.js';
 import { AuthExchangeModule } from './auth-exchange/auth-exchange.module.js';
 import { ConfiguredTicketKeySet } from './auth-exchange/configured-ticket-key-set.js';
@@ -17,6 +16,7 @@ import { PortalSessionIssuer, setPortalSessionCookies } from './identity/portal-
 import { PortalPreAuthService } from './identity/portal-session.service.js';
 import { PortalSessionVerifier } from './identity/identity.trust.js';
 import { AbuseLimitService } from './common/security/abuse-limits.js';
+import { MetaAssetsModule } from './meta-assets/meta-assets.module.js';
 
 @Module({})
 export class ApiModule {
@@ -39,7 +39,7 @@ export class ApiModule {
       : AuthExchangeModule.register();
     return {
       module: ApiModule,
-      imports: [HealthModule.register(environment), JobsModule.register(environment), identityModule, authExchangeModule],
+      imports: [HealthModule.register(environment), MetaAssetsModule.register(environment), identityModule, authExchangeModule],
       providers: [
         { provide: STRUCTURED_LOGGER, useClass: ConsoleStructuredLogger },
         { provide: CLOCK, useClass: SystemMonotonicClock },

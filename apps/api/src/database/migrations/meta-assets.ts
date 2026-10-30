@@ -437,8 +437,8 @@ const historyTriggers = [
 ] as const;
 
 const definition = {
-  id: '202610300003-meta-assets-grants-relations',
-  schemaVersion: 6,
+  id: '202610300005-meta-assets-grants-relations',
+  schemaVersion: 7,
   minimumSupportedApiVersion: 1,
   steps: [assetContextIndex, legacyMapContextIndex, authorizations, credentials, authorizationScopes, authorizationHistory,
     assetAuthorizations, assetGrants, assetRelations, identityClaims, claimQuarantine, assetLegacyReferences, assetHistory, ...historyTriggers],

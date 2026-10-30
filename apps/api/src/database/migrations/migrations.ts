@@ -5,6 +5,7 @@ import { DURABLE_WORK_MIGRATION, DURABLE_WORK_TABLES } from './durable-work.js';
 import { IDENTITY_MIGRATION } from './identity.js';
 import { PORTAL_SESSIONS_MIGRATION, PORTAL_SESSION_TABLES } from './portal-sessions.js';
 import { TICKET_RETRY_MIGRATION } from './ticket-retry.js';
+import { META_ASSETS_MIGRATION, META_ASSETS_TABLES } from './meta-assets.js';
 
 function ddl(
   id: string,
@@ -261,6 +262,7 @@ const migrationsWithoutChecksums = [
   IDENTITY_MIGRATION,
   PORTAL_SESSIONS_MIGRATION,
   TICKET_RETRY_MIGRATION,
+  META_ASSETS_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -278,6 +280,7 @@ export const DOMAIN_TABLES = [
   'ca_meta_service_identity_scopes',
   'ca_meta_identity_admin_audit',
   ...PORTAL_SESSION_TABLES,
+  ...META_ASSETS_TABLES,
   ...DURABLE_WORK_TABLES,
 ] as const;
 
