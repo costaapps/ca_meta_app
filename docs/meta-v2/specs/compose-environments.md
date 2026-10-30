@@ -1,6 +1,6 @@
 # SPEC · delivery/compose-environments
 
-Status: implemented; candidate validation pending. Issue: [M2.07 / #29](https://github.com/costaapps/ca_meta_app/issues/29). ADRs: [ADR-003 persistence/jobs](../adrs/ADR-003-persistence-jobs.md), [ADR-005 secrets/legacy](../adrs/ADR-005-secrets-legacy.md), [ADR-006 Compose ingress network](../adrs/ADR-006-compose-ingress-network.md). Contract/version: [Compose release lock](../contracts/release-lock.md), v1. Functional owner: DevOps / delivery engineering (operator not assigned). Evidence SHA: pending final candidate smoke.
+Status: implemented; local smoke passed, package CI pending. Issue: [M2.07 / #29](https://github.com/costaapps/ca_meta_app/issues/29). ADRs: [ADR-003 persistence/jobs](../adrs/ADR-003-persistence-jobs.md), [ADR-005 secrets/legacy](../adrs/ADR-005-secrets-legacy.md), [ADR-006 Compose ingress network](../adrs/ADR-006-compose-ingress-network.md). Contract/version: [Compose release lock](../contracts/release-lock.md), v1. Functional owner: DevOps / delivery engineering (operator not assigned). Runtime evidence SHA: `5d84eb3f3b9cf3615ef4b0f78f389842b665d571`; see [M2.07 evidence](../../delivery/M2/packages/M2.07-evidence.md).
 
 ## Problem and intended behavior
 
