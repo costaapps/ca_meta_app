@@ -184,7 +184,7 @@ jobs:
         id: smoke
         run: >-
           pwsh -NoLogo -NoProfile -File tools/m2-06/run-container-smoke.ps1 -KeepImages
-          -NodeImage docker.io/library/node@sha256:54f84b4cf8432b21aaffd5d3ce8d41e12cea0d10d33c09d2f3c9879d49d6b446
+          -NodeImage docker.io/library/node@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
           -NginxImage ghcr.io/nginx/nginx-unprivileged@sha256:2daef144b574804198caccc4041819fa1801ecd5df2252a39646bfa2b1ff3bea
       - name: Prepare report directory
         run: mkdir -p artifacts/security

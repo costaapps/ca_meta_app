@@ -11,6 +11,11 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "fdir": {
+      "picomatch": "4.0.7"
+    }
+  },
   "scripts": {
     "start": "npm run start:web",
     "start:web": "npm run start --workspace=@ca-meta/web",
