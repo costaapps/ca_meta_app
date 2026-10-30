@@ -299,15 +299,32 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
   const badFetch = await invokeMiddleware(middleware, request({ ...baseHeaders, 'sec-fetch-site': 'same-site' }));
   assert.equal((badFetch.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
 
-  const badCsrf = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-meta-csrf': 'wrong-token-with-sufficient-entropy-1234' }));
+  const badCsrf = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-csrf-token': 'wrong-token-with-sufficient-entropy-1234' }));
   assert.equal((badCsrf.response.bodyValue() as { code: string }).code, 'CSRF_INVALID');
 
-  const good = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-meta-csrf': csrf }));
+  const legacyHeader = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-meta-csrf': csrf }));
+  assert.equal((legacyHeader.response.bodyValue() as { code: string }).code, 'CSRF_INVALID');
+
+  const good = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-csrf-token': csrf }));
   assert.equal(good.continued, true);
   assert.equal(good.response.headerValue('access-control-allow-origin'), 'https://portal.example');
 
-  const validDelete = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-meta-csrf': csrf }, 'DELETE'));
+  const validDelete = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-csrf-token': csrf }, 'DELETE'));
   assert.equal(validDelete.continued, true);
+
+  const preflight = await invokeMiddleware(middleware, request({
+    origin: 'https://portal.example',
+    'access-control-request-method': 'DELETE',
+    'access-control-request-headers': 'content-type,x-csrf-token',
+  }, 'OPTIONS'));
+  assert.equal(preflight.response.statusCodeValue(), 204);
+  assert.match(String(preflight.response.headerValue('access-control-allow-headers')), /X-CSRF-Token/);
+  const legacyPreflight = await invokeMiddleware(middleware, request({
+    origin: 'https://portal.example',
+    'access-control-request-method': 'DELETE',
+    'access-control-request-headers': 'x-meta-csrf',
+  }, 'OPTIONS'));
+  assert.equal(legacyPreflight.response.statusCodeValue(), 403);
 });
 
 test('portal cookies are host-only, Secure, HttpOnly where required, and denial codes map to safe 403/409 envelopes', () => {

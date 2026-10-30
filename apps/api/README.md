@@ -54,7 +54,7 @@ local tests and harnesses only: 127.0.0.1,localhost.
 
 Portal session cookies are host-only `__Host-` cookies with `Secure`, `Path=/`, and `SameSite=Lax`;
 the session cookie is `HttpOnly`. CSRF and tenant-context references use separate host-only cookies
-and are sent in `X-Meta-CSRF` and `X-Tenant-Context` headers. Only exact configured origins receive
+and are sent in `X-CSRF-Token` and `X-Tenant-Context` headers. Only exact configured origins receive
 credentialed CORS headers. Mutations require exact same-origin `Origin` and
 `Sec-Fetch-Site: same-origin`; requests with a portal session also require the matching session-bound
 CSRF cookie/header. The initial idle/absolute expiry values are 30 minutes/eight hours; product

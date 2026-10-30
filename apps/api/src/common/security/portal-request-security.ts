@@ -73,7 +73,7 @@ export function portalRequestSecurityMiddleware(
       const requestedMethod = oneHeader(request.headers['access-control-request-method']);
       const requestedHeaders = oneHeader(request.headers['access-control-request-headers']);
       const allowedMethods = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
-      const allowedHeaders = new Set(['content-type', 'x-meta-csrf', 'x-tenant-context', 'idempotency-key']);
+      const allowedHeaders = new Set(['content-type', 'x-csrf-token', 'x-tenant-context', 'idempotency-key']);
       const normalizedHeaders = requestedHeaders?.split(',').map((header) => header.trim().toLowerCase()).filter(Boolean) ?? [];
       if (origin === undefined || !requestedMethod || !allowedMethods.has(requestedMethod.toUpperCase()) ||
         normalizedHeaders.some((header) => !allowedHeaders.has(header))) {
@@ -81,7 +81,7 @@ export function portalRequestSecurityMiddleware(
         return;
       }
       response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      response.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Meta-CSRF, X-Tenant-Context, Idempotency-Key');
+      response.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, X-Tenant-Context, Idempotency-Key');
       response.setHeader('Access-Control-Max-Age', '600');
       response.status(HttpStatus.NO_CONTENT).end();
       return;
@@ -104,7 +104,7 @@ export function portalRequestSecurityMiddleware(
         try {
           const session = await verifier.verify(sessionCookie);
           const csrfCookie = readPortalCookie(oneHeader(request.headers.cookie), PORTAL_CSRF_COOKIE);
-          const csrfHeader = oneHeader(request.headers['x-meta-csrf']);
+          const csrfHeader = oneHeader(request.headers['x-csrf-token']);
           if (!session) {
             fail(response, request, 'AUTH_REQUIRED', HttpStatus.UNAUTHORIZED);
             return;
