@@ -13,7 +13,7 @@ This runbook describes the workflow implemented for M2.09. **No Docker Hub relea
 
 ## Configure the release environment
 
-The only publishing job is `.github/workflows/release.yml`, triggered by a pushed `v*` tag. It has no pull-request trigger. It checks the exact source SHA against the successful `desktop-candidate`, `m2-08-mariadb`, `m2-08-security` and `m2-08-images` check runs, and verifies that the release commit is already reachable from `develop`.
+The release workflow `.github/workflows/release.yml` is triggered by a pushed `v*` tag and has no pull-request trigger. The build job checks the exact source SHA against the successful `desktop-candidate`, `m2-08-mariadb`, `m2-08-security` and `m2-08-images` check runs, and verifies that the release commit is already reachable from `develop`. It pushes candidate digests and exports those images plus SBOM/provenance evidence as short-lived artifacts. The separate `scan-images` job has only `contents:read`, no Docker Hub credentials, no job-wide `GH_TOKEN`, and no OIDC/signing permissions; it verifies archive checksums and scans the exported image archives. A downstream protected job signs the verified digests, then promotes them and writes the release manifest. The `dockerhub-release` environment protects both jobs that authenticate to Docker Hub, so repository administrators should confirm the resulting approval sequence when configuring its reviewers.
 
 Before the first release, an administrator must configure GitHub environment `dockerhub-release` with required reviewers and:
 
@@ -26,7 +26,7 @@ Before the first release, an administrator must configure GitHub environment `do
 | `DOCKERHUB_USERNAME` | environment secret | Dedicated least-privilege publishing identity |
 | `DOCKERHUB_TOKEN` | environment secret | Rotatable token scoped to the two target image repositories |
 
-Keep Docker Hub credentials out of repository variables, files, image build arguments and workflow text. The workflow pipes the token to `docker login --password-stdin`, uses an ephemeral Docker config directory, and removes it at the end of the job. Rotate the token through the approved operator path. No credential value is committed or printed.
+Keep Docker Hub credentials out of repository variables, files, image build arguments and workflow text. The workflow maps the username/token only into the Docker Hub login steps, pipes the token to `docker login --password-stdin`, uses an ephemeral Docker config directory, removes it before uploading scan inputs and before the isolated scanner runs, and cleans it again at job end. Rotate the token through the approved operator path. No credential value is committed or printed.
 
 Configure immutable tags in Docker Hub for both image repositories before enabling publication. The tag regex should match only the SemVer and full-SHA aliases:
 
@@ -45,7 +45,7 @@ After external settings are confirmed and a candidate has landed in `develop`:
 1. Create and push one stable SemVer tag at the exact candidate commit, for example `v1.2.3`. Tag creation remains behind GitHub's protected tag rules.
 2. Review the protected `dockerhub-release` environment gate. The workflow verifies source ancestry and the four required M2.08 checks before Docker login.
 3. The workflow builds web and API from the exact tagged SHA with OCI revision/version labels, `--provenance=mode=max,version=v1`, and `--sbom=true`. Build arguments contain only the SemVer and source SHA. It builds `linux/amd64` only.
-4. It extracts and records the BuildKit provenance and runtime image SBOM, then scans each exact candidate digest with pinned Trivy 0.76.1. HIGH and CRITICAL findings fail the job; unfixed findings are not suppressed.
+4. It extracts and records the BuildKit provenance and runtime image SBOM, exports the digest-resolved images as archives, and records each archive checksum with its image digest/source SHA. The unprivileged `scan-images` job checks those checksums and scans the archives with pinned Trivy 0.76.1; HIGH and CRITICAL findings fail the job, and unfixed findings are not suppressed.
 5. It creates and verifies GitHub/Sigstore provenance and SPDX attestations for both digests. Only after both image gates pass does it assign immutable SemVer and full-SHA tags. `docker buildx imagetools create` copies the verified OCI index; the resulting digest must stay identical.
 6. The workflow generates release notes and writes `release-manifest.json` plus `release-lock.env`. It checks the manifest, checks the lock with M2.07's `check-release-lock.ps1`, signs/verifies the manifest and publishes the complete set as GitHub Release assets. No manifest is published after only one image push or a failed scan/attestation.
 

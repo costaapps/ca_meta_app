@@ -11,20 +11,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish-images:
-    name: publish-images
+  build-images:
+    name: build-images
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment:
       name: dockerhub-release
     permissions:
-      actions: read
       checks: read
       contents: read
-      id-token: write
-      attestations: write
-      artifact-metadata: write
     env:
       GH_TOKEN: ${{ github.token }}
       DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
@@ -34,12 +30,20 @@ jobs:
       DOCKER_CONFIG: ${{ runner.temp }}/m2-09-docker-config
       RELEASE_TAG: ${{ github.ref_name }}
       SOURCE_REVISION: ${{ github.sha }}
-      RELEASE_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     outputs:
       release_tag: ${{ steps.prepare.outputs.release_tag }}
       release_id: ${{ steps.prepare.outputs.release_id }}
       source_revision: ${{ steps.prepare.outputs.source_revision }}
+      scan_artifact: ${{ steps.prepare.outputs.scan_artifact }}
+      scan_report_artifact: ${{ steps.prepare.outputs.scan_report_artifact }}
+      evidence_artifact: ${{ steps.prepare.outputs.evidence_artifact }}
       publish_artifact: ${{ steps.prepare.outputs.publish_artifact }}
+      web_image_ref: ${{ steps.web.outputs.image_ref }}
+      web_subject_name: ${{ steps.web.outputs.subject_name }}
+      web_digest: ${{ steps.web.outputs.digest }}
+      api_image_ref: ${{ steps.api.outputs.image_ref }}
+      api_subject_name: ${{ steps.api.outputs.subject_name }}
+      api_digest: ${{ steps.api.outputs.digest }}
     steps:
       - name: Checkout the exact release tag
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -86,15 +90,61 @@ jobs:
           IMAGE_KIND: api
         run: node tools/m2-09/release-pipeline.mjs resolve-image
 
-      - name: Remove Docker Hub credentials before third-party scan and attestation actions
+      - name: Export the exact digest images for isolated scanning
+        env:
+          WEB_IMAGE_REF: ${{ steps.web.outputs.image_ref }}
+          WEB_SUBJECT_NAME: ${{ steps.web.outputs.subject_name }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          API_IMAGE_REF: ${{ steps.api.outputs.image_ref }}
+          API_SUBJECT_NAME: ${{ steps.api.outputs.subject_name }}
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+        run: node tools/m2-09/release-pipeline.mjs prepare-scan-inputs
+
+      - name: Remove Docker Hub credentials before uploading scan inputs
+        if: always()
         run: rm -rf -- "$DOCKER_CONFIG"
 
-      - name: Scan exact web digest
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
-        env:
-          DOCKER_CONFIG: ''
+      - name: Upload digest-pinned scan inputs and build evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          image-ref: ${{ steps.web.outputs.image_ref }}
+          name: ${{ steps.prepare.outputs.scan_artifact }}
+          path: artifacts/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove Docker Hub credential file
+        if: always()
+        run: rm -rf -- "$DOCKER_CONFIG"
+
+  scan-images:
+    name: scan-images
+    needs: build-images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      SOURCE_REVISION: ${{ needs.build-images.outputs.source_revision }}
+    steps:
+      - name: Checkout the exact release source for the local verifier
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.build-images.outputs.source_revision }}
+          persist-credentials: false
+
+      - name: Download image archives and build metadata
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.build-images.outputs.scan_artifact }}
+          path: artifacts
+
+      - name: Verify archive digests and source identity
+        run: node tools/m2-09/verify-scan-inputs.mjs artifacts
+
+      - name: Scan exact web image archive
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        with:
+          input: artifacts/scan-images/web.tar
           format: json
           output: artifacts/release-evidence/trivy-web.json
           scanners: vuln
@@ -106,12 +156,10 @@ jobs:
           hide-progress: true
           timeout: 15m
 
-      - name: Scan exact API digest
+      - name: Scan exact API image archive
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
-        env:
-          DOCKER_CONFIG: ''
         with:
-          image-ref: ${{ steps.api.outputs.image_ref }}
+          input: artifacts/scan-images/api.tar
           format: json
           output: artifacts/release-evidence/trivy-api.json
           scanners: vuln
@@ -123,63 +171,112 @@ jobs:
           hide-progress: true
           timeout: 15m
 
+      - name: Upload scan reports
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ${{ needs.build-images.outputs.scan_report_artifact }}
+          path: |
+            artifacts/release-evidence/trivy-web.json
+            artifacts/release-evidence/trivy-api.json
+          if-no-files-found: error
+          retention-days: 14
+
+  attest-promote-release:
+    name: attest-promote-release
+    needs: [build-images, scan-images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: dockerhub-release
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+      DOCKERHUB_RELEASE_ENABLED: ${{ vars.DOCKERHUB_RELEASE_ENABLED }}
+      DOCKERHUB_IMMUTABLE_TAGS_CONFIRMED: ${{ vars.DOCKERHUB_IMMUTABLE_TAGS_CONFIRMED }}
+      DOCKERHUB_TARGET_PLATFORMS: ${{ vars.DOCKERHUB_TARGET_PLATFORMS }}
+      DOCKER_CONFIG: ${{ runner.temp }}/m2-09-docker-config
+      RELEASE_TAG: ${{ needs.build-images.outputs.release_tag }}
+      SOURCE_REVISION: ${{ needs.build-images.outputs.source_revision }}
+      RELEASE_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    outputs:
+      release_tag: ${{ needs.build-images.outputs.release_tag }}
+      release_id: ${{ needs.build-images.outputs.release_id }}
+      source_revision: ${{ needs.build-images.outputs.source_revision }}
+      publish_artifact: ${{ needs.build-images.outputs.publish_artifact }}
+    steps:
+      - name: Checkout the exact release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.build-images.outputs.source_revision }}
+          persist-credentials: false
+
+      - name: Download image metadata, SBOM and BuildKit provenance
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.build-images.outputs.scan_artifact }}
+          path: artifacts
+
+      - name: Download scan reports from the isolated scanner job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.build-images.outputs.scan_report_artifact }}
+          path: artifacts/release-evidence
+
       - name: Generate signed web image provenance
         id: web-provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
-        env:
-          DOCKER_CONFIG: ''
         with:
-          subject-name: ${{ steps.web.outputs.subject_name }}
-          subject-digest: ${{ steps.web.outputs.digest }}
+          subject-name: ${{ needs.build-images.outputs.web_subject_name }}
+          subject-digest: ${{ needs.build-images.outputs.web_digest }}
           push-to-registry: false
 
       - name: Generate signed API image provenance
         id: api-provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
-        env:
-          DOCKER_CONFIG: ''
         with:
-          subject-name: ${{ steps.api.outputs.subject_name }}
-          subject-digest: ${{ steps.api.outputs.digest }}
+          subject-name: ${{ needs.build-images.outputs.api_subject_name }}
+          subject-digest: ${{ needs.build-images.outputs.api_digest }}
           push-to-registry: false
 
       - name: Generate signed web SBOM attestation
         id: web-sbom
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
-        env:
-          DOCKER_CONFIG: ''
         with:
-          subject-name: ${{ steps.web.outputs.subject_name }}
-          subject-digest: ${{ steps.web.outputs.digest }}
+          subject-name: ${{ needs.build-images.outputs.web_subject_name }}
+          subject-digest: ${{ needs.build-images.outputs.web_digest }}
           sbom-path: artifacts/release-evidence/web-sbom.spdx.json
           push-to-registry: false
 
       - name: Generate signed API SBOM attestation
         id: api-sbom
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
-        env:
-          DOCKER_CONFIG: ''
         with:
-          subject-name: ${{ steps.api.outputs.subject_name }}
-          subject-digest: ${{ steps.api.outputs.digest }}
+          subject-name: ${{ needs.build-images.outputs.api_subject_name }}
+          subject-digest: ${{ needs.build-images.outputs.api_digest }}
           sbom-path: artifacts/release-evidence/api-sbom.spdx.json
           push-to-registry: false
 
       - name: Verify image provenance, SBOM and source SHA
         env:
-          WEB_IMAGE_REF: ${{ steps.web.outputs.image_ref }}
-          WEB_SUBJECT_NAME: ${{ steps.web.outputs.subject_name }}
-          WEB_DIGEST: ${{ steps.web.outputs.digest }}
-          API_IMAGE_REF: ${{ steps.api.outputs.image_ref }}
-          API_SUBJECT_NAME: ${{ steps.api.outputs.subject_name }}
-          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_IMAGE_REF: ${{ needs.build-images.outputs.web_image_ref }}
+          WEB_SUBJECT_NAME: ${{ needs.build-images.outputs.web_subject_name }}
+          WEB_DIGEST: ${{ needs.build-images.outputs.web_digest }}
+          API_IMAGE_REF: ${{ needs.build-images.outputs.api_image_ref }}
+          API_SUBJECT_NAME: ${{ needs.build-images.outputs.api_subject_name }}
+          API_DIGEST: ${{ needs.build-images.outputs.api_digest }}
           WEB_PROVENANCE_URL: ${{ steps.web-provenance.outputs.attestation-url }}
           API_PROVENANCE_URL: ${{ steps.api-provenance.outputs.attestation-url }}
           WEB_SBOM_URL: ${{ steps.web-sbom.outputs.attestation-url }}
           API_SBOM_URL: ${{ steps.api-sbom.outputs.attestation-url }}
         run: node tools/m2-09/release-pipeline.mjs verify-attestations
 
-      - name: Re-authenticate only for immutable image-tag promotion
+      - name: Authenticate only for immutable image-tag promotion
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -189,25 +286,26 @@ jobs:
 
       - name: Promote verified digests to immutable SemVer and SHA tags
         env:
-          WEB_IMAGE_REF: ${{ steps.web.outputs.image_ref }}
-          WEB_SUBJECT_NAME: ${{ steps.web.outputs.subject_name }}
-          WEB_DIGEST: ${{ steps.web.outputs.digest }}
-          API_IMAGE_REF: ${{ steps.api.outputs.image_ref }}
-          API_SUBJECT_NAME: ${{ steps.api.outputs.subject_name }}
-          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_IMAGE_REF: ${{ needs.build-images.outputs.web_image_ref }}
+          WEB_SUBJECT_NAME: ${{ needs.build-images.outputs.web_subject_name }}
+          WEB_DIGEST: ${{ needs.build-images.outputs.web_digest }}
+          API_IMAGE_REF: ${{ needs.build-images.outputs.api_image_ref }}
+          API_SUBJECT_NAME: ${{ needs.build-images.outputs.api_subject_name }}
+          API_DIGEST: ${{ needs.build-images.outputs.api_digest }}
         run: node tools/m2-09/release-pipeline.mjs promote
 
       - name: Remove Docker Hub credentials after image promotion
+        if: always()
         run: rm -rf -- "$DOCKER_CONFIG"
 
       - name: Generate changelog and release manifest plus Compose lock
         env:
-          WEB_IMAGE_REF: ${{ steps.web.outputs.image_ref }}
-          WEB_SUBJECT_NAME: ${{ steps.web.outputs.subject_name }}
-          WEB_DIGEST: ${{ steps.web.outputs.digest }}
-          API_IMAGE_REF: ${{ steps.api.outputs.image_ref }}
-          API_SUBJECT_NAME: ${{ steps.api.outputs.subject_name }}
-          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_IMAGE_REF: ${{ needs.build-images.outputs.web_image_ref }}
+          WEB_SUBJECT_NAME: ${{ needs.build-images.outputs.web_subject_name }}
+          WEB_DIGEST: ${{ needs.build-images.outputs.web_digest }}
+          API_IMAGE_REF: ${{ needs.build-images.outputs.api_image_ref }}
+          API_SUBJECT_NAME: ${{ needs.build-images.outputs.api_subject_name }}
+          API_DIGEST: ${{ needs.build-images.outputs.api_digest }}
           WEB_PROVENANCE_URL: ${{ steps.web-provenance.outputs.attestation-url }}
           API_PROVENANCE_URL: ${{ steps.api-provenance.outputs.attestation-url }}
           WEB_SBOM_URL: ${{ steps.web-sbom.outputs.attestation-url }}
@@ -240,32 +338,28 @@ jobs:
       - name: Upload sanitized release evidence (14 days)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        env:
-          DOCKER_CONFIG: ''
         with:
-          name: ${{ steps.prepare.outputs.evidence_artifact }}
+          name: ${{ needs.build-images.outputs.evidence_artifact }}
           path: artifacts/release-evidence/**
           if-no-files-found: warn
           retention-days: 14
 
       - name: Upload the exact release files for the publication job
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        env:
-          DOCKER_CONFIG: ''
         with:
-          name: ${{ steps.prepare.outputs.publish_artifact }}
+          name: ${{ needs.build-images.outputs.publish_artifact }}
           path: artifacts/release/**
           if-no-files-found: error
           retention-days: 14
 
-      - name: Remove the Docker Hub credential file
+      - name: Remove Docker Hub credential file
         if: always()
         run: rm -rf -- "$DOCKER_CONFIG"
 
   publish-release-record:
     name: publish-release-record
-    needs: publish-images
-    if: needs.publish-images.result == 'success'
+    needs: attest-promote-release
+    if: needs.attest-promote-release.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -274,18 +368,18 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      SOURCE_REVISION: ${{ needs.publish-images.outputs.source_revision }}
-      RELEASE_TAG: ${{ needs.publish-images.outputs.release_tag }}
+      SOURCE_REVISION: ${{ needs.attest-promote-release.outputs.source_revision }}
+      RELEASE_TAG: ${{ needs.attest-promote-release.outputs.release_tag }}
     steps:
       - name: Checkout the exact release tag
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ needs.publish-images.outputs.source_revision }}
+          ref: ${{ needs.attest-promote-release.outputs.source_revision }}
           persist-credentials: false
       - name: Download complete manifest, lock, scan, SBOM and provenance files
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: ${{ needs.publish-images.outputs.publish_artifact }}
+          name: ${{ needs.attest-promote-release.outputs.publish_artifact }}
           path: artifacts/release
       - name: Verify files and detect a completed retry
         id: existing
@@ -338,4 +432,3 @@ jobs:
           for asset in release-manifest.json release-lock.env changelog.md web-sbom.spdx.json api-sbom.spdx.json web-provenance.slsa.json api-provenance.slsa.json trivy-web.json trivy-api.json; do
             grep -Fxq "$asset" "$RUNNER_TEMP/release-assets.txt" || { echo "Release asset $asset is missing." >&2; exit 1; }
           done
-

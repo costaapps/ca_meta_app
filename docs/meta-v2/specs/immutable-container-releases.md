@@ -9,7 +9,7 @@ Build web and API images from one source SHA, preserve their digest identity thr
 ## Invariants and external boundaries
 
 - The release tag is `vMAJOR.MINOR.PATCH`. Image aliases are `MAJOR.MINOR.PATCH` and `sha-<full SHA>`; production references always use `repository@sha256:digest`.
-- Both image OCI labels, BuildKit provenance and GitHub signed attestations must match the same source revision/tag. Both images have to pass the exact M2.08 checks and pinned Trivy HIGH/CRITICAL policy.
+- Both image OCI labels, BuildKit revision metadata and GitHub signed attestations must match the same source revision/tag. The unprivileged scanner job receives digest-pinned image archives and checks their checksums before scanning; it has only `contents:read`, no Docker Hub credentials, no job-wide `GH_TOKEN`, and no OIDC/signing permissions. Both images have to pass the exact M2.08 checks and pinned Trivy HIGH/CRITICAL policy.
 - Neither image is promoted to immutable aliases until both images have been built, scanned and attested. Manifest creation is downstream of both successful promotions.
 - A retry accepts an existing alias only if its digest is consistent with the other alias, runtime labels, BuildKit source provenance and an existing GitHub signature for the exact source. A missing alias is created as a copy of the verified OCI index and must retain the same digest. A conflicting tag fails closed.
 - No registry namespace, username/token, target CPU, image tag immutability rules, protected tag rules, GitHub environment reviewers, retention configuration or staging host is assumed to exist. The workflow checks explicit environment gates before login.

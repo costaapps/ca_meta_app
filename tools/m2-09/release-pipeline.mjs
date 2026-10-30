@@ -144,16 +144,6 @@ function inspectDigest(reference) {
   return manifest.digest;
 }
 
-function verifyExistingAttestation(imageReference, context) {
-  run('gh', [
-    'attestation', 'verify', `oci://${imageReference}`,
-    '--repo', context.repository,
-    '--signer-workflow', `${context.repository}/.github/workflows/release.yml`,
-    '--source-digest', context.sourceRevision,
-    '--source-ref', `refs/tags/${context.releaseTag}`,
-  ]);
-}
-
 async function extractBuildEvidence(imageReference, imageKind, context) {
   const evidencePath = resolve('artifacts/release-evidence');
   await mkdir(evidencePath, { recursive: true });
@@ -220,8 +210,6 @@ async function prepare() {
   if (process.env.DOCKERHUB_RELEASE_ENABLED !== 'true') fail('Docker Hub release is disabled until an operator confirms the target environment configuration.');
   if (process.env.DOCKERHUB_IMMUTABLE_TAGS_CONFIRMED !== 'true') fail('Docker Hub immutable tag rules have not been confirmed by an operator.');
   if (process.env.DOCKERHUB_TARGET_PLATFORMS !== 'linux/amd64') fail('The configured deployment architecture must be confirmed as linux/amd64 before image publication.');
-  environment('DOCKERHUB_USERNAME');
-  environment('DOCKERHUB_TOKEN');
   const context = getReleaseContext({ verifyClean: true });
   run('docker', ['buildx', 'version']);
   const semverTag = context.semver;
@@ -237,6 +225,8 @@ async function prepare() {
     web_sha_ref: `docker.io/${context.namespace}/ca-meta-web:${shaTag}`,
     api_semver_ref: `docker.io/${context.namespace}/ca-meta-api:${semverTag}`,
     api_sha_ref: `docker.io/${context.namespace}/ca-meta-api:${shaTag}`,
+    scan_artifact: `m2-09-scan-input-${context.sourceRevision}-${attempt}`,
+    scan_report_artifact: `m2-09-scan-report-${context.sourceRevision}-${attempt}`,
     evidence_artifact: `m2-09-release-${context.sourceRevision}-${attempt}`,
     publish_artifact: `m2-09-publish-${context.sourceRevision}-${attempt}`,
   });
@@ -307,7 +297,6 @@ async function resolveImage() {
   const imageReference = `${imageName}@${digest}`;
   verifyRuntimeLabels(imageReference, kind, context);
   const evidence = await extractBuildEvidence(imageReference, kind, context);
-  if (reused) verifyExistingAttestation(imageReference, context);
   await output({
     digest,
     image_ref: imageReference,
@@ -319,6 +308,29 @@ async function resolveImage() {
     sbom_sha256: evidence.sbom.sha256,
     sbom_format: evidence.sbom.format,
   });
+}
+
+async function prepareScanInputs() {
+  const context = getReleaseContext();
+  const directory = resolve('artifacts/scan-images');
+  await mkdir(directory, { recursive: true });
+  const images = {};
+  for (const kind of ['web', 'api']) {
+    const upper = kind.toUpperCase();
+    const imageName = environment(`${upper}_SUBJECT_NAME`);
+    const digest = environment(`${upper}_DIGEST`);
+    const imageReference = environment(`${upper}_IMAGE_REF`);
+    if (imageName !== `docker.io/${context.namespace}/ca-meta-${kind}` || imageReference !== `${imageName}@${digest}` || !digestPattern.test(digest)) {
+      fail(`${kind} scan input is not the resolved digest for this release namespace.`);
+    }
+    const archive = `${kind}.tar`;
+    const archivePath = join(directory, archive);
+    run('docker', ['save', '--output', archivePath, imageReference], { inherit: true });
+    const archiveBytes = await readFile(archivePath);
+    if (archiveBytes.length === 0) fail(`${kind} image archive is empty.`);
+    images[kind] = { imageReference, digest, sourceRevision: context.sourceRevision, archive, sha256: sha256File(archiveBytes) };
+  }
+  await writeFile(resolve('artifacts/scan-inputs.json'), `${JSON.stringify({ sourceRevision: context.sourceRevision, images }, null, 2)}\n`, 'utf8');
 }
 
 function verifyAttestation(imageReference, context, predicateType = undefined) {
@@ -488,10 +500,11 @@ async function main() {
     if (command === 'prepare') await prepare();
     else if (command === 'verify-checks' && args.length === 2) await verifyChecks(args[0], args[1]);
     else if (command === 'resolve-image') await resolveImage();
+    else if (command === 'prepare-scan-inputs') await prepareScanInputs();
     else if (command === 'verify-attestations') await verifyAttestations();
     else if (command === 'promote') await promote();
     else if (command === 'write-manifest' && args.length === 2) await writeManifest(args[0], args[1]);
-    else fail('Usage: release-pipeline.mjs prepare|verify-checks <input> <output>|resolve-image|verify-attestations|promote|write-manifest <checks> <output-dir>');
+    else fail('Usage: release-pipeline.mjs prepare|verify-checks <input> <output>|resolve-image|prepare-scan-inputs|verify-attestations|promote|write-manifest <checks> <output-dir>');
   } catch (error) {
     console.error(`M2.09 release gate failed: ${error.message}`);
     process.exitCode = 1;
