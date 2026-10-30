@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createConnection, type Connection } from 'mysql2/promise';
 import { test } from 'node:test';
@@ -10,6 +11,15 @@ import { MIGRATIONS } from '../src/database/migrations/migrations.js';
 const enabled = process.env.M2_MIGRATION_TEST === '1';
 const UUID_PREFIX = '00000000-0000-4000-8000-';
 const uuid = (value: number): string => UUID_PREFIX + value.toString().padStart(12, '0');
+const tenantIsolationFixture = JSON.parse(readFileSync(
+  join(__dirname, '../../../../tools/m2-08/fixtures/tenant-isolation-negative.json'), 'utf8',
+)) as {
+  tenantA: 'primary';
+  tenantB: 'other';
+  appConfigurationTenant: 'primary' | 'other';
+  assetTenant: 'primary' | 'other';
+  expectedMariaDbError: string;
+};
 
 async function queryRows<T>(connection: Connection, sql: string, values: unknown[] = []): Promise<T[]> {
   const [result] = await connection.query(sql, values as never[]);
@@ -107,6 +117,10 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
         batch.flatMap((row) => row),
       );
     }
+    const tenantByFixtureLabel = {
+      [tenantIsolationFixture.tenantA]: tenantA,
+      [tenantIsolationFixture.tenantB]: tenantB,
+    };
     const longestSupportedExternalId = 'é'.repeat(512);
     await admin.query(
       `INSERT INTO ca_meta_assets
@@ -250,9 +264,15 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
         `INSERT INTO ca_meta_assets
          (id, tenant_id, app_configuration_id, provider, environment, asset_kind, external_id, display_name, created_at, updated_at)
          VALUES (?, ?, ?, 'META', 'test', 'PAGE', 'cross-tenant-fk', 'invalid', ?, ?)`,
-        [uuid(4002), tenantB, appA, timestamp, timestamp],
+        [
+          uuid(4002),
+          tenantByFixtureLabel[tenantIsolationFixture.assetTenant],
+          tenantByFixtureLabel[tenantIsolationFixture.appConfigurationTenant] === tenantA ? appA : appB,
+          timestamp,
+          timestamp,
+        ],
       ),
-      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'ER_NO_REFERENCED_ROW_2',
+      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === tenantIsolationFixture.expectedMariaDbError,
     );
 
     // Session ownership lands in M3; synthetic volume checks that tenant-scoped plans use indexes without forcing them.

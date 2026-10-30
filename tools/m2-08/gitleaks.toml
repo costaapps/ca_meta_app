@@ -1,0 +1,11 @@
+title = "CA Meta M2.08 secret scan"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "ca-meta-synthetic-secret-fixture"
+description = "Synthetic-only marker used to prove the secret gate fails closed"
+regex = '''CA_META_TEST_SECRET_[A-F0-9]{40}'''
+secretGroup = 0
+keywords = ["CA_META_TEST_SECRET_"]

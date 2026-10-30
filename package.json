@@ -11,6 +11,17 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "@angular-devkit/core": {
+      "picomatch": "4.0.7"
+    },
+    "@angular/build": {
+      "picomatch": "4.0.7"
+    },
+    "fdir": {
+      "picomatch": "4.0.7"
+    }
+  },
   "scripts": {
     "start": "npm run start:web",
     "start:web": "npm run start --workspace=@ca-meta/web",

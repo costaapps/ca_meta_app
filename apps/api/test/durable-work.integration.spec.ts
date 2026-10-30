@@ -105,6 +105,7 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
   const tenantB = uuid();
   const tenantReplay = uuid();
   const tenantWorker = uuid();
+  const tenantPlan = uuid();
   const tenantCap = uuid();
   const tenantConcurrent = uuid();
   const tenantFairA = '00000000-0000-4000-8000-000000000102';
@@ -120,8 +121,8 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
     await dataSource.query("SET time_zone = '+00:00'");
     await dataSource.query(
       `INSERT INTO ca_meta_tenants (id, created_at, updated_at)
-       VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)`,
-      [tenantA, timestamp, timestamp, tenantB, timestamp, timestamp, tenantReplay, timestamp, timestamp, tenantWorker, timestamp, timestamp, tenantCap, timestamp, timestamp, tenantConcurrent, timestamp, timestamp, tenantFairA, timestamp, timestamp, tenantFairB, timestamp, timestamp],
+       VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)`,
+      [tenantA, timestamp, timestamp, tenantB, timestamp, timestamp, tenantReplay, timestamp, timestamp, tenantWorker, timestamp, timestamp, tenantPlan, timestamp, timestamp, tenantCap, timestamp, timestamp, tenantConcurrent, timestamp, timestamp, tenantFairA, timestamp, timestamp, tenantFairB, timestamp, timestamp],
     );
     await dataSource.query(
       `INSERT INTO ca_meta_app_configurations
@@ -698,6 +699,36 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
         batch.flatMap((row) => row),
       );
     }
+
+    // Give the expired-lease plan a representative same-tenant RUNNING population.
+    // Most leases remain live, so the lease-expiry range is selective against the shared status prefix.
+    const liveLeaseCount = 1_000;
+    const expiredLeaseCount = 20;
+    const leasePlanRows: unknown[][] = [];
+    for (let index = 0; index < liveLeaseCount + expiredLeaseCount; index += 1) {
+      const expired = index < expiredLeaseCount;
+      const leaseExpiry = mysqlTime(expired ? -60_000 - index : 60_000 + index);
+      leasePlanRows.push([
+        uuid(), tenantPlan, 'PROJECTION_RECONCILE', 1, 'HISTORICAL_PROJECTION', 'SAFE_RETRY', `lease-plan-scope-${index}`,
+        `lease-plan-key-${index}`, `lease-plan-correlation-${index}`, null, Buffer.alloc(32),
+        JSON.stringify({ kind: 'PROJECTION_RECONCILE', projectionRef: `lease-plan-projection-${index}`, sourceVersion: 1 }),
+        'RUNNING', 1, 5, timestamp, timestamp, `lease-plan-worker-${index % 10}`, uuid(), leaseExpiry,
+        mysqlTime(-5_000), null, null, timestamp, timestamp, null,
+      ]);
+    }
+    for (let offset = 0; offset < leasePlanRows.length; offset += 100) {
+      const batch = leasePlanRows.slice(offset, offset + 100);
+      const values = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+      await dataSource.query(
+        `INSERT INTO ca_meta_jobs
+         (id, tenant_id, job_type, schema_version, lane, effect_mode, resource_scope_ref, idempotency_key,
+          correlation_id, causation_id, payload_hash, payload_json, status, attempt, max_attempts,
+          next_run_at, budget_started_at, lease_owner, claim_token, lease_expires_at, heartbeat_at,
+          last_safe_error_code, last_safe_error_action, created_at, updated_at, completed_at)
+         VALUES ${values}`,
+        batch.flatMap((row) => row),
+      );
+    }
     await dataSource.query('ANALYZE TABLE ca_meta_jobs');
     const urgentCandidatePlan = await dataSource.query(
       `EXPLAIN SELECT tenant_id, MIN(COALESCE(lease_expires_at, next_run_at)) AS ready_at
@@ -742,7 +773,7 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
        WHERE tenant_id = ? AND lane = 'HISTORICAL_PROJECTION' AND job_type = 'PROJECTION_RECONCILE'
          AND status = 'RUNNING' AND effect_mode <> 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6)
        ORDER BY lease_expires_at, created_at, id LIMIT 1`,
-      [tenantWorker],
+      [tenantPlan],
     ) as Array<{ table: string | null; key: string | null; type: string; rows: number | string }>;
     const tenantExpiredScan = tenantExpiredPlan.find((row) => row.table === 'ca_meta_jobs');
     assert.ok(
