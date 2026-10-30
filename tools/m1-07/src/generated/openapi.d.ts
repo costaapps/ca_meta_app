@@ -694,7 +694,7 @@ export interface components {
              * Format: uuid
              * @description Public opaque selector only; never a credential and insufficient to authorize revocation.
              */
-            readonly sessionRef: string;
+            readonly sessionRef?: string;
             readonly principalRef: string;
             readonly tenantRef: string;
             readonly roles: readonly ("owner" | "admin" | "operator" | "viewer")[];
@@ -1124,7 +1124,7 @@ export interface operations {
             /** @description Sanitized success example */
             readonly 201: {
                 headers: {
-                    /** @description Host-only Secure HttpOnly `__Host-ca_meta_pre_auth` cookie with SameSite=Lax; no Domain attribute. Cookie value is not in the response body. */
+                    /** @description Host-only Secure HttpOnly `__Host-meta_preauth` cookie with SameSite=Lax; no Domain attribute. Cookie value is not in the response body. */
                     readonly "Set-Cookie"?: string;
                     readonly [name: string]: unknown;
                 };
@@ -1168,7 +1168,7 @@ export interface operations {
             /** @description Sanitized success example */
             readonly 201: {
                 headers: {
-                    /** @description Opaque host-only Secure HttpOnly `__Host-ca_meta_portal` portal session cookie. */
+                    /** @description Opaque host-only Secure HttpOnly `__Host-meta_portal` portal session cookie. */
                     readonly "Set-Cookie"?: string;
                     readonly "Cache-Control"?: "no-store";
                     readonly [name: string]: unknown;

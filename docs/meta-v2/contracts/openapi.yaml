@@ -103,7 +103,7 @@ paths:
           description: Sanitized success example
           headers:
             Set-Cookie:
-              description: Host-only Secure HttpOnly `__Host-ca_meta_pre_auth` cookie with SameSite=Lax;
+              description: Host-only Secure HttpOnly `__Host-meta_preauth` cookie with SameSite=Lax;
                 no Domain attribute. Cookie value is not in the response body.
               schema:
                 type: string
@@ -174,7 +174,7 @@ paths:
           description: Sanitized success example
           headers:
             Set-Cookie:
-              description: Opaque host-only Secure HttpOnly `__Host-ca_meta_portal` portal session cookie.
+              description: Opaque host-only Secure HttpOnly `__Host-meta_portal` portal session cookie.
               schema:
                 type: string
             Cache-Control:
@@ -1925,12 +1925,12 @@ components:
     portalSession:
       type: apiKey
       in: cookie
-      name: __Host-ca_meta_portal
+      name: __Host-meta_portal
       description: Opaque host-only Secure HttpOnly portal session. The cookie value is never a DTO field.
     preAuthCookie:
       type: apiKey
       in: cookie
-      name: __Host-ca_meta_pre_auth
+      name: __Host-meta_preauth
       description: Browser-bound pre-auth cookie, distinct from the portal session and from any provider code.
     internalServiceAuth:
       type: http
@@ -2211,7 +2211,6 @@ components:
       type: object
       additionalProperties: false
       required:
-        - sessionRef
         - principalRef
         - tenantRef
         - roles

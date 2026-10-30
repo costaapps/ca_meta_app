@@ -99,8 +99,8 @@ export const AUTH_EXCHANGE_ALLOWED_ORIGINS = Symbol('AUTH_EXCHANGE_ALLOWED_ORIGI
 export const AUTH_EXCHANGE_ABUSE_LIMIT = Symbol('AUTH_EXCHANGE_ABUSE_LIMIT');
 export const AUTH_EXCHANGE_TEST_LOOPBACK_ORIGINS = Symbol('AUTH_EXCHANGE_TEST_LOOPBACK_ORIGINS');
 
-export const PRE_AUTH_COOKIE_NAME = '__Host-ca_meta_pre_auth';
-export const PORTAL_SESSION_COOKIE_NAME = '__Host-ca_meta_portal';
+export const PRE_AUTH_COOKIE_NAME = '__Host-meta_preauth';
+export const PORTAL_SESSION_COOKIE_NAME = '__Host-meta_portal';
 
 export interface AuthExchangeModuleOptions {
   readonly imports?: readonly (DynamicModule | Type<unknown>)[];

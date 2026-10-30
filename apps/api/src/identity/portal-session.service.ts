@@ -299,10 +299,10 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
   }
 }
 
-export const PORTAL_SESSION_COOKIE = '__Host-ca_meta_portal';
+export const PORTAL_SESSION_COOKIE = '__Host-meta_portal';
 export const PORTAL_CSRF_COOKIE = '__Host-ca_meta_csrf';
 export const PORTAL_CONTEXT_COOKIE = '__Host-ca_meta_context';
-export const PORTAL_PREAUTH_COOKIE = '__Host-ca_meta_pre_auth';
+export const PORTAL_PREAUTH_COOKIE = '__Host-meta_preauth';
 
 export function readPortalCookie(header: string | undefined, name: string): string | undefined {
   if (!header || header.length > 8192) return undefined;

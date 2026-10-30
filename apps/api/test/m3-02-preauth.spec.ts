@@ -173,7 +173,7 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
   });
   assert.equal(started.status, 201);
   const cookie = started.headers.get('set-cookie') ?? '';
-  assert.match(cookie, /^__Host-ca_meta_pre_auth=/);
+  assert.match(cookie, /^__Host-meta_preauth=/);
   assert.match(cookie, /; Path=\//);
   assert.match(cookie, /; Secure/);
   assert.match(cookie, /; HttpOnly/);
@@ -211,7 +211,7 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
     method: 'POST',
     headers: {
       ...sameOriginHeaders(context.origin),
-      cookie: '__Host-ca_meta_pre_auth=synthetic-browser-cookie-value-12345678901234567890',
+      cookie: '__Host-meta_preauth=synthetic-browser-cookie-value-12345678901234567890',
     },
     body: JSON.stringify({ ticket: signedTicket, challengeRef: 'synthetic-browser-challenge-123' }),
   });
