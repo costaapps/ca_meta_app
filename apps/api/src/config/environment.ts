@@ -1,5 +1,7 @@
 import { isIP } from 'node:net';
-import { randomBytes } from 'node:crypto';
+import { createPublicKey, randomBytes } from 'node:crypto';
+import type { TicketExchangeConfiguration } from '../auth-exchange/ticket-contract.js';
+import type { ConfiguredTicketPublicKey } from '../auth-exchange/configured-ticket-key-set.js';
 
 export type RuntimeEnvironment = 'development' | 'test' | 'staging' | 'production';
 
@@ -24,6 +26,13 @@ export interface ApiEnvironment {
     readonly connectTimeoutMs: number;
   };
   readonly portalSessionRecoveryKey: string;
+  /** Absent configuration disables Suite4 ticket exchange without disabling other API routes. */
+  readonly portalEntryTicket?: {
+    readonly configuration: TicketExchangeConfiguration;
+    readonly publicKeys: readonly ConfiguredTicketPublicKey[];
+    /** Set by validation only for isolated tests using a loopback listener. */
+    readonly allowInsecureLoopbackOrigins: boolean;
+  };
   readonly identity?: {
     /** Exact verified issuer/subject pairs granted platform identity administration. Empty is fail-closed. */
     readonly platformIdentityAdmins: readonly { readonly issuer: string; readonly subject: string }[];
@@ -263,6 +272,72 @@ function platformIdentityAdminsField(source: NodeJS.ProcessEnv, invalid: string[
   }
 }
 
+function portalEntryTicketField(
+  source: NodeJS.ProcessEnv,
+  nodeEnv: string,
+  allowedOrigins: readonly string[],
+  invalid: string[],
+): ApiEnvironment['portalEntryTicket'] {
+  const issuerField = 'API_PORTAL_ENTRY_TICKET_ISSUER';
+  const audienceField = 'API_PORTAL_ENTRY_TICKET_AUDIENCE';
+  const keysField = 'API_PORTAL_ENTRY_TICKET_PUBLIC_KEYS_JSON';
+  const configured = [issuerField, audienceField, keysField].some((name) => {
+    const value = source[name];
+    return value !== undefined && value.trim() !== '';
+  });
+  if (!configured) return undefined;
+
+  const issuer = required(source, issuerField, invalid);
+  const audience = required(source, audienceField, invalid);
+  const keyJson = required(source, keysField, invalid);
+  try {
+    const parsedIssuer = new URL(issuer);
+    if (parsedIssuer.protocol !== 'https:' || parsedIssuer.username || parsedIssuer.password || parsedIssuer.search || parsedIssuer.hash || issuer.length > 512) {
+      throw new Error();
+    }
+  } catch {
+    invalid.push(issuerField);
+  }
+  if (audience.length < 1 || audience.length > 255 || /[\u0000-\u001f\u007f]/.test(audience)) invalid.push(audienceField);
+  const clockSkewSeconds = optionalIntegerField(source, 'API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS', 5, 0, 5, invalid);
+  const maximumLifetimeSeconds = optionalIntegerField(source, 'API_PORTAL_ENTRY_TICKET_MAX_LIFETIME_SECONDS', 60, 1, 60, invalid);
+
+  let publicKeys: readonly ConfiguredTicketPublicKey[] = [];
+  try {
+    if (Buffer.byteLength(keyJson, 'utf8') > 128 * 1024) throw new Error();
+    const parsed: unknown = JSON.parse(keyJson);
+    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 20) throw new Error();
+    const keys = parsed.map((entry: unknown) => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new Error();
+      const kid = Reflect.get(entry, 'kid');
+      const publicKeyPem = Reflect.get(entry, 'publicKeyPem');
+      if (Object.keys(entry).some((name) => name !== 'kid' && name !== 'publicKeyPem') ||
+          typeof kid !== 'string' || !/^[A-Za-z0-9._-]{1,128}$/.test(kid) ||
+          typeof publicKeyPem !== 'string' || publicKeyPem.length > 16 * 1024 ||
+          publicKeyPem.includes('PRIVATE KEY')) throw new Error();
+      const normalizedPem = publicKeyPem.trim();
+      if (!normalizedPem.startsWith('-----BEGIN PUBLIC KEY-----')) throw new Error();
+      const key = createPublicKey(normalizedPem);
+      const modulusLength = key.asymmetricKeyDetails?.modulusLength;
+      if (key.type !== 'public' || key.asymmetricKeyType !== 'rsa' || !modulusLength || modulusLength < 2048 || modulusLength > 8192) {
+        throw new Error();
+      }
+      return Object.freeze({ kid, publicKeyPem: normalizedPem });
+    });
+    if (new Set(keys.map(({ kid }) => kid)).size !== keys.length) throw new Error();
+    publicKeys = Object.freeze(keys);
+  } catch {
+    invalid.push(keysField);
+  }
+  if (allowedOrigins.length === 0) invalid.push('API_ALLOWED_ORIGINS');
+
+  return Object.freeze({
+    configuration: Object.freeze({ issuer, audience, clockSkewSeconds, maximumLifetimeSeconds }),
+    publicKeys,
+    allowInsecureLoopbackOrigins: nodeEnv === 'test',
+  });
+}
+
 export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   const invalid: string[] = [];
   const nodeEnv = required(source, 'NODE_ENV', invalid);
@@ -283,6 +358,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   const configuredOrigins = source.API_ALLOWED_ORIGINS?.trim() ?? '';
   if (configuredOrigins === '' && (nodeEnv === 'staging' || nodeEnv === 'production')) invalid.push('API_ALLOWED_ORIGINS');
   const allowedOrigins = configuredOrigins === '' ? [] : allowedOriginsField(configuredOrigins, nodeEnv, invalid);
+  const portalEntryTicket = portalEntryTicketField(source, nodeEnv, allowedOrigins, invalid);
   const trustedProxyCidrs = trustedProxiesField(
     required(source, 'API_TRUSTED_PROXIES', invalid),
     invalid,
@@ -341,6 +417,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     portalSessionIdleTimeoutSeconds,
     portalSessionAbsoluteTimeoutSeconds,
     portalSessionRecoveryKey,
+    ...(portalEntryTicket ? { portalEntryTicket } : {}),
     database: {
       host,
       port: databasePort,

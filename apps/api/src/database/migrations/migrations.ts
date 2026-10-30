@@ -4,6 +4,7 @@ import { migrationChecksum } from './migration-fingerprint.js';
 import { DURABLE_WORK_MIGRATION, DURABLE_WORK_TABLES } from './durable-work.js';
 import { IDENTITY_MIGRATION } from './identity.js';
 import { PORTAL_SESSIONS_MIGRATION, PORTAL_SESSION_TABLES } from './portal-sessions.js';
+import { TICKET_RETRY_MIGRATION } from './ticket-retry.js';
 
 function ddl(
   id: string,
@@ -259,6 +260,7 @@ const migrationsWithoutChecksums = [
   DURABLE_WORK_MIGRATION,
   IDENTITY_MIGRATION,
   PORTAL_SESSIONS_MIGRATION,
+  TICKET_RETRY_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({

@@ -1,5 +1,6 @@
 import {
   createHash,
+  createHmac,
   createPublicKey,
   generateKeyPairSync,
   randomBytes,
@@ -23,6 +24,7 @@ const MAGIC_LINK_TTL_MS = 10 * 60 * 1000;
 const MAGIC_LINK_RATE_LIMIT = 3;
 const MAGIC_LINK_RATE_WINDOW_MS = 60 * 1000;
 const EMBED_NONCE_TTL_MS = 60 * 1000;
+const SESSION_RECOVERY_KEY = randomBytes(32);
 const ALLOWED_ROLES = new Set(['owner', 'admin', 'operator', 'viewer']);
 const EXCHANGE_ENTRY_MODES = new Map([
   ['PORTAL_TOP_LEVEL', APP_ORIGIN],
@@ -254,10 +256,20 @@ async function activeMembership(conn, tenantId, issuer, subject, lock = false) {
   return rows[0];
 }
 
-async function insertSession(conn, { tenantId, issuer, subject, roleName, nowMs }) {
-  const sessionSecret = randomSecret();
-  const csrfToken = randomSecret();
-  const contextRef = randomSecret();
+function recoveredSessionMaterial(claims, preAuthCookie) {
+  const binding = `${claims.iss}\0${claims.jti}\0${claims.preauth_challenge}\0${sha256(preAuthCookie)}`;
+  const derive = (purpose) => createHmac('sha256', SESSION_RECOVERY_KEY)
+    .update(`m106-portal-${purpose}\0${binding}`, 'utf8')
+    .digest('base64url');
+  return Object.freeze({ sessionSecret: derive('session'), csrfToken: derive('csrf'), contextRef: derive('context') });
+}
+
+async function insertSession(conn, { tenantId, issuer, subject, roleName, nowMs, material }) {
+  const { sessionSecret, csrfToken, contextRef } = material ?? {
+    sessionSecret: randomSecret(),
+    csrfToken: randomSecret(),
+    contextRef: randomSecret(),
+  };
   const issuedAt = sqlTime(nowMs);
   const idleAt = issuedAt;
   const expiresAt = sqlTime(nowMs + SESSION_ABSOLUTE_MS);
@@ -313,33 +325,74 @@ export function createSecurityModel({ pool, fakeIssuer, nowMs }) {
       );
       const challenge = challengeRows[0];
       if (!challenge || timestampMs(challenge.expires_at) <= at) reject('EXCHANGE_CHALLENGE_INVALID');
-      if (challenge.consumed_at !== null) reject('EXCHANGE_CHALLENGE_INVALID');
       const membership = await activeMembership(conn, claims.tenant, FAKE_ISSUER, claims.sub, true);
-      try {
-        await conn.execute(
-          'INSERT INTO m106_consumed_ticket (issuer, jti_hash, expires_at, consumed_at) VALUES (?, ?, ?, ?)',
-          [FAKE_ISSUER, sha256(claims.jti), sqlTime(claims.exp * 1000), sqlTime(at)],
+      const challengeHash = sha256(claims.preauth_challenge);
+      const preAuthCookieHash = sha256(exchangeContext.preAuthCookie);
+      const ticketHash = sha256(token);
+      const jtiHash = sha256(claims.jti);
+      const [ticketRows] = await conn.execute(
+        `SELECT challenge_hash, preauth_cookie_hash, ticket_hash, session_hash
+         FROM m106_consumed_ticket WHERE issuer = ? AND jti_hash = ? FOR UPDATE`,
+        [FAKE_ISSUER, jtiHash],
+      );
+      const consumedTicket = ticketRows[0];
+      if (consumedTicket) {
+        if (challenge.consumed_at === null || consumedTicket.challenge_hash !== challengeHash ||
+          consumedTicket.preauth_cookie_hash !== preAuthCookieHash || consumedTicket.ticket_hash !== ticketHash) {
+          reject('TICKET_REPLAY');
+        }
+        const material = recoveredSessionMaterial(claims, exchangeContext.preAuthCookie);
+        const [sessionRows] = await conn.execute(
+          'SELECT * FROM m106_portal_session WHERE session_hash = ? FOR UPDATE',
+          [consumedTicket.session_hash],
         );
+        const session = sessionRows[0];
+        assertSessionLive(session, at);
+        if (session.issuer !== FAKE_ISSUER || session.subject !== claims.sub || session.tenant_id !== claims.tenant ||
+          session.session_hash !== sha256(material.sessionSecret) || session.csrf_hash !== sha256(material.csrfToken) ||
+          session.context_ref_hash !== sha256(material.contextRef)) reject('TICKET_REPLAY');
+        await conn.commit();
+        return {
+          sessionSecret: material.sessionSecret,
+          csrfToken: material.csrfToken,
+          contextRef: material.contextRef,
+          tenantId: session.tenant_id,
+          subject: session.subject,
+          role: membership.role_name.toLowerCase(),
+          cookie: cookieFor(material.sessionSecret),
+        };
+      }
+      if (challenge.consumed_at !== null) reject('EXCHANGE_CHALLENGE_INVALID');
+      const material = recoveredSessionMaterial(claims, exchangeContext.preAuthCookie);
+      try {
+        const [challengeConsumed] = await conn.execute(
+          `UPDATE m106_preauth_challenge SET consumed_at = ?
+           WHERE challenge_hash = ? AND preauth_cookie_hash = ? AND consumed_at IS NULL`,
+          [sqlTime(at), challengeHash, preAuthCookieHash],
+        );
+        if (challengeConsumed.affectedRows !== 1) reject('EXCHANGE_CHALLENGE_INVALID');
+        // Roles in the signed claim are deliberately not used; current membership is authoritative.
+        const result = await insertSession(conn, {
+          tenantId: claims.tenant,
+          issuer: FAKE_ISSUER,
+          subject: claims.sub,
+          roleName: membership.role_name.toLowerCase(),
+          nowMs: at,
+          material,
+        });
+        await conn.execute(
+          `INSERT INTO m106_consumed_ticket
+           (issuer, jti_hash, expires_at, consumed_at, challenge_hash, preauth_cookie_hash, ticket_hash, session_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [FAKE_ISSUER, jtiHash, sqlTime(claims.exp * 1000), sqlTime(at), challengeHash, preAuthCookieHash,
+            ticketHash, sha256(material.sessionSecret)],
+        );
+        await conn.commit();
+        return result;
       } catch (error) {
         if (isDuplicateKey(error)) reject('TICKET_REPLAY');
         throw error;
       }
-      const [challengeConsumed] = await conn.execute(
-        `UPDATE m106_preauth_challenge SET consumed_at = ?
-         WHERE challenge_hash = ? AND preauth_cookie_hash = ? AND consumed_at IS NULL`,
-        [sqlTime(at), sha256(claims.preauth_challenge), sha256(exchangeContext.preAuthCookie)],
-      );
-      if (challengeConsumed.affectedRows !== 1) reject('EXCHANGE_CHALLENGE_INVALID');
-      // Roles in the signed claim are deliberately not used; current membership is authoritative.
-      const result = await insertSession(conn, {
-        tenantId: claims.tenant,
-        issuer: FAKE_ISSUER,
-        subject: claims.sub,
-        roleName: membership.role_name.toLowerCase(),
-        nowMs: at,
-      });
-      await conn.commit();
-      return result;
     } catch (error) {
       await conn.rollback();
       throw error;

@@ -1,6 +1,6 @@
 import type { QueryRunner } from 'typeorm';
 import { migrationChecksum } from './migration-fingerprint.js';
-import { assertExpectedColumns, tableExists } from './schema-inspection.js';
+import { assertExpectedColumns, tableColumns, tableExists } from './schema-inspection.js';
 import type { DdlStep, VersionedMigration } from './migration.types.js';
 
 interface ExpectedIndex { readonly name: string; readonly columns: readonly string[]; readonly unique: boolean; }
@@ -145,14 +145,21 @@ const sessions = tableStep(
   ],
 );
 
+const ticketJtiColumns = ['issuer', 'jti_hash', 'pre_auth_id', 'session_id', 'ticket_expires_at', 'consumed_at'] as const;
+const ticketJtiIndexes = [
+  { name: 'PRIMARY', columns: ['issuer', 'jti_hash'], unique: true },
+  { name: 'ix_ca_meta_portal_jti_expiry', columns: ['ticket_expires_at'], unique: false },
+] as const;
+const ticketJtiForeignKeys = [
+  { name: 'fk_ca_meta_portal_jti_preauth', columns: ['pre_auth_id'], table: 'ca_meta_portal_pre_auth', referencedColumns: ['id'] },
+  { name: 'fk_ca_meta_portal_jti_session', columns: ['session_id'], table: 'ca_meta_portal_sessions', referencedColumns: ['id'] },
+] as const;
+
 const ticketJtis = tableStep(
   'create-portal-ticket-jtis',
   'ca_meta_portal_ticket_jtis',
-  ['issuer', 'jti_hash', 'pre_auth_id', 'session_id', 'ticket_expires_at', 'consumed_at'],
-  [
-    { name: 'PRIMARY', columns: ['issuer', 'jti_hash'], unique: true },
-    { name: 'ix_ca_meta_portal_jti_expiry', columns: ['ticket_expires_at'], unique: false },
-  ],
+  ticketJtiColumns,
+  ticketJtiIndexes,
   `CREATE TABLE IF NOT EXISTS ca_meta_portal_ticket_jtis (
     issuer VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
     jti_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -167,11 +174,27 @@ const ticketJtis = tableStep(
     CONSTRAINT fk_ca_meta_portal_jti_session FOREIGN KEY (session_id) REFERENCES ca_meta_portal_sessions (id)
       ON UPDATE RESTRICT ON DELETE RESTRICT
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
-  [
-    { name: 'fk_ca_meta_portal_jti_preauth', columns: ['pre_auth_id'], table: 'ca_meta_portal_pre_auth', referencedColumns: ['id'] },
-    { name: 'fk_ca_meta_portal_jti_session', columns: ['session_id'], table: 'ca_meta_portal_sessions', referencedColumns: ['id'] },
-  ],
+  ticketJtiForeignKeys,
 );
+
+/** Validate the table's exact schema for a migration version without rewriting the checksummed v5 verifier. */
+export async function verifyPortalTicketJtiTableShape(
+  queryRunner: QueryRunner,
+  version: 'v5' | 'v6',
+): Promise<boolean> {
+  const table = 'ca_meta_portal_ticket_jtis';
+  if (!(await tableExists(queryRunner, table))) return false;
+  const expected = version === 'v5'
+    ? ticketJtiColumns
+    : ['issuer', 'jti_hash', 'ticket_sha256', 'pre_auth_id', 'session_id', 'ticket_expires_at', 'consumed_at'];
+  const actual = await tableColumns(queryRunner, table);
+  if (actual.length !== expected.length || expected.some((column, index) => actual[index] !== column)) {
+    throw new Error(`Migration preflight found an unexpected shape for table ${table} (${actual.join(',')}).`);
+  }
+  await verifyIndexes(queryRunner, table, ticketJtiIndexes);
+  await verifyForeignKeys(queryRunner, table, ticketJtiForeignKeys);
+  return true;
+}
 
 const abuseBuckets = tableStep(
   'create-abuse-limit-buckets',

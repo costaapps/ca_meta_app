@@ -4,7 +4,7 @@ import { createPool, type Pool, type RowDataPacket } from 'mysql2/promise';
 import type { ApiEnvironment } from '../../config/environment.js';
 import { SafeBoundaryError } from './security.errors.js';
 
-export type AbuseLimitPolicy = 'PORTAL_PREAUTH' | 'PORTAL_EXCHANGE' | 'MAGIC_LINK_REQUEST' | 'MAGIC_LINK_CONSUME' |
+export type AbuseLimitPolicy = 'PORTAL_PREAUTH' | 'PORTAL_EXCHANGE_ATTEMPT' | 'PORTAL_EXCHANGE' | 'MAGIC_LINK_REQUEST' | 'MAGIC_LINK_CONSUME' |
   'ONBOARDING_START' | 'SESSION_STATUS' | 'ADMIN_ACTION';
 export type AbuseLimitDimension = 'ip' | 'actor' | 'tenant';
 
@@ -16,6 +16,7 @@ interface Policy {
 
 export const ABUSE_LIMIT_POLICIES: Readonly<Record<AbuseLimitPolicy, Policy>> = Object.freeze({
   PORTAL_PREAUTH: { limit: 20, windowSeconds: 60, dimensions: ['ip'] },
+  PORTAL_EXCHANGE_ATTEMPT: { limit: 20, windowSeconds: 60, dimensions: ['ip'] },
   PORTAL_EXCHANGE: { limit: 10, windowSeconds: 60, dimensions: ['ip', 'actor'] },
   MAGIC_LINK_REQUEST: { limit: 5, windowSeconds: 60, dimensions: ['ip', 'tenant'] },
   MAGIC_LINK_CONSUME: { limit: 10, windowSeconds: 60, dimensions: ['ip', 'actor'] },

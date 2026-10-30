@@ -28,7 +28,7 @@ The exact count can increase when a new trace check is added. A non-zero process
 - Four synthetic WhatsApp Coexistence connection references are separate and never replace one another.
 - The current session tenant is the only tenant used by fixture resources; without a safe company label, the switcher is hidden and all writes are blocked.
 - ACTIVE/READY, PARTIAL, REAUTH_REQUIRED, UNKNOWN/stale, DISCONNECTED, authorization states, and the absent webhook/subscription field remain separate.
-- Suite4 preauth precedes ticket exchange in the same browser; cookie/ticket values are absent, and lost responses follow the contract retry boundary. Popup close, server-confirmed cancellation, timeout/UNKNOWN, and cross-tab `CONTEXT_CHANGED` have separate recovery checks.
+- Suite4 preauth precedes ticket exchange in the same browser; cookie/ticket values are absent, and a lost exchange response permits only the exact same signed ticket/JTI, challenge, and browser binding to return the same still-active session. A different signed ticket using the same JTI, browser, or challenge is denied; recovery never creates or renews a session. Popup close, server-confirmed cancellation, timeout/UNKNOWN, and cross-tab `CONTEXT_CHANGED` have separate recovery checks.
 - Reauthorization stays disabled while no launch reference is returned; notification loading, empty, and read-error copy are separate checks. Template creation stays disabled when examples required by the existing UI are not represented by the proposed API request; automation `412` does not overwrite; notification REPLY stays pending and is not repeated automatically.
 - Traceability and W3C accessibility references are present.
 

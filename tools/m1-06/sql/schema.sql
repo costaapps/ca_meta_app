@@ -29,6 +29,10 @@ CREATE TABLE m106_consumed_ticket (
   jti_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   expires_at DATETIME(6) NOT NULL,
   consumed_at DATETIME(6) NOT NULL,
+  challenge_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  preauth_cookie_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  ticket_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  session_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   PRIMARY KEY (issuer, jti_hash)
 ) ENGINE=InnoDB;
 

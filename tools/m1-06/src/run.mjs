@@ -282,8 +282,41 @@ try {
     await expectFailure(model.exchangeTicket(replayedChallengeTicket, victimEntry.context, nowMs), 'EXCHANGE_CHALLENGE_INVALID');
     await expectJtiUnused(replayedChallengeJti);
     const victimJti = verifyFakeTicket(victimTicket, fakeIssuer.jwks, nowMs).jti;
-    await expectFailure(model.exchangeTicket(victimTicket, victimEntry.context, nowMs), 'EXCHANGE_CHALLENGE_INVALID');
+    const attackerReplayContext = createTrustedExchangeContext({
+      requestOrigin: APP_ORIGIN,
+      hostOrigin: APP_ORIGIN,
+      entryMode: 'PORTAL_TOP_LEVEL',
+      preAuthCookie: attackerEntry.preAuthCookie,
+    });
+    await expectFailure(model.exchangeTicket(victimTicket, attackerReplayContext, nowMs), 'EXCHANGE_CHALLENGE_INVALID');
     await expectJtiConsumed(victimJti);
+    const [sessionCountBeforeRetry] = await db.execute('SELECT COUNT(*) AS total FROM m106_portal_session');
+    const recoveredSession = await model.exchangeTicket(victimTicket, victimEntry.context, nowMs);
+    assert.equal(recoveredSession.sessionSecret, ownerSession.sessionSecret, 'exact same-browser retry returns the original active session');
+    assert.equal(recoveredSession.cookie, ownerSession.cookie);
+    assert.equal(recoveredSession.csrfToken, ownerSession.csrfToken);
+    const [sessionCountAfterRetry] = await db.execute('SELECT COUNT(*) AS total FROM m106_portal_session');
+    assert.equal(Number(sessionCountAfterRetry[0].total), Number(sessionCountBeforeRetry[0].total), 'exact retry creates no session');
+    const [storedTicketRows] = await db.execute(
+      'SELECT ticket_hash FROM m106_consumed_ticket WHERE issuer = ? AND jti_hash = ?',
+      [FAKE_ISSUER, sha256(victimJti)],
+    );
+    assert.equal(storedTicketRows.length, 1);
+    assert.equal(storedTicketRows[0].ticket_hash, sha256(victimTicket), 'only the exact compact ticket digest is persisted');
+    assert.notEqual(storedTicketRows[0].ticket_hash, victimTicket, 'the compact ticket is not persisted');
+    const changedSignedTicket = issueFakeTicket(fakeIssuer, {
+      sub: 'user-owner-01',
+      tenant: 'tenant-a',
+      roles: ['owner'],
+      jti: victimJti,
+      preauth_challenge: victimEntry.challenge,
+      session_iss: 'suite4-session:alternate-signed-token',
+    }, { nowMs });
+    assert.notEqual(changedSignedTicket, victimTicket);
+    await expectFailure(model.exchangeTicket(changedSignedTicket, victimEntry.context, nowMs), 'TICKET_REPLAY');
+    const [sessionCountAfterChangedTicket] = await db.execute('SELECT COUNT(*) AS total FROM m106_portal_session');
+    assert.equal(Number(sessionCountAfterChangedTicket[0].total), Number(sessionCountAfterRetry[0].total),
+      'a different signed token with the same JTI/browser/challenge cannot recover or create a session');
     const duplicateJtiEntry = await beginBrowserEntry();
     const duplicateJtiTicket = issueFakeTicket(fakeIssuer, {
       sub: 'user-owner-01', tenant: 'tenant-a', jti: victimJti, preauth_challenge: duplicateJtiEntry.challenge,

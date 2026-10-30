@@ -1,12 +1,15 @@
 # Nest API workspace
 
-The API is an independent NestJS 12 application. It has no Meta integration or provider
-credential handling. It contains the portal session and identity boundaries; /health is process liveness;
-/ready checks only the essential MariaDB connection. Success returns { "status": "ok" }.
+The API is an independent NestJS 12 application. It has no Meta provider integration or provider
+credential handling. It contains the portal session, identity, and optional Suite4 ticket-entry
+boundaries. `/health` is process liveness; `/ready` checks only the essential MariaDB connection.
+Success returns { "status": "ok" }.
 Dependency failure returns HTTP 503 with the canonical OpenAPI Unavailable ErrorEnvelope.
 Business routes use /api/v1 and are denied by the global guard unless a route is explicitly
 marked public. Session routes also have an explicit portal-session guard; they are not anonymous.
-The health routes are the only unguarded public routes.
+The health routes are public. `POST /api/v1/auth/preauth` creates only a rate-limited browser
+binding; it does not authenticate or establish membership. `POST /api/v1/auth/exchanges` returns
+a safe 503 when its optional trusted ticket issuer/key configuration is absent.
 
 ## Toolchain and commands
 
@@ -47,6 +50,23 @@ only invalid or missing field names.
 | API_DATABASE_PASSWORD | Non-blank; valid leading/trailing whitespace is preserved and never logged |
 | API_DATABASE_CONNECT_TIMEOUT_MS | 100–5000 milliseconds |
 
+### Optional Suite4 ticket-entry configuration
+
+The API starts without these fields; ticket exchange then fails closed with a safe 503 while
+unrelated API routes and top-level pre-auth remain available. Configure all three core values
+together to enable exchange. The issuer/audience and public-key set are server-side trust inputs,
+not values supplied by a ticket. The key set contains public SPKI PEM keys indexed by `kid` and can
+hold overlapping keys during rotation. The service never follows a URL from a token and rejects
+private-key PEM. No Suite4 issuer, audience, signing key, or production configuration is confirmed.
+
+| Variable | Validation |
+|---|---|
+| API_PORTAL_ENTRY_TICKET_ISSUER | Exact HTTPS issuer URL, no credentials/query/fragment; required with audience and key set |
+| API_PORTAL_ENTRY_TICKET_AUDIENCE | Exact nonblank audience string up to 255 characters; required with issuer and key set |
+| API_PORTAL_ENTRY_TICKET_PUBLIC_KEYS_JSON | JSON array of 1–20 `{ "kid", "publicKeyPem" }` entries; unique bounded kid and RSA public key 2048–8192 bits; public keys only |
+| API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS | Optional integer 0–5; default 5 |
+| API_PORTAL_ENTRY_TICKET_MAX_LIFETIME_SECONDS | Optional integer 1–60; default 60 |
+
 API_ALLOWED_HOSTS is fail-closed in every environment: list only exact hosts assigned to that
 environment. An incoming Host may include its request port; the middleware compares the parsed
 host against the explicit allowlist. Configure no placeholder production domain. Example used by
@@ -60,7 +80,10 @@ credentialed CORS headers. Mutations require exact same-origin `Origin` and
 CSRF cookie/header. The initial idle/absolute expiry values are 30 minutes/eight hours; product
 and operational policy are **Not confirmed**.
 The real Suite4 iframe/browser cookie topology is **Not confirmed**; the implemented cookie policy
-supports the first-party/top-level path and does not certify cross-site embedding.
+supports the first-party/top-level path and does not certify cross-site embedding. The pre-auth
+endpoint rejects `SUITE4_EMBED` until M3.05 implements and validates that separate flow. Only
+`NODE_ENV=test` accepts exact loopback HTTP origins for the exchange service; production requires
+HTTPS and the same exact-origin boundary as the API middleware.
 
 API_TRUSTED_PROXIES=none disables Express proxy trust. Wildcard ranges such as 0.0.0.0/0,
 ::/0, expanded unspecified IPv6, and IPv4-mapped IPv6 ranges covering all IPv4 are rejected.

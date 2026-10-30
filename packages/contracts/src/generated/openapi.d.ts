@@ -11,7 +11,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Start browser-bound pre-authentication
-         * @description Public before a portal session. Requires an exact allowlisted Origin, matching Fetch Metadata, and an HttpOnly pre-auth cookie bound to the server-created challenge. The challenge is for the trusted Suite4 portal-entry handoff, not a Meta provider code.
+         * @description Public before a portal session. Requires an exact allowlisted Origin, matching Fetch Metadata, and an HttpOnly pre-auth cookie bound to the server-created challenge. The challenge is for a trusted portal-entry handoff, not a Meta provider code. The current runtime supports PORTAL_TOP_LEVEL only; SUITE4_EMBED is reserved for M3.05 and is rejected with 400.
          */
         readonly post: operations["startPreauth"];
         readonly delete?: never;
@@ -31,7 +31,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Exchange a portal-entry ticket for a portal session
-         * @description Public in the sense that no session exists yet; protected by a pre-auth cookie and one-time signed ticket. This exchange is distinct from Meta OAuth/Embedded Signup callback handling and MUST NOT accept an authorization code. Ticket, browser challenge, cookie, current server membership, issuer and audience must match atomically. The `tenant` claim is revalidated; `company_uuid` is ignored. Set-Cookie returns the opaque portal session; the JSON DTO contains no session cookie, Meta credential, or ticket.
+         * @description Public in the sense that no session exists yet; protected by a pre-auth cookie and one-time signed ticket. This exchange is distinct from Meta OAuth/Embedded Signup callback handling and MUST NOT accept an authorization code. Ticket, browser challenge, pre-auth cookie/browser binding, current server membership, issuer and audience must match atomically. The `tenant` claim is revalidated; `company_uuid` is ignored. Set-Cookie returns the opaque portal session; the JSON DTO contains no session cookie, Meta credential, or ticket. An exact retry after a lost response (same ticket/JTI, challenge, and pre-auth browser binding) may recover only the same still-active session; it creates or renews no session and fails after session, membership, or tenant revocation/expiry. A different cookie or challenge is denied. When the trusted issuer or server-configured public key set is unavailable, the endpoint returns a safe 503 and issues no session.
          */
         readonly post: operations["exchangePortalEntryTicket"];
         readonly delete?: never;
@@ -964,7 +964,7 @@ export interface components {
                 readonly "application/json": components["schemas"]["ErrorEnvelope"];
             };
         };
-        /** @description Authentication or one-time proof is required. */
+        /** @description Authentication or one-time proof is required. For ticket exchange this includes a mismatched pre-auth cookie/challenge or an expired/revoked session, membership, or tenant; a response-loss retry is accepted only for the same still-active session and browser binding. */
         readonly Unauthorized: {
             headers: {
                 readonly [name: string]: unknown;
@@ -1124,7 +1124,7 @@ export interface operations {
             /** @description Sanitized success example */
             readonly 201: {
                 headers: {
-                    /** @description Host-only Secure HttpOnly pre-auth cookie; no Domain attribute. Cookie value is not in the response body. */
+                    /** @description Host-only Secure HttpOnly `__Host-meta_preauth` cookie with SameSite=Lax; no Domain attribute. Cookie value is not in the response body. */
                     readonly "Set-Cookie"?: string;
                     readonly [name: string]: unknown;
                 };
@@ -1168,7 +1168,7 @@ export interface operations {
             /** @description Sanitized success example */
             readonly 201: {
                 headers: {
-                    /** @description Opaque host-only Secure HttpOnly portal session cookie. */
+                    /** @description Opaque host-only Secure HttpOnly `__Host-meta_portal` portal session cookie. */
                     readonly "Set-Cookie"?: string;
                     readonly "Cache-Control"?: "no-store";
                     readonly [name: string]: unknown;

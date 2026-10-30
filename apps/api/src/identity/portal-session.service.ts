@@ -28,6 +28,8 @@ export interface StartedPortalPreAuth {
 export interface PortalSessionIssueOptions {
   /** Lowercase SHA-256 hex digest. Raw JTI and ticket are deliberately excluded. */
   readonly ticketJtiSha256: string;
+  /** Lowercase SHA-256 hex digest of the exact compact signed ticket; raw ticket is excluded. */
+  readonly ticketSha256: string;
   readonly ticketExpiresAt: Date;
   /** Lowercase SHA-256 hex digest of the validated ticket's preauth_challenge claim. */
   readonly ticketChallengeSha256: string;
@@ -81,6 +83,7 @@ export interface PortalSessionIssueRecord {
   readonly assertion: VerifiedIdentityAssertion;
   readonly requestedTenantId: string;
   readonly ticketJtiSha256: string;
+  readonly ticketSha256: string;
   readonly ticketChallengeSha256: string;
   readonly ticketExpiresAt: Date;
   readonly preAuth: VerifiedPortalPreAuth;
@@ -201,7 +204,7 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
     options: PortalSessionIssueOptions,
   ): Promise<IssuedPortalSession> {
     if (!isVerifiedIdentityAssertion(assertion) || !isVerifiedPreAuth(options.preAuth) || !requestedTenantId ||
-      !validDigest(options.ticketJtiSha256) || !validDigest(options.ticketChallengeSha256) ||
+      !validDigest(options.ticketJtiSha256) || !validDigest(options.ticketSha256) || !validDigest(options.ticketChallengeSha256) ||
       !digestMatches(options.preAuth.challengeHash, options.ticketChallengeSha256) ||
       !(options.ticketExpiresAt instanceof Date) || !Number.isFinite(options.ticketExpiresAt.getTime()) ||
       options.ticketExpiresAt.getTime() <= Date.now() ||
@@ -219,6 +222,7 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
       assertion,
       requestedTenantId,
       ticketJtiSha256: options.ticketJtiSha256,
+      ticketSha256: options.ticketSha256,
       ticketChallengeSha256: options.ticketChallengeSha256,
       ticketExpiresAt: options.ticketExpiresAt,
       preAuth: options.preAuth,
@@ -299,10 +303,10 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
   }
 }
 
-export const PORTAL_SESSION_COOKIE = '__Host-ca_meta_portal';
+export const PORTAL_SESSION_COOKIE = '__Host-meta_portal';
 export const PORTAL_CSRF_COOKIE = '__Host-ca_meta_csrf';
 export const PORTAL_CONTEXT_COOKIE = '__Host-ca_meta_context';
-export const PORTAL_PREAUTH_COOKIE = '__Host-ca_meta_pre_auth';
+export const PORTAL_PREAUTH_COOKIE = '__Host-meta_preauth';
 
 export function readPortalCookie(header: string | undefined, name: string): string | undefined {
   if (!header || header.length > 8192) return undefined;

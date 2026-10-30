@@ -43,6 +43,7 @@ function matchesHash(value: string, digest: string): boolean {
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const META_WEBHOOK_INGRESS_PATH = /^\/api\/v1\/webhooks\/meta\/[A-Za-z0-9_-]{1,128}$/;
+const PORTAL_ENTRY_EXCHANGE_PATH = '/api/v1/auth/exchanges';
 
 /** Exact-origin CORS plus same-origin Fetch Metadata and synchronizer-token checks on authenticated writes. */
 export function portalRequestSecurityMiddleware(
@@ -102,7 +103,11 @@ export function portalRequestSecurityMiddleware(
           return;
         }
         try {
-          const session = await verifier.verify(sessionCookie);
+          const normalizedPath = request.path.toLowerCase().replace(/\/$/, '');
+          const ticketExchangeRequest = request.method === 'POST' && normalizedPath === PORTAL_ENTRY_EXCHANGE_PATH;
+          const session = ticketExchangeRequest
+            ? await verifier.verify(sessionCookie, { touchLastSeen: false })
+            : await verifier.verify(sessionCookie);
           const csrfCookie = readPortalCookie(oneHeader(request.headers.cookie), PORTAL_CSRF_COOKIE);
           const csrfHeader = oneHeader(request.headers['x-csrf-token']);
           if (!session) {

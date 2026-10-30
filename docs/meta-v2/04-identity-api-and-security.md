@@ -12,9 +12,9 @@ O portal oferece uma experiência sem senha adicional, mas sempre cria identidad
 | 4 | API | Rotaciona sessão e emite cookie opaco HttpOnly/Secure; retorna contexto público |
 | 5 | Angular | Consulta sessão/recursos; não persiste ticket ou token Meta em localStorage |
 
-Claims propostas: `iss`, `aud`, `sub`, `tenant`, `roles` ou referência autoritativa, `jti`, `iat`, `exp`, versão e identificação da sessão emissora. TTL inicial de até 60 segundos, clock skew limitado e algoritmo permitido; confirmar com emissor real antes de implementar. O servidor deve consultar ou comprovar membership vigente, inclusive quando claims antigas ainda estiverem assinadas.
+Claims propostas: `iss`, `aud`, `sub`, `tenant`, `roles` ou referência autoritativa, `jti`, `iat`, `exp`, `purpose=META_PORTAL_ENTRY`, `ver=1` e `session_iss`, com header `typ=JWT`, `alg=RS256` e `kid` localmente confiável. O skew proposto é limitado a 5 segundos e TTL a 60 segundos. `session_iss` é apenas string obrigatória não vazia e limitada; formato/semântica e relação com Suite4 são **Not confirmed**, sem autoridade sobre identidade ou tenant. Confirmar o perfil com o emissor real. O servidor deve consultar ou comprovar membership vigente, inclusive quando claims antigas ainda estiverem assinadas.
 
-Rotação de chave usa `kid` e conjunto confiável de chaves; não seguir `jku` de input arbitrário. Consumo de jti e criação de sessão são atômicos. Falha de rede após troca tem recuperação vinculada ao mesmo browser/exchange, sem tornar ticket reaproveitável por qualquer pessoa.
+Rotação de chave usa `kid` e conjunto confiável de chaves; não seguir `jku` de input arbitrário. Consumo de jti e criação de sessão são atômicos. Retry de resposta perdida com o mesmo ticket/JTI, challenge e binding pre-auth do browser pode retornar somente a mesma sessão ainda ativa, sem criá-la ou renová-la; sessão/membership/tenant revogada ou expirada e qualquer binding diferente são negados. O ticket não funciona como bearer fora dessa recuperação exata.
 
 Se Suite4 já oferecer OIDC confiável, o ADR pode adotar esse padrão em vez de inventar outro emissor; mantêm-se as invariantes de tenant, replay, audience e sessão. O contrato real ainda não foi fornecido.
 
@@ -50,6 +50,7 @@ Os paths são contrato inicial para ratificação em OpenAPI. Segurança de toda
 
 | Operação | Método e rota | Autorização/efeito |
 |---|---|---|
+| Iniciar pre-auth | POST `/api/v1/auth/preauth` | Origin exata + Fetch Metadata + quota por IP; cria binding de browser top-level e cookie HttpOnly, sem autenticar nem criar membership |
 | Trocar ticket | POST `/api/v1/auth/exchanges` | Ticket confiável e consumo único; cria sessão |
 | Pedir link | POST `/api/v1/auth/magic-links` | Público limitado, resposta uniforme; não cria membership |
 | Consumir link | POST `/api/v1/auth/magic-links/consume` | Segredo temporário único + controles de origem |
@@ -70,7 +71,7 @@ Os paths são contrato inicial para ratificação em OpenAPI. Segurança de toda
 | Operações | GET `/operations/:id` | Outcome incluindo UNKNOWN, sem token/resposta bruta |
 | Webhook | GET/POST `/webhooks/meta/:appConfigRef` | Challenge/assinatura/raw body/limites; referência pública não é segredo |
 
-O proxy encaminha POST sem `Origin` somente no path exato `/api/v1/webhooks/meta/{appConfigRef}` para ingresso de provedor. O handler precisa verificar a assinatura sobre os bytes originais antes de aceitar ou rotear payload; ele ainda não existe neste candidato e esse caminho não está pronto para receber tráfego. Não há rota interna de serviço com autenticação por credencial neste candidato; futuras rotas desse tipo, planejadas em M3.08, precisam de classificação e guard próprios. A criação HTTP do desafio pre-auth permanece dependência de integração M3.05; M3.04 fornece o serviço interno, não o bootstrap HTTP.
+O proxy encaminha POST sem `Origin` somente no path exato `/api/v1/webhooks/meta/{appConfigRef}` para ingresso de provedor. O handler precisa verificar a assinatura sobre os bytes originais antes de aceitar ou rotear payload; ele ainda não existe neste candidato e esse caminho não está pronto para receber tráfego. Não há rota interna de serviço com autenticação por credencial neste candidato; futuras rotas desse tipo, planejadas em M3.08, precisam de classificação e guard próprios. M3.02 expõe o bootstrap pre-auth `PORTAL_TOP_LEVEL` ligado ao cookie e à quota do M3.04; o bootstrap ainda não autentica uma pessoa nem estabelece membership. `SUITE4_EMBED` permanece reservado para M3.05 e é recusado até que o handshake, a origem/janela do parent e o caminho top-level de recuperação estejam implementados. Sem issuer/audience/chaves confiáveis de ticket configurados no servidor, a rota de exchange retorna erro seguro 503. O emissor real, a origem Suite4 e o comportamento real de cookies continuam **Not confirmed**.
 | Revogação/exclusão Meta | Rota por configuração/produto | Mecanismo assinado conforme documentação validada |
 | Relay interno | POST `/internal/v1/assets/:id/operations` | Operação tipada no payload; serviço com escopos de tenant/ativo/operação, sem Graph URL arbitrária |
 | Liveness/readiness | GET `/health/live`, `/health/ready` | Detail restrito e sem segredos; não chama Meta no liveness |

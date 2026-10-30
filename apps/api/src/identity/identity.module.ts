@@ -18,6 +18,7 @@ import { PortalSessionController } from './portal-session.controller.js';
 import { PortalSessionsController } from './portal-sessions.controller.js';
 import { PortalSessionGuard } from './portal-session.guard.js';
 import { AbuseLimitService, MysqlAbuseLimitService } from '../common/security/abuse-limits.js';
+import { PortalPreAuthController } from '../auth-exchange/portal-preauth.controller.js';
 
 @Module({})
 export class IdentityModule {
@@ -88,7 +89,7 @@ export class IdentityModule {
       exports: [TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService,
         IdentityAdministrationService, PlatformIdentityAdminAuthority, PortalSessionVerifier,
         PortalSessionIssuer, PortalPreAuthService, AbuseLimitService],
-      controllers: [PortalSessionController, PortalSessionsController],
+      controllers: [PortalSessionController, PortalSessionsController, PortalPreAuthController],
     };
   }
 }
