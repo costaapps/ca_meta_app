@@ -180,9 +180,29 @@ mariadb --defaults-extra-file="$defaults_file" --protocol=socket --user=root --d
 
 function Assert-HttpStatus {
   param([string]$Uri, [int]$ExpectedStatus)
-  $response = Invoke-WebRequest -Uri $Uri -Method Get -TimeoutSec 10 -SkipHttpErrorCheck
-  if ([int]$response.StatusCode -ne $ExpectedStatus) {
-    throw "HTTP smoke expected $ExpectedStatus from $Uri; got $([int]$response.StatusCode)."
+  $handler = [System.Net.Http.HttpClientHandler]::new()
+  $handler.UseProxy = $false
+  $client = [System.Net.Http.HttpClient]::new($handler)
+  $client.Timeout = [TimeSpan]::FromSeconds(2)
+  $lastResult = 'unreachable'
+  try {
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+      $response = $null
+      try {
+        $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
+        $lastResult = [int]$response.StatusCode
+        if ($lastResult -eq $ExpectedStatus) { return }
+      } catch {
+        $lastResult = 'unreachable'
+      } finally {
+        if ($null -ne $response) { $response.Dispose() }
+      }
+      if ($attempt -lt 14) { Start-Sleep -Seconds 1 }
+    }
+    throw "HTTP smoke expected $ExpectedStatus from $Uri after bounded loop; last result: $lastResult."
+  } finally {
+    $client.Dispose()
+    $handler.Dispose()
   }
 }
 
