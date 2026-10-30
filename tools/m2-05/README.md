@@ -32,13 +32,13 @@ Replay is an internal service with no HTTP controller. `preview()` is always dry
 
 ## Local evidence
 
-Record the exact commit/snapshot and exit code after each focused run. The coordinator performs the final candidate review and milestone integration separately.
+Candidate validated: `80fc9df8cf925731b90064af38109a2c305d4ff5` on Windows, Node v24.22.2/npm 11.19.1. The M2.05 MariaDB harness uses synthetic fixtures only; it does not contact Meta or production/staging.
 
-| Check | Command | Environment/result |
+| Check | Command | Result |
 |---|---|---|
-| Runtime versions | `tools/m2-05/run-mariadb-tests.ps1` runtime preflight | Node v24.22.2 / npm 11.19.1; pass |
-| Specialized MariaDB/API integration | `powershell -ExecutionPolicy Bypass -File tools/m2-05/run-mariadb-tests.ps1` | MariaDB 11.8.8, UUID Compose project `m205-9fcee8ceded248ac9b768e81027cff12`; API test TypeScript compile passed; 1 test passed, 0 failed; exit code 0 on pre-review snapshot `6578daf5aeda19356d9fff613241a7dc401a603c`. Replay, timeout, crash-before-ACK and high-history additions in the current working diff still require the single focused candidate rerun. |
-| API unit/build suite | `npm test --workspace=@ca-meta/api` | An initial run before the AJV import/type fix stopped in Nest build (exit 1); the root coordinator will run the complete suite on the integrated candidate |
-| Formatting/whitespace | `git diff --cached --check` | Pass; exit code 0 |
-
-An earlier harness attempt found and fixed a trailing comma in the v3 replay-audit DDL; the next attempt found and fixed the job INSERT parameter order for `idempotencyKey` and `resourceScopeRef`. The specialized pass above predates the current review fixes and is not evidence for them. The principal runs the final focused harness once on the new candidate SHA after this diff is committed and reviewed.
+| Runtime versions | Harness preflight | Node v24.22.2 / npm 11.19.1; pass |
+| Specialized MariaDB/API integration | `powershell -ExecutionPolicy Bypass -File tools/m2-05/run-mariadb-tests.ps1` | MariaDB 11.8.8; UUID Compose project `m205-9a04d03c2c194bcc86b067cbdec4f16a`; TypeScript test compile passed; 1 integration test passed, 0 failed; exit code 0 (5.6 s). The harness removed only this project's container, network, volume and temporary SQL. |
+| Workspace build | `npm run build` | Pass; API Nest build, Angular production build, and 12 deterministic contract artifacts verified. |
+| Workspace tests | `npm test -- --watch=false` | Pass, exit code 0. API: 28 passed, 0 failed, 7 skipped for dedicated MariaDB/POSIX-only cases; web: 10 passed; contract sensitivity/determinism/contract/runtime tests passed. |
+| Workspace typecheck | `npm run typecheck` | Pass for API build/test TypeScript, Angular application, and contracts. |
+| Workspace lint | `npm run lint` | Pass; web boundary check inspected 18 source files and Redocly validated both OpenAPI documents. |
