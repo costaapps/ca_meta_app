@@ -92,7 +92,10 @@ test('runtime event validation uses the M1.07 schemas and rejects unallowlisted 
 
 test('Nest application context closes the lazy durable-work DB provider during shutdown', async () => {
   const environment: ApiEnvironment = {
-    nodeEnv: 'test', port: 0, bindAddress: '127.0.0.1', allowedHosts: ['localhost'], trustedProxyCidrs: false,
+    nodeEnv: 'test', port: 0, bindAddress: '127.0.0.1', allowedHosts: ['localhost'], allowedOrigins: ['http://localhost'], trustedProxyCidrs: false,
+    portalSessionRecoveryKey: 'synthetic-test-session-recovery-key-32-bytes-minimum',
+    portalSessionIdleTimeoutSeconds: 1800,
+    portalSessionAbsoluteTimeoutSeconds: 28800,
     database: { host: '127.0.0.1', port: 3306, name: 'api_lifecycle_test', user: 'api_test', password: 'synthetic-only', connectTimeoutMs: 500 },
   };
   const app = await NestFactory.createApplicationContext(ApiModule.register(environment), { logger: false });

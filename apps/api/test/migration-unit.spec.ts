@@ -5,6 +5,7 @@ import { migrationStepChecksum } from '../src/database/migrations/migration-fing
 import { MIGRATIONS } from '../src/database/migrations/migrations.js';
 import { DURABLE_WORK_MIGRATION } from '../src/database/migrations/durable-work.js';
 import { IDENTITY_MIGRATION } from '../src/database/migrations/identity.js';
+import { PORTAL_SESSIONS_MIGRATION } from '../src/database/migrations/portal-sessions.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -45,8 +46,8 @@ test('migration configuration rejects runtime account reuse and privileged built
 });
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
-  assert.equal(MIGRATIONS.length, 4);
-  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4]);
+  assert.equal(MIGRATIONS.length, 5);
+  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5]);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -85,6 +86,18 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.ok(adminAuditStep.sql.includes('request_hash'));
   assert.ok(IDENTITY_MIGRATION.steps.some((step) => step.id === 'identity-admin-audit-no-update'));
   assert.ok(IDENTITY_MIGRATION.steps.some((step) => step.id === 'identity-admin-audit-no-delete'));
+  assert.equal(PORTAL_SESSIONS_MIGRATION.schemaVersion, 5);
+  assert.deepEqual(PORTAL_SESSIONS_MIGRATION.steps.map((step) => step.id), [
+    'create-portal-pre-auth', 'create-portal-sessions', 'create-portal-ticket-jtis', 'create-abuse-limit-buckets',
+  ]);
+  const sessionStep = PORTAL_SESSIONS_MIGRATION.steps.find((step) => step.id === 'create-portal-sessions');
+  assert.ok(sessionStep && 'sql' in sessionStep);
+  assert.ok(sessionStep.sql.includes('secret_hash'));
+  assert.ok(sessionStep.sql.includes('csrf_token_hash'));
+  assert.ok(sessionStep.sql.includes('idle_expires_at'));
+  assert.ok(sessionStep.sql.includes('absolute_expires_at'));
+  const ticketStep = PORTAL_SESSIONS_MIGRATION.steps.find((step) => step.id === 'create-portal-ticket-jtis');
+  assert.ok(ticketStep && 'sql' in ticketStep && ticketStep.sql.includes('PRIMARY KEY (issuer, jti_hash)'));
 });
 
 test('migration fingerprints detect definition configuration and callback drift', () => {

@@ -276,7 +276,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
           if (!Buffer.from(hash).equals(cookieHash)) return undefined;
           return {
             sessionId: uuid(71_002), principalId: identityUserId, tenantId: tenantA,
-            contextVersion: 1, contextRefHash: hashTenantContextReference(contextRef),
+            contextVersion: 1, contextRefHash: hashTenantContextReference(contextRef), csrfTokenHash: 'a'.repeat(64),
           };
         },
       }).verify(cookie);
@@ -300,7 +300,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
           if (!Buffer.from(hash).equals(adminCookieHash)) return undefined;
           return {
             sessionId: uuid(71_004), principalId: granted.principalId as string, tenantId: tenantA,
-            contextVersion: 1, contextRefHash: hashTenantContextReference(adminContextRef),
+            contextVersion: 1, contextRefHash: hashTenantContextReference(adminContextRef), csrfTokenHash: 'b'.repeat(64),
           };
         },
       }).verify(adminCookie);
@@ -551,7 +551,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     }
 
     const applied = await readMigrationStatus(environment);
-    assert.equal(applied.migrations.length, 4);
+    assert.equal(applied.migrations.length, MIGRATIONS.length);
     assert.ok(applied.migrations.every((migration) => migration.state === 'APPLIED' && migration.checksumMatches));
 
     const runtime = await createConnection(connectionOptions);

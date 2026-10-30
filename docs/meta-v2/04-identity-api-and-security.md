@@ -53,8 +53,8 @@ Os paths são contrato inicial para ratificação em OpenAPI. Segurança de toda
 | Trocar ticket | POST `/api/v1/auth/exchanges` | Ticket confiável e consumo único; cria sessão |
 | Pedir link | POST `/api/v1/auth/magic-links` | Público limitado, resposta uniforme; não cria membership |
 | Consumir link | POST `/api/v1/auth/magic-links/consume` | Segredo temporário único + controles de origem |
-| Sessão | GET `/api/v1/session` | Cookie; pessoa/empresa/permissões públicas |
-| Troca/logout | POST `/session/tenant-switch`, POST `/session/logout` | Membership e CSRF; rotação/revogação |
+| Sessão | GET `/api/v1/session` | Cookie; pessoa/empresa/permissões públicas e `sessionRef` opaco; limite `SESSION_STATUS` por IP/principal/tenant |
+| Troca/logout/revogação | POST `/session/tenant-switch`, POST `/session/logout`, DELETE `/sessions/:id` | CSRF/origin e sessão verificada; revogação limitada ao principal e tenant ativos da sessão corrente. `sessionRef` só seleciona o recurso; não autoriza. Sem endpoint de lista, a interface atual expõe apenas a sessão corrente |
 | Catálogo | GET `/integrations/flows` | Tenant autenticado, config/flags/capabilities |
 | Iniciar onboarding | POST `/onboarding-sessions` | Papel/capability + CSRF + idempotência; retorna bootstrap público |
 | Entregar código | POST `/onboarding-sessions/:id/authorization-code` | Sessão/onboarding/state/correlação; código efêmero, resposta 202 |
@@ -69,6 +69,8 @@ Os paths são contrato inicial para ratificação em OpenAPI. Segurança de toda
 | Notificações | GET `/notifications`, POST `/notifications/:id/actions` | Tenant completo e operationId; leitura separada de efeito externo |
 | Operações | GET `/operations/:id` | Outcome incluindo UNKNOWN, sem token/resposta bruta |
 | Webhook | GET/POST `/webhooks/meta/:appConfigRef` | Challenge/assinatura/raw body/limites; referência pública não é segredo |
+
+O proxy encaminha POST sem `Origin` somente no path exato `/api/v1/webhooks/meta/{appConfigRef}` para ingresso de provedor. O handler precisa verificar a assinatura sobre os bytes originais antes de aceitar ou rotear payload; ele ainda não existe neste candidato e esse caminho não está pronto para receber tráfego. Não há rota interna de serviço com autenticação por credencial neste candidato; futuras rotas desse tipo, planejadas em M3.08, precisam de classificação e guard próprios. A criação HTTP do desafio pre-auth permanece dependência de integração M3.05; M3.04 fornece o serviço interno, não o bootstrap HTTP.
 | Revogação/exclusão Meta | Rota por configuração/produto | Mecanismo assinado conforme documentação validada |
 | Relay interno | POST `/internal/v1/assets/:id/operations` | Operação tipada no payload; serviço com escopos de tenant/ativo/operação, sem Graph URL arbitrária |
 | Liveness/readiness | GET `/health/live`, `/health/ready` | Detail restrito e sem segredos; não chama Meta no liveness |

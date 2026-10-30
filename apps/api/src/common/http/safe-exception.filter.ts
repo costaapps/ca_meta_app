@@ -11,6 +11,8 @@ import type { Request, Response } from 'express';
 import { errorEnvelope } from './error-envelope.js';
 import type { ErrorAction, ErrorCode } from './error-envelope.js';
 import { STRUCTURED_LOGGER, type StructuredLogger } from './request-context.js';
+import { IdentityDeniedError } from '../../identity/identity.errors.js';
+import { SafeBoundaryError } from '../security/security.errors.js';
 
 @Catch()
 @Injectable()
@@ -22,16 +24,23 @@ export class SafeExceptionFilter implements ExceptionFilter {
     const request = context.getRequest<Request & { requestId?: string }>();
     const response = context.getResponse<Response>();
     const requestId = request.requestId ?? 'unknown';
-    const status = exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
+    const status = exception instanceof IdentityDeniedError
+      ? exception.code === 'CONTEXT_CHANGED' ? HttpStatus.CONFLICT : HttpStatus.FORBIDDEN
+      : exception instanceof SafeBoundaryError
+        ? exception.code === 'RATE_LIMITED' ? HttpStatus.TOO_MANY_REQUESTS : HttpStatus.FORBIDDEN
+        : exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const details = this.safeDetails(status);
+    const details = this.safeDetails(status, exception);
+    if (status === HttpStatus.TOO_MANY_REQUESTS) response.setHeader('Retry-After', '60');
     this.logger.write({
       level: status >= 500 ? 'error' : 'warn',
       event: 'http.exception',
       requestId,
       statusCode: status,
       code: details.code,
-      errorType: exception instanceof HttpException ? 'HttpException' : 'UnhandledException',
+      errorType: exception instanceof IdentityDeniedError ? 'IdentityDeniedError' :
+        exception instanceof SafeBoundaryError ? 'SafeBoundaryError' :
+          exception instanceof HttpException ? 'HttpException' : 'UnhandledException',
     });
 
     response.status(status).json(
@@ -39,12 +48,27 @@ export class SafeExceptionFilter implements ExceptionFilter {
     );
   }
 
-  private safeDetails(status: number): {
+  private safeDetails(status: number, exception: unknown): {
     code: ErrorCode;
     safeMessage: string;
     retryable: boolean;
     action: ErrorAction;
   } {
+    if (exception instanceof IdentityDeniedError && exception.code === 'CONTEXT_CHANGED') {
+      return { code: 'CONTEXT_CHANGED', safeMessage: 'The tenant context has changed. Reload the current session context.', retryable: false, action: 'REFRESH' };
+    }
+    if (exception instanceof SafeBoundaryError) {
+      if (exception.code === 'RATE_LIMITED') {
+        return { code: 'RATE_LIMITED', safeMessage: 'Too many requests. Try again later.', retryable: true, action: 'WAIT' };
+      }
+      if (exception.code === 'CSRF_INVALID') {
+        return { code: 'CSRF_INVALID', safeMessage: 'The request security check failed.', retryable: false, action: 'RELOAD_PORTAL' };
+      }
+      return { code: 'ORIGIN_NOT_ALLOWED', safeMessage: 'This request origin is not allowed.', retryable: false, action: 'RELOAD_PORTAL' };
+    }
+    if (exception instanceof IdentityDeniedError) {
+      return { code: 'ACCESS_DENIED', safeMessage: 'This action is not available for the current account.', retryable: false, action: 'CONTACT_ADMIN' };
+    }
     if (status === HttpStatus.UNAUTHORIZED) {
       return { code: 'AUTH_REQUIRED', safeMessage: 'Authentication is required.', retryable: false, action: 'SIGN_IN' };
     }
@@ -62,6 +86,9 @@ export class SafeExceptionFilter implements ExceptionFilter {
     }
     if (status === HttpStatus.SERVICE_UNAVAILABLE) {
       return { code: 'DEPENDENCY_UNAVAILABLE', safeMessage: 'The operation could not be confirmed yet.', retryable: true, action: 'CHECK_STATUS' };
+    }
+    if (status === HttpStatus.TOO_MANY_REQUESTS) {
+      return { code: 'RATE_LIMITED', safeMessage: 'Too many requests. Try again later.', retryable: true, action: 'WAIT' };
     }
     return { code: 'INTERNAL_ERROR', safeMessage: 'The service could not complete this request.', retryable: false, action: 'CONTACT_ADMIN' };
   }

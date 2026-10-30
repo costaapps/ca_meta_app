@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { randomBytes } from 'node:crypto';
 
 export type RuntimeEnvironment = 'development' | 'test' | 'staging' | 'production';
 
@@ -7,7 +8,13 @@ export interface ApiEnvironment {
   readonly port: number;
   readonly bindAddress: string;
   readonly allowedHosts: readonly string[];
+  /** Exact scheme/host/port browser origin allowlist; wildcards are never accepted. */
+  readonly allowedOrigins: readonly string[];
   readonly trustedProxyCidrs: false | readonly string[];
+  /** Sliding portal-session expiry; proposal default, not confirmed against Suite4 behavior. */
+  readonly portalSessionIdleTimeoutSeconds: number;
+  /** Absolute portal-session expiry; proposal default, not confirmed against Suite4 behavior. */
+  readonly portalSessionAbsoluteTimeoutSeconds: number;
   readonly database: {
     readonly host: string;
     readonly port: number;
@@ -16,6 +23,7 @@ export interface ApiEnvironment {
     readonly password: string;
     readonly connectTimeoutMs: number;
   };
+  readonly portalSessionRecoveryKey: string;
   readonly identity?: {
     /** Exact verified issuer/subject pairs granted platform identity administration. Empty is fail-closed. */
     readonly platformIdentityAdmins: readonly { readonly issuer: string; readonly subject: string }[];
@@ -81,6 +89,28 @@ function integerField(
   return parsed;
 }
 
+function optionalIntegerField(
+  source: NodeJS.ProcessEnv,
+  key: string,
+  defaultValue: number,
+  minimum: number,
+  maximum: number,
+  invalid: string[],
+): number {
+  const value = source[key];
+  if (value === undefined) return defaultValue;
+  if (!/^(0|[1-9]\d*)$/.test(value.trim())) {
+    invalid.push(key);
+    return defaultValue;
+  }
+  const parsed = Number(value.trim());
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    invalid.push(key);
+    return defaultValue;
+  }
+  return parsed;
+}
+
 function normalizeAllowedHost(value: string): string | undefined {
   if (value.length === 0 || value.includes('*') || value.includes('/') || value.includes('@')) return undefined;
   if (isIP(value) !== 0) return value.toLowerCase();
@@ -113,6 +143,31 @@ function allowedHostsField(value: string, invalid: string[]): readonly string[] 
     return [];
   }
   return normalized as string[];
+}
+
+function allowedOriginsField(value: string, nodeEnv: string, invalid: string[]): readonly string[] {
+  const entries = value.split(',').map((entry) => entry.trim());
+  const origins = entries.map((entry) => {
+    try {
+      const url = new URL(entry);
+      const loopbackHttp = nodeEnv === 'test' || nodeEnv === 'development'
+        ? ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+        : false;
+      if (
+        entry.includes('*') || url.origin !== entry || url.username || url.password || url.pathname !== '/' || url.search || url.hash ||
+        (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopbackHttp))
+      ) return undefined;
+      return url.origin;
+    } catch {
+      return undefined;
+    }
+  });
+  if (entries.length === 0 || entries.some((entry) => !entry) || origins.some((origin) => origin === undefined) ||
+    new Set(origins).size !== origins.length) {
+    invalid.push('API_ALLOWED_ORIGINS');
+    return [];
+  }
+  return origins as string[];
 }
 
 function isUnspecifiedIpv6(address: string): boolean {
@@ -225,10 +280,22 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   }
 
   const allowedHosts = allowedHostsField(required(source, 'API_ALLOWED_HOSTS', invalid), invalid);
+  const configuredOrigins = source.API_ALLOWED_ORIGINS?.trim() ?? '';
+  if (configuredOrigins === '' && (nodeEnv === 'staging' || nodeEnv === 'production')) invalid.push('API_ALLOWED_ORIGINS');
+  const allowedOrigins = configuredOrigins === '' ? [] : allowedOriginsField(configuredOrigins, nodeEnv, invalid);
   const trustedProxyCidrs = trustedProxiesField(
     required(source, 'API_TRUSTED_PROXIES', invalid),
     invalid,
   );
+  const portalSessionIdleTimeoutSeconds = optionalIntegerField(
+    source, 'API_PORTAL_SESSION_IDLE_TIMEOUT_SECONDS', 30 * 60, 60, 24 * 60 * 60, invalid,
+  );
+  const portalSessionAbsoluteTimeoutSeconds = optionalIntegerField(
+    source, 'API_PORTAL_SESSION_ABSOLUTE_TIMEOUT_SECONDS', 8 * 60 * 60, 5 * 60, 30 * 24 * 60 * 60, invalid,
+  );
+  if (portalSessionAbsoluteTimeoutSeconds < portalSessionIdleTimeoutSeconds) {
+    invalid.push('API_PORTAL_SESSION_ABSOLUTE_TIMEOUT_SECONDS');
+  }
   const host = required(source, 'API_DATABASE_HOST', invalid);
   if (!/^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(host) && isIP(host) === 0) {
     invalid.push('API_DATABASE_HOST');
@@ -249,6 +316,14 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     5000,
     invalid,
   );
+  const configuredRecoveryKey = source.API_PORTAL_SESSION_RECOVERY_KEY;
+  if ((!configuredRecoveryKey || configuredRecoveryKey.trim() === '') && (nodeEnv === 'staging' || nodeEnv === 'production')) {
+    invalid.push('API_PORTAL_SESSION_RECOVERY_KEY');
+  }
+  const portalSessionRecoveryKey = configuredRecoveryKey && configuredRecoveryKey.trim() !== ''
+    ? configuredRecoveryKey
+    : randomBytes(32).toString('base64url');
+  if (Buffer.byteLength(portalSessionRecoveryKey, 'utf8') < 32) invalid.push('API_PORTAL_SESSION_RECOVERY_KEY');
   const platformIdentityAdmins = platformIdentityAdminsField(source, invalid);
 
   if (invalid.length > 0) {
@@ -261,7 +336,11 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     port,
     bindAddress,
     allowedHosts,
+    allowedOrigins,
     trustedProxyCidrs,
+    portalSessionIdleTimeoutSeconds,
+    portalSessionAbsoluteTimeoutSeconds,
+    portalSessionRecoveryKey,
     database: {
       host,
       port: databasePort,
