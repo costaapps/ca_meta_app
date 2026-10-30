@@ -213,11 +213,12 @@ function Get-WorkerStartEventCount {
 }
 
 function Assert-WorkerRunning {
-  param([int]$MinimumStartCount = 1)
+  param([string]$PreviousContainerId)
   for ($attempt = 0; $attempt -lt 30; $attempt++) {
     $worker = Get-ContainerInfo -Service 'worker'
     if ($worker.State.Status -ne 'running') { throw 'Worker did not remain running after startup.' }
-    if ((Get-WorkerStartEventCount) -ge $MinimumStartCount) { return }
+    if ($PreviousContainerId -and $worker.Id -eq $PreviousContainerId) { throw 'Compose did not replace the worker container.' }
+    if ((Get-WorkerStartEventCount) -ge 1) { return }
     Start-Sleep -Seconds 1
   }
   throw 'Worker did not emit the expected startup event within 30 seconds.'
@@ -401,11 +402,10 @@ SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_jobs WHERE id = '$jobId'), ':',
               (SELECT schema_version FROM ca_meta_schema_migrations ORDER BY schema_version DESC LIMIT 1));
 "@
     if ((Invoke-DbQuery -Sql $seedSql) -ne '1:3') { throw 'The synthetic queued job or schema-v3 ledger was not present after migration.' }
-    $workerStartCount = Get-WorkerStartEventCount
+    $previousWorkerContainerId = (Get-ContainerInfo -Service 'worker').Id
     $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', '--force-recreate', '--no-deps', 'api')
     $null = Invoke-Compose -Arguments @('up', '--detach', '--force-recreate', '--no-deps', 'worker')
-    Assert-WorkerRunning -MinimumStartCount ($workerStartCount + 1)
-    $workerStartCount = Get-WorkerStartEventCount
+    Assert-WorkerRunning -PreviousContainerId $previousWorkerContainerId
     $preserved = Invoke-DbQuery -Sql "SELECT CONCAT(status, ':', (SELECT MAX(schema_version) FROM ca_meta_schema_migrations)) FROM ca_meta_jobs WHERE id = '$jobId';"
     if ($preserved -ne 'QUEUED:3') { throw 'API/worker recreation did not preserve the synthetic job and schema-v3 data.' }
     Write-Output 'Persistence smoke: recreating API and worker preserved the queued job and schema v3.'
@@ -415,7 +415,7 @@ SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_jobs WHERE id = '$jobId'), ':',
       Start-Sleep -Seconds 3
       $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', 'database')
       $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', 'api')
-      Assert-WorkerRunning -MinimumStartCount $workerStartCount
+      Assert-WorkerRunning
       Assert-HttpStatus -Uri "$baseUri/api/health" -ExpectedStatus 200
       Assert-HttpStatus -Uri "$baseUri/api/ready" -ExpectedStatus 200
       if ((Invoke-DbQuery -Sql "SELECT CONCAT(status, ':', (SELECT MAX(schema_version) FROM ca_meta_schema_migrations)) FROM ca_meta_jobs WHERE id = '$jobId';") -ne 'QUEUED:3') {
