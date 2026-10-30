@@ -2,7 +2,7 @@
 
 ## Current stage
 
-M3.01/#25 has implementation commit `bd4d87f493c35f0b3da98efd8d06c92ebd48bdc3` on `desktop/m3-01`, based on `89f44ced872226afecc71b195b8c0e0cd6311179`. Independent review rejected that SHA on two blockers; a focused corrective change is in progress and must be committed before the coordinator can validate it. It is not integrated into `desktop/milestone-m3`; no package PR exists. The coordinator owns MariaDB validation, repeated independent reviews and GitHub operations.
+M3.01/#25 preserves implementation commit `bd4d87f493c35f0b3da98efd8d06c92ebd48bdc3` and has corrective code commit `a7339237ba794395b85245254d118117bdff4f18` on `desktop/m3-01`, based on `89f44ced872226afecc71b195b8c0e0cd6311179`. The correction addresses the two review blockers. It is not integrated into `desktop/milestone-m3`; no package PR exists. The coordinator owns MariaDB validation, repeated independent reviews and GitHub operations. This handoff status update is documentation-only after the tested code commit.
 
 The API worktree used Node `v24.22.2` and npm `11.19.1`. A lockfile install completed with 674 packages. Original focused checks passed before review. The corrective work was also validated on Node `v24.22.2` / npm `11.19.1` with:
 
@@ -11,7 +11,7 @@ The API worktree used Node `v24.22.2` and npm `11.19.1`. A lockfile install comp
 - `npm exec --workspace=@ca-meta/api -- tsc -p tsconfig.test.json` — passed.
 - `node --test apps/api/dist-test/test/m3-01-identity.spec.js apps/api/dist-test/test/migration-unit.spec.js` — 11 passed, 0 failed, 0 skipped.
 
-Corrective gate results after the review changes: `npm run typecheck:api` passed; `npm run build:api` passed; `npm exec --workspace=@ca-meta/api -- tsc -p tsconfig.test.json` passed; the same focused node command passed 14 tests, 0 failed, 0 skipped. These are local checks only. The MariaDB test is intentionally left for the coordinator on the committed candidate.
+Corrective gate results on code SHA `a7339237ba794395b85245254d118117bdff4f18` after the review changes: `npm run typecheck:api` passed; `npm run build:api` passed; `npm exec --workspace=@ca-meta/api -- tsc -p tsconfig.test.json` passed; `node --test apps/api/dist-test/test/m3-01-identity.spec.js apps/api/dist-test/test/migration-unit.spec.js` passed 14 tests, 0 failed, 0 skipped. The runtime path prepended for each command was `C:\Users\user\AppData\Local\Codex\runtimes\node-v24.22.2` (Node `v24.22.2`, npm `11.19.1`). These are local checks only. The MariaDB test is intentionally left for the coordinator on the committed candidate.
 
 The new MariaDB assertions are in `apps/api/test/migrations.integration.spec.ts`, but were not run from this worktree. The coordinator prepared a local disposable MariaDB; only the coordinator will run that harness with its protected local credentials on the committed candidate. Do not run the broad API suite or Docker harness from this package agent.
 

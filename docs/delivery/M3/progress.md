@@ -13,7 +13,7 @@
 
 | Package / issue | Stage | Candidate | Last evidence | Package PR / squash | Next action |
 |---|---|---|---|---|---|
-| M3.01 / #25 | Corrective review in progress | Branch `desktop/m3-01`, based on `89f44ced872226afecc71b195b8c0e0cd6311179`; preserves implementation commit `bd4d87f493c35f0b3da98efd8d06c92ebd48bdc3` | Corrective checks run on Node `v24.22.2` / npm `11.19.1`: API typecheck, build, test TypeScript compile, and 14 focused tests passed. MariaDB remains with the coordinator. | Not created | Commit correction; coordinator runs the MariaDB integration harness and repeats reviews on the new SHA |
+| M3.01 / #25 | Corrective code committed; integration/reviews pending | Tested code SHA `a7339237ba794395b85245254d118117bdff4f18` on `desktop/m3-01`, based on `89f44ced872226afecc71b195b8c0e0cd6311179`; preserves original implementation commit `bd4d87f493c35f0b3da98efd8d06c92ebd48bdc3` | On Node `v24.22.2` / npm `11.19.1`: API typecheck/build, test TypeScript compile, and 14 focused tests passed. MariaDB and repeated independent reviews remain with the coordinator. | Not created | Coordinator runs the MariaDB migration harness and repeats reviews on the tested code SHA |
 | M3.02 / #38 | Not started | — | — | — | Wait for M3.01; implement ticket exchange against fake issuer, preserve real Suite4 gate |
 | M3.03 / #31 | Not started | — | — | — | Wait for M3.01 and M3.04; implement one-use link with local fake mail transport |
 | M3.04 / #27 | Not started | — | — | — | Wait for M3.01; implement persisted sessions, CSRF, CORS, quotas and wire tenant context |
