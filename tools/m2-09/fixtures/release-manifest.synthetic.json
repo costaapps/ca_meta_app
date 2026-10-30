@@ -1,0 +1,121 @@
+{
+  "manifestVersion": 1,
+  "release": {
+    "tag": "v1.2.3",
+    "semver": "1.2.3",
+    "releaseId": "1.2.3+0123456789ab",
+    "createdAt": "2026-10-30T00:00:00.000Z",
+    "workflowRunUrl": "https://example.invalid/actions/runs/synthetic"
+  },
+  "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
+  "contract": {
+    "version": "1.0.0-proposed",
+    "path": "docs/meta-v2/contracts/openapi.yaml",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "databaseSchema": {
+    "version": 3,
+    "minCompatible": 3,
+    "maxCompatible": 3
+  },
+  "images": {
+    "web": {
+      "name": "docker.io/synthetic/ca-meta-web",
+      "reference": "docker.io/synthetic/ca-meta-web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
+      "buildKitProvenance": {
+        "asset": "web-provenance.slsa.json",
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "attestations": {
+        "provenance": {
+          "issuer": "GitHub Actions / Sigstore",
+          "predicateType": "https://slsa.dev/provenance/v1",
+          "verified": true,
+          "url": "https://example.invalid/attestations/web-provenance"
+        },
+        "sbom": {
+          "issuer": "GitHub Actions / Sigstore",
+          "predicateType": "https://spdx.dev/Document",
+          "verified": true,
+          "url": "https://example.invalid/attestations/web-sbom",
+          "format": "SPDX-2.2",
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "asset": "web-sbom.spdx.json"
+        }
+      },
+      "scan": {
+        "engine": "Trivy",
+        "version": "0.76.1",
+        "severity": ["HIGH", "CRITICAL"],
+        "result": "success",
+        "report": "trivy-web.json",
+        "reportSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "api": {
+      "name": "docker.io/synthetic/ca-meta-api",
+      "reference": "docker.io/synthetic/ca-meta-api@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
+      "buildKitProvenance": {
+        "asset": "api-provenance.slsa.json",
+        "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+      },
+      "attestations": {
+        "provenance": {
+          "issuer": "GitHub Actions / Sigstore",
+          "predicateType": "https://slsa.dev/provenance/v1",
+          "verified": true,
+          "url": "https://example.invalid/attestations/api-provenance"
+        },
+        "sbom": {
+          "issuer": "GitHub Actions / Sigstore",
+          "predicateType": "https://spdx.dev/Document",
+          "verified": true,
+          "url": "https://example.invalid/attestations/api-sbom",
+          "format": "SPDX-2.2",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "asset": "api-sbom.spdx.json"
+        }
+      },
+      "scan": {
+        "engine": "Trivy",
+        "version": "0.76.1",
+        "severity": ["HIGH", "CRITICAL"],
+        "result": "success",
+        "report": "trivy-api.json",
+        "reportSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  },
+  "worker": {
+    "image": "docker.io/synthetic/ca-meta-api@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "command": [
+      "sh",
+      "-ec",
+      "export API_DATABASE_PASSWORD=\"$(cat /run/secrets/api_database_password)\"; exec node dist/worker/main.js"
+    ],
+    "composeService": "worker"
+  },
+  "checks": {
+    "requiredCi": [
+      { "name": "desktop-candidate", "conclusion": "success", "url": "https://example.invalid/checks/desktop-candidate" },
+      { "name": "m2-08-mariadb", "conclusion": "success", "url": "https://example.invalid/checks/m2-08-mariadb" },
+      { "name": "m2-08-security", "conclusion": "success", "url": "https://example.invalid/checks/m2-08-security" },
+      { "name": "m2-08-images", "conclusion": "success", "url": "https://example.invalid/checks/m2-08-images" }
+    ],
+    "imageScan": {
+      "engine": "Trivy",
+      "version": "0.76.1",
+      "severity": ["HIGH", "CRITICAL"],
+      "result": "success",
+      "reports": ["trivy-web.json", "trivy-api.json"]
+    }
+  },
+  "changelog": {
+    "url": "https://example.invalid/releases/tag/v1.2.3",
+    "markdown": "Synthetic fixture only; not a published release."
+  }
+}

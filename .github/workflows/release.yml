@@ -1,0 +1,341 @@
+name: Immutable container release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions: {}
+
+concurrency:
+  group: container-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-images:
+    name: publish-images
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: dockerhub-release
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+      DOCKERHUB_RELEASE_ENABLED: ${{ vars.DOCKERHUB_RELEASE_ENABLED }}
+      DOCKERHUB_IMMUTABLE_TAGS_CONFIRMED: ${{ vars.DOCKERHUB_IMMUTABLE_TAGS_CONFIRMED }}
+      DOCKERHUB_TARGET_PLATFORMS: ${{ vars.DOCKERHUB_TARGET_PLATFORMS }}
+      DOCKER_CONFIG: ${{ runner.temp }}/m2-09-docker-config
+      RELEASE_TAG: ${{ github.ref_name }}
+      SOURCE_REVISION: ${{ github.sha }}
+      RELEASE_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    outputs:
+      release_tag: ${{ steps.prepare.outputs.release_tag }}
+      release_id: ${{ steps.prepare.outputs.release_id }}
+      source_revision: ${{ steps.prepare.outputs.source_revision }}
+      publish_artifact: ${{ steps.prepare.outputs.publish_artifact }}
+    steps:
+      - name: Checkout the exact release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate external release gate and tag
+        id: prepare
+        run: node tools/m2-09/release-pipeline.mjs prepare
+
+      - name: Verify candidate checks on this exact commit
+        run: |
+          mkdir -p artifacts/release-evidence
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/commits/${SOURCE_REVISION}/check-runs?per_page=100" > "$RUNNER_TEMP/check-runs.json"
+          node tools/m2-09/release-pipeline.mjs verify-checks "$RUNNER_TEMP/check-runs.json" artifacts/release-evidence/required-checks.json
+
+      - name: Confirm release commit is already in develop
+        run: |
+          comparison="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${SOURCE_REVISION}...develop" --jq .status)"
+          case "$comparison" in
+            ahead|identical) ;;
+            *) echo "Release source must already be reachable from develop; compare status: $comparison" >&2; exit 1 ;;
+          esac
+
+      - name: Authenticate to the explicitly configured Docker Hub namespace
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          install -d -m 700 "$DOCKER_CONFIG"
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: Resolve or build web image by source and immutable release tags
+        id: web
+        env:
+          IMAGE_KIND: web
+        run: node tools/m2-09/release-pipeline.mjs resolve-image
+
+      - name: Resolve or build API image by source and immutable release tags
+        id: api
+        env:
+          IMAGE_KIND: api
+        run: node tools/m2-09/release-pipeline.mjs resolve-image
+
+      - name: Remove Docker Hub credentials before third-party scan and attestation actions
+        run: rm -rf -- "$DOCKER_CONFIG"
+
+      - name: Scan exact web digest
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        env:
+          DOCKER_CONFIG: ''
+        with:
+          image-ref: ${{ steps.web.outputs.image_ref }}
+          format: json
+          output: artifacts/release-evidence/trivy-web.json
+          scanners: vuln
+          vuln-type: os,library
+          version: v0.76.1
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          hide-progress: true
+          timeout: 15m
+
+      - name: Scan exact API digest
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        env:
+          DOCKER_CONFIG: ''
+        with:
+          image-ref: ${{ steps.api.outputs.image_ref }}
+          format: json
+          output: artifacts/release-evidence/trivy-api.json
+          scanners: vuln
+          vuln-type: os,library
+          version: v0.76.1
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          hide-progress: true
+          timeout: 15m
+
+      - name: Generate signed web image provenance
+        id: web-provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        env:
+          DOCKER_CONFIG: ''
+        with:
+          subject-name: ${{ steps.web.outputs.subject_name }}
+          subject-digest: ${{ steps.web.outputs.digest }}
+          push-to-registry: false
+
+      - name: Generate signed API image provenance
+        id: api-provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        env:
+          DOCKER_CONFIG: ''
+        with:
+          subject-name: ${{ steps.api.outputs.subject_name }}
+          subject-digest: ${{ steps.api.outputs.digest }}
+          push-to-registry: false
+
+      - name: Generate signed web SBOM attestation
+        id: web-sbom
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        env:
+          DOCKER_CONFIG: ''
+        with:
+          subject-name: ${{ steps.web.outputs.subject_name }}
+          subject-digest: ${{ steps.web.outputs.digest }}
+          sbom-path: artifacts/release-evidence/web-sbom.spdx.json
+          push-to-registry: false
+
+      - name: Generate signed API SBOM attestation
+        id: api-sbom
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        env:
+          DOCKER_CONFIG: ''
+        with:
+          subject-name: ${{ steps.api.outputs.subject_name }}
+          subject-digest: ${{ steps.api.outputs.digest }}
+          sbom-path: artifacts/release-evidence/api-sbom.spdx.json
+          push-to-registry: false
+
+      - name: Verify image provenance, SBOM and source SHA
+        env:
+          WEB_IMAGE_REF: ${{ steps.web.outputs.image_ref }}
+          WEB_SUBJECT_NAME: ${{ steps.web.outputs.subject_name }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          API_IMAGE_REF: ${{ steps.api.outputs.image_ref }}
+          API_SUBJECT_NAME: ${{ steps.api.outputs.subject_name }}
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_PROVENANCE_URL: ${{ steps.web-provenance.outputs.attestation-url }}
+          API_PROVENANCE_URL: ${{ steps.api-provenance.outputs.attestation-url }}
+          WEB_SBOM_URL: ${{ steps.web-sbom.outputs.attestation-url }}
+          API_SBOM_URL: ${{ steps.api-sbom.outputs.attestation-url }}
+        run: node tools/m2-09/release-pipeline.mjs verify-attestations
+
+      - name: Re-authenticate only for immutable image-tag promotion
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          install -d -m 700 "$DOCKER_CONFIG"
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: Promote verified digests to immutable SemVer and SHA tags
+        env:
+          WEB_IMAGE_REF: ${{ steps.web.outputs.image_ref }}
+          WEB_SUBJECT_NAME: ${{ steps.web.outputs.subject_name }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          API_IMAGE_REF: ${{ steps.api.outputs.image_ref }}
+          API_SUBJECT_NAME: ${{ steps.api.outputs.subject_name }}
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+        run: node tools/m2-09/release-pipeline.mjs promote
+
+      - name: Remove Docker Hub credentials after image promotion
+        run: rm -rf -- "$DOCKER_CONFIG"
+
+      - name: Generate changelog and release manifest plus Compose lock
+        env:
+          WEB_IMAGE_REF: ${{ steps.web.outputs.image_ref }}
+          WEB_SUBJECT_NAME: ${{ steps.web.outputs.subject_name }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          API_IMAGE_REF: ${{ steps.api.outputs.image_ref }}
+          API_SUBJECT_NAME: ${{ steps.api.outputs.subject_name }}
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_PROVENANCE_URL: ${{ steps.web-provenance.outputs.attestation-url }}
+          API_PROVENANCE_URL: ${{ steps.api-provenance.outputs.attestation-url }}
+          WEB_SBOM_URL: ${{ steps.web-sbom.outputs.attestation-url }}
+          API_SBOM_URL: ${{ steps.api-sbom.outputs.attestation-url }}
+        run: |
+          mkdir -p artifacts/release
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" -f tag_name="$RELEASE_TAG" -f target_commitish="$SOURCE_REVISION" --jq .body > artifacts/release/changelog.md
+          node tools/m2-09/release-pipeline.mjs write-manifest artifacts/release-evidence/required-checks.json artifacts/release
+          node tools/m2-09/verify-release-manifest.mjs artifacts/release/release-manifest.json
+          pwsh -NoLogo -NoProfile -File tools/m2-07/check-release-lock.ps1 -Path artifacts/release/release-lock.env
+
+      - name: Generate signed release manifest provenance
+        id: manifest-provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: artifacts/release/release-manifest.json
+          push-to-registry: false
+
+      - name: Verify signed release manifest provenance
+        env:
+          MANIFEST_ATTESTATION_URL: ${{ steps.manifest-provenance.outputs.attestation-url }}
+        run: |
+          gh attestation verify artifacts/release/release-manifest.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$SOURCE_REVISION" \
+            --source-ref "refs/tags/$RELEASE_TAG"
+          printf 'Signed release manifest provenance: %s\n' "$MANIFEST_ATTESTATION_URL" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized release evidence (14 days)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        env:
+          DOCKER_CONFIG: ''
+        with:
+          name: ${{ steps.prepare.outputs.evidence_artifact }}
+          path: artifacts/release-evidence/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload the exact release files for the publication job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        env:
+          DOCKER_CONFIG: ''
+        with:
+          name: ${{ steps.prepare.outputs.publish_artifact }}
+          path: artifacts/release/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove the Docker Hub credential file
+        if: always()
+        run: rm -rf -- "$DOCKER_CONFIG"
+
+  publish-release-record:
+    name: publish-release-record
+    needs: publish-images
+    if: needs.publish-images.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      attestations: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_REVISION: ${{ needs.publish-images.outputs.source_revision }}
+      RELEASE_TAG: ${{ needs.publish-images.outputs.release_tag }}
+    steps:
+      - name: Checkout the exact release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.publish-images.outputs.source_revision }}
+          persist-credentials: false
+      - name: Download complete manifest, lock, scan, SBOM and provenance files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.publish-images.outputs.publish_artifact }}
+          path: artifacts/release
+      - name: Verify files and detect a completed retry
+        id: existing
+        run: |
+          node tools/m2-09/verify-release-manifest.mjs artifacts/release/release-manifest.json
+          gh attestation verify artifacts/release/release-manifest.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$SOURCE_REVISION" \
+            --source-ref "refs/tags/$RELEASE_TAG"
+          existing_release=false
+          assets=''
+          if gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' >/tmp/m2-09-release-assets.txt 2>/dev/null; then
+            existing_release=true
+            assets="$(cat /tmp/m2-09-release-assets.txt)"
+          fi
+          if printf '%s\n' "$assets" | grep -Fxq release-manifest.json; then
+            mkdir -p "$RUNNER_TEMP/existing-release"
+            gh release download "$RELEASE_TAG" --pattern release-manifest.json --dir "$RUNNER_TEMP/existing-release"
+            node tools/m2-09/verify-release-manifest.mjs "$RUNNER_TEMP/existing-release/release-manifest.json"
+            gh attestation verify "$RUNNER_TEMP/existing-release/release-manifest.json" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$SOURCE_REVISION" \
+              --source-ref "refs/tags/$RELEASE_TAG"
+            node tools/m2-09/verify-release-assets.mjs artifacts/release "$RUNNER_TEMP/existing-release/release-manifest.json"
+          fi
+          if [ "$existing_release" != true ]; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file artifacts/release/changelog.md
+          fi
+          for asset in release-manifest.json release-lock.env changelog.md web-sbom.spdx.json api-sbom.spdx.json web-provenance.slsa.json api-provenance.slsa.json trivy-web.json trivy-api.json; do
+            if ! printf '%s\n' "$assets" | grep -Fxq "$asset"; then
+              gh release upload "$RELEASE_TAG" "artifacts/release/$asset"
+            fi
+          done
+          echo 'complete=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify complete GitHub release record
+        run: |
+          mkdir -p "$RUNNER_TEMP/final-release-assets"
+          gh release download "$RELEASE_TAG" --dir "$RUNNER_TEMP/final-release-assets"
+          node tools/m2-09/verify-release-assets.mjs "$RUNNER_TEMP/final-release-assets"
+          pwsh -NoLogo -NoProfile -File tools/m2-07/check-release-lock.ps1 -Path "$RUNNER_TEMP/final-release-assets/release-lock.env"
+          gh attestation verify "$RUNNER_TEMP/final-release-assets/release-manifest.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$SOURCE_REVISION" \
+            --source-ref "refs/tags/$RELEASE_TAG"
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | sort > "$RUNNER_TEMP/release-assets.txt"
+          for asset in release-manifest.json release-lock.env changelog.md web-sbom.spdx.json api-sbom.spdx.json web-provenance.slsa.json api-provenance.slsa.json trivy-web.json trivy-api.json; do
+            grep -Fxq "$asset" "$RUNNER_TEMP/release-assets.txt" || { echo "Release asset $asset is missing." >&2; exit 1; }
+          done
+
