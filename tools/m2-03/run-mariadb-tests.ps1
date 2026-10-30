@@ -7,9 +7,9 @@ $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ca-meta-m203-$runId"
 $initSqlPath = Join-Path $tempRoot 'init.sql'
 $composeFile = Join-Path $PSScriptRoot 'compose.yaml'
 $keepEnvironment = $env:M2_03_KEEP_ENVIRONMENT -eq '1'
-$isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+$isWindowsPlatform = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
 $runtimeDirectory = $env:M2_NODE_RUNTIME_DIR
-if ($isWindows) {
+if ($isWindowsPlatform) {
   if ([string]::IsNullOrWhiteSpace($runtimeDirectory)) {
     $runtimeDirectory = Join-Path $env:LOCALAPPDATA 'Codex\runtimes\node-v24.22.2'
   }

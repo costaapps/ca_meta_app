@@ -182,7 +182,10 @@ jobs:
           persist-credentials: false
       - name: Build web and API images and run same-commit smoke
         id: smoke
-        run: pwsh -NoLogo -NoProfile -File tools/m2-06/run-container-smoke.ps1 -KeepImages
+        run: >-
+          pwsh -NoLogo -NoProfile -File tools/m2-06/run-container-smoke.ps1 -KeepImages
+          -NodeImage docker.io/library/node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
+          -NginxImage ghcr.io/nginx/nginx-unprivileged@sha256:2daef144b574804198caccc4041819fa1801ecd5df2252a39646bfa2b1ff3bea
       - name: Prepare report directory
         run: mkdir -p artifacts/security
       - name: Scan web image vulnerabilities

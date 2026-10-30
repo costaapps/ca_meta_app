@@ -39,6 +39,8 @@ The M2.03 integration suite consumes `fixtures/tenant-isolation-negative.json` t
 
 CI calls the M2.06 smoke with `-KeepImages`. On full smoke success only, it exposes the two locally built tags to Trivy, scans each independently with Trivy `v0.76.1` for OS/library vulnerabilities, then removes those exact tags. The scan fails on any HIGH/CRITICAL finding. The image labels record the same source commit SHA; neither tag is pushed to a registry.
 
+The smoke keeps the ECR Public defaults from the release Dockerfiles. Its optional CI mirror arguments are pinned to `docker.io/library/node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c` and `ghcr.io/nginx/nginx-unprivileged@sha256:2daef144b574804198caccc4041819fa1801ecd5df2252a39646bfa2b1ff3bea`. Registry manifest responses returned the identical digests used by the Dockerfiles after ECR Public returned `429 Data limit exceeded`. The smoke accepts only those exact mirror references; they affect its build invocation, not release Dockerfiles or Compose configuration.
+
 ## Secret and dependency scans
 
 ```powershell

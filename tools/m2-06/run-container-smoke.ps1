@@ -1,5 +1,7 @@
 param(
-  [switch] $KeepImages
+  [switch] $KeepImages,
+  [string] $NodeImage,
+  [string] $NginxImage
 )
 
 Set-StrictMode -Version Latest
@@ -14,6 +16,22 @@ $apiContainer = "m206-api-$suffix"
 $workerContainer = "m206-worker-$suffix"
 $webImage = "ca-meta-web:m206-$suffix"
 $apiImage = "ca-meta-api:m206-$suffix"
+$approvedNodeImageMirror = 'docker.io/library/node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c'
+$approvedNginxImageMirror = 'ghcr.io/nginx/nginx-unprivileged@sha256:2daef144b574804198caccc4041819fa1801ecd5df2252a39646bfa2b1ff3bea'
+$nodeBuildArguments = @()
+$nginxBuildArguments = @()
+if ($NodeImage) {
+  if ($NodeImage -cne $approvedNodeImageMirror) {
+    throw 'NodeImage must exactly match the verified Docker Hub Node mirror digest.'
+  }
+  $nodeBuildArguments = @('--build-arg', "NODE_IMAGE=$NodeImage")
+}
+if ($NginxImage) {
+  if ($NginxImage -cne $approvedNginxImageMirror) {
+    throw 'NginxImage must exactly match the verified GHCR nginx-unprivileged mirror digest.'
+  }
+  $nginxBuildArguments = @('--build-arg', "NGINX_IMAGE=$NginxImage")
+}
 $ociVersion = '0.0.0-m2-06'
 $ociRevision = (& git -C $repoRoot rev-parse HEAD).Trim()
 $createdContainers = [System.Collections.Generic.List[object]]::new()
@@ -289,13 +307,17 @@ try {
   Write-Output "Candidate: $ociRevision"
   Write-Output "Web image: $webImage"
   Write-Output "API image: $apiImage"
-  Write-Output 'Building images from the npm lockfile with digest-pinned ECR Public bases.'
+  if ($NodeImage -or $NginxImage) {
+    Write-Output 'Building images from the npm lockfile with explicitly verified digest-pinned base-image mirrors.'
+  } else {
+    Write-Output 'Building images from the npm lockfile with digest-pinned ECR Public bases.'
+  }
 
-  Invoke-Docker -Arguments @('build', '--file', 'infra/docker/web.Dockerfile', '--build-arg', "OCI_VERSION=$ociVersion", '--build-arg', "OCI_REVISION=$ociRevision", '--tag', $webImage, '.') | Out-Null
+  Invoke-Docker -Arguments (@('build', '--file', 'infra/docker/web.Dockerfile', '--build-arg', "OCI_VERSION=$ociVersion", '--build-arg', "OCI_REVISION=$ociRevision") + $nodeBuildArguments + $nginxBuildArguments + @('--tag', $webImage, '.')) | Out-Null
   $webImageInfo = @(Invoke-Docker -Arguments @('image', 'inspect', $webImage) | ConvertFrom-Json)[0]
   $createdImages.Add([pscustomobject]@{ Name = $webImage; Id = $webImageInfo.Id })
   Test-ImageArchiveLayers -Image $webImage -ImageKind web
-  Invoke-Docker -Arguments @('build', '--file', 'infra/docker/api.Dockerfile', '--build-arg', "OCI_VERSION=$ociVersion", '--build-arg', "OCI_REVISION=$ociRevision", '--tag', $apiImage, '.') | Out-Null
+  Invoke-Docker -Arguments (@('build', '--file', 'infra/docker/api.Dockerfile', '--build-arg', "OCI_VERSION=$ociVersion", '--build-arg', "OCI_REVISION=$ociRevision") + $nodeBuildArguments + @('--tag', $apiImage, '.')) | Out-Null
   $apiImageInfo = @(Invoke-Docker -Arguments @('image', 'inspect', $apiImage) | ConvertFrom-Json)[0]
   $createdImages.Add([pscustomobject]@{ Name = $apiImage; Id = $apiImageInfo.Id })
   Test-ImageArchiveLayers -Image $apiImage -ImageKind api
