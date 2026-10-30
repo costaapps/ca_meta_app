@@ -3,6 +3,8 @@ import { appendFile, copyFile, mkdir, readFile, writeFile } from 'node:fs/promis
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { validateManifest } from './verify-release-manifest.mjs';
+import { validateScanInputs } from './verify-scan-inputs.mjs';
+import { validateScanResults } from './verify-scan-results.mjs';
 
 const requiredChecks = [
   'desktop-candidate',
@@ -328,7 +330,7 @@ async function prepareScanInputs() {
     run('docker', ['save', '--output', archivePath, imageReference], { inherit: true });
     const archiveBytes = await readFile(archivePath);
     if (archiveBytes.length === 0) fail(`${kind} image archive is empty.`);
-    images[kind] = { imageReference, digest, sourceRevision: context.sourceRevision, archive, sha256: sha256File(archiveBytes) };
+    images[kind] = { subjectName: imageName, imageReference, digest, sourceRevision: context.sourceRevision, archive, sha256: sha256File(archiveBytes) };
   }
   await writeFile(resolve('artifacts/scan-inputs.json'), `${JSON.stringify({ sourceRevision: context.sourceRevision, images }, null, 2)}\n`, 'utf8');
 }
@@ -397,9 +399,35 @@ async function writeManifest(checksPath, outputDirectory) {
   const outputRoot = resolve(outputDirectory);
   await mkdir(outputRoot, { recursive: true });
   const requiredCi = JSON.parse(await readFile(checksPath, 'utf8'));
+  const scanInputs = JSON.parse(await readFile('artifacts/scan-inputs.json', 'utf8'));
+  const scanResultsBytes = await readFile(join(evidenceDirectory, 'scan-results.json'));
+  const scanResults = JSON.parse(scanResultsBytes.toString('utf8'));
   const contract = await contractMetadata();
   const changelogText = (await readFile('artifacts/release/changelog.md', 'utf8')).trim();
   if (!changelogText) fail('Generated changelog is empty.');
+
+  const expectedScan = {
+    sourceRevision: context.sourceRevision,
+    images: Object.fromEntries(['web', 'api'].map((kind) => {
+      const upper = kind.toUpperCase();
+      return [kind, {
+        subjectName: environment(`${upper}_SUBJECT_NAME`),
+        imageReference: environment(`${upper}_IMAGE_REF`),
+        digest: environment(`${upper}_DIGEST`),
+      }];
+    })),
+  };
+  validateScanInputs(scanInputs, expectedScan);
+  const actualReportHashes = {};
+  const reportBytesByKind = {};
+  for (const kind of ['web', 'api']) {
+    reportBytesByKind[kind] = await readFile(join(evidenceDirectory, `trivy-${kind}.json`));
+    actualReportHashes[kind] = sha256File(reportBytesByKind[kind]);
+    if (scanResults.images?.[kind]?.archiveSha256 !== scanInputs.images[kind].sha256) {
+      fail(`${kind} scan report does not identify the verified build archive.`);
+    }
+  }
+  validateScanResults(scanResults, expectedScan, actualReportHashes);
 
   const images = {};
   for (const kind of ['web', 'api']) {
@@ -408,10 +436,9 @@ async function writeManifest(checksPath, outputDirectory) {
     const digest = environment(`${upper}_DIGEST`);
     const sbomPath = join(evidenceDirectory, `${kind}-sbom.spdx.json`);
     const provenancePath = join(evidenceDirectory, `${kind}-provenance.slsa.json`);
-    const trivyPath = join(evidenceDirectory, `trivy-${kind}.json`);
     const sbom = await readFile(sbomPath);
     const provenance = await readFile(provenancePath);
-    const trivyReport = await readFile(trivyPath);
+    const trivyReport = reportBytesByKind[kind];
     const sbomAsset = `${kind}-sbom.spdx.json`;
     const provenanceAsset = `${kind}-provenance.slsa.json`;
     await copyFile(sbomPath, join(outputRoot, sbomAsset));
@@ -440,6 +467,9 @@ async function writeManifest(checksPath, outputDirectory) {
       },
       buildKitProvenance: { asset: provenanceAsset, sha256: sha256File(provenance) },
       scan: {
+        imageReference: `${name}@${digest}`,
+        digest,
+        sourceRevision: context.sourceRevision,
         engine: 'Trivy',
         version: '0.76.1',
         severity: ['HIGH', 'CRITICAL'],
@@ -448,7 +478,7 @@ async function writeManifest(checksPath, outputDirectory) {
         reportSha256: sha256File(trivyReport),
       },
     };
-    await copyFile(trivyPath, join(outputRoot, `trivy-${kind}.json`));
+    await writeFile(join(outputRoot, `trivy-${kind}.json`), trivyReport);
   }
 
   const manifest = {
@@ -487,11 +517,13 @@ async function writeManifest(checksPath, outputDirectory) {
       url: `https://github.com/${context.repository}/releases/tag/${context.releaseTag}`,
       markdown: changelogText,
     },
+    scanEvidence: { asset: 'scan-results.json', sha256: sha256File(scanResultsBytes) },
   };
   validateManifest(manifest);
   await writeFile(join(outputRoot, 'release-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   await writeReleaseLock(manifest, join(outputRoot, 'release-lock.env'));
   await copyFile('artifacts/release/changelog.md', join(outputRoot, 'changelog.md'));
+  await copyFile(join(evidenceDirectory, 'scan-results.json'), join(outputRoot, 'scan-results.json'));
 }
 
 async function main() {

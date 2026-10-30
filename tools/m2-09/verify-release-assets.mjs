@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { validateManifest } from './verify-release-manifest.mjs';
+import { validateScanResults } from './verify-scan-results.mjs';
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -39,6 +40,7 @@ try {
     throw new Error('Release asset source SHA does not match this workflow run.');
   }
 
+  const reportHashes = {};
   for (const kind of ['web', 'api']) {
     const image = manifest.images[kind];
     const sbom = await readFile(join(directory, image.attestations.sbom.asset));
@@ -48,7 +50,19 @@ try {
     const report = await readFile(join(directory, image.scan.report));
     if (sha256(report) !== image.scan.reportSha256) throw new Error(`${kind} Trivy report checksum does not match the signed manifest.`);
     JSON.parse(report.toString('utf8'));
+    reportHashes[kind] = sha256(report);
   }
+  const scanEvidence = await readFile(join(directory, manifest.scanEvidence.asset));
+  if (sha256(scanEvidence) !== manifest.scanEvidence.sha256) throw new Error('Scan identity evidence checksum does not match the signed manifest.');
+  const scanResults = JSON.parse(scanEvidence.toString('utf8'));
+  validateScanResults(scanResults, {
+    sourceRevision: manifest.sourceRevision,
+    images: Object.fromEntries(['web', 'api'].map((kind) => [kind, {
+      subjectName: manifest.images[kind].name,
+      imageReference: manifest.images[kind].reference,
+      digest: manifest.images[kind].digest,
+    }])),
+  }, reportHashes);
   const lock = new Map();
   for (const line of (await readFile(join(directory, 'release-lock.env'), 'utf8')).split(/\r?\n/)) {
     const entry = line.trim();

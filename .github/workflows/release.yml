@@ -11,8 +11,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-release-contract:
+    name: validate-release-contract
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the exact release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node 24.22.2
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24.22.2
+      - name: Verify the synthetic release and scan contracts
+        run: node tools/m2-09/test-release-contract.mjs
+
   build-images:
     name: build-images
+    needs: validate-release-contract
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -125,6 +146,12 @@ jobs:
       contents: read
     env:
       SOURCE_REVISION: ${{ needs.build-images.outputs.source_revision }}
+      WEB_SUBJECT_NAME: ${{ needs.build-images.outputs.web_subject_name }}
+      WEB_IMAGE_REF: ${{ needs.build-images.outputs.web_image_ref }}
+      WEB_DIGEST: ${{ needs.build-images.outputs.web_digest }}
+      API_SUBJECT_NAME: ${{ needs.build-images.outputs.api_subject_name }}
+      API_IMAGE_REF: ${{ needs.build-images.outputs.api_image_ref }}
+      API_DIGEST: ${{ needs.build-images.outputs.api_digest }}
     steps:
       - name: Checkout the exact release source for the local verifier
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -171,6 +198,9 @@ jobs:
           hide-progress: true
           timeout: 15m
 
+      - name: Record each report against its build image digest
+        run: node tools/m2-09/record-scan-results.mjs
+
       - name: Upload scan reports
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -178,6 +208,7 @@ jobs:
           path: |
             artifacts/release-evidence/trivy-web.json
             artifacts/release-evidence/trivy-api.json
+            artifacts/release-evidence/scan-results.json
           if-no-files-found: error
           retention-days: 14
 
@@ -227,6 +258,16 @@ jobs:
         with:
           name: ${{ needs.build-images.outputs.scan_report_artifact }}
           path: artifacts/release-evidence
+
+      - name: Verify scan reports against the exact build outputs
+        env:
+          WEB_SUBJECT_NAME: ${{ needs.build-images.outputs.web_subject_name }}
+          WEB_IMAGE_REF: ${{ needs.build-images.outputs.web_image_ref }}
+          WEB_DIGEST: ${{ needs.build-images.outputs.web_digest }}
+          API_SUBJECT_NAME: ${{ needs.build-images.outputs.api_subject_name }}
+          API_IMAGE_REF: ${{ needs.build-images.outputs.api_image_ref }}
+          API_DIGEST: ${{ needs.build-images.outputs.api_digest }}
+        run: node tools/m2-09/verify-scan-results.mjs artifacts
 
       - name: Generate signed web image provenance
         id: web-provenance
@@ -410,7 +451,7 @@ jobs:
           if [ "$existing_release" != true ]; then
             gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file artifacts/release/changelog.md
           fi
-          for asset in release-manifest.json release-lock.env changelog.md web-sbom.spdx.json api-sbom.spdx.json web-provenance.slsa.json api-provenance.slsa.json trivy-web.json trivy-api.json; do
+          for asset in release-manifest.json release-lock.env changelog.md scan-results.json web-sbom.spdx.json api-sbom.spdx.json web-provenance.slsa.json api-provenance.slsa.json trivy-web.json trivy-api.json; do
             if ! printf '%s\n' "$assets" | grep -Fxq "$asset"; then
               gh release upload "$RELEASE_TAG" "artifacts/release/$asset"
             fi
@@ -429,6 +470,6 @@ jobs:
             --source-digest "$SOURCE_REVISION" \
             --source-ref "refs/tags/$RELEASE_TAG"
           gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | sort > "$RUNNER_TEMP/release-assets.txt"
-          for asset in release-manifest.json release-lock.env changelog.md web-sbom.spdx.json api-sbom.spdx.json web-provenance.slsa.json api-provenance.slsa.json trivy-web.json trivy-api.json; do
+          for asset in release-manifest.json release-lock.env changelog.md scan-results.json web-sbom.spdx.json api-sbom.spdx.json web-provenance.slsa.json api-provenance.slsa.json trivy-web.json trivy-api.json; do
             grep -Fxq "$asset" "$RUNNER_TEMP/release-assets.txt" || { echo "Release asset $asset is missing." >&2; exit 1; }
           done

@@ -47,6 +47,7 @@ function validateImage(image, kind, sourceRevision) {
   requireUrl(sbom.url, `${kind} SBOM attestation URL`);
   requireValue(image.scan?.engine === 'Trivy' && image.scan.version === '0.76.1', `${kind} Trivy scan version is invalid.`);
   requireValue(JSON.stringify(image.scan.severity) === JSON.stringify(['HIGH', 'CRITICAL']), `${kind} scan severity policy changed.`);
+  requireValue(image.scan.imageReference === image.reference && image.scan.digest === image.digest && image.scan.sourceRevision === sourceRevision, `${kind} scan identity does not match its image digest and source SHA.`);
   requireValue(image.scan.result === 'success' && image.scan.report === `trivy-${kind}.json` && /^[0-9a-f]{64}$/.test(image.scan.reportSha256), `${kind} image scan report is incomplete.`);
 }
 
@@ -91,6 +92,7 @@ export function validateManifest(manifest) {
   requireValue(manifest.checks.imageScan.result === 'success' && manifest.checks.imageScan.reports.length === 2, 'Both image scan reports must be present and successful.');
   requireValue(manifest.changelog && typeof manifest.changelog.markdown === 'string' && manifest.changelog.markdown.trim().length > 0, 'Generated changelog is missing.');
   requireUrl(manifest.changelog.url, 'changelog URL');
+  requireValue(manifest.scanEvidence?.asset === 'scan-results.json' && /^[0-9a-f]{64}$/.test(manifest.scanEvidence.sha256), 'The signed scan identity evidence is missing.');
 
   const serialized = JSON.stringify(manifest);
   requireValue(!/\blatest\b/i.test(serialized), 'Mutable latest tags are prohibited in a release manifest.');

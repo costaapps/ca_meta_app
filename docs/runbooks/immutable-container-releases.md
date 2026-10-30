@@ -49,7 +49,7 @@ After external settings are confirmed and a candidate has landed in `develop`:
 5. It creates and verifies GitHub/Sigstore provenance and SPDX attestations for both digests. Only after both image gates pass does it assign immutable SemVer and full-SHA tags. `docker buildx imagetools create` copies the verified OCI index; the resulting digest must stay identical.
 6. The workflow generates release notes and writes `release-manifest.json` plus `release-lock.env`. It checks the manifest, checks the lock with M2.07's `check-release-lock.ps1`, signs/verifies the manifest and publishes the complete set as GitHub Release assets. No manifest is published after only one image push or a failed scan/attestation.
 
-The release assets include the manifest, schema-v3 lock, generated changelog, two SPDX SBOMs, two BuildKit provenance documents and two Trivy reports. The manifest's image attestations and checksum fields bind those files to the image digest. Use [the release-manifest contract](../meta-v2/contracts/release-manifest.md) as the source of field meanings.
+The release assets include the manifest, schema-v3 lock, generated changelog, `scan-results.json`, two SPDX SBOMs, two BuildKit provenance documents and two Trivy reports. The scan-results asset records each scanned image name/reference/digest and binds its report checksum; the signed manifest repeats the image scan identity and hashes the scan-results asset. Use [the release-manifest contract](../meta-v2/contracts/release-manifest.md) as the source of field meanings.
 
 If a run fails before promotion, candidate tags are not deployment inputs. A retry uses new per-run candidate tags. If a SemVer or SHA alias was already written during a partial final promotion, the retry verifies and reuses that digest and creates only the missing alias. It refuses conflicting digests and does not overwrite tags. Existing GitHub Release assets are never clobbered; a retry uploads only missing assets after verifying any existing signed manifest.
 
@@ -57,7 +57,7 @@ Candidate tags are not deployment references. Keep them until release recovery i
 
 ## Verify and select a release
 
-Download the GitHub Release manifest, lock, SBOMs, provenance and reports from the authorized GitHub account. Verify the signed manifest and image attestations before selecting a lock:
+Download the GitHub Release manifest, lock, `scan-results.json`, SBOMs, provenance and reports from the authorized GitHub account. Verify the signed manifest and image attestations before selecting a lock:
 
 ```sh
 node tools/m2-09/verify-release-assets.mjs /secure/ca-meta/release-assets

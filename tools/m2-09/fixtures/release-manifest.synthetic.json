@@ -49,6 +49,9 @@
         "engine": "Trivy",
         "version": "0.76.1",
         "severity": ["HIGH", "CRITICAL"],
+        "imageReference": "docker.io/synthetic/ca-meta-web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
         "result": "success",
         "report": "trivy-web.json",
         "reportSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -84,6 +87,9 @@
         "engine": "Trivy",
         "version": "0.76.1",
         "severity": ["HIGH", "CRITICAL"],
+        "imageReference": "docker.io/synthetic/ca-meta-api@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
         "result": "success",
         "report": "trivy-api.json",
         "reportSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -117,5 +123,9 @@
   "changelog": {
     "url": "https://example.invalid/releases/tag/v1.2.3",
     "markdown": "Synthetic fixture only; not a published release."
+  },
+  "scanEvidence": {
+    "asset": "scan-results.json",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
   }
 }

@@ -13,7 +13,8 @@
     "images",
     "worker",
     "checks",
-    "changelog"
+    "changelog",
+    "scanEvidence"
   ],
   "properties": {
     "manifestVersion": { "const": 1 },
@@ -126,6 +127,15 @@
         "url": { "type": "string", "format": "uri" },
         "markdown": { "type": "string", "minLength": 1 }
       }
+    },
+    "scanEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset", "sha256"],
+      "properties": {
+        "asset": { "const": "scan-results.json" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
     }
   },
   "$defs": {
@@ -172,8 +182,11 @@
         "scan": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["engine", "version", "severity", "result", "report", "reportSha256"],
+          "required": ["imageReference", "digest", "sourceRevision", "engine", "version", "severity", "result", "report", "reportSha256"],
           "properties": {
+            "imageReference": { "type": "string", "pattern": "^docker\\.io/[^@]+@sha256:[0-9a-f]{64}$" },
+            "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "sourceRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
             "engine": { "const": "Trivy" },
             "version": { "const": "0.76.1" },
             "severity": { "const": ["HIGH", "CRITICAL"] },
