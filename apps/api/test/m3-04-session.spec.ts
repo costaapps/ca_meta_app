@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { test } from 'node:test';
 import { portalRequestSecurityMiddleware } from '../src/common/security/portal-request-security.js';
 import { SafeExceptionFilter } from '../src/common/http/safe-exception.filter.js';
 import type { StructuredLogger } from '../src/common/http/request-context.js';
-import type { ApiEnvironment } from '../src/config/environment.js';
+import { validateEnvironment, type ApiEnvironment } from '../src/config/environment.js';
+import { AbuseLimitService, type AbuseLimitDimensions, type AbuseLimitPolicy } from '../src/common/security/abuse-limits.js';
 import type { IdentityRepository } from '../src/identity/identity.repository.js';
 import { IdentityDeniedError } from '../src/identity/identity.errors.js';
 import { TenantContextService } from '../src/identity/identity.service.js';
+import { PortalSessionController } from '../src/identity/portal-session.controller.js';
+import { PortalSessionsController } from '../src/identity/portal-sessions.controller.js';
+import { PortalSessionGuard, type PortalRequest } from '../src/identity/portal-session.guard.js';
 import { IdentityAssertionVerifier, PortalSessionVerifier } from '../src/identity/identity.trust.js';
 import type { StoredPortalSession, VerifiedPortalSession } from '../src/identity/identity.trust.js';
 import type { MembershipRole, TenantMembership } from '../src/identity/identity.types.js';
@@ -63,6 +67,7 @@ class SharedSessionStore implements PortalSessionStore {
   readonly revoked = new Set<string>();
   rawCookiePassedToVerifier: boolean | undefined;
   issueCount = 0;
+  lastSeenRefreshes = 0;
 
   async createPreAuth(input: Omit<PortalPreAuthRecord, 'consumedAt' | 'expiresAt'>): Promise<Date> {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
@@ -105,7 +110,8 @@ class SharedSessionStore implements PortalSessionStore {
     return record;
   }
 
-  async findActiveBySecretHash(secretHash: Uint8Array): Promise<StoredPortalSession | undefined> {
+  async findActiveBySecretHash(secretHash: Uint8Array, options?: { readonly touchLastSeen?: boolean }): Promise<StoredPortalSession | undefined> {
+    if (options?.touchLastSeen !== false) this.lastSeenRefreshes += 1;
     const digest = Buffer.from(secretHash).toString('hex');
     const stored = [...this.activeById.values()].find((record) => hash(record.sessionCookie) === digest && !this.revoked.has(record.sessionId));
     this.rawCookiePassedToVerifier = false;
@@ -119,10 +125,17 @@ class SharedSessionStore implements PortalSessionStore {
     };
   }
 
+  async refreshActivity(session: VerifiedPortalSession): Promise<void> {
+    const stored = this.activeById.get(session.sessionId);
+    if (!stored || this.revoked.has(session.sessionId) || stored.contextVersion !== session.contextVersion ||
+      stored.contextRefHash !== session.contextRefHash) throw new IdentityDeniedError('CONTEXT_CHANGED');
+    this.lastSeenRefreshes += 1;
+  }
+
   async changeContext(input: {
     readonly session: VerifiedPortalSession; readonly requestedTenantId: string; readonly contextRef: string;
     readonly contextRefHash: string; readonly csrfTokenHash: string;
-  }): Promise<{ readonly contextVersion: number; readonly roles: readonly MembershipRole[] }> {
+  }): Promise<{ readonly contextVersion: number; readonly roles: readonly MembershipRole[]; readonly expiresAt: string }> {
     const stored = this.activeById.get(input.session.sessionId);
     if (!stored || this.revoked.has(stored.sessionId) || stored.contextVersion !== input.session.contextVersion ||
       stored.contextRefHash !== input.session.contextRefHash) throw new IdentityDeniedError('CONTEXT_CHANGED');
@@ -136,10 +149,22 @@ class SharedSessionStore implements PortalSessionStore {
       roles: input.requestedTenantId === tenantA ? ['operator'] as const : ['viewer'] as const,
     });
     this.activeById.set(stored.sessionId, updated);
-    return { contextVersion: updated.contextVersion, roles: updated.roles };
+    return { contextVersion: updated.contextVersion, roles: updated.roles, expiresAt: updated.expiresAt };
   }
 
   async revokeSession(sessionId: string): Promise<boolean> { this.revoked.add(sessionId); return true; }
+
+  async revokeAuthorizedSession(actor: VerifiedPortalSession, targetSessionId: string): Promise<void> {
+    const actorRecord = this.activeById.get(actor.sessionId);
+    const target = this.activeById.get(targetSessionId);
+    if (!actorRecord || this.revoked.has(actor.sessionId) || actorRecord.principalId !== actor.principalId ||
+      actorRecord.tenantId !== actor.tenantId || actorRecord.contextVersion !== actor.contextVersion ||
+      actorRecord.contextRefHash !== actor.contextRefHash) throw new IdentityDeniedError('CONTEXT_CHANGED');
+    if (!target || target.principalId !== actor.principalId || target.tenantId !== actor.tenantId) throw new IdentityDeniedError();
+    this.revoked.add(targetSessionId);
+  }
+
+  seedSession(record: PortalSessionRecord): void { this.activeById.set(record.sessionId, record); }
 }
 
 function hash(value: string): string { return createHash('sha256').update(value, 'utf8').digest('hex'); }
@@ -233,6 +258,8 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
     nodeEnv: 'test', port: 3000, bindAddress: '127.0.0.1', allowedHosts: ['portal.example'],
     allowedOrigins: ['https://portal.example'], trustedProxyCidrs: false,
     portalSessionRecoveryKey: recoveryKey,
+    portalSessionIdleTimeoutSeconds: 1800,
+    portalSessionAbsoluteTimeoutSeconds: 28800,
     database: { host: '127.0.0.1', port: 3306, name: 'synthetic', user: 'synthetic', password: 'synthetic', connectTimeoutMs: 100 },
   } satisfies ApiEnvironment;
   const csrf = 'csrf-token-with-sufficient-entropy-123456';
@@ -249,9 +276,20 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
     origin: 'https://portal.example', 'sec-fetch-site': 'same-origin',
     cookie: `${PORTAL_SESSION_COOKIE}=${sessionCookie}; ${PORTAL_CSRF_COOKIE}=${csrf}`,
   };
-  const request = (headers: Record<string, string | string[] | undefined>) => ({
-    headers, method: 'POST', protocol: 'https', get: (name: string) => name.toLowerCase() === 'host' ? 'portal.example' : undefined,
+  const request = (headers: Record<string, string | string[] | undefined>, method = 'POST', path = '/api/v1/auth/exchanges') => ({
+    headers, method, path, protocol: 'https', get: (name: string) => name.toLowerCase() === 'host' ? 'portal.example' : undefined,
   });
+
+  const originlessExchange = await invokeMiddleware(middleware, request({}, 'POST', '/api/v1/auth/exchanges'));
+  assert.equal(originlessExchange.response.statusCodeValue(), 403);
+  assert.equal((originlessExchange.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+  const originlessSessionWrite = await invokeMiddleware(middleware, request({}, 'POST', '/api/v1/session/tenant-switch'));
+  assert.equal(originlessSessionWrite.response.statusCodeValue(), 403);
+  assert.equal((originlessSessionWrite.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+  const originlessWebhook = await invokeMiddleware(middleware, request({}, 'POST', '/api/v1/webhooks/meta/config_ref-123'));
+  assert.equal(originlessWebhook.continued, true);
+  const malformedWebhook = await invokeMiddleware(middleware, request({}, 'POST', '/api/v1/webhooks/meta/config/ref'));
+  assert.equal(malformedWebhook.response.statusCodeValue(), 403);
 
   const badOrigin = await invokeMiddleware(middleware, request({ ...baseHeaders, origin: 'https://attacker.example' }));
   assert.equal(badOrigin.response.statusCodeValue(), 403);
@@ -267,6 +305,9 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
   const good = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-meta-csrf': csrf }));
   assert.equal(good.continued, true);
   assert.equal(good.response.headerValue('access-control-allow-origin'), 'https://portal.example');
+
+  const validDelete = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-meta-csrf': csrf }, 'DELETE'));
+  assert.equal(validDelete.continued, true);
 });
 
 test('portal cookies are host-only, Secure, HttpOnly where required, and denial codes map to safe 403/409 envelopes', () => {
@@ -280,7 +321,7 @@ test('portal cookies are host-only, Secure, HttpOnly where required, and denial 
     contextRef: 'context-reference-with-sufficient-entropy-1234',
     tenantId: tenantA,
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    publicContext: { principalRef: 'principal-ref', roles: ['operator'], tenantRef: tenantA, tenantContextRef: 'context', contextVersion: 1 },
+    publicContext: { sessionRef: 'session-1', principalRef: 'principal-ref', roles: ['operator'], tenantRef: tenantA, tenantContextRef: 'context', contextVersion: 1 },
   });
   assert.equal(appended.length, 3);
   assert.ok((appended[0] ?? '').startsWith(`${PORTAL_SESSION_COOKIE}=`));
@@ -310,4 +351,165 @@ test('portal cookies are host-only, Secure, HttpOnly where required, and denial 
   assert.equal((mapped[0]?.body as { code: string }).code, 'ACCESS_DENIED');
   assert.equal(mapped[1]?.status, 409);
   assert.equal((mapped[1]?.body as { code: string }).code, 'CONTEXT_CHANGED');
+});
+
+test('DELETE session revokes only an owned same-tenant session; logout still revokes with stale context', async () => {
+  const store = new SharedSessionStore();
+  const { contexts, sessions, assertions } = services(store);
+  const started = await sessions.begin();
+  const preAuth = await sessions.verifyBrowserBinding(started.challengeRef, started.cookieValue);
+  assert.ok(preAuth);
+  const issued = await sessions.issueFromVerifiedAssertion(assertions.verify(), tenantA, {
+    ticketJtiSha256: hash('delete-session-jti'),
+    ticketExpiresAt: new Date(Date.now() + 30_000),
+    ticketChallengeSha256: hash(started.challengeRef),
+    preAuth,
+  });
+  const actor = await new PortalSessionVerifier(store).verify(issued.sessionCookie);
+  assert.ok(actor);
+
+  const ownRecord = store.activeById.get(issued.sessionId);
+  assert.ok(ownRecord);
+  const foreign: PortalSessionRecord = Object.freeze({
+    ...ownRecord,
+    sessionId: randomUUID(),
+    principalId: 'another-principal',
+    sessionCookie: 'foreign-session-cookie-with-sufficient-entropy-123456',
+    contextRefHash: 'b'.repeat(64),
+    csrfTokenHash: 'c'.repeat(64),
+  });
+  store.seedSession(foreign);
+  const deleteController = new PortalSessionsController(sessions);
+  const deleteResponseHeaders: string[] = [];
+  const deleteResponse = { append(_name: string, value: string) { deleteResponseHeaders.push(value); } } as unknown as Response;
+  await assert.rejects(deleteController.revoke({ portalSession: actor } as PortalRequest, foreign.sessionId, deleteResponse), IdentityDeniedError);
+  assert.equal(store.revoked.has(foreign.sessionId), false);
+
+  const samePrincipalOtherTenant = Object.freeze({
+    ...ownRecord,
+    sessionId: randomUUID(),
+    tenantId: tenantB,
+    sessionCookie: 'other-tenant-session-cookie-with-sufficient-entropy-123456',
+  });
+  store.seedSession(samePrincipalOtherTenant);
+  await assert.rejects(deleteController.revoke({ portalSession: actor } as PortalRequest, samePrincipalOtherTenant.sessionId, deleteResponse), IdentityDeniedError);
+  assert.equal(store.revoked.has(samePrincipalOtherTenant.sessionId), false);
+
+  await deleteController.revoke({ portalSession: actor } as PortalRequest, issued.sessionId, deleteResponse);
+  assert.equal(deleteResponseHeaders.length, 4);
+  assert.equal(await new PortalSessionVerifier(store).verify(issued.sessionCookie), undefined);
+
+  const logoutChallenge = await sessions.begin();
+  const logoutPreAuth = await sessions.verifyBrowserBinding(logoutChallenge.challengeRef, logoutChallenge.cookieValue);
+  assert.ok(logoutPreAuth);
+  const logoutIssued = await sessions.issueFromVerifiedAssertion(assertions.verify(), tenantA, {
+    ticketJtiSha256: hash('logout-session-jti'),
+    ticketExpiresAt: new Date(Date.now() + 30_000),
+    ticketChallengeSha256: hash(logoutChallenge.challengeRef),
+    preAuth: logoutPreAuth,
+  });
+  const logoutSession = await new PortalSessionVerifier(store).verify(logoutIssued.sessionCookie);
+  assert.ok(logoutSession);
+  const logoutController = new PortalSessionController({
+    async resolveCurrent() { throw new IdentityDeniedError('CONTEXT_CHANGED'); },
+  } as unknown as TenantContextService, sessions, new class extends AbuseLimitService { async consume() {} }());
+  const cleared: string[] = [];
+  const response = { append(_name: string, value: string) { cleared.push(value); } } as unknown as Response;
+  await logoutController.logout({
+    headers: { 'x-tenant-context': 'stale-context-reference' },
+    portalSession: logoutSession,
+  } as unknown as PortalRequest, response);
+  assert.equal(store.revoked.has(logoutSession.sessionId), true);
+  assert.equal(cleared.length, 4);
+  assert.equal(await new PortalSessionVerifier(store).verify(logoutIssued.sessionCookie), undefined);
+});
+
+test('GET session consumes SESSION_STATUS quota with verified principal, tenant, and trusted request IP', async () => {
+  const store = new SharedSessionStore();
+  const { contexts, sessions, assertions } = services(store);
+  const challenge = await sessions.begin();
+  const preAuth = await sessions.verifyBrowserBinding(challenge.challengeRef, challenge.cookieValue);
+  assert.ok(preAuth);
+  const issued = await sessions.issueFromVerifiedAssertion(assertions.verify(), tenantA, {
+    ticketJtiSha256: hash('session-status-jti'),
+    ticketExpiresAt: new Date(Date.now() + 30_000),
+    ticketChallengeSha256: hash(challenge.challengeRef),
+    preAuth,
+  });
+  const guardedRequest = {
+    method: 'GET', path: '/api/v1/session', headers: { cookie: `${PORTAL_SESSION_COOKIE}=${issued.sessionCookie}` },
+  } as PortalRequest;
+  const guard = new PortalSessionGuard(new PortalSessionVerifier(store));
+  await guard.canActivate({ switchToHttp: () => ({ getRequest: () => guardedRequest }) } as never);
+  const verified = guardedRequest.portalSession;
+  assert.equal(store.lastSeenRefreshes, 0);
+  const consumed: Array<{ policy: AbuseLimitPolicy; dimensions: AbuseLimitDimensions }> = [];
+  const abuseLimits = new class extends AbuseLimitService {
+    async consume(policy: AbuseLimitPolicy, dimensions: AbuseLimitDimensions): Promise<void> {
+      consumed.push({ policy, dimensions });
+    }
+  }();
+  const controller = new PortalSessionController({
+    resolveCurrent: contexts.resolveCurrent.bind(contexts),
+    resolveTenantSwitch: contexts.resolveTenantSwitch.bind(contexts),
+  } as unknown as TenantContextService, sessions, abuseLimits);
+  const contextRef = issued.contextRef;
+  const result = await controller.current({
+    ip: '192.0.2.40',
+    headers: guardedRequest.headers,
+    portalSession: verified,
+  } as PortalRequest, contextRef);
+  assert.equal(result.sessionRef, issued.sessionId);
+  assert.equal(result.tenantRef, tenantA);
+  assert.equal(store.lastSeenRefreshes, 1);
+  assert.deepEqual(consumed, [{
+    policy: 'SESSION_STATUS',
+    dimensions: { ip: '192.0.2.40', actor: principalId, tenant: tenantA },
+  }]);
+
+  const currentRecord = store.activeById.get(issued.sessionId);
+  assert.ok(currentRecord);
+  const nearExpiry = new Date(Date.now() + 90_000).toISOString();
+  store.activeById.set(issued.sessionId, Object.freeze({ ...currentRecord, expiresAt: nearExpiry }));
+  const cookieHeaders: string[] = [];
+  const response = { append(_name: string, value: string) { cookieHeaders.push(value); } } as unknown as Response;
+  await controller.switchTenant({
+    portalSession: verified,
+    headers: { 'x-tenant-context': issued.contextRef },
+  } as unknown as PortalRequest, { tenantRef: tenantB }, issued.contextRef, response);
+  assert.equal(cookieHeaders.length, 2);
+  assert.ok(cookieHeaders.every((value) => /Max-Age=(?:[1-9]\d?|0);/.test(value)));
+  assert.ok(cookieHeaders.every((value) => Number(value.match(/Max-Age=(\d+)/)?.[1]) <= 90));
+});
+
+test('portal-session timeout settings use documented proposal defaults, validate overrides, and reject absolute expiry below idle', () => {
+  const environment = {
+    NODE_ENV: 'test',
+    API_PORT: '3000',
+    API_BIND_ADDRESS: '127.0.0.1',
+    API_ALLOWED_HOSTS: 'portal.example',
+    API_ALLOWED_ORIGINS: 'http://localhost:8080',
+    API_TRUSTED_PROXIES: 'none',
+    API_DATABASE_HOST: '127.0.0.1',
+    API_DATABASE_PORT: '3306',
+    API_DATABASE_NAME: 'synthetic',
+    API_DATABASE_USER: 'synthetic',
+    API_DATABASE_PASSWORD: 'synthetic-only',
+    API_DATABASE_CONNECT_TIMEOUT_MS: '250',
+  };
+  const defaults = validateEnvironment(environment);
+  assert.equal(defaults.portalSessionIdleTimeoutSeconds, 1800);
+  assert.equal(defaults.portalSessionAbsoluteTimeoutSeconds, 28800);
+  const configured = validateEnvironment({
+    ...environment,
+    API_PORTAL_SESSION_IDLE_TIMEOUT_SECONDS: '600',
+    API_PORTAL_SESSION_ABSOLUTE_TIMEOUT_SECONDS: '3600',
+  });
+  assert.equal(configured.portalSessionIdleTimeoutSeconds, 600);
+  assert.equal(configured.portalSessionAbsoluteTimeoutSeconds, 3600);
+  assert.throws(() => validateEnvironment({
+    ...environment,
+    API_PORTAL_SESSION_IDLE_TIMEOUT_SECONDS: '600',
+    API_PORTAL_SESSION_ABSOLUTE_TIMEOUT_SECONDS: '300',
+  }), /API_PORTAL_SESSION_ABSOLUTE_TIMEOUT_SECONDS/);
 });

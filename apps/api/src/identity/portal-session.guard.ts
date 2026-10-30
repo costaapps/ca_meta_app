@@ -15,7 +15,8 @@ export class PortalSessionGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<PortalRequest>();
     const cookieValue = readPortalCookie(request.headers.cookie, PORTAL_SESSION_COOKIE);
-    const session = await this.sessions.verify(cookieValue);
+    const sessionStatusRead = request.method === 'GET' && request.path === '/api/v1/session';
+    const session = await this.sessions.verify(cookieValue, { touchLastSeen: !sessionStatusRead });
     if (!session) throw new UnauthorizedException();
     request.portalSession = session;
     return true;

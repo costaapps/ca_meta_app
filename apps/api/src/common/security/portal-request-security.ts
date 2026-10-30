@@ -42,6 +42,7 @@ function matchesHash(value: string, digest: string): boolean {
 }
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const META_WEBHOOK_INGRESS_PATH = /^\/api\/v1\/webhooks\/meta\/[A-Za-z0-9_-]{1,128}$/;
 
 /** Exact-origin CORS plus same-origin Fetch Metadata and synchronizer-token checks on authenticated writes. */
 export function portalRequestSecurityMiddleware(
@@ -59,6 +60,13 @@ export function portalRequestSecurityMiddleware(
       response.setHeader('Access-Control-Allow-Origin', origin);
       response.setHeader('Access-Control-Allow-Credentials', 'true');
       response.vary('Origin');
+    }
+
+    // Provider callbacks do not use browser Origin/CSRF. This exact contracted
+    // ingress path must still be protected by its route's raw-body signature validator.
+    if (request.method === 'POST' && origin === undefined && META_WEBHOOK_INGRESS_PATH.test(request.path)) {
+      next();
+      return;
     }
 
     if (request.method === 'OPTIONS') {

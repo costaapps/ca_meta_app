@@ -36,6 +36,7 @@ export interface PortalSessionIssueOptions {
 }
 
 export interface PortalSessionPublicContext {
+  readonly sessionRef: string;
   readonly principalRef: string;
   readonly roles: readonly MembershipRole[];
   readonly tenantRef: string;
@@ -97,7 +98,7 @@ export interface PortalSessionStore {
   createPreAuth(input: Omit<PortalPreAuthRecord, 'consumedAt' | 'expiresAt'>): Promise<Date>;
   findPreAuth(challengeHash: string, browserCookieHash: string): Promise<PortalPreAuthRecord | undefined>;
   createOrRecoverSession(input: PortalSessionIssueRecord): Promise<PortalSessionRecord>;
-  findActiveBySecretHash(secretHash: Uint8Array): Promise<{
+  findActiveBySecretHash(secretHash: Uint8Array, options?: { readonly touchLastSeen?: boolean }): Promise<{
     readonly sessionId: string;
     readonly principalId: string;
     readonly tenantId: string;
@@ -105,14 +106,17 @@ export interface PortalSessionStore {
     readonly contextRefHash: string;
     readonly csrfTokenHash: string;
   } | undefined>;
+  refreshActivity(session: VerifiedPortalSession): Promise<void>;
   changeContext(input: {
     readonly session: VerifiedPortalSession;
     readonly requestedTenantId: string;
     readonly contextRef: string;
     readonly contextRefHash: string;
     readonly csrfTokenHash: string;
-  }): Promise<{ readonly contextVersion: number; readonly roles: readonly MembershipRole[] }>;
+  }): Promise<{ readonly contextVersion: number; readonly roles: readonly MembershipRole[]; readonly expiresAt: string }>;
   revokeSession(sessionId: string, principalId: string): Promise<boolean>;
+  /** Revocation authority is derived from the current verified session and rechecked by the SQL adapter. */
+  revokeAuthorizedSession(actor: VerifiedPortalSession, targetSessionId: string): Promise<void>;
 }
 
 export abstract class PortalPreAuthService {
@@ -229,6 +233,7 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
     });
     const principalRef = createHash('sha256').update(`principal-ref\0${record.principalId}`, 'utf8').digest('hex');
     const publicContext: PortalSessionPublicContext = Object.freeze({
+      sessionRef: record.sessionId,
       principalRef,
       roles: Object.freeze([...record.roles]),
       tenantRef: record.tenantId,
@@ -249,6 +254,7 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
   async rotateTenantContext(session: VerifiedPortalSession, tenantContextRef: string | undefined, requestedTenantId: string): Promise<{
     readonly contextRef: string;
     readonly csrfToken: string;
+    readonly expiresAt: string;
     readonly publicContext: Omit<PortalSessionPublicContext, 'principalRef'>;
   }> {
     const current = await this.contexts.resolveTenantSwitch(session, tenantContextRef, requestedTenantId);
@@ -264,7 +270,9 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
     return Object.freeze({
       contextRef,
       csrfToken,
+      expiresAt: updated.expiresAt,
       publicContext: Object.freeze({
+        sessionRef: session.sessionId,
         roles: Object.freeze([...updated.roles]),
         tenantRef: current.tenantId,
         tenantContextRef: contextRef,
@@ -276,6 +284,18 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
   async revoke(session: VerifiedPortalSession): Promise<void> {
     if (!isVerifiedPortalSession(session)) throw new IdentityDeniedError();
     await this.store.revokeSession(session.sessionId, session.principalId);
+  }
+
+  async refreshActivity(session: VerifiedPortalSession): Promise<void> {
+    if (!isVerifiedPortalSession(session)) throw new IdentityDeniedError();
+    await this.store.refreshActivity(session);
+  }
+
+  async revokeAuthorizedSession(actor: VerifiedPortalSession, targetSessionId: string): Promise<void> {
+    if (!isVerifiedPortalSession(actor) || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetSessionId)) {
+      throw new IdentityDeniedError();
+    }
+    await this.store.revokeAuthorizedSession(actor, targetSessionId);
   }
 }
 

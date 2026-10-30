@@ -11,6 +11,10 @@ export interface ApiEnvironment {
   /** Exact scheme/host/port browser origin allowlist; wildcards are never accepted. */
   readonly allowedOrigins: readonly string[];
   readonly trustedProxyCidrs: false | readonly string[];
+  /** Sliding portal-session expiry; proposal default, not confirmed against Suite4 behavior. */
+  readonly portalSessionIdleTimeoutSeconds: number;
+  /** Absolute portal-session expiry; proposal default, not confirmed against Suite4 behavior. */
+  readonly portalSessionAbsoluteTimeoutSeconds: number;
   readonly database: {
     readonly host: string;
     readonly port: number;
@@ -81,6 +85,28 @@ function integerField(
   if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
     invalid.push(key);
     return minimum;
+  }
+  return parsed;
+}
+
+function optionalIntegerField(
+  source: NodeJS.ProcessEnv,
+  key: string,
+  defaultValue: number,
+  minimum: number,
+  maximum: number,
+  invalid: string[],
+): number {
+  const value = source[key];
+  if (value === undefined) return defaultValue;
+  if (!/^(0|[1-9]\d*)$/.test(value.trim())) {
+    invalid.push(key);
+    return defaultValue;
+  }
+  const parsed = Number(value.trim());
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    invalid.push(key);
+    return defaultValue;
   }
   return parsed;
 }
@@ -261,6 +287,15 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     required(source, 'API_TRUSTED_PROXIES', invalid),
     invalid,
   );
+  const portalSessionIdleTimeoutSeconds = optionalIntegerField(
+    source, 'API_PORTAL_SESSION_IDLE_TIMEOUT_SECONDS', 30 * 60, 60, 24 * 60 * 60, invalid,
+  );
+  const portalSessionAbsoluteTimeoutSeconds = optionalIntegerField(
+    source, 'API_PORTAL_SESSION_ABSOLUTE_TIMEOUT_SECONDS', 8 * 60 * 60, 5 * 60, 30 * 24 * 60 * 60, invalid,
+  );
+  if (portalSessionAbsoluteTimeoutSeconds < portalSessionIdleTimeoutSeconds) {
+    invalid.push('API_PORTAL_SESSION_ABSOLUTE_TIMEOUT_SECONDS');
+  }
   const host = required(source, 'API_DATABASE_HOST', invalid);
   if (!/^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(host) && isIP(host) === 0) {
     invalid.push('API_DATABASE_HOST');
@@ -303,6 +338,8 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     allowedHosts,
     allowedOrigins,
     trustedProxyCidrs,
+    portalSessionIdleTimeoutSeconds,
+    portalSessionAbsoluteTimeoutSeconds,
     portalSessionRecoveryKey,
     database: {
       host,

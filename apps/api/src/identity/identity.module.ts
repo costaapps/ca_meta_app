@@ -15,6 +15,7 @@ import {
   PortalSessionIssuer,
 } from './portal-session.service.js';
 import { PortalSessionController } from './portal-session.controller.js';
+import { PortalSessionsController } from './portal-sessions.controller.js';
 import { PortalSessionGuard } from './portal-session.guard.js';
 import { AbuseLimitService, MysqlAbuseLimitService } from '../common/security/abuse-limits.js';
 
@@ -26,7 +27,7 @@ export class IdentityModule {
       providers: [
         {
           provide: PORTAL_SESSION_STORE,
-          useFactory: () => new MysqlPortalSessionStore(environment.database),
+          useFactory: () => new MysqlPortalSessionStore(environment),
         },
         {
           provide: PortalSessionVerifier,
@@ -87,7 +88,7 @@ export class IdentityModule {
       exports: [TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService,
         IdentityAdministrationService, PlatformIdentityAdminAuthority, PortalSessionVerifier,
         PortalSessionIssuer, PortalPreAuthService, AbuseLimitService],
-      controllers: [PortalSessionController],
+      controllers: [PortalSessionController, PortalSessionsController],
     };
   }
 }

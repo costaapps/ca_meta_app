@@ -70,15 +70,19 @@ async function rollback(connection: PoolConnection): Promise<void> {
 @Injectable()
 export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicationShutdown {
   private readonly pool: Pool;
+  private readonly idleTimeoutSeconds: number;
+  private readonly absoluteTimeoutSeconds: number;
 
-  constructor(environment: ApiEnvironment['database']) {
+  constructor(environment: Pick<ApiEnvironment, 'database' | 'portalSessionIdleTimeoutSeconds' | 'portalSessionAbsoluteTimeoutSeconds'>) {
+    this.idleTimeoutSeconds = environment.portalSessionIdleTimeoutSeconds;
+    this.absoluteTimeoutSeconds = environment.portalSessionAbsoluteTimeoutSeconds;
     this.pool = createPool({
-      host: environment.host,
-      port: environment.port,
-      database: environment.name,
-      user: environment.user,
-      password: environment.password,
-      connectTimeout: environment.connectTimeoutMs,
+      host: environment.database.host,
+      port: environment.database.port,
+      database: environment.database.name,
+      user: environment.database.user,
+      password: environment.database.password,
+      connectTimeout: environment.database.connectTimeoutMs,
       connectionLimit: 10,
       waitForConnections: true,
       queueLimit: 100,
@@ -182,9 +186,9 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
          (id, principal_id, tenant_id, secret_hash, csrf_token_hash, context_ref_hash, context_version,
           created_at, last_seen_at, idle_expires_at, absolute_expires_at, revoked_at)
          VALUES (?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6),
-                 DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 30 MINUTE), DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 8 HOUR), NULL)`,
+                 DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND), DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND), NULL)`,
         [input.sessionId, membership.principal_id, membership.tenant_id, input.sessionCookieHash,
-          input.csrfTokenHash, input.contextRefHash],
+          input.csrfTokenHash, input.contextRefHash, this.idleTimeoutSeconds, this.absoluteTimeoutSeconds],
       );
       await connection.execute(
         `UPDATE ca_meta_portal_pre_auth SET consumed_at = UTC_TIMESTAMP(6)
@@ -277,14 +281,16 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
     });
   }
 
-  async findActiveBySecretHash(secretHash: Uint8Array): Promise<StoredPortalSession | undefined> {
+  async findActiveBySecretHash(secretHash: Uint8Array, options: { readonly touchLastSeen?: boolean } = {}): Promise<StoredPortalSession | undefined> {
     const digest = Buffer.from(secretHash).toString('hex');
-    await this.pool.execute(
-      `UPDATE ca_meta_portal_sessions
-       SET last_seen_at = UTC_TIMESTAMP(6), idle_expires_at = LEAST(absolute_expires_at, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 30 MINUTE))
-       WHERE secret_hash = ? AND revoked_at IS NULL AND idle_expires_at > UTC_TIMESTAMP(6)
-         AND absolute_expires_at > UTC_TIMESTAMP(6)`, [digest],
-    );
+    if (options.touchLastSeen !== false) {
+      await this.pool.execute(
+        `UPDATE ca_meta_portal_sessions
+         SET last_seen_at = UTC_TIMESTAMP(6), idle_expires_at = LEAST(absolute_expires_at, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND))
+         WHERE secret_hash = ? AND revoked_at IS NULL AND idle_expires_at > UTC_TIMESTAMP(6)
+           AND absolute_expires_at > UTC_TIMESTAMP(6)`, [this.idleTimeoutSeconds, digest],
+      );
+    }
     const [rows] = await this.pool.execute<ActiveSessionRow[]>(
       `SELECT id, principal_id, tenant_id, context_version, context_ref_hash, csrf_token_hash
        FROM ca_meta_portal_sessions WHERE secret_hash = ? AND revoked_at IS NULL
@@ -302,13 +308,24 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
     });
   }
 
+  async refreshActivity(session: VerifiedPortalSession): Promise<void> {
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE ca_meta_portal_sessions
+       SET last_seen_at = UTC_TIMESTAMP(6), idle_expires_at = LEAST(absolute_expires_at, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND))
+       WHERE id = ? AND principal_id = ? AND tenant_id = ? AND context_version = ? AND context_ref_hash = ?
+         AND revoked_at IS NULL AND idle_expires_at > UTC_TIMESTAMP(6) AND absolute_expires_at > UTC_TIMESTAMP(6)`,
+      [this.idleTimeoutSeconds, session.sessionId, session.principalId, session.tenantId, session.contextVersion, session.contextRefHash],
+    );
+    if (result.affectedRows !== 1) throw new IdentityDeniedError('CONTEXT_CHANGED');
+  }
+
   async changeContext(input: {
     readonly session: VerifiedPortalSession;
     readonly requestedTenantId: string;
     readonly contextRef: string;
     readonly contextRefHash: string;
     readonly csrfTokenHash: string;
-  }): Promise<{ readonly contextVersion: number; readonly roles: readonly MembershipRole[] }> {
+  }): Promise<{ readonly contextVersion: number; readonly roles: readonly MembershipRole[]; readonly expiresAt: string }> {
     const connection = await this.pool.getConnection();
     await connection.beginTransaction();
     try {
@@ -340,13 +357,17 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
       await connection.execute(
         `UPDATE ca_meta_portal_sessions
          SET tenant_id = ?, context_version = context_version + 1, context_ref_hash = ?, csrf_token_hash = ?,
-             last_seen_at = UTC_TIMESTAMP(6), idle_expires_at = LEAST(absolute_expires_at, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 30 MINUTE))
+             last_seen_at = UTC_TIMESTAMP(6), idle_expires_at = LEAST(absolute_expires_at, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND))
          WHERE id = ? AND context_version = ? AND tenant_id = ? AND context_ref_hash = ? AND revoked_at IS NULL`,
-        [input.requestedTenantId, input.contextRefHash, input.csrfTokenHash, input.session.sessionId,
+        [input.requestedTenantId, input.contextRefHash, input.csrfTokenHash, this.idleTimeoutSeconds, input.session.sessionId,
           input.session.contextVersion, input.session.tenantId, input.session.contextRefHash],
       );
       await connection.commit();
-      return Object.freeze({ contextVersion: input.session.contextVersion + 1, roles });
+      return Object.freeze({
+        contextVersion: input.session.contextVersion + 1,
+        roles,
+        expiresAt: dateValue(session.absolute_expires_at).toISOString(),
+      });
     } catch (error) {
       await rollback(connection);
       throw error;
@@ -361,6 +382,62 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
        WHERE id = ? AND principal_id = ? AND revoked_at IS NULL`, [sessionId, principalId],
     );
     return result.affectedRows === 1;
+  }
+
+  async revokeAuthorizedSession(actor: VerifiedPortalSession, targetSessionId: string): Promise<void> {
+    const connection = await this.pool.getConnection();
+    await connection.beginTransaction();
+    try {
+      const [actorRows] = await connection.execute<ActiveSessionRow[]>(
+        `SELECT id, principal_id, tenant_id, context_version, context_ref_hash, csrf_token_hash,
+                idle_expires_at, absolute_expires_at
+         FROM ca_meta_portal_sessions
+         WHERE id = ? AND principal_id = ? AND tenant_id = ? AND revoked_at IS NULL
+           AND idle_expires_at > UTC_TIMESTAMP(6) AND absolute_expires_at > UTC_TIMESTAMP(6)
+         FOR UPDATE`,
+        [actor.sessionId, actor.principalId, actor.tenantId],
+      );
+      const actorRow = actorRows[0];
+      if (!actorRow || Number(actorRow.context_version) !== actor.contextVersion || actorRow.context_ref_hash !== actor.contextRefHash) {
+        throw new IdentityDeniedError('CONTEXT_CHANGED');
+      }
+
+      const [membershipRows] = await connection.execute<PrincipalMembershipRow[]>(
+        `SELECT p.id AS principal_id, p.kind AS principal_kind, p.status AS principal_status,
+                t.id AS tenant_id, t.status AS tenant_status, m.status AS membership_status, m.roles
+         FROM ca_meta_principals AS p
+         INNER JOIN ca_meta_memberships AS m ON m.principal_id = p.id AND m.principal_kind = p.kind
+         INNER JOIN ca_meta_tenants AS t ON t.id = m.tenant_id
+         WHERE p.id = ? AND p.kind = 'USER' AND p.status = 'ACTIVE'
+           AND m.tenant_id = ? AND m.status = 'ACTIVE' AND t.status = 'ACTIVE'
+         LIMIT 1 FOR UPDATE`,
+        [actor.principalId, actor.tenantId],
+      );
+      const membership = membershipRows[0];
+      if (!validMembership(membership, actor.tenantId)) throw new IdentityDeniedError();
+      safeRoles(membership.roles);
+
+      const [targetRows] = await connection.execute<Array<RowDataPacket & {
+        readonly id: string; readonly principal_id: string; readonly tenant_id: string;
+      }>>(
+        `SELECT id, principal_id, tenant_id FROM ca_meta_portal_sessions WHERE id = ? FOR UPDATE`, [targetSessionId],
+      );
+      const target = targetRows[0];
+      if (!target || target.principal_id !== actor.principalId || target.tenant_id !== actor.tenantId) {
+        throw new IdentityDeniedError();
+      }
+      await connection.execute(
+        `UPDATE ca_meta_portal_sessions SET revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP(6))
+         WHERE id = ? AND principal_id = ? AND tenant_id = ?`,
+        [targetSessionId, actor.principalId, actor.tenantId],
+      );
+      await connection.commit();
+    } catch (error) {
+      await rollback(connection);
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   async onApplicationShutdown(): Promise<void> {

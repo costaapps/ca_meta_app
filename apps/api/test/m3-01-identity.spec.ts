@@ -324,6 +324,8 @@ test('service authorization uses tenant-scoped service scopes and never human me
   const contextModule = IdentityModule.register({
     nodeEnv: 'test', port: 0, bindAddress: '127.0.0.1', allowedHosts: ['localhost'], allowedOrigins: ['http://localhost'], trustedProxyCidrs: false,
     portalSessionRecoveryKey: 'synthetic-test-session-recovery-key-32-bytes-minimum',
+    portalSessionIdleTimeoutSeconds: 1800,
+    portalSessionAbsoluteTimeoutSeconds: 28800,
     database: { host: '127.0.0.1', port: 3306, name: 'synthetic', user: 'synthetic', password: 'not-a-secret', connectTimeoutMs: 100 },
   });
   assert.ok(contextModule.exports);
