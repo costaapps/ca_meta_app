@@ -1,6 +1,6 @@
 # M2.06 Docker image smoke harness
 
-Runs the web and API image builds and a focused container smoke test. It uses Docker Engine, PowerShell 7, and the repository lockfile. Node/npm on the host are not required. Docker pulls only the digest-pinned Node and unprivileged NGINX bases from Amazon ECR Public; the script never publishes an image or contacts Docker Hub.
+Runs the web and API image builds and a focused container smoke test. It uses Docker Engine and PowerShell 7.3 or later (for `System.Formats.Tar.TarReader`) with the repository lockfile. Node/npm on the host are not required. Docker pulls only the digest-pinned Node and unprivileged NGINX bases from Amazon ECR Public; the script never publishes an image or contacts Docker Hub.
 
 From the repository root, run:
 
@@ -34,6 +34,6 @@ Assertions cover:
 
 The webhook route is not implemented by the current API. The smoke sends `application/octet-stream` so Express's current 64 KiB JSON parser does not reject that request before routing: the 65,537-byte request must reach the API and receive a correlated non-413 response; 1,048,577 bytes must be rejected by NGINX. This proves the proxy limit and unchanged URI/body handling only; it does not implement or certify raw-body capture/signature verification. The ordinary 65,537-byte JSON request is rejected by NGINX's default proxy body limit before it can exercise the API parser.
 
-The script removes only its own confirmed containers, UUID network, images addressed by their verified image IDs, and the UUID temporary layer-scan directory it created after confirming that path is free. It verifies each generated Docker name was free before creation and records only successfully created resource IDs for cleanup. It does not create volumes, inspect or stop other projects, run global prune, contact Meta, or use production/staging data. The smoke does not prove live database readiness, provider permissions, or external callback routing; those remain distinct M2 gates.
+The script removes only its own confirmed containers, UUID network, unique image tags still pointing to the recorded image IDs, and the UUID temporary layer-scan directory it created after confirming that path is free. Removing the unique tag preserves any pre-existing tags that happen to reference the same image ID. It verifies each generated Docker name was free before creation and records only successfully created resource IDs for cleanup. It does not create volumes, inspect or stop other projects, run global prune, contact Meta, or use production/staging data. The smoke does not prove live database readiness, provider permissions, or external callback routing; those remain distinct M2 gates.
 
 The API image's healthcheck targets HTTP liveness. A Compose worker service using the same image must disable that HTTP healthcheck because its command does not listen on a port; its process lifecycle is verified by the SIGTERM smoke instead.

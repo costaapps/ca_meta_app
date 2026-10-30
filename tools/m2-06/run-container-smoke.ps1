@@ -100,9 +100,11 @@ function Test-AppTextContent {
   param([Parameter(Mandatory)][string] $Name, [Parameter(Mandatory)][string] $Content, [Parameter(Mandatory)][ValidateSet('web', 'api')][string] $ImageKind)
   $path = $Name.Replace('\', '/')
   $inApp = if ($ImageKind -eq 'web') {
-    $path -match '^(?:usr/share/nginx/html/|etc/nginx/|usr/local/bin/web-entrypoint\.sh$)'
+    $path -eq 'workspace/image-metadata.json' -or
+      $path -match '^(?:usr/share/nginx/html/|etc/nginx/|usr/local/bin/web-entrypoint\.sh$)'
   } else {
-    $path -match '^(?:workspace/apps/api/|workspace/packages/contracts/|workspace/image-metadata\.json$)'
+    $path -eq 'workspace/image-metadata.json' -or
+      $path -match '^(?:workspace/apps/api/|workspace/packages/contracts/)'
   }
   if (-not $inApp) { return }
 
@@ -382,8 +384,8 @@ finally {
     $current = & docker image inspect $resource.Id 2>$null
     if ($LASTEXITCODE -eq 0) {
       $info = @($current | ConvertFrom-Json)[0]
-      if ($info.Id -eq $resource.Id) { & docker image rm $resource.Id *> $null }
-      else { Write-Warning 'Skipped an image ID that no longer identifies this smoke run.' }
+      if ($info.Id -eq $resource.Id) { & docker image rm $resource.Name *> $null }
+      else { Write-Warning 'Skipped an image tag that no longer identifies this smoke run.' }
     }
   }
   if ($layerScanCreated) {
