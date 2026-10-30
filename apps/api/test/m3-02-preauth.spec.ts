@@ -314,7 +314,7 @@ test('runtime preauth keeps top-level cookies and allows partitioned embed preau
     'PORTAL_EXCHANGE_ATTEMPT', 'PORTAL_EXCHANGE_ATTEMPT', 'PORTAL_EXCHANGE',
   ]);
   assert.deepEqual(context.abuseLimits.calls[2]?.dimensions, { ip: '127.0.0.1' });
-  assert.deepEqual(context.abuseLimits.calls[4]?.dimensions, { ip: '127.0.0.1', actor: `${ISSUER}\0synthetic-subject` });
+  assert.deepEqual(context.abuseLimits.calls[5]?.dimensions, { ip: '127.0.0.1', actor: `${ISSUER}\0synthetic-subject` });
   assert.equal(JSON.stringify(context.logger.records).includes(signedTicket), false);
 });
 
