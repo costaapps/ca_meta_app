@@ -547,11 +547,13 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
     const current = await addCasCredential();
     assert.equal(await schedulerA.scheduleDue(1, 5_000), 1, 'the synthetic credential gets one exact lifecycle lease');
     const currentJobRows = await dataSource.query(
-      `SELECT payload_json FROM ca_meta_jobs WHERE tenant_id = ? AND job_type = 'CREDENTIAL_INSPECTION'
+      `SELECT tenant_id, payload_json FROM ca_meta_jobs WHERE tenant_id = ? AND job_type = 'CREDENTIAL_INSPECTION'
        AND resource_scope_ref = ? AND status = 'QUEUED' ORDER BY created_at DESC LIMIT 1`,
       [tenantId, current.binding.credentialId],
-    ) as Array<{ payload_json: unknown }>;
-    const currentFence = parseMariaDbJsonObject(currentJobRows[0]!.payload_json) as unknown as CredentialInspectionBinding;
+    ) as Array<{ tenant_id: string; payload_json: unknown }>;
+    assert.equal(currentJobRows[0]?.tenant_id, tenantId, 'the current fence takes its tenant from the persisted job row');
+    const currentFence = { ...parseMariaDbJsonObject(currentJobRows[0]!.payload_json),
+      tenantId: currentJobRows[0]!.tenant_id } as unknown as CredentialInspectionBinding;
     const casPreflightRows = await dataSource.query(
       `SELECT auth.authorization_state, auth.version AS authorization_version, auth.flow_variant, auth.auth_variant,
               c.status AS credential_status, c.version AS credential_version, s.version AS secret_version,
@@ -603,11 +605,13 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
     const stale = await addCasCredential();
     assert.equal(await schedulerA.scheduleDue(1, 5_000), 1);
     const staleJobRows = await dataSource.query(
-      `SELECT payload_json FROM ca_meta_jobs WHERE tenant_id = ? AND job_type = 'CREDENTIAL_INSPECTION'
+      `SELECT tenant_id, payload_json FROM ca_meta_jobs WHERE tenant_id = ? AND job_type = 'CREDENTIAL_INSPECTION'
        AND resource_scope_ref = ? AND status = 'QUEUED' ORDER BY created_at DESC LIMIT 1`,
       [tenantId, stale.binding.credentialId],
-    ) as Array<{ payload_json: unknown }>;
-    const staleFence = parseMariaDbJsonObject(staleJobRows[0]!.payload_json) as unknown as CredentialInspectionBinding;
+    ) as Array<{ tenant_id: string; payload_json: unknown }>;
+    assert.equal(staleJobRows[0]?.tenant_id, tenantId, 'the stale fence also takes its tenant from the persisted job row');
+    const staleFence = { ...parseMariaDbJsonObject(staleJobRows[0]!.payload_json),
+      tenantId: staleJobRows[0]!.tenant_id } as unknown as CredentialInspectionBinding;
     const resourceIdentity = await dataSource.query(
       'SELECT external_id FROM ca_meta_assets WHERE tenant_id = ? AND id = ?', [tenantId, firstResource.assetId],
     ) as Array<{ external_id: string }>;
