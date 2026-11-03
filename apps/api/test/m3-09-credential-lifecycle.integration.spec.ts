@@ -552,6 +552,41 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
       [tenantId, current.binding.credentialId],
     ) as Array<{ payload_json: unknown }>;
     const currentFence = parseMariaDbJsonObject(currentJobRows[0]!.payload_json) as unknown as CredentialInspectionBinding;
+    const casPreflightRows = await dataSource.query(
+      `SELECT auth.authorization_state, auth.version AS authorization_version, auth.flow_variant, auth.auth_variant,
+              c.status AS credential_status, c.version AS credential_version, s.version AS secret_version,
+              l.version AS lifecycle_version, l.schedule_generation AS generation, l.lease_owner, l.lease_token,
+              (l.lease_expires_at > UTC_TIMESTAMP(6)) AS lease_valid
+       FROM ca_meta_authorizations auth JOIN ca_meta_credentials c ON c.tenant_id = auth.tenant_id
+         AND c.authorization_id = auth.id AND c.app_configuration_id = auth.app_configuration_id
+         AND c.provider = auth.provider AND c.environment = auth.environment
+       JOIN ca_meta_credential_secrets s ON s.tenant_id = c.tenant_id AND s.credential_id = c.id
+         AND s.authorization_id = c.authorization_id AND s.app_configuration_id = c.app_configuration_id
+         AND s.provider = c.provider AND s.environment = c.environment
+       JOIN ca_meta_credential_lifecycle l ON l.tenant_id = c.tenant_id AND l.credential_id = c.id
+         AND l.authorization_id = c.authorization_id AND l.app_configuration_id = c.app_configuration_id
+         AND l.provider = c.provider AND l.environment = c.environment
+       WHERE auth.tenant_id = ? AND c.id = ? AND auth.id = ? AND c.app_configuration_id = ?
+         AND c.provider = 'META' AND c.environment = ? AND c.family = ?`,
+      [currentFence.tenantId, currentFence.credentialId, currentFence.authorizationId, currentFence.appConfigurationId,
+        currentFence.environment, currentFence.family],
+    ) as Array<{ authorization_state: string; authorization_version: number | string; flow_variant: string; auth_variant: string;
+      credential_status: string; credential_version: number | string; secret_version: number | string;
+      lifecycle_version: number | string; generation: number | string; lease_owner: string; lease_token: string; lease_valid: number | string }>;
+    assert.equal(casPreflightRows.length, 1, 'the current CAS fixture resolves through all tenant-scoped joins');
+    const casPreflight = casPreflightRows[0]!;
+    assert.ok(['ACTIVE', 'PARTIAL'].includes(casPreflight.authorization_state), 'the CAS fixture authorization remains active');
+    assert.equal(Number(casPreflight.authorization_version), currentFence.authorizationVersion, 'the CAS authorization fence matches');
+    assert.equal(casPreflight.credential_status, 'ACTIVE', 'the CAS credential remains active');
+    assert.equal(Number(casPreflight.credential_version), currentFence.credentialVersion, 'the CAS credential fence matches');
+    assert.equal(Number(casPreflight.secret_version), currentFence.secretVersion, 'the CAS vault-secret fence matches');
+    assert.equal(Number(casPreflight.lifecycle_version), currentFence.lifecycleVersion, 'the CAS lifecycle fence matches');
+    assert.equal(Number(casPreflight.generation), currentFence.generation, 'the CAS schedule generation matches');
+    assert.equal(casPreflight.lease_owner, currentFence.leaseOwner, 'the CAS scheduler owner matches');
+    assert.equal(casPreflight.lease_token, currentFence.leaseToken, 'the CAS scheduler token matches');
+    assert.equal(Number(casPreflight.lease_valid), 1, 'the CAS scheduler lease remains live');
+    assert.equal(casPreflight.flow_variant, currentFence.flowVariant, 'the CAS flow variant matches');
+    assert.equal(casPreflight.auth_variant, currentFence.authVariant, 'the CAS auth variant matches');
     const replacementCas = new CredentialReplacementCasService(database, vault);
     assert.equal(await replacementCas.replaceIfCurrent(currentFence, current.actor, replacementMarker), true,
       'a current isolated CAS atomically updates the vault secret');
