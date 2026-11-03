@@ -903,7 +903,10 @@ paths:
       parameters: &a25
         - $ref: "#/components/parameters/TenantContext"
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/ConnectionCatalogLimit"
+        - $ref: "#/components/parameters/AssetCatalogChannel"
+        - $ref: "#/components/parameters/AssetCatalogNumber"
+        - $ref: "#/components/parameters/ConnectionCatalogStatus"
       responses:
         "200":
           description: Sanitized success example
@@ -1104,7 +1107,13 @@ paths:
       description: Cursor-paginated tenant-scoped projection. External IDs are opaque strings and are
         never resolved across tenants. Status includes observation freshness.
       security: *a10
-      parameters: *a25
+      parameters:
+        - $ref: "#/components/parameters/TenantContext"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/AssetCatalogLimit"
+        - $ref: "#/components/parameters/AssetCatalogChannel"
+        - $ref: "#/components/parameters/AssetCatalogNumber"
+        - $ref: "#/components/parameters/AssetCatalogStatus"
       responses:
         "200":
           description: Sanitized success example
@@ -1123,6 +1132,12 @@ paths:
                         authorizationStatus: VERIFIED
                         observedAt: 2026-10-29T11:59:00Z
                         stale: false
+                        capabilities:
+                          canSend: false
+                          canManageTemplates: false
+                          canSubscribe: false
+                          canReauthorize: false
+                          canDisconnect: false
                     nextCursor: null
                     requestId: req_example_27
         "400": *a11
@@ -1179,6 +1194,12 @@ paths:
                     authorizationStatus: VERIFIED
                     observedAt: 2026-10-29T11:59:00Z
                     stale: false
+                    capabilities:
+                      canSend: false
+                      canManageTemplates: false
+                      canSubscribe: false
+                      canReauthorize: false
+                      canDisconnect: false
                     requestId: req_example_28
         "400": *a11
         "401": *a12
@@ -2089,6 +2110,69 @@ components:
       schema:
         type: string
         maxLength: 512
+    AssetCatalogLimit:
+      name: limit
+      in: query
+      required: false
+      description: Bounded page size, default 50, maximum 50.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 50
+    ConnectionCatalogLimit:
+      name: limit
+      in: query
+      required: false
+      description: Bounded page size, default 50, maximum 50.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 50
+    AssetCatalogChannel:
+      name: channel
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+          - FACEBOOK
+          - INSTAGRAM
+          - WHATSAPP
+    AssetCatalogNumber:
+      name: number
+      in: query
+      required: false
+      description: Exact opaque WhatsApp phone number filter.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 33
+        pattern: '^\+?[0-9]{1,32}$'
+    AssetCatalogStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+          - ACTIVE
+          - INACTIVE
+          - UNKNOWN
+          - STALE
+    ConnectionCatalogStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+          - ACTIVE
+          - PARTIAL
+          - REAUTH_REQUIRED
+          - UNKNOWN
+          - DISCONNECTED
     Limit:
       name: limit
       in: query
@@ -2739,6 +2823,7 @@ components:
         - authorizationStatus
         - observedAt
         - stale
+        - capabilities
         - requestId
       properties:
         id:
@@ -2770,6 +2855,8 @@ components:
           format: date-time
         stale:
           type: boolean
+        capabilities:
+          $ref: "#/components/schemas/AssetCapabilities"
         requestId:
           type: string
           minLength: 1
@@ -2784,6 +2871,7 @@ components:
         - authorizationStatus
         - observedAt
         - stale
+        - capabilities
       properties:
         id:
           type: string
@@ -2813,6 +2901,29 @@ components:
           type: string
           format: date-time
         stale:
+          type: boolean
+        capabilities:
+          $ref: "#/components/schemas/AssetCapabilities"
+    AssetCapabilities:
+      type: object
+      additionalProperties: false
+      description: Advisory snapshot derived from verified evidence and current membership. Exact Meta operation-to-grant eligibility is Not confirmed; these flags do not authorize server operations.
+      required:
+        - canSend
+        - canManageTemplates
+        - canSubscribe
+        - canReauthorize
+        - canDisconnect
+      properties:
+        canSend:
+          type: boolean
+        canManageTemplates:
+          type: boolean
+        canSubscribe:
+          type: boolean
+        canReauthorize:
+          type: boolean
+        canDisconnect:
           type: boolean
     AssetListPage:
       type: object

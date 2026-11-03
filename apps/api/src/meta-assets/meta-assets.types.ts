@@ -125,6 +125,83 @@ export interface AuthorizationReadModel {
   readonly assets: readonly AssetReadModel[];
 }
 
+export type AssetCatalogStatus = 'ACTIVE' | 'INACTIVE' | 'UNKNOWN' | 'STALE';
+export type AssetCatalogAuthorizationStatus = 'VERIFIED' | 'REVOKED' | 'UNKNOWN';
+export type AssetCatalogChannel = 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP';
+
+export interface AssetCapabilityEvidence {
+  readonly flowVariant: MetaFlowVariant | null;
+  readonly authVariant: MetaAuthVariant | null;
+  readonly authorizationState: AuthorizationState;
+  readonly assetAuthorizationState: AssetAuthorizationState;
+  readonly verificationState: AssetVerificationState;
+  readonly grantNames: readonly string[];
+}
+
+/** Normalized tenant-scoped projection used only by the portal catalog. */
+export interface AssetCatalogReadModel {
+  readonly assetRef: string;
+  /** Internal app configuration reference; omitted from API serializers. */
+  readonly appConfigurationId: string;
+  readonly kind: MetaAssetKind;
+  readonly status: AssetCatalogStatus;
+  readonly authorizationStatus: AssetCatalogAuthorizationStatus;
+  readonly observedAt: string;
+  readonly stale: boolean;
+  readonly capabilityEvidence: readonly AssetCapabilityEvidence[];
+  readonly reauthorizationRequired: boolean;
+}
+
+export interface AssetCatalogPageQuery {
+  readonly tenantId: string;
+  readonly environment: MetaEnvironment;
+  readonly assetRef?: string;
+  /** Server-owned authorization filter used for connection detail assembly. */
+  readonly authorizationRef?: string;
+  readonly cursor?: string;
+  readonly limit: number;
+  readonly channel?: AssetCatalogChannel;
+  readonly number?: string;
+  readonly status?: AssetCatalogStatus;
+}
+
+export interface AssetCatalogPage {
+  readonly items: readonly AssetCatalogReadModel[];
+  readonly nextCursor: string | null;
+}
+
+export type PublicMetaFlowVariant = 'FACEBOOK_LOGIN' | 'INSTAGRAM_VIA_FACEBOOK_LOGIN' | 'INSTAGRAM_LOGIN' |
+  'WHATSAPP_CLOUD_API' | 'WHATSAPP_COEXISTENCE';
+export type ConnectionCatalogStatus = 'ACTIVE' | 'PARTIAL' | 'REAUTH_REQUIRED' | 'UNKNOWN' | 'DISCONNECTED';
+export type ConnectionReadiness = 'READY' | 'PARTIAL' | 'UNKNOWN';
+
+export interface ConnectionCatalogReadModel {
+  readonly connectionRef: string;
+  readonly flowVariant: PublicMetaFlowVariant;
+  readonly status: ConnectionCatalogStatus;
+  readonly readiness: ConnectionReadiness;
+  readonly observedAt: string;
+  readonly stale: boolean;
+  readonly assetCount: number;
+  readonly assets?: readonly AssetCatalogReadModel[];
+}
+
+export interface ConnectionCatalogPageQuery {
+  readonly tenantId: string;
+  readonly environment: MetaEnvironment;
+  readonly connectionRef?: string;
+  readonly cursor?: string;
+  readonly limit: number;
+  readonly channel?: AssetCatalogChannel;
+  readonly number?: string;
+  readonly status?: ConnectionCatalogStatus;
+}
+
+export interface ConnectionCatalogPage {
+  readonly items: readonly ConnectionCatalogReadModel[];
+  readonly nextCursor: string | null;
+}
+
 export interface AuthorizationUpsertResult {
   readonly authorizationRef: string;
   readonly version: number;

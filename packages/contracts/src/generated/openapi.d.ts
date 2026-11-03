@@ -850,6 +850,7 @@ export interface components {
             /** Format: date-time */
             readonly observedAt: string;
             readonly stale: boolean;
+            readonly capabilities: components["schemas"]["AssetCapabilities"];
             readonly requestId: string;
         };
         readonly AssetListItem: {
@@ -863,6 +864,15 @@ export interface components {
             /** Format: date-time */
             readonly observedAt: string;
             readonly stale: boolean;
+            readonly capabilities: components["schemas"]["AssetCapabilities"];
+        };
+        /** @description Advisory snapshot derived from verified evidence and current membership. Exact Meta operation-to-grant eligibility is Not confirmed; these flags do not authorize server operations. */
+        readonly AssetCapabilities: {
+            readonly canSend: boolean;
+            readonly canManageTemplates: boolean;
+            readonly canSubscribe: boolean;
+            readonly canReauthorize: boolean;
+            readonly canDisconnect: boolean;
         };
         readonly AssetListPage: {
             readonly items: readonly components["schemas"]["AssetListItem"][];
@@ -1114,6 +1124,15 @@ export interface components {
         readonly IfMatch: string;
         /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
         readonly Cursor: string;
+        /** @description Bounded page size, default 50, maximum 50. */
+        readonly AssetCatalogLimit: number;
+        /** @description Bounded page size, default 50, maximum 50. */
+        readonly ConnectionCatalogLimit: number;
+        readonly AssetCatalogChannel: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP";
+        /** @description Exact opaque WhatsApp phone number filter. */
+        readonly AssetCatalogNumber: string;
+        readonly AssetCatalogStatus: "ACTIVE" | "INACTIVE" | "UNKNOWN" | "STALE";
+        readonly ConnectionCatalogStatus: "ACTIVE" | "PARTIAL" | "REAUTH_REQUIRED" | "UNKNOWN" | "DISCONNECTED";
         /** @description Page size, default 50, maximum 100. */
         readonly Limit: number;
         /** @description Provider signature over exact raw request bytes. Supported algorithm/header configuration must be ratified for the actual app. */
@@ -1723,8 +1742,12 @@ export interface operations {
             readonly query?: {
                 /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
                 readonly cursor?: components["parameters"]["Cursor"];
-                /** @description Page size, default 50, maximum 100. */
-                readonly limit?: components["parameters"]["Limit"];
+                /** @description Bounded page size, default 50, maximum 50. */
+                readonly limit?: components["parameters"]["ConnectionCatalogLimit"];
+                readonly channel?: components["parameters"]["AssetCatalogChannel"];
+                /** @description Exact opaque WhatsApp phone number filter. */
+                readonly number?: components["parameters"]["AssetCatalogNumber"];
+                readonly status?: components["parameters"]["ConnectionCatalogStatus"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -1907,8 +1930,12 @@ export interface operations {
             readonly query?: {
                 /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
                 readonly cursor?: components["parameters"]["Cursor"];
-                /** @description Page size, default 50, maximum 100. */
-                readonly limit?: components["parameters"]["Limit"];
+                /** @description Bounded page size, default 50, maximum 50. */
+                readonly limit?: components["parameters"]["AssetCatalogLimit"];
+                readonly channel?: components["parameters"]["AssetCatalogChannel"];
+                /** @description Exact opaque WhatsApp phone number filter. */
+                readonly number?: components["parameters"]["AssetCatalogNumber"];
+                readonly status?: components["parameters"]["AssetCatalogStatus"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -2264,8 +2291,12 @@ export interface operations {
             readonly query?: {
                 /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
                 readonly cursor?: components["parameters"]["Cursor"];
-                /** @description Page size, default 50, maximum 100. */
-                readonly limit?: components["parameters"]["Limit"];
+                /** @description Bounded page size, default 50, maximum 50. */
+                readonly limit?: components["parameters"]["ConnectionCatalogLimit"];
+                readonly channel?: components["parameters"]["AssetCatalogChannel"];
+                /** @description Exact opaque WhatsApp phone number filter. */
+                readonly number?: components["parameters"]["AssetCatalogNumber"];
+                readonly status?: components["parameters"]["ConnectionCatalogStatus"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -2364,8 +2395,12 @@ export interface operations {
             readonly query?: {
                 /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
                 readonly cursor?: components["parameters"]["Cursor"];
-                /** @description Page size, default 50, maximum 100. */
-                readonly limit?: components["parameters"]["Limit"];
+                /** @description Bounded page size, default 50, maximum 50. */
+                readonly limit?: components["parameters"]["ConnectionCatalogLimit"];
+                readonly channel?: components["parameters"]["AssetCatalogChannel"];
+                /** @description Exact opaque WhatsApp phone number filter. */
+                readonly number?: components["parameters"]["AssetCatalogNumber"];
+                readonly status?: components["parameters"]["ConnectionCatalogStatus"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */

@@ -6,6 +6,7 @@ import { CredentialInspectionWorker, CredentialLifecycleScheduler } from '../cre
 import type { CredentialInspectionPort, CredentialLifecyclePolicyPort, CredentialLifecycleSecretPort } from '../credentials/credential-lifecycle.types.js';
 import type { JobType } from '../jobs/event-validation.js';
 import { DurableWorker, type JobFinalizer, type JobHandler } from './durable-worker.js';
+import type { MetaAssetRefreshAdapter } from '../meta-assets/asset-refresh.service.js';
 
 interface CredentialLifecycleAdapters {
   readonly policies: CredentialLifecyclePolicyPort;
@@ -15,6 +16,11 @@ interface CredentialLifecycleAdapters {
 
 /** No provider adapter set is installed in this package; an environment flag alone is not capability. */
 function configuredCredentialLifecycleAdapters(): CredentialLifecycleAdapters | undefined {
+  return undefined;
+}
+
+/** A job handler is registered only alongside an installed provider adapter. */
+function configuredMetaAssetRefreshAdapter(): MetaAssetRefreshAdapter | undefined {
   return undefined;
 }
 
@@ -35,7 +41,20 @@ export async function bootstrapWorker(): Promise<void> {
       finalizers.set('CREDENTIAL_INSPECTION', inspection.finalizer);
       lifecycleScheduler = new CredentialLifecycleScheduler(database, new DurableJobStore(database), `api-worker:${process.pid}`);
     }
-    // M2.05 provides the durable runner. M3.09 lifecycle work remains opt-in and has no provider adapter here.
+    const assetRefreshAdapter = configuredMetaAssetRefreshAdapter();
+    if (assetRefreshAdapter) {
+      handlers.set('ASSET_REFRESH', async (job, signal) => {
+        if (job.payload.kind !== 'ASSET_REFRESH') return { kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' };
+        try {
+          await assetRefreshAdapter.refresh({ tenantId: job.tenantId, assetId: job.payload.assetId,
+            appConfigurationId: job.payload.appConfigurationId, environment: job.payload.environment }, signal);
+          return { kind: 'SUCCEEDED' };
+        } catch {
+          return { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DEPENDENCY_UNAVAILABLE' };
+        }
+      });
+    }
+    // M2.05 provides the durable runner. M3.09 and M3.12 remain without provider adapters here.
     const worker = new DurableWorker(new DurableJobStore(database), {
       workerRef: `api-worker:${process.pid}`,
       leaseMs: 30_000,

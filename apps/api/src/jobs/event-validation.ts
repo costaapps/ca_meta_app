@@ -36,7 +36,7 @@ export interface OutboxEventEnvelope {
   readonly data: Readonly<Record<string, unknown>>;
 }
 
-export type JobType = 'INBOX_PROCESS' | 'OUTBOX_DELIVER' | 'ONBOARDING_STEP' | 'PROJECTION_RECONCILE' | 'HISTORY_SYNC' | 'CREDENTIAL_INSPECTION';
+export type JobType = 'INBOX_PROCESS' | 'OUTBOX_DELIVER' | 'ONBOARDING_STEP' | 'PROJECTION_RECONCILE' | 'HISTORY_SYNC' | 'CREDENTIAL_INSPECTION' | 'ASSET_REFRESH';
 
 export type JobPayload =
   | { readonly kind: 'INBOX_PROCESS'; readonly inboxEventRef: string }
@@ -51,6 +51,10 @@ export type JobPayload =
     readonly family: string; readonly credentialVersion: number; readonly secretVersion: number;
     readonly authorizationVersion: number; readonly lifecycleVersion: number; readonly generation: number;
     readonly leaseOwner: string; readonly leaseToken: string;
+  }
+  | {
+    readonly kind: 'ASSET_REFRESH'; readonly assetId: string; readonly appConfigurationId: string;
+    readonly environment: 'development' | 'test' | 'staging' | 'production';
   };
 
 export type JobLane = 'WEBHOOK_URGENT' | 'ONBOARDING' | 'HISTORICAL_PROJECTION';
@@ -91,6 +95,10 @@ export const JOB_POLICIES: Readonly<Record<JobType, JobPolicy>> = Object.freeze(
   CREDENTIAL_INSPECTION: {
     lane: 'HISTORICAL_PROJECTION', effectMode: 'IDEMPOTENT', maxAttempts: 1,
     maxElapsedMs: 5 * 60_000, maxHandlerMs: 30_000, retryBaseMs: 1_000, retryMaxMs: 1_000,
+  },
+  ASSET_REFRESH: {
+    lane: 'HISTORICAL_PROJECTION', effectMode: 'SAFE_RETRY', maxAttempts: 3,
+    maxElapsedMs: 15 * 60_000, maxHandlerMs: 60_000, retryBaseMs: 2_000, retryMaxMs: 60_000,
   },
 });
 
@@ -151,6 +159,13 @@ const jobPayloadSchemas: Readonly<Record<JobType, object>> = {
       authorizationVersion: { type: 'integer', minimum: 1 }, lifecycleVersion: { type: 'integer', minimum: 1 },
       generation: { type: 'integer', minimum: 1 }, leaseOwner: { type: 'string', pattern: '^[A-Za-z0-9:_-]{1,128}$' },
       leaseToken: { type: 'string', format: 'uuid' },
+    },
+  },
+  ASSET_REFRESH: {
+    type: 'object', additionalProperties: false, required: ['kind', 'assetId', 'appConfigurationId', 'environment'],
+    properties: {
+      kind: { const: 'ASSET_REFRESH' }, assetId: { type: 'string', format: 'uuid' },
+      appConfigurationId: { type: 'string', format: 'uuid' }, environment: { enum: ['development', 'test', 'staging', 'production'] },
     },
   },
 };
