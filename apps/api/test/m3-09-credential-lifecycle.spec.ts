@@ -107,6 +107,9 @@ test('inspection job payload rejects secret fields and requires version/lease fe
   assert.deepEqual(parseJobPayload('CREDENTIAL_INSPECTION', decodeStoredJobPayload(JSON.stringify(payload))), payload);
   assert.deepEqual(parseJobPayload('CREDENTIAL_INSPECTION', decodeStoredJobPayload(Buffer.from(JSON.stringify(payload)))), payload);
   assert.deepEqual(parseJobPayload('CREDENTIAL_INSPECTION', decodeStoredJobPayload(payload)), payload);
+  assert.throws(() => decodeStoredJobPayload(Buffer.from([0xff])));
+  assert.throws(() => parseJobPayload('CREDENTIAL_INSPECTION',
+    decodeStoredJobPayload(Buffer.from(JSON.stringify({ ...payload, access_token: 'synthetic-secret' })))));
   assert.throws(() => parseJobPayload('CREDENTIAL_INSPECTION', { ...payload, access_token: 'synthetic-secret' }));
   assert.throws(() => parseJobPayload('CREDENTIAL_INSPECTION', { ...payload, secretVersion: 0 }));
   assert.equal(JOB_POLICIES.CREDENTIAL_INSPECTION.lane, 'HISTORICAL_PROJECTION');

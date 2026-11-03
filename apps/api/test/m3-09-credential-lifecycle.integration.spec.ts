@@ -49,6 +49,24 @@ function parseMariaDbJsonObject(value: unknown): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+function safeMariaDbErrorCode(error: unknown): string {
+  const codeFrom = (value: unknown): string | undefined => {
+    if (value === null || typeof value !== 'object' || !('code' in value)) return undefined;
+    const code = (value as { code?: unknown }).code;
+    return typeof code === 'string' && SAFE_MARIADB_ERROR_CODES.has(code) ? code : undefined;
+  };
+  if (error === null || typeof error !== 'object') return 'UNCLASSIFIED';
+  const wrapped = error as { driverError?: unknown; cause?: unknown };
+  return codeFrom(error) ?? codeFrom(wrapped.driverError) ?? codeFrom(wrapped.cause) ?? 'UNCLASSIFIED';
+}
+
+function safeDiagnosticErrorType(error: unknown): 'Error' | 'TypeError' | 'SyntaxError' | 'RangeError' | 'NonError' {
+  if (error instanceof SyntaxError) return 'SyntaxError';
+  if (error instanceof TypeError) return 'TypeError';
+  if (error instanceof RangeError) return 'RangeError';
+  return error instanceof Error ? 'Error' : 'NonError';
+}
+
 test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, and stale-version fencing', {
   skip: enabled ? false : 'Run in the disposable M2.05 MariaDB profile with M3_09_TEST=1.',
 }, async () => {
@@ -255,10 +273,8 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
       try {
         await worker.run(controller.signal);
       } catch (error) {
-        const rawCode = error !== null && typeof error === 'object' && 'code' in error
-          ? (error as { code?: unknown }).code : undefined;
-        const code = typeof rawCode === 'string' && SAFE_MARIADB_ERROR_CODES.has(rawCode)
-          ? rawCode : 'UNCLASSIFIED';
+        const code = safeMariaDbErrorCode(error);
+        const errorType = safeDiagnosticErrorType(error);
         const diagnosticPath = process.env.M3_09_DIAGNOSTIC_PATH;
         if (diagnosticPath) {
           try {
@@ -266,13 +282,14 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
             const tempRoot = `${resolve(tmpdir())}${sep}`;
             if (basename(resolvedPath) === 'm3-09-safe-diagnostic.txt' &&
                 resolvedPath.toLowerCase().startsWith(tempRoot.toLowerCase())) {
-              await writeFile(resolvedPath, `[M3.09 safe diagnostic] stage=${workerStage} code=${code}`, {
+              await writeFile(resolvedPath,
+                `[M3.09 safe diagnostic] stage=${workerStage} code=${code} type=${errorType}`, {
                 encoding: 'utf8', flag: 'wx',
               });
             }
           } catch { /* The sanitized error remains the fallback diagnostic. */ }
         }
-        throw new Error(`[M3.09 safe diagnostic] stage=${workerStage} code=${code}`);
+        throw new Error(`[M3.09 safe diagnostic] stage=${workerStage} code=${code} type=${errorType}`);
       }
     };
     await runWorker();

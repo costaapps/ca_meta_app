@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { TextDecoder } from 'node:util';
 import type { DataSource, EntityManager } from 'typeorm';
 import {
   canonicalJson,
@@ -134,7 +135,7 @@ function rowAffected(result: unknown): number {
 
 export function decodeStoredJobPayload(value: unknown): unknown {
   if (typeof value === 'string') return JSON.parse(value) as unknown;
-  if (Buffer.isBuffer(value)) return JSON.parse(value.toString('utf8')) as unknown;
+  if (Buffer.isBuffer(value)) return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(value)) as unknown;
   return value;
 }
 
