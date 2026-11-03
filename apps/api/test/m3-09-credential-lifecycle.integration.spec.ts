@@ -50,6 +50,7 @@ type M309DiagnosticStage =
   | 'claim_active_count'
   | 'claim_resource_count'
   | 'claim_transaction'
+  | 'claim_transaction_commit'
   | 'claim_job_update'
   | 'claim_attempt_insert'
   | 'claim_cursor_update'
@@ -147,7 +148,7 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
           const callback = args[callbackIndex];
           if (typeof callback !== 'function') return Reflect.apply(value, target, args as never[]);
           const transactionArgs = [...args];
-          transactionArgs[callbackIndex] = (manager: EntityManager) => {
+          transactionArgs[callbackIndex] = async (manager: EntityManager) => {
             const diagnosticManager = new Proxy(manager, {
               get(managerTarget, managerProperty) {
                 const managerValue: unknown = Reflect.get(managerTarget, managerProperty, managerTarget);
@@ -160,7 +161,9 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
                 return typeof managerValue === 'function' ? managerValue.bind(managerTarget) : managerValue;
               },
             });
-            return Reflect.apply(callback, undefined, [diagnosticManager]);
+            const result = await Reflect.apply(callback, undefined, [diagnosticManager]);
+            if (isM309ClaimStage(workerStage)) workerStage = 'claim_transaction_commit';
+            return result;
           };
           if (isM309ClaimStage(workerStage)) workerStage = 'claim_transaction';
           return Reflect.apply(value, target, transactionArgs as never[]);
