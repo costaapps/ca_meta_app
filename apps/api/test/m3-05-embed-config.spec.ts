@@ -44,3 +44,15 @@ test('Suite4 embed origin configuration fails closed and accepts only unique exa
     );
   }
 });
+
+test('onboarding state HMAC key is optional for API startup and accepts only canonical 32-byte base64url values', () => {
+  assert.equal(validateEnvironment(baseEnvironment).onboardingStateSigningKey, undefined);
+  const key = Buffer.alloc(32, 0x51).toString('base64url');
+  assert.equal(validateEnvironment({ ...baseEnvironment, API_ONBOARDING_STATE_KEY: key }).onboardingStateSigningKey, key);
+  for (const invalidKey of [Buffer.alloc(31, 0x51).toString('base64url'), `${key}=`, 'not-base64url']) {
+    assert.throws(
+      () => validateEnvironment({ ...baseEnvironment, API_ONBOARDING_STATE_KEY: invalidKey }),
+      (error: unknown) => error instanceof EnvironmentValidationError && error.fieldNames.includes('API_ONBOARDING_STATE_KEY'),
+    );
+  }
+});

@@ -8,11 +8,11 @@ From the repository root on Windows:
 powershell -ExecutionPolicy Bypass -File tools/m2-05/run-mariadb-tests.ps1
 ```
 
-The script sets up separate least-privilege synthetic migrator and runtime accounts, compiles the API test tree, and runs `durable-work.integration.spec.js` and `m3-06-meta-assets.integration.spec.js` with `M2_DURABLE_WORK_TEST=1`, followed by `m3-02-db.integration.spec.js` with `M3_02_DB_TEST=1`. The session fixture asserts that a Suite4 embed mode survives the actual MySQL session insert after the versioned migration chain is applied. The full API/root suite is a separate candidate gate and is not repeated by this harness. No production/staging database, Meta API, provider account, real tenant data, or provider credential is used.
+The script sets up separate least-privilege synthetic migrator and runtime accounts, compiles the API test tree, and runs `durable-work.integration.spec.js`, `m3-05-onboarding.integration.spec.js` and `m3-06-meta-assets.integration.spec.js` with `M2_DURABLE_WORK_TEST=1`, followed by `m3-02-db.integration.spec.js` with `M3_02_DB_TEST=1`. The onboarding fixture checks migration v10 and verifies tenant/session ownership, tenant-scoped idempotency, one-use state consumption and digest-only persistence using synthetic rows. The session fixture asserts that a Suite4 embed mode survives the actual MySQL session insert after the versioned migration chain is applied. The full API/root suite is a separate candidate gate and is not repeated by this harness. No production/staging database, Meta API, provider account, real tenant data, or provider credential is used.
 
 The M3.06 fixture covers concurrent upsert/shared assets, confirmed scopes and grants, typed Instagram-to-Page relation persistence, omitted-grants preservation versus explicit revocation, cross-tenant FK rejection and quarantine, exact external IDs above 2^53, and rollback after outbox staging. Its JUnit and LCOV reports are emitted as `m3-06-meta-assets.*`. The M3.02 portal-session fixture emits `m3-02-portal-session.*`; both report sets are uploaded by the M2.08 MariaDB workflow.
 
-The MariaDB scenario checks:
+The M2.05 durable-work MariaDB scenario checks:
 
 - Migration chain v1/v2/v3 and the additive v3 schema, including job claim, tenant/resource, tenant+lane candidate, ambiguous lease and replay audit indexes, plus one persistent dispatch cursor per lane.
 - Same idempotency key/body returns the existing job; the same key with a different payload hash is rejected.

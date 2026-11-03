@@ -1,6 +1,6 @@
 # M2.07 Compose harness
 
-This harness provides an isolated, repeatable Docker Compose environment smoke without relying on an existing developer database or production configuration. It requires Docker Engine, Docker Compose 2.23.0+ and PowerShell 7+ on the host. Node 24.22.2/npm 11.19.1 and API/web dependencies are installed inside a dev image using the repository lockfile. The local database is MariaDB 11.8.8 pinned by digest; the API migrates the local database through schema v9. The separate release lock contract continues to require schema-v3 API compatibility. No extra PowerShell module or host npm install is required.
+This harness provides an isolated, repeatable Docker Compose environment smoke without relying on an existing developer database or production configuration. It requires Docker Engine, Docker Compose 2.23.0+ and PowerShell 7+ on the host. Node 24.22.2/npm 11.19.1 and API/web dependencies are installed inside a dev image using the repository lockfile. The local database is MariaDB 11.8.8 pinned by digest; the API migrates the local database through schema v10. The separate release lock contract continues to require schema-v3 API compatibility. No extra PowerShell module or host npm install is required.
 
 From the repository root on Windows:
 

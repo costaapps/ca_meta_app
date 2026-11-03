@@ -39,7 +39,8 @@
     "check:web-boundary": "npm run lint --workspace=@ca-meta/web",
     "smoke:routes": "npm run build:web && node tools/m2/smoke-web-dist.mjs",
     "check:web-bundle": "npm run build:web && node tools/m2/check-web-bundle.mjs",
-    "m3-05:validate": "node tools/m3-05/run.mjs"
+    "m3-05:validate": "node tools/m3-05/run.mjs",
+    "m3-05:onboarding:validate": "node tools/m3-05/run.mjs --onboarding-only"
   },
   "prettier": {
     "printWidth": 100,

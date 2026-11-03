@@ -612,8 +612,10 @@ paths:
       description: Tenant/principal/config are resolved from the current server session. Body cannot
         select a tenant, CompanyUUID, app or secret. The server generates provider state and its
         correlation to this onboarding; launch URL is server-generated from allowlisted
-        configuration. A 201 or provider redirect means only that a flow was created, never that a
-        connection is READY.
+        configuration. Persisted state is represented by a digest and is valid for ten minutes for one
+        use. The current runtime has no configured provider launch adapter or state-signing key and
+        fails closed with 503. A 201 or provider redirect means only that a flow was created, never
+        that a connection is READY.
       security: *a10
       parameters: &a23
         - &a26
@@ -692,9 +694,12 @@ paths:
         - Onboarding
       summary: Read authoritative onboarding status
       description: The server derives READY/PARTIAL from current versioned policy and verified evidence. A
-        code exchange, HTTP 200, popup finish event, or redirect alone never sets READY. The M3.05 route
-        is session-guarded but returns 503 until an authoritative persisted onboarding status reader is wired.
-        UNKNOWN/STALE evidence stays visible and blocks READY when required.
+        code exchange, HTTP 200, popup finish event, or redirect alone never sets READY. The read is
+        scoped to the verified portal session and principal, then checks current membership in the
+        onboarding's original tenant even after a tenant-context switch. Only a trusted server-side
+        completion port can update status; a front-end return signal cannot do so. Provider completion
+        remains unavailable until a verified server adapter is configured. UNKNOWN/STALE evidence stays
+        visible and blocks READY when required.
       security: *a10
       parameters: *a22
       responses:

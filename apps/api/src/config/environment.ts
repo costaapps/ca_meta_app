@@ -28,6 +28,8 @@ export interface ApiEnvironment {
     readonly connectTimeoutMs: number;
   };
   readonly portalSessionRecoveryKey: string;
+  /** Optional server-side HMAC key for OAuth state; absent disables new onboarding starts. */
+  readonly onboardingStateSigningKey?: string;
   /** Absent configuration disables Suite4 ticket exchange without disabling other API routes. */
   readonly portalEntryTicket?: {
     readonly configuration: TicketExchangeConfiguration;
@@ -424,6 +426,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     ? configuredRecoveryKey
     : randomBytes(32).toString('base64url');
   if (Buffer.byteLength(portalSessionRecoveryKey, 'utf8') < 32) invalid.push('API_PORTAL_SESSION_RECOVERY_KEY');
+  const onboardingStateSigningKey = optionalBase64urlKey(source.API_ONBOARDING_STATE_KEY, 'API_ONBOARDING_STATE_KEY', invalid);
   const platformIdentityAdmins = platformIdentityAdminsField(source, invalid);
 
   if (invalid.length > 0) {
@@ -442,6 +445,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     portalSessionIdleTimeoutSeconds,
     portalSessionAbsoluteTimeoutSeconds,
     portalSessionRecoveryKey,
+    ...(onboardingStateSigningKey ? { onboardingStateSigningKey } : {}),
     ...(portalEntryTicket ? { portalEntryTicket } : {}),
     database: {
       host,
@@ -453,4 +457,15 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     },
     identity: { platformIdentityAdmins },
   };
+}
+
+function optionalBase64urlKey(value: string | undefined, field: string, invalid: string[]): string | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  try {
+    const decoded = Buffer.from(value, 'base64url');
+    if (decoded.length !== 32 || decoded.toString('base64url') !== value) invalid.push(field);
+  } catch {
+    invalid.push(field);
+  }
+  return invalid.includes(field) ? undefined : value;
 }

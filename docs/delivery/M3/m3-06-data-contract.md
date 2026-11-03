@@ -9,7 +9,7 @@ MetaAssetsModule.register(environment) is defined in apps/api/src/meta-assets/me
 Integration wiring:
 
 1. Import META_ASSETS_MIGRATION and META_ASSETS_TABLES from apps/api/src/database/migrations/meta-assets.js.
-2. The M3.06 package appends META_ASSETS_MIGRATION after M3.04 v5 and M3.02 v6 in migrationsWithoutChecksums. M3.06 owns schema v7; after M3.03 v8 and M3.05 v9 are integrated, the current sequence is versions 1–9. M3.05 v9 adds only the persisted portal-session entry mode and keeps old rows at `PORTAL_TOP_LEVEL`.
+2. The M3.06 package appends META_ASSETS_MIGRATION after M3.04 v5 and M3.02 v6 in migrationsWithoutChecksums. M3.06 owns schema v7; M3.03 v8 and M3.05 v9 add invited-member links and persisted portal-session entry mode. M3.05 v10 adds persisted onboarding sessions, so the current sequence is versions 1–10. M3.05 v9 keeps old rows at `PORTAL_TOP_LEVEL`.
 3. Include ...META_ASSETS_TABLES in DOMAIN_TABLES.
 4. Replace the root JobsModule.register(environment) with MetaAssetsModule.register(environment) (it re-exports JobsModule) and import MetaAssetsModule from ./meta-assets/meta-assets.module.js.
 5. Preserve the M3.04 session provider/migration and M3.02 retry migration/version checksums.

@@ -7,6 +7,7 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const apiRoot = join(repositoryRoot, 'apps', 'api');
 const workRoot = mkdtempSync(join(apiRoot, '.m3-05-validate-'));
 const apiOutput = join(workRoot, 'api-test');
+const onboardingOnly = process.argv.includes('--onboarding-only');
 
 function run(label, executable, args, options = {}) {
   console.log(`\n[M3.05] ${label}`);
@@ -26,7 +27,8 @@ try {
   const tsc = join(repositoryRoot, 'node_modules', 'typescript', 'bin', 'tsc');
   const vitest = join(repositoryRoot, 'node_modules', 'vitest', 'vitest.mjs');
   const ngc = join(repositoryRoot, 'node_modules', '@angular', 'compiler-cli', 'bundles', 'src', 'bin', 'ngc.js');
-  for (const path of [tsc, vitest, ngc]) {
+  const requiredTools = onboardingOnly ? [tsc] : [tsc, vitest, ngc];
+  for (const path of requiredTools) {
     try {
       realpathSync(path);
     } catch {
@@ -44,30 +46,35 @@ try {
     join(apiOutput, 'test', 'm3-02-preauth.spec.js'),
     join(apiOutput, 'test', 'm3-05-embed-config.spec.js'),
     join(apiOutput, 'test', 'm3-05-onboarding-status.spec.js'),
+    join(apiOutput, 'test', 'm3-05-onboarding-session.spec.js'),
   ]);
   run('API session mode and migration focused tests', process.execPath, [
     '--test',
     join(apiOutput, 'test', 'm3-04-session.spec.js'),
     join(apiOutput, 'test', 'migration-unit.spec.js'),
   ]);
-  run('Safe Nginx access-log regression test', process.execPath, [
-    '--test',
-    join(repositoryRoot, 'tools', 'm3-05', 'nginx-log.test.mjs'),
-  ]);
-  run('Web entrypoint origin-validation regression test', process.execPath, [
-    '--test',
-    join(repositoryRoot, 'tools', 'm3-05', 'web-entrypoint.test.mjs'),
-  ]);
-  run('Angular application typecheck', process.execPath, [
-    ngc, '-p', join(repositoryRoot, 'apps', 'web', 'tsconfig.app.json'), '--noEmit',
-  ]);
-  run('Web embed/config focused tests', process.execPath, [
-    vitest, 'run', '--root', join(repositoryRoot, 'apps', 'web'),
-    'src/app/core/config/public-runtime-config.spec.ts',
-    'src/app/core/embed/embed-contract.spec.ts',
-    'src/app/core/embed/embed-bridge.service.spec.ts',
-  ]);
-  console.log('\n[M3.05] focused checks passed');
+  if (!onboardingOnly) {
+    run('Safe Nginx access-log regression test', process.execPath, [
+      '--test',
+      join(repositoryRoot, 'tools', 'm3-05', 'nginx-log.test.mjs'),
+    ]);
+    run('Web entrypoint origin-validation regression test', process.execPath, [
+      '--test',
+      join(repositoryRoot, 'tools', 'm3-05', 'web-entrypoint.test.mjs'),
+    ]);
+    run('Angular application typecheck', process.execPath, [
+      ngc, '-p', join(repositoryRoot, 'apps', 'web', 'tsconfig.app.json'), '--noEmit',
+    ]);
+    run('Web embed/config focused tests', process.execPath, [
+      vitest, 'run', '--root', join(repositoryRoot, 'apps', 'web'),
+      'src/app/core/config/public-runtime-config.spec.ts',
+      'src/app/core/embed/embed-contract.spec.ts',
+      'src/app/core/embed/embed-bridge.service.spec.ts',
+    ]);
+  }
+  console.log(onboardingOnly
+    ? '\n[M3.05] onboarding state, status, config and migration checks passed'
+    : '\n[M3.05] focused checks passed');
 } finally {
   const canonicalApiRoot = realpathSync(apiRoot);
   const canonicalWorkRoot = realpathSync(workRoot);

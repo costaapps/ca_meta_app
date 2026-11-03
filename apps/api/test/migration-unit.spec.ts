@@ -10,6 +10,7 @@ import { TICKET_RETRY_MIGRATION } from '../src/database/migrations/ticket-retry.
 import { META_ASSETS_MIGRATION, META_ASSETS_TABLES } from '../src/database/migrations/meta-assets.js';
 import { MAGIC_LINKS_MIGRATION, MAGIC_LINK_TABLES } from '../src/database/migrations/magic-links.js';
 import { PORTAL_SESSION_ENTRY_MODE_MIGRATION } from '../src/database/migrations/portal-session-entry-mode.js';
+import { ONBOARDING_SESSIONS_MIGRATION, ONBOARDING_SESSION_TABLES } from '../src/database/migrations/onboarding-sessions.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -50,8 +51,8 @@ test('migration configuration rejects runtime account reuse and privileged built
 });
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
-  assert.equal(MIGRATIONS.length, 9);
-  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.equal(MIGRATIONS.length, 10);
+  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -73,11 +74,15 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(MAGIC_LINKS_MIGRATION.schemaVersion, 8);
   assert.equal(PORTAL_SESSION_ENTRY_MODE_MIGRATION.id, '202610300009-portal-session-entry-mode');
   assert.equal(PORTAL_SESSION_ENTRY_MODE_MIGRATION.schemaVersion, 9);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 3]?.id, META_ASSETS_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 2]?.id, MAGIC_LINKS_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 1]?.id, PORTAL_SESSION_ENTRY_MODE_MIGRATION.id);
+  assert.equal(ONBOARDING_SESSIONS_MIGRATION.id, '202611030010-persisted-onboarding-sessions');
+  assert.equal(ONBOARDING_SESSIONS_MIGRATION.schemaVersion, 10);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 4]?.id, META_ASSETS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 3]?.id, MAGIC_LINKS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 2]?.id, PORTAL_SESSION_ENTRY_MODE_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 1]?.id, ONBOARDING_SESSIONS_MIGRATION.id);
   assert.ok(META_ASSETS_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.ok(MAGIC_LINK_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
+  assert.ok(ONBOARDING_SESSION_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.deepEqual(IDENTITY_MIGRATION.steps.map((step) => step.id), [
     'create-principals', 'create-tenant-memberships', 'create-service-identity-scopes',
     'create-identity-admin-audit', 'identity-admin-audit-no-update', 'identity-admin-audit-no-delete',
@@ -161,6 +166,20 @@ test('M3.05 entry-mode migration accepts only the additive column shape and pres
   assert.equal(await step.verify({ ...context, queryRunner: validQueryRunner }), true);
   assert.equal(await step.verify({ ...context, queryRunner: missingQueryRunner }), false);
   await assert.rejects(step.verify({ ...context, queryRunner: invalidQueryRunner }), /unexpected portal session entry-mode column/);
+});
+
+test('M3.05 onboarding migration persists only scoped hashes and one-use status metadata', () => {
+  const step = ONBOARDING_SESSIONS_MIGRATION.steps[0];
+  assert.ok(step && 'sql' in step);
+  assert.equal(step.phase, 'expand');
+  assert.match(step.sql, /UNIQUE KEY uq_ca_meta_onboarding_idempotency \(tenant_id, idempotency_key_hash\)/);
+  assert.match(step.sql, /UNIQUE KEY uq_ca_meta_onboarding_provider_state \(provider_state_hash\)/);
+  assert.match(step.sql, /portal_session_id CHAR\(36\)/);
+  assert.match(step.sql, /tenant_context_hash CHAR\(64\)/);
+  assert.match(step.sql, /provider_state_consumed_at DATETIME\(6\) NULL/);
+  assert.match(step.sql, /expires_at > created_at/);
+  assert.match(step.definition, /provider state, idempotency key and request body are represented only by SHA-256 digests/);
+  assert.match(step.definition, /authorization code is never persisted/);
 });
 
 test('migration fingerprints detect definition configuration and callback drift', () => {

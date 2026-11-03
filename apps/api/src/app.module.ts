@@ -47,7 +47,7 @@ export class ApiModule {
         identityModule,
         authExchangeModule,
         MagicLinkModule.register(environment),
-        OnboardingStatusModule.register(identityModule),
+        OnboardingStatusModule.register(identityModule, environment),
       ],
       providers: [
         { provide: STRUCTURED_LOGGER, useClass: ConsoleStructuredLogger },

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import type { Response } from 'express';
 import type { components } from '@ca-meta/contracts';
+import type { AbuseLimitService } from '../src/common/security/abuse-limits.js';
 import { setPortalPreAuthCookie, setPortalSessionCookies, type IssuedPortalSession, type StartedPortalPreAuth } from '../src/identity/portal-session.service.js';
 import type { VerifiedPortalSession } from '../src/identity/identity.trust.js';
 import { OnboardingStatusController, type OnboardingStatusReader, type OnboardingStatusSnapshot } from '../src/onboarding/onboarding-status.controller.js';
-import { UnavailableOnboardingStatusReader } from '../src/onboarding/onboarding-status.module.js';
+import type { OnboardingSessionService } from '../src/onboarding/onboarding-session.service.js';
 
 test('embed pre-auth and session cookies are partitioned while first-party issuance stays compatible', () => {
   const preAuthHeaders: string[] = [];
@@ -68,7 +69,8 @@ test('onboarding status reader is passed only server session, opaque ID and cont
       return snapshot;
     },
   };
-  const controller = new OnboardingStatusController(reader);
+  const abuseLimits = { async consume() {} } as unknown as AbuseLimitService;
+  const controller = new OnboardingStatusController(reader, {} as OnboardingSessionService, abuseLimits);
   const request = {
     portalSession: session,
     originalUrl: '/api/v1/onboarding-sessions/onboarding-opaque-reference-123',
@@ -87,10 +89,22 @@ test('onboarding status reader is passed only server session, opaque ID and cont
   assert.equal('tenantId' in result, false);
 });
 
-test('unconfigured onboarding status is unavailable and cannot infer success from a callback', async () => {
-  const reader = new UnavailableOnboardingStatusReader();
+test('onboarding creation rejects query strings so OAuth data cannot enter request targets', async () => {
+  const session = Object.freeze({ sessionId: 'session-a', principalId: 'principal-a', tenantId: 'tenant-a' }) as VerifiedPortalSession;
+  const controller = new OnboardingStatusController(
+    { async read() { return undefined; } },
+    {} as OnboardingSessionService,
+    { async consume() {} } as unknown as AbuseLimitService,
+  );
+  const request = {
+    portalSession: session,
+    originalUrl: '/api/v1/onboarding-sessions?code=synthetic-sensitive-value',
+    requestId: 'server-request-id',
+    headers: {},
+  } as never;
+
   await assert.rejects(
-    reader.read({} as VerifiedPortalSession, 'onboarding-opaque-reference-123', 'tenant-context-reference-123456'),
-    ServiceUnavailableException,
+    controller.create({} as never, request),
+    BadRequestException,
   );
 });

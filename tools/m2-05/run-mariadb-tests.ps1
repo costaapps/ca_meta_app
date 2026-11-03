@@ -109,7 +109,8 @@ try {
       '--test-reporter=lcov',
       '--test-reporter-destination=artifacts/test-results/m2-05-durable-work.junit.xml',
       '--test-reporter-destination=artifacts/test-results/m2-05-durable-work.lcov.info',
-      'apps/api/dist-test/test/durable-work.integration.spec.js'
+      'apps/api/dist-test/test/durable-work.integration.spec.js',
+      'apps/api/dist-test/test/m3-05-onboarding.integration.spec.js'
     )
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
