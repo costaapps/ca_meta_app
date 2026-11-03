@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DurableWorkDatabase } from './durable-work-database.js';
 import { isJobType, isUuid, parseJobPayload } from './event-validation.js';
-import type { JobStore } from './job-store.js';
+import { decodeStoredJobPayload, type JobStore } from './job-store.js';
 
 export interface ReplayAuthorizationRequest {
   readonly tenantId: string;
@@ -44,7 +44,7 @@ interface DeadLetterJobRow {
   effect_mode: string;
   resource_scope_ref: string;
   correlation_id: string;
-  payload_json: string | unknown;
+  payload_json: unknown;
 }
 
 function affectedRows(value: unknown): number {
@@ -142,7 +142,7 @@ export class ReplayDryRunService {
           status = grantStatus(input, grant);
           if (status !== 'VALID') reasonCode = status;
           else {
-          const payloadValue = typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) as unknown : row.payload_json;
+          const payloadValue = decodeStoredJobPayload(row.payload_json);
           const payload = parseJobPayload(row.job_type, payloadValue);
           const replayKey = `replay:${createHash('sha256')
             .update(`${input.tenantId}:${input.deadLetterId}`)
@@ -170,9 +170,7 @@ export class ReplayDryRunService {
             reasonCode = status;
           } else {
             if (!enqueued.duplicate && row.job_type === 'INBOX_PROCESS') {
-              const payloadObject = typeof row.payload_json === 'string'
-                ? JSON.parse(row.payload_json) as unknown
-                : row.payload_json;
+              const payloadObject = decodeStoredJobPayload(row.payload_json);
               const inboxEventRef = inboxEventReference(row.job_type, payloadObject);
               const resetProjection = await manager.query(
                 `UPDATE ca_meta_inbox_events SET processing_state = 'PENDING'

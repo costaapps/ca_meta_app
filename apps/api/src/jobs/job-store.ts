@@ -86,7 +86,7 @@ interface JobRow {
   resource_scope_ref: string;
   correlation_id: string;
   causation_id: string | null;
-  payload_json: string | JobPayload;
+  payload_json: string | Buffer | JobPayload;
   attempt: number | string;
   max_attempts: number | string;
   claim_token: string;
@@ -132,8 +132,14 @@ function rowAffected(result: unknown): number {
   return 0;
 }
 
-function parsePayload(value: string | JobPayload): JobPayload {
-  return typeof value === 'string' ? JSON.parse(value) as JobPayload : value;
+export function decodeStoredJobPayload(value: unknown): unknown {
+  if (typeof value === 'string') return JSON.parse(value) as unknown;
+  if (Buffer.isBuffer(value)) return JSON.parse(value.toString('utf8')) as unknown;
+  return value;
+}
+
+function parsePayload(value: string | Buffer | JobPayload): JobPayload {
+  return decodeStoredJobPayload(value) as JobPayload;
 }
 
 function formatDate(value: string | Date): string {
@@ -553,7 +559,7 @@ export class DurableJobStore implements JobStore {
            WHERE id = ? AND tenant_id = ? AND status = 'RUNNING' AND effect_mode = 'AMBIGUOUS'
              AND lease_expires_at <= UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE SKIP LOCKED`,
           [stale.id, stale.tenant_id],
-        ) as Array<{ id: string; job_type: string; payload_json: string | JobPayload; attempt: number | string }>;
+        ) as Array<{ id: string; job_type: string; payload_json: string | Buffer | JobPayload; attempt: number | string }>;
         const row = rows[0];
         if (!row) return;
         await manager.query(
