@@ -181,6 +181,32 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.match(entryModeStep.definition, /compatiblePriorSteps/);
 });
 
+test('M3.03 append-only ledger trigger verification rejects a same-name trigger with a different body', async () => {
+  const triggerSteps = MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.steps.filter((step) =>
+    step.id === 'magic-link-identity-events-no-update' || step.id === 'magic-link-identity-events-no-delete');
+  assert.equal(triggerSteps.length, 2);
+
+  for (const step of triggerSteps) {
+    assert.ok('verify' in step && 'sql' in step);
+    const event = step.id.endsWith('no-update') ? 'UPDATE' : 'DELETE';
+    const context = { migrationId: MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.id, stepId: step.id };
+    const incorrectQueryRunner = {
+      async query() {
+        return [{
+          action_timing: 'BEFORE',
+          event_manipulation: event,
+          event_object_table: 'ca_meta_magic_link_identity_events',
+          action_statement: 'SET @allow_mutation = TRUE',
+        }];
+      },
+    } as never;
+    await assert.rejects(
+      step.verify({ ...context, queryRunner: incorrectQueryRunner }),
+      /unexpected append-only trigger/,
+    );
+  }
+});
+
 test('M3.05 entry-mode migration accepts only the additive column shape and preserves legacy default', async () => {
   const step = PORTAL_SESSION_ENTRY_MODE_MIGRATION.steps[0];
   assert.ok(step && 'verify' in step);

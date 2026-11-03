@@ -82,21 +82,24 @@ const createIdentityEvents: DdlStep = {
 
 function appendOnlyTrigger(id: string, event: 'UPDATE' | 'DELETE'): DdlStep {
   const name = `tr_ca_meta_magic_identity_events_no_${event.toLowerCase()}`;
+  const statement = "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'magic-link identity events are append-only'";
+  const normalize = (value: string) => value.toUpperCase().replace(/[\s`]+/g, '');
   return {
     id,
     phase: 'expand',
-    sql: `CREATE TRIGGER ${name} BEFORE ${event} ON ${identityEventsTable} FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'magic-link identity events are append-only'`,
+    sql: `CREATE TRIGGER ${name} BEFORE ${event} ON ${identityEventsTable} FOR EACH ROW ${statement}`,
     definitionVersion: 'v1',
-    definition: JSON.stringify({ name, table: identityEventsTable, event, appendOnly: true }),
+    definition: JSON.stringify({ name, table: identityEventsTable, event, statement }),
     retryWhenAbsent: true,
     verify: async ({ queryRunner }) => {
       const rows = await queryRunner.query(
-        `SELECT action_timing, event_manipulation, event_object_table
+        `SELECT action_timing, event_manipulation, event_object_table, action_statement
          FROM information_schema.triggers WHERE trigger_schema = DATABASE() AND trigger_name = ?`, [name],
-      ) as Array<{ action_timing: string; event_manipulation: string; event_object_table: string }>;
+      ) as Array<{ action_timing: string; event_manipulation: string; event_object_table: string; action_statement: string }>;
       if (rows.length === 0) return false;
       const row = rows[0];
-      if (row?.action_timing !== 'BEFORE' || row.event_manipulation !== event || row.event_object_table !== identityEventsTable) {
+      if (!row || row.action_timing !== 'BEFORE' || row.event_manipulation !== event ||
+        row.event_object_table !== identityEventsTable || normalize(row.action_statement) !== normalize(statement)) {
         throw new Error(`Magic-link identity ledger found an unexpected append-only trigger (${name}).`);
       }
       return true;
