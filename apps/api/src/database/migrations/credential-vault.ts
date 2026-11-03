@@ -14,6 +14,8 @@ const ROTATION_COLUMNS = [
 const AUDIT_COLUMNS = [
   'id', 'tenant_id', 'credential_id', 'actor_ref', 'action', 'operation', 'key_version', 'correlation_id', 'created_at',
 ] as const;
+const KEY_STATE_COLUMNS = ['singleton_id', 'active_key_version', 'updated_at'] as const;
+const KEY_VERSION_COLUMNS = ['key_version', 'status', 'created_at', 'retired_at'] as const;
 
 async function verifyTable(
   queryRunner: QueryRunner,
@@ -87,6 +89,55 @@ async function verifyCredentialAudit(context: MigrationStepContext): Promise<boo
     ], [],
   );
 }
+
+async function verifyCredentialKeyState(context: MigrationStepContext): Promise<boolean> {
+  return verifyTable(context.queryRunner, 'ca_meta_credential_vault_key_state', KEY_STATE_COLUMNS,
+    [{ name: 'PRIMARY', columns: ['singleton_id'], unique: true }], [],
+  );
+}
+
+async function verifyCredentialKeyVersions(context: MigrationStepContext): Promise<boolean> {
+  return verifyTable(context.queryRunner, 'ca_meta_credential_vault_key_versions', KEY_VERSION_COLUMNS,
+    [{ name: 'PRIMARY', columns: ['key_version'], unique: true }], [],
+  );
+}
+
+const createCredentialKeyState = {
+  id: 'create-credential-vault-key-state',
+  phase: 'expand' as const,
+  definitionVersion: 'v1',
+  definition: JSON.stringify({ table: 'ca_meta_credential_vault_key_state', columns: KEY_STATE_COLUMNS, purpose: 'persistent active-key write fence across replicas' }),
+  retryWhenAbsent: true as const,
+  sql: [
+    'CREATE TABLE IF NOT EXISTS ca_meta_credential_vault_key_state (',
+    ' singleton_id TINYINT UNSIGNED NOT NULL,',
+    ' active_key_version VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,',
+    ' updated_at DATETIME(6) NOT NULL,',
+    ' PRIMARY KEY (singleton_id),',
+    ' CONSTRAINT ck_ca_meta_vault_key_state_singleton CHECK (singleton_id = 1)',
+    ') ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin',
+  ].join('\n'),
+  verify: async (context: MigrationStepContext) => verifyCredentialKeyState(context),
+};
+
+const createCredentialKeyVersions = {
+  id: 'create-credential-vault-key-version-history',
+  phase: 'expand' as const,
+  definitionVersion: 'v1',
+  definition: JSON.stringify({ table: 'ca_meta_credential_vault_key_versions', columns: KEY_VERSION_COLUMNS, purpose: 'prevent key-version reuse or downgrade after cutover' }),
+  retryWhenAbsent: true as const,
+  sql: [
+    'CREATE TABLE IF NOT EXISTS ca_meta_credential_vault_key_versions (',
+    ' key_version VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,',
+    ' status VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,',
+    ' created_at DATETIME(6) NOT NULL, retired_at DATETIME(6) NULL,',
+    ' PRIMARY KEY (key_version),',
+    " CONSTRAINT ck_ca_meta_vault_key_version_status CHECK (status IN ('ACTIVE', 'RETIRED')),",
+    " CONSTRAINT ck_ca_meta_vault_key_version_retired CHECK ((status = 'ACTIVE' AND retired_at IS NULL) OR (status = 'RETIRED' AND retired_at IS NOT NULL))",
+    ') ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin',
+  ].join('\n'),
+  verify: async (context: MigrationStepContext) => verifyCredentialKeyVersions(context),
+};
 
 const createCredentialSecrets = {
   id: 'create-credential-secret-envelope',
@@ -169,10 +220,10 @@ const createCredentialAccessAudit = {
   verify: async (context: MigrationStepContext) => verifyCredentialAudit(context),
 };
 
-const steps = [createCredentialSecrets, createCredentialRotations, createCredentialAccessAudit] as const;
+const steps = [createCredentialKeyState, createCredentialKeyVersions, createCredentialSecrets, createCredentialRotations, createCredentialAccessAudit] as const;
 const migration = {
   id: '202610300010-credential-vault',
-  schemaVersion: 10,
+  schemaVersion: 11,
   minimumSupportedApiVersion: 1,
   steps,
 } as const;
@@ -183,5 +234,6 @@ export const META_CREDENTIAL_VAULT_MIGRATION: VersionedMigration = {
 };
 
 export const META_CREDENTIAL_VAULT_TABLES = [
+  'ca_meta_credential_vault_key_state', 'ca_meta_credential_vault_key_versions',
   'ca_meta_credential_secrets', 'ca_meta_credential_rotations', 'ca_meta_credential_access_audit',
 ] as const;

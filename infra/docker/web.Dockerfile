@@ -18,6 +18,7 @@ FROM ${NGINX_IMAGE} AS runtime
 ARG OCI_VERSION
 ARG OCI_REVISION
 USER root
+RUN apk add --no-cache libexpat=2.10.0-r0
 RUN test -n "${OCI_VERSION}" && test -n "${OCI_REVISION}"
 LABEL org.opencontainers.image.title="CA Meta Web" \
       org.opencontainers.image.source="https://github.com/costaapps/ca_meta_app" \
@@ -30,6 +31,8 @@ COPY infra/docker/web-entrypoint.sh /usr/local/bin/web-entrypoint.sh
 RUN chmod 0555 /usr/local/bin/web-entrypoint.sh
 
 ENV WEB_PUBLIC_META_API_BASE_URL=/api
+ENV WEB_SUITE4_EMBED_ORIGINS=
+ENV WEB_PUBLIC_META_AUTHORIZATION_ORIGINS=
 USER 101:101
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

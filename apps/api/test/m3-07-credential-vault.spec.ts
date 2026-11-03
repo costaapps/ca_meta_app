@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { CredentialKeyRingConfiguration, EnvironmentValidationError, validateEnvironment } from '../src/config/environment.js';
-import { CredentialVaultDeniedError, CredentialVaultIntegrityError, CredentialVaultKeyUnavailableError } from '../src/credentials/credential-vault.errors.js';
+import { CredentialVaultDeniedError, CredentialVaultIntegrityError, CredentialVaultKeyUnavailableError,
+  CredentialVaultOperationError, CredentialVaultRotationError } from '../src/credentials/credential-vault.errors.js';
 import { decryptCredential, encryptCredential } from '../src/credentials/credential-vault-crypto.js';
 import { ConfiguredCredentialKeyProvider } from '../src/credentials/credential-key-provider.js';
 import { CredentialVaultService, FailClosedCredentialVaultAuthorization } from '../src/credentials/credential-vault.service.js';
@@ -39,8 +40,13 @@ class InMemoryCredentialVaultRepository implements CredentialVaultRepository {
   readonly auditRows: CredentialVaultAuditEntry[] = [];
   readonly rotations = new Map<string, CredentialVaultRotationState>();
   private readonly leases = new Map<string, CredentialRotationLease>();
+  private activeKeyVersion: string | undefined;
+  private readonly usedKeyVersions = new Set<string>();
 
   async store(context: CredentialBinding, envelope: EncryptedCredential, audit: CredentialVaultAuditEntry): Promise<void> {
+    this.activeKeyVersion ??= envelope.keyVersion;
+    if (this.activeKeyVersion !== envelope.keyVersion) throw new Error('credential-key-version-not-active');
+    this.usedKeyVersions.add(envelope.keyVersion);
     const previous = this.records.get(context.credentialId);
     this.records.set(context.credentialId, Object.freeze({ ...context, envelope, version: (previous?.version ?? 0) + 1 }));
     this.auditRows.push(audit);
@@ -53,11 +59,23 @@ class InMemoryCredentialVaultRepository implements CredentialVaultRepository {
   }
   async audit(entry: CredentialVaultAuditEntry): Promise<void> { this.auditRows.push(entry); }
   async ensureRotation(target: string): Promise<CredentialVaultRotationState> {
+    if (this.activeKeyVersion && this.activeKeyVersion !== target) {
+      if (this.usedKeyVersions.has(target)) throw new Error('credential-key-version-reuse-denied');
+      const previous = this.rotations.get(this.activeKeyVersion);
+      if (previous?.state === 'RUNNING') {
+        this.rotations.set(this.activeKeyVersion, Object.freeze({ ...previous, state: 'PAUSED', lastSafeErrorCode: 'ROTATION_FAILED' }));
+      }
+      this.leases.delete(this.activeKeyVersion);
+      this.usedKeyVersions.add(this.activeKeyVersion);
+    }
+    this.activeKeyVersion = target;
+    this.usedKeyVersions.add(target);
     const current = this.rotations.get(target) ?? Object.freeze({ targetKeyVersion: target, state: 'RUNNING' as const, cursorCredentialId: null, lastSafeErrorCode: null });
     this.rotations.set(target, current);
     return current;
   }
   async acquireRotationLease(target: string, owner: string, token: string): Promise<CredentialRotationLease | undefined> {
+    if (this.activeKeyVersion !== target) throw new Error('stale-rotation-key-version');
     const state = this.rotations.get(target);
     if (!state || state.state !== 'RUNNING' || this.leases.has(target)) return undefined;
     const lease = Object.freeze({ targetKeyVersion: target, owner, token });
@@ -67,6 +85,7 @@ class InMemoryCredentialVaultRepository implements CredentialVaultRepository {
   async rotateBatch(lease: CredentialRotationLease, batchSize: number,
     transform: (record: StoredCredential) => EncryptedCredential,
     auditFor: (record: StoredCredential, newKeyVersion: string) => CredentialVaultAuditEntry): Promise<CredentialRotationBatchResult> {
+    if (this.activeKeyVersion !== lease.targetKeyVersion) throw new Error('stale-rotation-key-version');
     const currentLease = this.leases.get(lease.targetKeyVersion);
     assert.equal(currentLease?.token, lease.token);
     const state = this.rotations.get(lease.targetKeyVersion);
@@ -100,6 +119,7 @@ class InMemoryCredentialVaultRepository implements CredentialVaultRepository {
     return state;
   }
   async resumeRotation(target: string): Promise<CredentialVaultRotationState> {
+    if (this.activeKeyVersion !== target) throw new Error('stale-rotation-key-version');
     const state = await this.getRotationState(target);
     const resumed = Object.freeze({ ...state, state: state.state === 'PAUSED' ? 'RUNNING' as const : state.state, lastSafeErrorCode: null });
     this.rotations.set(target, resumed);
@@ -160,41 +180,73 @@ test('vault authorizes store/use, audits metadata only, fails closed without a k
     oldWriter.store({ ...first, ...actor, secret: 'synthetic-credential-A' }),
     oldWriter.store({ ...second, ...actor, secret: 'synthetic-credential-B' }),
   ]);
+  await oldWriter.beginRotation(actor);
 
   let exposed = '';
   const activeKeys = new StaticKeyProvider('v2', new Map([['v1', v1], ['v2', v2]]));
   const vault = new CredentialVaultService(repo, activeKeys, new AllowVaultAccess());
-  const value = await vault.withCredential({ ...first, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => {
-    exposed = secret;
-    return 'provider-result-reference';
-  });
-  assert.equal(value, 'provider-result-reference');
+  const callbackReturnsSecret = (async (secret: string) => secret) as unknown as (secret: string) => Promise<void>;
+  const value = await vault.withCredential({ ...first, ...actor, operation: 'MESSAGE_SEND' }, callbackReturnsSecret);
+  assert.equal(value, undefined, 'vault never returns a callback result that could contain the plaintext');
+  await vault.withCredential({ ...first, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => { exposed = secret; });
   assert.equal(exposed, 'synthetic-credential-A');
   assert.ok(!JSON.stringify(repo.auditRows).includes('synthetic-credential-A'));
 
   const noKeys = new CredentialVaultService(repo, new StaticKeyProvider(undefined, new Map()), new AllowVaultAccess());
   await assert.rejects(noKeys.store({ ...binding(), ...actor, secret: 'synthetic-no-key' }), CredentialVaultKeyUnavailableError);
-  await assert.rejects(noKeys.withCredential({ ...first, ...actor, operation: 'MESSAGE_SEND' }, async () => 'unreachable'), CredentialVaultKeyUnavailableError);
+  await assert.rejects(noKeys.withCredential({ ...first, ...actor, operation: 'MESSAGE_SEND' }, async () => {}), CredentialVaultKeyUnavailableError);
   const noAccess = new CredentialVaultService(repo, activeKeys, new FailClosedCredentialVaultAuthorization());
-  await assert.rejects(noAccess.withCredential({ ...first, ...actor, operation: 'MESSAGE_SEND' }, async () => 'unreachable'), CredentialVaultDeniedError);
+  await assert.rejects(noAccess.withCredential({ ...first, ...actor, operation: 'MESSAGE_SEND' }, async () => {}), CredentialVaultDeniedError);
   const authorizedVault = new CredentialVaultService(repo, activeKeys, new AllowVaultAccess());
   const rotation = await authorizedVault.beginRotation(actor);
   await assert.rejects(noAccess.rotationState(actor, rotation.targetKeyVersion), CredentialVaultDeniedError);
   const firstBatch = await authorizedVault.rotateNextBatch(actor, rotation.targetKeyVersion, 1);
   assert.equal(firstBatch.processed, 1);
   assert.equal(firstBatch.done, false);
+  const lateBinding = { ...binding(), credentialId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' };
+  await assert.rejects(
+    oldWriter.store({ ...lateBinding, ...actor, secret: 'synthetic-stale-writer-token' }),
+    CredentialVaultOperationError,
+  );
 
-  // A new service instance represents a worker restart; the repository keeps the committed cursor.
-  const restartedWorker = new CredentialVaultService(repo, activeKeys, new AllowVaultAccess());
-  const resumedBatch = await restartedWorker.rotateNextBatch(actor, rotation.targetKeyVersion, 1);
+  const staleV2Lease = await repo.acquireRotationLease(rotation.targetKeyVersion, 'stale-v2-worker', randomUUID());
+  assert.ok(staleV2Lease);
+  const v3 = randomBytes(32);
+  const activeKeysV3 = new StaticKeyProvider('v3', new Map([['v1', v1], ['v2', v2], ['v3', v3]]));
+  const v3Vault = new CredentialVaultService(repo, activeKeysV3, new AllowVaultAccess());
+  const rotationV3 = await v3Vault.beginRotation(actor);
+  let staleTransformCalls = 0;
+  await assert.rejects(repo.rotateBatch(staleV2Lease, 1, (record) => {
+    staleTransformCalls += 1;
+    return record.envelope;
+  }, (record, keyVersion) => ({
+    tenantId: record.tenantId, credentialId: record.credentialId, actorRef: actor.actorRef,
+    correlationId: actor.correlationId, action: 'ROTATE', operation: 'CREDENTIAL_KEY_ROTATION', keyVersion,
+  })));
+  assert.equal(staleTransformCalls, 0, 'a v2 worker cannot transform after v3 becomes active');
+  await assert.rejects(authorizedVault.resumeRotation(actor, rotation.targetKeyVersion), CredentialVaultRotationError);
+
+  const v3FirstBatch = await v3Vault.rotateNextBatch(actor, rotationV3.targetKeyVersion, 1);
+  assert.equal(v3FirstBatch.processed, 1);
+  assert.equal(v3FirstBatch.done, false);
+  const restartedWorker = new CredentialVaultService(repo, activeKeysV3, new AllowVaultAccess());
+  const resumedBatch = await restartedWorker.rotateNextBatch(actor, rotationV3.targetKeyVersion, 1);
   assert.equal(resumedBatch.processed, 1);
   assert.equal(resumedBatch.done, true);
-  assert.equal((await restartedWorker.rotationState(actor, rotation.targetKeyVersion)).state, 'COMPLETED');
-  const recovered = await Promise.all([first, second].map((context) =>
-    restartedWorker.withCredential({ ...context, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => secret)));
+  assert.equal((await restartedWorker.rotationState(actor, rotationV3.targetKeyVersion)).state, 'COMPLETED');
+  await assert.rejects(oldWriter.beginRotation(actor), CredentialVaultRotationError, 'a retired v1 cannot become active again');
+  await assert.rejects(oldWriter.resumeRotation(actor, 'v1'), CredentialVaultRotationError);
+  await assert.rejects(
+    oldWriter.store({ ...lateBinding, ...actor, secret: 'synthetic-stale-writer-after-completion' }),
+    CredentialVaultOperationError,
+  );
+  const recovered: string[] = [];
+  await Promise.all([first, second].map((context) =>
+    restartedWorker.withCredential({ ...context, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => { recovered.push(secret); })));
   assert.deepEqual(new Set(recovered), new Set(['synthetic-credential-A', 'synthetic-credential-B']));
   assert.ok(repo.auditRows.filter((entry) => entry.action === 'ROTATE').length >= 2);
   assert.ok(!JSON.stringify([...repo.records.values()]).includes('synthetic-credential-A'));
   v1.fill(0);
   v2.fill(0);
+  v3.fill(0);
 });

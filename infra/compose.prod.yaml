@@ -3,6 +3,8 @@ services:
     image: ${CA_META_WEB_IMAGE:?Set CA_META_WEB_IMAGE from the release lock to a registry reference pinned by sha256 digest}
     environment:
       WEB_PUBLIC_META_API_BASE_URL: ${WEB_PUBLIC_META_API_BASE_URL:-/api}
+      WEB_SUITE4_EMBED_ORIGINS: ${WEB_SUITE4_EMBED_ORIGINS:-}
+      WEB_PUBLIC_META_AUTHORIZATION_ORIGINS: ${WEB_PUBLIC_META_AUTHORIZATION_ORIGINS:-}
 
   api:
     image: ${CA_META_API_IMAGE:?Set CA_META_API_IMAGE from the release lock to a registry reference pinned by sha256 digest}

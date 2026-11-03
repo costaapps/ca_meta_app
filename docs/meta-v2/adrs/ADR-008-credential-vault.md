@@ -23,6 +23,7 @@ M3.06 persiste metadados de credencial e grants com constraints de tenant, mas n
 - Manter `CredentialKeyProvider` como porta. KMS/secret manager pode substituí-la sem mudar o formato lógico do domínio, mas a implementação local não afirma validar um serviço gerenciado.
 - Toda operação exige autorização backend-side. A aplicação entrega a chave a um callback interno e nunca tem controller/DTO de decrypt. A instalação padrão usa autorização fail-closed até a política de serviço confiável ser conectada.
 - Rotação é um trabalho global auditado, aditivo e retomável. Lease com token de fencing impede processadores concorrentes; cada lote atualiza envelopes e cursor na mesma transação. Falha pausa sem avançar o checkpoint; chave antiga é necessária para retomar.
+- O schema mantém uma versão de chave ativa persistida. Cada `store` confirma essa versão sob lock compartilhado; `beginRotation` avança a barreira na mesma transação em que registra o trabalho, de modo que réplicas antigas terminam antes da troca ou são recusadas depois dela.
 - Auditoria guarda somente tenant, credential, ator opaco, ação, operação, versão da chave, correlação e horário. Retenção e exclusão seguem M3.10.
 
 ## Consequências e limites

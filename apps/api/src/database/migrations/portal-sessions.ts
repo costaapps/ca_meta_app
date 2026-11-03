@@ -105,16 +105,30 @@ const preAuth = tableStep(
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
 );
 
+const portalSessionColumns = [
+  'id', 'principal_id', 'tenant_id', 'secret_hash', 'csrf_token_hash', 'context_ref_hash', 'context_version',
+  'created_at', 'last_seen_at', 'idle_expires_at', 'absolute_expires_at', 'revoked_at',
+] as const;
+const portalSessionColumnsWithEntryMode = [
+  'id', 'principal_id', 'tenant_id', 'secret_hash', 'csrf_token_hash', 'context_ref_hash', 'context_version',
+  'entry_mode', 'created_at', 'last_seen_at', 'idle_expires_at', 'absolute_expires_at', 'revoked_at',
+] as const;
+const portalSessionIndexes = [
+  { name: 'PRIMARY', columns: ['id'], unique: true },
+  { name: 'uq_ca_meta_portal_session_secret', columns: ['secret_hash'], unique: true },
+  { name: 'ix_ca_meta_portal_session_principal', columns: ['principal_id', 'revoked_at', 'created_at'], unique: false },
+  { name: 'ix_ca_meta_portal_session_expiry', columns: ['idle_expires_at', 'absolute_expires_at'], unique: false },
+] as const;
+const portalSessionForeignKeys = [
+  { name: 'fk_ca_meta_portal_session_principal', columns: ['principal_id'], table: 'ca_meta_principals', referencedColumns: ['id'] },
+  { name: 'fk_ca_meta_portal_session_tenant', columns: ['tenant_id'], table: 'ca_meta_tenants', referencedColumns: ['id'] },
+] as const;
+
 const sessions = tableStep(
   'create-portal-sessions',
   'ca_meta_portal_sessions',
-  ['id', 'principal_id', 'tenant_id', 'secret_hash', 'csrf_token_hash', 'context_ref_hash', 'context_version', 'created_at', 'last_seen_at', 'idle_expires_at', 'absolute_expires_at', 'revoked_at'],
-  [
-    { name: 'PRIMARY', columns: ['id'], unique: true },
-    { name: 'uq_ca_meta_portal_session_secret', columns: ['secret_hash'], unique: true },
-    { name: 'ix_ca_meta_portal_session_principal', columns: ['principal_id', 'revoked_at', 'created_at'], unique: false },
-    { name: 'ix_ca_meta_portal_session_expiry', columns: ['idle_expires_at', 'absolute_expires_at'], unique: false },
-  ],
+  portalSessionColumns,
+  portalSessionIndexes,
   `CREATE TABLE IF NOT EXISTS ca_meta_portal_sessions (
     id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     principal_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -139,11 +153,18 @@ const sessions = tableStep(
     CONSTRAINT fk_ca_meta_portal_session_tenant FOREIGN KEY (tenant_id) REFERENCES ca_meta_tenants (id)
       ON UPDATE RESTRICT ON DELETE RESTRICT
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
-  [
-    { name: 'fk_ca_meta_portal_session_principal', columns: ['principal_id'], table: 'ca_meta_principals', referencedColumns: ['id'] },
-    { name: 'fk_ca_meta_portal_session_tenant', columns: ['tenant_id'], table: 'ca_meta_tenants', referencedColumns: ['id'] },
-  ],
+  portalSessionForeignKeys,
 );
+
+/** Verify the v5 portal-session structure after the additive v9 entry_mode migration. */
+export async function verifyPortalSessionTableWithEntryMode(queryRunner: QueryRunner): Promise<boolean> {
+  const table = 'ca_meta_portal_sessions';
+  if (!(await tableExists(queryRunner, table))) return false;
+  await assertExpectedColumns(queryRunner, table, portalSessionColumnsWithEntryMode);
+  await verifyIndexes(queryRunner, table, portalSessionIndexes);
+  await verifyForeignKeys(queryRunner, table, portalSessionForeignKeys);
+  return true;
+}
 
 const ticketJtiColumns = ['issuer', 'jti_hash', 'pre_auth_id', 'session_id', 'ticket_expires_at', 'consumed_at'] as const;
 const ticketJtiIndexes = [

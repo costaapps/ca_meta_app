@@ -2,8 +2,12 @@ import { Routes } from '@angular/router';
 import { ChannelListComponent } from './features/channels/pages/channel-list/channel-list.component';
 import { ChannelSetupComponent } from './features/channels/pages/channel-setup/channel-setup.component';
 import { ChannelTemplatesComponent } from './features/channels/pages/channel-templates/channel-templates.component';
+import { EmbedShellComponent } from './features/embed/embed-shell.component';
+import { OAuthReturnComponent } from './features/embed/oauth-return.component';
 
 export const routes: Routes = [
+  { path: 'embed', component: EmbedShellComponent },
+  { path: 'oauth/return', component: OAuthReturnComponent },
   {
     path: 'setup',
     component: ChannelSetupComponent,
