@@ -123,6 +123,7 @@ jobs:
             artifacts/test-results/m2-05-durable-work.*
             artifacts/test-results/m3-06-meta-assets.*
             artifacts/test-results/m3-02-portal-session.*
+            artifacts/test-results/m3-07-credential-vault.*
           if-no-files-found: warn
           retention-days: 7
 
