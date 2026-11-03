@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist-test",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/meta-assets/meta-assets.module.ts", "test/m3-08-credential-resolver.spec.ts"],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}
