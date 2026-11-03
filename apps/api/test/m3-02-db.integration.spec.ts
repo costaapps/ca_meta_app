@@ -422,16 +422,32 @@ test('MariaDB persists one ticket session and recovers only for its original bro
       identityA.onApplicationShutdown(), identityB.onApplicationShutdown(),
     ]);
     try {
-      for (const jtiHash of jtiHashes) {
-        await admin.query('DELETE FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?', [issuer, jtiHash]);
+      const cleanup = await createConnection({
+        host: migrationEnvironment.database.host,
+        port: migrationEnvironment.database.port,
+        database: migrationEnvironment.database.name,
+        user: migrationEnvironment.apiDatabaseUser,
+        password: apiPassword,
+        connectTimeout: migrationEnvironment.database.connectTimeoutMs,
+        multipleStatements: false,
+        dateStrings: true,
+        charset: 'utf8mb4',
+        timezone: 'Z',
+      });
+      try {
+        for (const jtiHash of jtiHashes) {
+          await cleanup.query('DELETE FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?', [issuer, jtiHash]);
+        }
+        await cleanup.query('DELETE FROM ca_meta_portal_sessions WHERE principal_id = ? AND tenant_id = ?', [principalId, tenantId]);
+        for (const challengeHash of challengeHashes) {
+          await cleanup.query('DELETE FROM ca_meta_portal_pre_auth WHERE challenge_hash = ?', [challengeHash]);
+        }
+        await cleanup.query('DELETE FROM ca_meta_memberships WHERE tenant_id = ? AND principal_id = ?', [tenantId, principalId]);
+        await cleanup.query('DELETE FROM ca_meta_principals WHERE id = ?', [principalId]);
+        await cleanup.query('DELETE FROM ca_meta_tenants WHERE id = ?', [tenantId]);
+      } finally {
+        await cleanup.end();
       }
-      await admin.query('DELETE FROM ca_meta_portal_sessions WHERE principal_id = ? AND tenant_id = ?', [principalId, tenantId]);
-      for (const challengeHash of challengeHashes) {
-        await admin.query('DELETE FROM ca_meta_portal_pre_auth WHERE challenge_hash = ?', [challengeHash]);
-      }
-      await admin.query('DELETE FROM ca_meta_memberships WHERE tenant_id = ? AND principal_id = ?', [tenantId, principalId]);
-      await admin.query('DELETE FROM ca_meta_principals WHERE id = ?', [principalId]);
-      await admin.query('DELETE FROM ca_meta_tenants WHERE id = ?', [tenantId]);
     } finally {
       await admin.end();
     }
