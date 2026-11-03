@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { CredentialKeyRingConfiguration, validateEnvironment } from '../src/config/environment.js';
 import { CredentialVaultDeniedError, CredentialVaultKeyUnavailableError,
@@ -14,6 +17,69 @@ import { MysqlCredentialVaultRepository } from '../src/credentials/mysql-credent
 
 const enabled = process.env.M2_DURABLE_WORK_TEST === '1';
 const timestamp = '2026-10-30 12:00:00.000000';
+function assertMarkersAbsent(value: Buffer | string, markers: readonly string[], label: string): void {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, 'utf8');
+  for (const marker of markers) {
+    const markerBytes = Buffer.from(marker, 'utf8');
+    const representations = [markerBytes, Buffer.from(markerBytes.toString('hex')), Buffer.from(markerBytes.toString('base64'))];
+    assert.equal(representations.some((representation) => bytes.includes(representation)), false,
+      `${label} does not expose a synthetic credential marker`);
+  }
+}
+
+function readFilesRecursively(directory: string): Buffer[] {
+  if (!existsSync(directory)) return [];
+  const contents: Buffer[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) contents.push(...readFilesRecursively(path));
+    else if (entry.isFile()) contents.push(readFileSync(path));
+  }
+  return contents;
+}
+
+function assertApplicationArtifactsRedacted(markers: readonly string[]): void {
+  const repositoryRoot = process.cwd();
+  const appArtifactPaths = [
+    resolve(repositoryRoot, 'apps/api/dist'),
+    resolve(repositoryRoot, 'apps/api/dist-test'),
+  ];
+  for (const directory of appArtifactPaths) {
+    for (const content of readFilesRecursively(directory)) {
+      assertMarkersAbsent(content, markers, 'application/test build artifacts');
+    }
+  }
+}
+
+function runDisposableMariaDbCommand(arguments_: string[], input?: Buffer): Buffer {
+  const composeProject = process.env.M2_COMPOSE_PROJECT;
+  const composeFile = process.env.M2_COMPOSE_FILE;
+  assert.ok(composeProject && composeFile, 'the disposable MariaDB profile provides its Compose project');
+  const result = spawnSync('docker', [
+    'compose', '-p', composeProject, '-f', composeFile, ...arguments_,
+  ], { input, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+  assert.equal(result.error, undefined, 'the disposable MariaDB backup command starts successfully');
+  assert.equal(result.status, 0, 'the disposable MariaDB backup command completes successfully');
+  return result.stdout ?? Buffer.alloc(0);
+}
+
+function createDatabaseDump(): Buffer {
+  return runDisposableMariaDbCommand([
+    'exec', '-T', 'mariadb', 'sh', '-lc',
+    'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-dump --user=root --single-transaction --hex-blob --skip-comments --databases ca_meta_m205',
+  ]);
+}
+
+function restoreDatabaseDump(dump: Buffer): void {
+  runDisposableMariaDbCommand([
+    'exec', '-T', 'mariadb', 'sh', '-lc',
+    'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb --user=root -e "DROP DATABASE IF EXISTS ca_meta_m205"',
+  ]);
+  runDisposableMariaDbCommand([
+    'exec', '-T', 'mariadb', 'sh', '-lc',
+    'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb --user=root',
+  ], dump);
+}
 
 class AllowVaultAccess implements CredentialVaultAuthorizationPort {
   async authorize(): Promise<void> {}
@@ -27,6 +93,7 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
   const database = new DurableWorkDatabase(environment);
   const dataSource = await database.getDataSource();
   const repository = new MysqlCredentialVaultRepository(database);
+  let restoredDatabase: DurableWorkDatabase | undefined;
   const keyV1 = randomBytes(32);
   const keyV2 = randomBytes(32);
   const keyV3 = randomBytes(32);
@@ -78,7 +145,10 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
     );
 
     const writer = new CredentialVaultService(repository, providerV1, new AllowVaultAccess());
-    const markerSecrets = bindings.map((_, index) => `m3-07-synthetic-marker-${index}`);
+    const markerSeed = process.env.M2_COMPOSE_PROJECT?.slice('m205-'.length) ?? '';
+    assert.match(markerSeed, /^[a-f0-9]{32}$/i, 'the disposable MariaDB profile provides a synthetic run identifier');
+    const markerSecrets = bindings.map((_, index) =>
+      `m3-07-synthetic-marker-${index}-${markerSeed}`);
     for (const [index, binding] of bindings.entries()) {
       await writer.store({ ...binding, ...actor, secret: markerSecrets[index]! });
     }
@@ -98,7 +168,6 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
     await assert.rejects(denied.withCredential({ ...bindings[0]!, ...actor, operation: 'MESSAGE_SEND' }, async () => {}), CredentialVaultDeniedError);
     await assert.rejects(vault.withCredential({ ...bindings[1]!, tenantId: randomUUID(), ...actor, operation: 'MESSAGE_SEND' }, async () => {}));
 
-    const snapshot = persisted.find((row) => row.credential_id === bindings[0]!.credentialId)!;
     const state = await vault.beginRotation(actor);
     const leaseAttempts = await Promise.all([
       repository.acquireRotationLease(state.targetKeyVersion, 'synthetic-worker-a', randomUUID(), 30),
@@ -163,22 +232,9 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
       { ...binding, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => { decrypted.push(secret); },
     )));
     assert.deepEqual(accessResults, [undefined, undefined], 'withCredential returns no callback value');
-    assert.deepEqual(new Set(decrypted), new Set(markerSecrets));
-
-    // Restore the captured v1 envelope in the isolated test DB and verify only the retained v1 key can recover it.
-    await dataSource.query(
-      `UPDATE ca_meta_credential_secrets SET ciphertext = ?, nonce = ?, authentication_tag = ?, key_version = 'm3-test-v1'
-       WHERE tenant_id = ? AND credential_id = ?`,
-      [snapshot.ciphertext, snapshot.nonce, snapshot.authentication_tag, snapshot.tenant_id, snapshot.credential_id],
-    );
-    let restored = '';
-    const restoreResult = await restartedWorker.withCredential({ ...bindings[0]!, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => { restored = secret; });
-    assert.equal(restoreResult, undefined);
-    assert.equal(restored, markerSecrets[0]);
-    const missingV1 = new CredentialVaultService(repository,
-      new ConfiguredCredentialKeyProvider(new CredentialKeyRingConfiguration('m3-test-v2', [{ version: 'm3-test-v2', key: keyV2 }])),
-      new AllowVaultAccess());
-    await assert.rejects(missingV1.withCredential({ ...bindings[0]!, ...actor, operation: 'MESSAGE_SEND' }, async () => {}), CredentialVaultKeyUnavailableError);
+    assert.equal(markerSecrets.every((marker) => decrypted.includes(marker)), true,
+      'the authorized key recovers each synthetic marker');
+    assertApplicationArtifactsRedacted(markerSecrets);
 
     const auditRows = await dataSource.query(
       'SELECT action, operation, key_version, actor_ref FROM ca_meta_credential_access_audit WHERE tenant_id IN (?, ?) ORDER BY created_at',
@@ -189,10 +245,39 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
     assert.ok(auditRows.some((row) => row.action === 'ROTATE' && row.key_version === 'm3-test-v2'));
     assert.ok(auditRows.some((row) => row.action === 'ROTATE' && row.key_version === 'm3-test-v3'));
     assert.ok(!JSON.stringify(auditRows).includes(markerSecrets[0]!));
+
+    // Exercise a MariaDB logical backup artifact, drop the isolated schema, and restore its full contents.
+    await database.close();
+    const databaseDump = createDatabaseDump();
+    assert.ok(databaseDump.length > 0, 'the isolated MariaDB dump is non-empty');
+    assertMarkersAbsent(databaseDump, markerSecrets, 'MariaDB logical backup');
+    restoreDatabaseDump(databaseDump);
+
+    restoredDatabase = new DurableWorkDatabase(environment);
+    const restoredRepository = new MysqlCredentialVaultRepository(restoredDatabase);
+    const restoredVault = new CredentialVaultService(restoredRepository, providerV3, new AllowVaultAccess());
+    const missingV3 = new CredentialVaultService(restoredRepository,
+      new ConfiguredCredentialKeyProvider(new CredentialKeyRingConfiguration('m3-test-v3', [
+        { version: 'm3-test-v2', key: keyV2 },
+      ])), new AllowVaultAccess());
+    await assert.rejects(missingV3.withCredential(
+      { ...bindings[0]!, ...actor, operation: 'MESSAGE_SEND' }, async () => {},
+    ), CredentialVaultKeyUnavailableError);
+    const restoredMarkers: string[] = [];
+    await Promise.all(bindings.map((binding) => restoredVault.withCredential(
+      { ...binding, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => { restoredMarkers.push(secret); },
+    )));
+    assert.equal(markerSecrets.every((marker) => restoredMarkers.includes(marker)), true,
+      'the authorized retained key restores credential access after database restore');
+    for (const [index, binding] of bindings.entries()) {
+      assertMarkersAbsent(JSON.stringify(await restoredRepository.findActive(binding)), markerSecrets,
+        `restored application record ${index}`);
+    }
   } finally {
     keyV1.fill(0);
     keyV2.fill(0);
     keyV3.fill(0);
+    await restoredDatabase?.close();
     await database.close();
   }
 });

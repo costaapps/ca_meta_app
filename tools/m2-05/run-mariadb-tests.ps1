@@ -42,7 +42,7 @@ function Invoke-Checked {
 }
 
 $managedEnvironment = @(
-  'M2_ROOT_PASSWORD', 'M2_DB_PORT', 'M2_INIT_SQL_PATH',
+  'M2_ROOT_PASSWORD', 'M2_DB_PORT', 'M2_INIT_SQL_PATH', 'M2_COMPOSE_PROJECT', 'M2_COMPOSE_FILE',
   'MIGRATION_DATABASE_HOST', 'MIGRATION_DATABASE_PORT', 'MIGRATION_DATABASE_NAME',
   'MIGRATION_DATABASE_USER', 'MIGRATION_DATABASE_PASSWORD', 'MIGRATION_DATABASE_CONNECT_TIMEOUT_MS',
   'MIGRATION_LOCK_TIMEOUT_SECONDS', 'MIGRATION_STATEMENT_TIMEOUT_SECONDS', 'MIGRATION_MIN_SUPPORTED_API_VERSION',
@@ -68,6 +68,8 @@ Set-Content -LiteralPath $initSqlPath -Value $sql -Encoding Ascii
 $env:M2_ROOT_PASSWORD = $rootPassword
 $env:M2_DB_PORT = [string]$dbPort
 $env:M2_INIT_SQL_PATH = $initSqlPath.Replace('\', '/')
+$env:M2_COMPOSE_PROJECT = $composeProject
+$env:M2_COMPOSE_FILE = $composeFile
 $env:MIGRATION_DATABASE_HOST = '127.0.0.1'
 $env:MIGRATION_DATABASE_PORT = [string]$dbPort
 $env:MIGRATION_DATABASE_NAME = 'ca_meta_m205'
@@ -128,6 +130,7 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-07-credential-vault.lcov.info',
       'apps/api/dist-test/test/m3-07-credential-vault.integration.spec.js'
     )
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m3-07/check-vault-artifact-redaction.mjs')
   } finally { Pop-Location }
 } finally {
   if (-not $keepEnvironment) {

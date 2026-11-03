@@ -12,7 +12,7 @@ The script sets up separate least-privilege synthetic migrator and runtime accou
 
 The M3.06 fixture covers concurrent upsert/shared assets, confirmed scopes and grants, typed Instagram-to-Page relation persistence, omitted-grants preservation versus explicit revocation, cross-tenant FK rejection and quarantine, exact external IDs above 2^53, and rollback after outbox staging. Its JUnit and LCOV reports are emitted as `m3-06-meta-assets.*` and uploaded by the M2.08 MariaDB workflow.
 
-The M3.07 fixture uses runtime-generated synthetic keys/markers to cover tenant-bound ciphertext, metadata-only audit, one active rotation lease, checkpoint resume after worker recreation, and recovery of a restored envelope with a retained key version. Its reports are emitted as `m3-07-credential-vault.*`; this local envelope recovery check does not certify a production database backup or key custody procedure.
+The M3.07 fixture uses runtime-generated synthetic keys/markers to cover tenant-bound ciphertext, metadata-only audit, one active rotation lease, checkpoint resume after worker recreation, and a full disposable MariaDB logical dump/drop/restore round trip. It confirms that the dump, persisted ciphertext rows, API/test build artifacts, and emitted JUnit/LCOV reports do not contain a marker in plaintext; a key ring missing the restored envelope's version is denied, while the authorized retained key decrypts the restored records. Reports are emitted as `m3-07-credential-vault.*`; the local exercise does not certify production backup access controls, physical media, KMS custody, retention, or restore procedures.
 
 The MariaDB scenario checks:
 
