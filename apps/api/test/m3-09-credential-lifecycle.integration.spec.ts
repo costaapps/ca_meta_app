@@ -38,6 +38,10 @@ type M309DiagnosticStage =
   | 'fixture_setup'
   | 'claim'
   | 'claim_ambiguous_scan'
+  | 'claim_ambiguous_job_select'
+  | 'claim_ambiguous_outbox_update'
+  | 'claim_attempt_update'
+  | 'claim_dead_letter_insert'
   | 'claim_lane_init'
   | 'claim_dispatch_lock'
   | 'claim_candidates'
@@ -79,6 +83,10 @@ function safeMariaDbErrorCode(error: unknown): string {
   if (error instanceof Error) {
     if (error.message === 'Invalid durable job payload.') return 'INVALID_DURABLE_JOB_PAYLOAD';
     if (error.message === 'Job lane dispatch cursor could not be locked.') return 'JOB_LANE_DISPATCH_MISSING';
+    if (error.message === 'Expired outbox job has an invalid payload.') return 'INVALID_EXPIRED_OUTBOX_PAYLOAD';
+    if (error.message === 'Expired ambiguous outbox job has no pending event projection.') {
+      return 'MISSING_EXPIRED_OUTBOX_PROJECTION';
+    }
   }
   const wrapped = error as { driverError?: unknown; cause?: unknown };
   return codeFrom(wrapped.driverError) ?? codeFrom(wrapped.cause) ?? 'UNCLASSIFIED';
@@ -94,6 +102,7 @@ function safeDiagnosticErrorType(error: unknown): 'Error' | 'TypeError' | 'Synta
 function safeClaimQueryStage(query: unknown): M309DiagnosticStage {
   const normalized = typeof query === 'string' ? query.trimStart().toLowerCase() : '';
   if (normalized.startsWith('select id, tenant_id, attempt from ca_meta_jobs')) return 'claim_ambiguous_scan';
+  if (normalized.startsWith('select id, job_type, payload_json, attempt from ca_meta_jobs')) return 'claim_ambiguous_job_select';
   if (normalized.startsWith('insert ignore into ca_meta_job_lane_dispatch')) return 'claim_lane_init';
   if (normalized.startsWith('select last_tenant_id from ca_meta_job_lane_dispatch')) return 'claim_dispatch_lock';
   if (normalized.startsWith('select ready.tenant_id')) return 'claim_candidates';
@@ -103,7 +112,10 @@ function safeClaimQueryStage(query: unknown): M309DiagnosticStage {
     return normalized.includes('resource_scope_ref') ? 'claim_resource_count' : 'claim_active_count';
   }
   if (normalized.startsWith('update ca_meta_jobs')) return 'claim_job_update';
+  if (normalized.startsWith('update ca_meta_outbox_events')) return 'claim_ambiguous_outbox_update';
+  if (normalized.startsWith('update ca_meta_job_attempts')) return 'claim_attempt_update';
   if (normalized.startsWith('insert into ca_meta_job_attempts')) return 'claim_attempt_insert';
+  if (normalized.startsWith('insert into ca_meta_job_dead_letters')) return 'claim_dead_letter_insert';
   if (normalized.startsWith('update ca_meta_job_lane_dispatch')) return 'claim_cursor_update';
   return 'claim_other_query';
 }
