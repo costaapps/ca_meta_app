@@ -10,6 +10,7 @@
     "build": "nest build",
     "migrate:deploy": "node dist/database/migrations/cli.js deploy",
     "migrate:status": "node dist/database/migrations/cli.js status",
+    "test:m3-08": "node ../../tools/m3-08/run-focused-test.mjs",
     "lint": "node ../../tools/m2-08/lint-api-boundary.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.build.json && tsc --noEmit -p tsconfig.test.json",
     "test": "npm run build && tsc -p tsconfig.test.json && node ../../tools/m2-08/prepare-test-reports.mjs && node --test --experimental-test-coverage --test-reporter=junit --test-reporter=lcov --test-reporter-destination=../../artifacts/test-results/api.junit.xml --test-reporter-destination=../../artifacts/test-results/api.lcov.info dist-test/test/*.spec.js"

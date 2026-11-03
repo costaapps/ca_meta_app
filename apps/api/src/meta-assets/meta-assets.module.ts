@@ -8,6 +8,21 @@ import { ConfiguredCredentialKeyProvider } from '../credentials/credential-key-p
 import { CREDENTIAL_KEY_PROVIDER, CREDENTIAL_VAULT_AUTHORIZATION, CREDENTIAL_VAULT_REPOSITORY } from '../credentials/credential-vault.types.js';
 import { CredentialVaultService, FailClosedCredentialVaultAuthorization } from '../credentials/credential-vault.service.js';
 import { MysqlCredentialVaultRepository } from '../credentials/mysql-credential-vault.repository.js';
+import {
+  CREDENTIAL_OPERATION_POLICY,
+  CREDENTIAL_RESOLUTION_AUDIT,
+  CREDENTIAL_RESOLUTION_AUTHORIZATION,
+  CREDENTIAL_RESOLUTION_REPOSITORY,
+} from '../credentials/credential-resolver.types.js';
+import {
+  CredentialResolverService,
+  FailClosedCredentialOperationPolicy,
+  FailClosedCredentialResolutionAudit,
+  IdentityCredentialResolutionAuthorization,
+} from '../credentials/credential-resolver.service.js';
+import { MysqlCredentialResolutionRepository } from '../credentials/mysql-credential-resolver.repository.js';
+import { ServiceTenantAuthorizationService } from '../identity/identity.service.js';
+import { MysqlIdentityRepository } from '../identity/mysql-identity.repository.js';
 
 @Module({})
 export class MetaAssetsModule {
@@ -35,8 +50,39 @@ export class MetaAssetsModule {
             new CredentialVaultService(repository, keys, authorization),
           inject: [CREDENTIAL_VAULT_REPOSITORY, CREDENTIAL_KEY_PROVIDER, CREDENTIAL_VAULT_AUTHORIZATION],
         },
+        {
+          provide: CREDENTIAL_RESOLUTION_REPOSITORY,
+          useFactory: (database: DurableWorkDatabase) => new MysqlCredentialResolutionRepository(database),
+          inject: [DURABLE_WORK_DATABASE],
+        },
+        { provide: CREDENTIAL_OPERATION_POLICY, useClass: FailClosedCredentialOperationPolicy },
+        { provide: CREDENTIAL_RESOLUTION_AUDIT, useClass: FailClosedCredentialResolutionAudit },
+        {
+          provide: MysqlIdentityRepository,
+          useFactory: () => new MysqlIdentityRepository(environment.database),
+        },
+        {
+          provide: ServiceTenantAuthorizationService,
+          useFactory: (repository: MysqlIdentityRepository) => new ServiceTenantAuthorizationService(repository),
+          inject: [MysqlIdentityRepository],
+        },
+        {
+          provide: CREDENTIAL_RESOLUTION_AUTHORIZATION,
+          useFactory: (identity: ServiceTenantAuthorizationService) => new IdentityCredentialResolutionAuthorization(identity),
+          inject: [ServiceTenantAuthorizationService],
+        },
+        {
+          provide: CredentialResolverService,
+          useFactory: (repository: MysqlCredentialResolutionRepository,
+            policies: FailClosedCredentialOperationPolicy,
+            authorization: IdentityCredentialResolutionAuthorization,
+            audit: FailClosedCredentialResolutionAudit,
+            vault: CredentialVaultService) => new CredentialResolverService(repository, policies, authorization, audit, vault),
+          inject: [CREDENTIAL_RESOLUTION_REPOSITORY, CREDENTIAL_OPERATION_POLICY, CREDENTIAL_RESOLUTION_AUTHORIZATION,
+            CREDENTIAL_RESOLUTION_AUDIT, CredentialVaultService],
+        },
       ],
-      exports: [META_ASSETS_REPOSITORY, CredentialVaultService, JobsModule],
+      exports: [META_ASSETS_REPOSITORY, CredentialVaultService, CredentialResolverService, JobsModule],
     };
   }
 }
