@@ -81,7 +81,8 @@ $managedEnvironment = @(
   'MIGRATION_LOCK_TIMEOUT_SECONDS', 'MIGRATION_STATEMENT_TIMEOUT_SECONDS', 'MIGRATION_MIN_SUPPORTED_API_VERSION',
   'API_DATABASE_HOST', 'API_DATABASE_PORT', 'API_DATABASE_NAME', 'API_DATABASE_USER', 'API_DATABASE_PASSWORD',
   'API_DATABASE_CONNECT_TIMEOUT_MS', 'API_PORT', 'API_BIND_ADDRESS', 'API_ALLOWED_HOSTS', 'API_TRUSTED_PROXIES',
-  'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST', 'M3_02_DB_TEST', 'M3_09_TEST'
+  'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST', 'M3_02_DB_TEST', 'M3_09_TEST',
+  'M3_TEST_CREDENTIAL_KEY_V3'
 )
 $previousEnvironment = @{}
 foreach ($name in $managedEnvironment) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name) }
@@ -90,6 +91,7 @@ New-Item -ItemType Directory -Path $tempRoot | Out-Null
 $rootPassword = New-HexSecret
 $apiPassword = New-HexSecret
 $migrationPassword = New-HexSecret
+$credentialKeyV3 = New-HexSecret
 $sql = @"
 CREATE USER 'ca_meta_migrator'@'%' IDENTIFIED BY '$migrationPassword';
 GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES, TRIGGER ON ca_meta_m205.* TO 'ca_meta_migrator'@'%';
@@ -118,6 +120,7 @@ $env:API_DATABASE_NAME = 'ca_meta_m205'
 $env:API_DATABASE_USER = 'ca_meta_api'
 $env:API_DATABASE_PASSWORD = $apiPassword
 $env:M2_API_DATABASE_PASSWORD = $apiPassword
+$env:M3_TEST_CREDENTIAL_KEY_V3 = $credentialKeyV3
 $env:API_DATABASE_CONNECT_TIMEOUT_MS = '5000'
 $env:NODE_ENV = 'test'
 $env:API_PORT = '0'

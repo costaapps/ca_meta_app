@@ -34,8 +34,19 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
   const environment = validateEnvironment(process.env);
   const database = new DurableWorkDatabase(environment);
   const dataSource = await database.getDataSource();
-  const credentialKey = randomBytes(32);
-  const keyVersion = `m3-09-${randomUUID().slice(0, 8)}`;
+  const keyState = await dataSource.query(
+    'SELECT active_key_version FROM ca_meta_credential_vault_key_state WHERE singleton_id = 1',
+  ) as Array<{ active_key_version: string }>;
+  const configuredKeyV3 = process.env.M3_TEST_CREDENTIAL_KEY_V3;
+  if (configuredKeyV3 !== undefined) assert.match(configuredKeyV3, /^[0-9a-f]{64}$/i);
+  const activeKeyVersion = keyState[0]?.active_key_version;
+  if (activeKeyVersion !== undefined) {
+    assert.ok(configuredKeyV3, 'the shared MariaDB profile supplies the active synthetic vault key outside Git');
+    assert.equal(activeKeyVersion, 'm3-test-v3', 'the M3.07/M3.09 integration profile shares its active test key version');
+  }
+  const credentialKey = configuredKeyV3 === undefined ? randomBytes(32) : Buffer.from(configuredKeyV3, 'hex');
+  // The M2.05 profile runs M3.07 first, so both fixtures use the same key bytes/version for its persisted rows.
+  const keyVersion = activeKeyVersion ?? (configuredKeyV3 === undefined ? `m3-09-${randomUUID().slice(0, 8)}` : 'm3-test-v3');
   const secretMarker = `m3-09-synthetic-${randomUUID()}`;
   const replacementMarker = `m3-09-replacement-${randomUUID()}`;
   const tenantId = randomUUID();

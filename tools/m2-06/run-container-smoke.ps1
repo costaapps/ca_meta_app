@@ -212,7 +212,7 @@ function Test-ImageArchiveLayers {
       if ($outerEntry.Name -eq 'manifest.json') {
         $reader = [System.IO.StreamReader]::new($outerEntry.DataStream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
         try { $manifestText = $reader.ReadToEnd() } finally { $reader.Dispose() }
-        Test-AppTextContent -Name 'workspace/image-metadata.json' -Content $manifestText -ImageKind $ImageKind
+        # The manifest stores opaque config/layer digests; scan its image references below instead of treating hashes as credential text.
       } elseif ($outerEntry.Name -match '\.json$') {
         $reader = [System.IO.StreamReader]::new($outerEntry.DataStream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
         try {
@@ -232,6 +232,11 @@ function Test-ImageArchiveLayers {
   $manifestEntries = @($manifestText | ConvertFrom-Json)
   $manifestEntry = $manifestEntries | Select-Object -First 1
   Assert-True ($null -ne $manifestEntry.Config -and @($manifestEntry.Layers).Count -gt 0) "Docker save manifest is incomplete for the final $ImageKind image."
+  foreach ($imageReference in @($manifestEntry.RepoTags)) {
+    if ($null -ne $imageReference) {
+      Test-AppTextContent -Name 'workspace/image-metadata.json' -Content ([string] $imageReference) -ImageKind $ImageKind
+    }
+  }
   $configReference = ([string] $manifestEntry.Config).Replace('\', '/').TrimStart('/')
   $layerReferences = @($manifestEntry.Layers | ForEach-Object { ([string] $_).Replace('\', '/').TrimStart('/') })
 
