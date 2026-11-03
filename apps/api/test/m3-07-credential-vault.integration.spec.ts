@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { CredentialKeyRingConfiguration, validateEnvironment } from '../src/config/environment.js';
-import { CredentialVaultDeniedError, CredentialVaultKeyUnavailableError } from '../src/credentials/credential-vault.errors.js';
+import { CredentialVaultDeniedError, CredentialVaultKeyUnavailableError,
+  CredentialVaultOperationError } from '../src/credentials/credential-vault.errors.js';
 import { ConfiguredCredentialKeyProvider } from '../src/credentials/credential-key-provider.js';
 import { CredentialVaultService } from '../src/credentials/credential-vault.service.js';
 import type { CredentialVaultAuthorizationPort } from '../src/credentials/credential-vault.types.js';
@@ -36,6 +37,7 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
   const actor = { actorRef: randomUUID(), correlationId: randomUUID() };
   const tenants = [randomUUID(), randomUUID()];
   const bindings = tenants.map((tenantId) => ({ tenantId, credentialId: randomUUID(), authorizationId: randomUUID(), appConfigurationId: randomUUID(), provider: 'META' as const, environment: 'test', family: 'USER_ACCESS' }));
+  const lateBinding = { ...bindings[0]!, credentialId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' };
 
   try {
     await dataSource.query("SET time_zone = '+00:00'");
@@ -62,6 +64,12 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
         [binding.credentialId, binding.tenantId, binding.authorizationId, binding.appConfigurationId, timestamp, timestamp],
       );
     }
+    await dataSource.query(
+      `INSERT INTO ca_meta_credentials
+       (id, tenant_id, authorization_id, app_configuration_id, provider, environment, family, status, version, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'META', 'test', 'USER_ACCESS', 'ACTIVE', 1, ?, ?)`,
+      [lateBinding.credentialId, lateBinding.tenantId, lateBinding.authorizationId, lateBinding.appConfigurationId, timestamp, timestamp],
+    );
 
     const writer = new CredentialVaultService(repository, providerV1, new AllowVaultAccess());
     const markerSecrets = bindings.map((_, index) => `m3-07-synthetic-marker-${index}`);
@@ -81,8 +89,8 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
     const denied = new CredentialVaultService(repository, providerV2, {
       async authorize() { throw new Error('synthetic policy denial'); },
     });
-    await assert.rejects(denied.withCredential({ ...bindings[0]!, ...actor, operation: 'MESSAGE_SEND' }, async () => 'unreachable'), CredentialVaultDeniedError);
-    await assert.rejects(vault.withCredential({ ...bindings[1]!, tenantId: randomUUID(), ...actor, operation: 'MESSAGE_SEND' }, async () => 'unreachable'));
+    await assert.rejects(denied.withCredential({ ...bindings[0]!, ...actor, operation: 'MESSAGE_SEND' }, async () => {}), CredentialVaultDeniedError);
+    await assert.rejects(vault.withCredential({ ...bindings[1]!, tenantId: randomUUID(), ...actor, operation: 'MESSAGE_SEND' }, async () => {}));
 
     const snapshot = persisted.find((row) => row.credential_id === bindings[0]!.credentialId)!;
     const state = await vault.beginRotation(actor);
@@ -103,11 +111,22 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
     const secondBatch = await restartedWorker.rotateNextBatch(actor, state.targetKeyVersion, 1);
     assert.equal(secondBatch.processed, 1);
     assert.equal(secondBatch.done, true);
+    const staleWriter = new CredentialVaultService(repository, providerV1, new AllowVaultAccess());
+    await assert.rejects(
+      staleWriter.store({ ...lateBinding, ...actor, secret: 'm3-07-stale-replica-marker' }),
+      CredentialVaultOperationError,
+    );
+    assert.equal(Number((await dataSource.query(
+      'SELECT COUNT(*) AS count FROM ca_meta_credential_secrets WHERE tenant_id = ? AND credential_id = ?',
+      [lateBinding.tenantId, lateBinding.credentialId],
+    ) as Array<{ count: string | number }>)[0]?.count ?? 0), 0, 'a stale replica cannot write after rotation completion');
     const keyVersions = await dataSource.query('SELECT DISTINCT key_version FROM ca_meta_credential_secrets') as Array<{ key_version: string }>;
     assert.deepEqual(keyVersions.map((row) => row.key_version), ['m3-test-v2']);
-    const decrypted = await Promise.all(bindings.map((binding) => restartedWorker.withCredential(
-      { ...binding, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => secret,
+    const decrypted: string[] = [];
+    const accessResults = await Promise.all(bindings.map((binding) => restartedWorker.withCredential(
+      { ...binding, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => { decrypted.push(secret); },
     )));
+    assert.deepEqual(accessResults, [undefined, undefined], 'withCredential returns no callback value');
     assert.deepEqual(new Set(decrypted), new Set(markerSecrets));
 
     // Restore the captured v1 envelope in the isolated test DB and verify only the retained v1 key can recover it.
@@ -116,12 +135,14 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
        WHERE tenant_id = ? AND credential_id = ?`,
       [snapshot.ciphertext, snapshot.nonce, snapshot.authentication_tag, snapshot.tenant_id, snapshot.credential_id],
     );
-    const restored = await restartedWorker.withCredential({ ...bindings[0]!, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => secret);
+    let restored = '';
+    const restoreResult = await restartedWorker.withCredential({ ...bindings[0]!, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => { restored = secret; });
+    assert.equal(restoreResult, undefined);
     assert.equal(restored, markerSecrets[0]);
     const missingV1 = new CredentialVaultService(repository,
       new ConfiguredCredentialKeyProvider(new CredentialKeyRingConfiguration('m3-test-v2', [{ version: 'm3-test-v2', key: keyV2 }])),
       new AllowVaultAccess());
-    await assert.rejects(missingV1.withCredential({ ...bindings[0]!, ...actor, operation: 'MESSAGE_SEND' }, async (secret) => secret), CredentialVaultKeyUnavailableError);
+    await assert.rejects(missingV1.withCredential({ ...bindings[0]!, ...actor, operation: 'MESSAGE_SEND' }, async () => {}), CredentialVaultKeyUnavailableError);
 
     const auditRows = await dataSource.query(
       'SELECT action, operation, key_version, actor_ref FROM ca_meta_credential_access_audit WHERE tenant_id IN (?, ?) ORDER BY created_at',

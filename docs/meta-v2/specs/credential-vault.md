@@ -8,7 +8,7 @@ Status: proposed M3.07 implementation; exact-candidate validation pending. Produ
 - Use AES-256-GCM with a fresh 12-byte nonce, 16-byte tag, format version, key version and AAD over the key version and entire composite identity, including credential family. A ciphertext, tag, key-version or binding mismatch fails closed.
 - Read key versions through `CredentialKeyProvider`; the runtime configuration currently uses protected `API_CREDENTIAL_KEYRING_JSON` input. A missing active/previous key blocks the operation; startup never creates a replacement key.
 - Require an injected server-side authorization port for store, use and global rotation. Default wiring denies all vault actions until a verified service policy is connected. No public decrypt endpoint or browser DTO exists.
-- Deliver plaintext only to the internal operation callback, after recording metadata-only audit. Provider exceptions are sanitized before leaving the vault boundary.
+- Deliver plaintext only to the internal operation callback, after recording metadata-only audit. The callback result is discarded and `withCredential` returns `void`; callers cannot return plaintext through the vault API. Provider exceptions are sanitized before leaving the vault boundary.
 - Rotate to the configured active key in bounded batches. DB lease owner/token/expiry fences competing workers. Credential updates, audit rows and the checkpoint commit together. Crashes resume from the last committed credential; invalid ciphertext or missing old key pauses safely.
 
 ## Persistence
@@ -18,6 +18,7 @@ Migration `202610300010-credential-vault` (schema version 10, after M3.05 sessio
 - `ca_meta_credential_secrets`: binary envelope and duplicated context protected by a composite foreign key to credential metadata.
 - `ca_meta_credential_rotations`: one versioned rotation state per target key, with resumable cursor and expiring lease.
 - `ca_meta_credential_access_audit`: append-style metadata for store/use/rotation without ciphertext or plaintext.
+- `ca_meta_credential_vault_key_state`: singleton persistent active-key version. Stores lock it in shared mode and reject a process whose configured key is stale; rotation changes it under an exclusive transaction lock before acquiring a batch lease.
 
 The existing M3.06 metadata table and public read model do not acquire secret fields. Rotation does not revoke provider tokens or erase revoked credentials; those are separate lifecycle operations.
 

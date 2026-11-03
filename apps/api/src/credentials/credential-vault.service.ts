@@ -67,8 +67,8 @@ export class CredentialVaultService {
   }
 
   /** Executes server-side work with a credential; plaintext is never returned by this service. */
-  async withCredential<T>(input: CredentialBinding & CredentialVaultActor & { readonly operation: string },
-    execute: (secret: string) => Promise<T>): Promise<T> {
+  async withCredential(input: CredentialBinding & CredentialVaultActor & { readonly operation: string },
+    execute: (secret: string) => Promise<void>): Promise<void> {
     const { operation, ...actorBinding } = input;
     const binding: CredentialBinding = {
       tenantId: actorBinding.tenantId,
@@ -116,7 +116,7 @@ export class CredentialVaultService {
       throw new CredentialVaultDeniedError();
     }
     try {
-      return await execute(secret);
+      await execute(secret);
     } catch {
       // Provider/library exceptions may include request headers or response bodies; never propagate them here.
       throw new CredentialVaultOperationError();

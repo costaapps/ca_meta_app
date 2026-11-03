@@ -36,6 +36,7 @@ export class MysqlCredentialVaultRepository implements CredentialVaultRepository
   async store(binding: CredentialBinding, envelope: EncryptedCredential, audit: CredentialVaultAuditEntry): Promise<void> {
     const dataSource = await this.database.getDataSource();
     await dataSource.transaction(async (manager) => {
+      await this.lockActiveKeyVersion(manager, envelope.keyVersion);
       const credentials = await manager.query(
         `SELECT status FROM ca_meta_credentials
          WHERE tenant_id = ? AND id = ? AND authorization_id = ? AND app_configuration_id = ?
@@ -81,13 +82,30 @@ export class MysqlCredentialVaultRepository implements CredentialVaultRepository
 
   async ensureRotation(targetKeyVersion: string): Promise<CredentialVaultRotationState> {
     const dataSource = await this.database.getDataSource();
-    await dataSource.query(
-      `INSERT IGNORE INTO ca_meta_credential_rotations
-       (id, target_key_version, state, created_at, updated_at)
-       VALUES (?, ?, 'RUNNING', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
-      [randomUUID(), targetKeyVersion],
-    );
-    return this.rotationState(dataSource, targetKeyVersion);
+    return dataSource.transaction(async (manager) => {
+      await manager.query(
+        `INSERT IGNORE INTO ca_meta_credential_vault_key_state (singleton_id, active_key_version, updated_at)
+         VALUES (1, ?, UTC_TIMESTAMP(6))`,
+        [targetKeyVersion],
+      );
+      const keyState = await manager.query(
+        'SELECT active_key_version FROM ca_meta_credential_vault_key_state WHERE singleton_id = 1 FOR UPDATE',
+      ) as Array<{ active_key_version: string }>;
+      if (keyState[0]?.active_key_version !== targetKeyVersion) {
+        await manager.query(
+          `UPDATE ca_meta_credential_vault_key_state
+           SET active_key_version = ?, updated_at = UTC_TIMESTAMP(6) WHERE singleton_id = 1`,
+          [targetKeyVersion],
+        );
+      }
+      await manager.query(
+        `INSERT IGNORE INTO ca_meta_credential_rotations
+         (id, target_key_version, state, created_at, updated_at)
+         VALUES (?, ?, 'RUNNING', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+        [randomUUID(), targetKeyVersion],
+      );
+      return this.rotationState(manager, targetKeyVersion);
+    });
   }
 
   async acquireRotationLease(targetKeyVersion: string, owner: string, token: string, leaseSeconds: number): Promise<CredentialRotationLease | undefined> {
@@ -212,6 +230,18 @@ export class MysqlCredentialVaultRepository implements CredentialVaultRepository
       cursorCredentialId: row.cursor_credential_id,
       lastSafeErrorCode: row.last_safe_error_code,
     });
+  }
+
+  private async lockActiveKeyVersion(manager: EntityManager, keyVersion: string): Promise<void> {
+    await manager.query(
+      `INSERT IGNORE INTO ca_meta_credential_vault_key_state (singleton_id, active_key_version, updated_at)
+       VALUES (1, ?, UTC_TIMESTAMP(6))`,
+      [keyVersion],
+    );
+    const rows = await manager.query(
+      'SELECT active_key_version FROM ca_meta_credential_vault_key_state WHERE singleton_id = 1 LOCK IN SHARE MODE',
+    ) as Array<{ active_key_version: string }>;
+    if (rows[0]?.active_key_version !== keyVersion) throw new Error('credential-key-version-not-active');
   }
 
   private async insertAudit(executor: DataSource | EntityManager, entry: CredentialVaultAuditEntry): Promise<void> {
