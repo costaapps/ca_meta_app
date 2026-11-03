@@ -582,8 +582,8 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
     assert.equal(Number(casPreflight.secret_version), currentFence.secretVersion, 'the CAS vault-secret fence matches');
     assert.equal(Number(casPreflight.lifecycle_version), currentFence.lifecycleVersion, 'the CAS lifecycle fence matches');
     assert.equal(Number(casPreflight.generation), currentFence.generation, 'the CAS schedule generation matches');
-    assert.equal(casPreflight.lease_owner, currentFence.leaseOwner, 'the CAS scheduler owner matches');
-    assert.equal(casPreflight.lease_token, currentFence.leaseToken, 'the CAS scheduler token matches');
+    assert.equal(casPreflight.lease_owner === currentFence.leaseOwner, true, 'the CAS scheduler owner matches');
+    assert.equal(casPreflight.lease_token === currentFence.leaseToken, true, 'the CAS scheduler token matches');
     assert.equal(Number(casPreflight.lease_valid), 1, 'the CAS scheduler lease remains live');
     assert.equal(casPreflight.flow_variant, currentFence.flowVariant, 'the CAS flow variant matches');
     assert.equal(casPreflight.auth_variant, currentFence.authVariant, 'the CAS auth variant matches');
