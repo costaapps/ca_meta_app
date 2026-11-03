@@ -1,8 +1,8 @@
 # M3.05 focused validation harness
 
-This harness compiles the API sources with the M3.02 pre-auth and M3.05 embed/status tests, plus focused M3.04 session-cookie and migration-unit coverage. It also checks the safe Nginx access-log format, typechecks the Angular application, and runs the focused web config/embed tests. The Nginx regression test rejects default combined logging and only permits `$uri` and `$status` in the explicit access-log format. It uses the repository lockfile and adds no dependencies. No database, Docker service, Meta credential, Suite4 issuer, or provider call is used.
+This harness compiles the API sources with the M3.02 pre-auth and M3.05 embed/status tests, plus focused M3.04 session-cookie and migration-unit coverage. It also checks the safe Nginx access/error-log configuration, invokes the real web entrypoint with synthetic valid and invalid origins, typechecks the Angular application, and runs the focused web config/embed tests. The Nginx regression test allows only `$uri` and `$status` in access logs and verifies that the provider callback location discards error-log lines that may contain callback queries. The entrypoint test writes its generated files under a unique temporary directory and removes only that directory. It uses the repository lockfile and adds no dependencies. No database, Docker service, Meta credential, Suite4 issuer, or provider call is used.
 
-Requirements: Node `24.x` and npm `11.x` as pinned in the root `package.json`.
+Requirements: Node `24.x` and npm `11.x` as pinned in the root `package.json`. On Windows, WSL `bash.exe` is also required for the shell-level entrypoint regression test; Linux CI uses `/bin/sh` directly.
 
 From a clean checkout:
 

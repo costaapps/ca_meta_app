@@ -54,6 +54,10 @@ try {
     '--test',
     join(repositoryRoot, 'tools', 'm3-05', 'nginx-log.test.mjs'),
   ]);
+  run('Web entrypoint origin-validation regression test', process.execPath, [
+    '--test',
+    join(repositoryRoot, 'tools', 'm3-05', 'web-entrypoint.test.mjs'),
+  ]);
   run('Angular application typecheck', process.execPath, [
     ngc, '-p', join(repositoryRoot, 'apps', 'web', 'tsconfig.app.json'), '--noEmit',
   ]);

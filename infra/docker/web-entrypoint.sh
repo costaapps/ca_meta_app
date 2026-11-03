@@ -13,7 +13,7 @@ validate_exact_https_origins() {
   value="$1"
   [ -z "$value" ] && return 0
   case "$value" in ,*|*,|*,,*) return 1 ;; esac
-  case "$value" in *[!A-Za-z0-9:.,-]*) return 1 ;; esac
+  case "$value" in *[!A-Za-z0-9:/.,-]*) return 1 ;; esac
   rest="$value"
   seen=' '
   while [ -n "$rest" ]; do
