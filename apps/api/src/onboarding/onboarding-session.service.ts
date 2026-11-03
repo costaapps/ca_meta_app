@@ -130,7 +130,7 @@ export class OnboardingSessionService {
     }
 
     // Do not re-issue an expired deterministic state if a client retries after the
-    // ten-minute correlation window. Status reads also persist EXPIRED in MySQL.
+    // ten-minute correlation period. Status reads also persist EXPIRED in MySQL.
     if (record.expiresAt.getTime() <= this.now().getTime()) throw new OnboardingConflictError();
 
     const stateRef = this.stateSigner.issue({
