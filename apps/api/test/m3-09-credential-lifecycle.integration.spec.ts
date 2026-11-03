@@ -239,24 +239,26 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
     assert.match(intents[0]?.dedupe_key ?? '', new RegExp(`^authorization:${authorizationId}:impact:SYNTHETIC_AUTHORIZATION_ACCESS$`));
     assert.ok(!JSON.stringify(intents).includes(secretMarker));
 
+    // Keep the stale-version case eligible for scheduling; confirmed-revoked credentials are no longer schedulable.
+    const staleLifecycle = await addReauthCredential('EXPIRED');
     await dataSource.query(
       `UPDATE ca_meta_credential_lifecycle SET next_check_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)
-       WHERE tenant_id = ? AND credential_id = ?`, [tenantId, secondCredential.credentialId],
+       WHERE tenant_id = ? AND credential_id = ?`, [tenantId, staleLifecycle.binding.credentialId],
     );
     assert.equal(await schedulerA.scheduleDue(1, 5_000), 1);
     await dataSource.query(
       'UPDATE ca_meta_credentials SET version = version + 1 WHERE tenant_id = ? AND id = ?',
-      [tenantId, secondCredential.credentialId],
+      [tenantId, staleLifecycle.binding.credentialId],
     );
     const beforeFence = await dataSource.query(
       'SELECT health_state, version FROM ca_meta_credential_lifecycle WHERE tenant_id = ? AND credential_id = ?',
-      [tenantId, secondCredential.credentialId],
+      [tenantId, staleLifecycle.binding.credentialId],
     ) as Array<{ health_state: string; version: number | string }>;
     await runWorker();
     assert.equal(inspectorCalls, 2, 'stale credential version is rejected before decrypted secret or inspector access');
     const afterFence = await dataSource.query(
       'SELECT health_state, version FROM ca_meta_credential_lifecycle WHERE tenant_id = ? AND credential_id = ?',
-      [tenantId, secondCredential.credentialId],
+      [tenantId, staleLifecycle.binding.credentialId],
     ) as Array<{ health_state: string; version: number | string }>;
     assert.equal(afterFence[0]?.health_state, beforeFence[0]?.health_state);
     assert.equal(Number(afterFence[0]?.version), Number(beforeFence[0]?.version), 'stale finalizer cannot restore older metadata');
