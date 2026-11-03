@@ -3,6 +3,7 @@ import { migrationChecksum } from './migration-fingerprint.js';
 import type { DdlStep, VersionedMigration } from './migration.types.js';
 
 const expectedColumnType = "enum('PORTAL_TOP_LEVEL','SUITE4_EMBED')";
+const expectedColumnDefault = "'PORTAL_TOP_LEVEL'";
 
 async function verifyEntryModeColumn(queryRunner: QueryRunner): Promise<boolean> {
   const rows = await queryRunner.query(
@@ -18,7 +19,7 @@ async function verifyEntryModeColumn(queryRunner: QueryRunner): Promise<boolean>
   const row = rows[0];
   if (!row) return false;
   if (row.data_type !== 'enum' || row.column_type !== expectedColumnType || row.is_nullable !== 'NO' ||
-    row.column_default !== 'PORTAL_TOP_LEVEL') {
+    row.column_default !== expectedColumnDefault) {
     throw new Error('Migration preflight found an unexpected portal session entry-mode column.');
   }
   return true;

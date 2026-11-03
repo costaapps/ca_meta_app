@@ -147,7 +147,7 @@ test('M3.05 entry-mode migration accepts only the additive column shape and pres
         data_type: 'enum',
         column_type: "enum('PORTAL_TOP_LEVEL','SUITE4_EMBED')",
         is_nullable: 'NO',
-        column_default: 'PORTAL_TOP_LEVEL',
+        column_default: "'PORTAL_TOP_LEVEL'",
       }];
     },
   } as never;
