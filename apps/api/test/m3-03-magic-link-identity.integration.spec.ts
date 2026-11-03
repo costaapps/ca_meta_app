@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { validateEnvironment } from '../src/config/environment.js';
 import { deployMigrations } from '../src/database/migrations/migration-runner.js';
@@ -110,6 +110,22 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
     assert.ok(initialTarget);
     assert.equal(initialTarget.principalId, principalA);
     assert.ok([tenantA, tenantB].includes(initialTarget.tenantId));
+    const pendingLinkTokenHash = createHash('sha256').update(randomUUID(), 'utf8').digest('hex');
+    assert.equal(await store.enqueueForInvitedIdentity({
+      emailHash, recipient: email, target: initialTarget, linkId: randomUUID(), tokenHash: pendingLinkTokenHash,
+    }), true);
+    const pendingSessionCookie = `${randomUUID()}${randomUUID()}`;
+    const pendingCsrfToken = `${randomUUID()}${randomUUID()}`;
+    const pendingContextRef = `${randomUUID()}${randomUUID()}`;
+    const pendingSessionMaterial = {
+      sessionId: randomUUID(),
+      sessionCookie: pendingSessionCookie,
+      sessionCookieHash: createHash('sha256').update(pendingSessionCookie, 'utf8').digest('hex'),
+      csrfToken: pendingCsrfToken,
+      csrfTokenHash: createHash('sha256').update(pendingCsrfToken, 'utf8').digest('hex'),
+      contextRef: pendingContextRef,
+      contextRefHash: createHash('sha256').update(pendingContextRef, 'utf8').digest('hex'),
+    };
 
     const assertionVerifier = new SyntheticIdentityAssertionVerifier();
     const adminAssertion = assertionVerifier.issue();
@@ -117,6 +133,17 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
       .verify(adminAssertion);
     await associations.revoke(actor, emailHash, principalA, 'IDENTITY_CORRECTION');
     assert.equal(await store.findEligibleTarget(emailHash), undefined, 'revocation blocks magic-link lookup for every tenant');
+    const [revokedLinkRows] = await dataSource.query(
+      `SELECT l.consumed_at, q.status FROM ca_meta_magic_links AS l
+       INNER JOIN ca_meta_magic_link_mail_queue AS q ON q.magic_link_id = l.id
+       WHERE l.token_hash = ?`, [pendingLinkTokenHash],
+    ) as [Array<{ consumed_at: string | null; status: string }>, unknown];
+    assert.ok(revokedLinkRows[0]?.consumed_at, 'revocation consumes outstanding link tokens');
+    assert.equal(revokedLinkRows[0]?.status, 'DEAD', 'revocation prevents queued email delivery');
+    await assert.rejects(
+      store.consumeAndIssueSession(pendingLinkTokenHash, pendingSessionMaterial), IdentityDeniedError,
+      'a link issued before identity revocation cannot create a session',
+    );
     await assert.rejects(associations.revoke(actor, emailHash, principalA, 'IDENTITY_CORRECTION'), IdentityDeniedError);
 
     const reverificationReference = proofVerifier.add({ email, principalId: principalA, proofReference: `proof-${randomUUID()}` });

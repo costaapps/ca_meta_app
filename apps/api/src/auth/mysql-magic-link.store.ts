@@ -288,6 +288,24 @@ export class MysqlMagicLinkStore implements MagicLinkStore, MagicLinkIdentitySto
          WHERE email_hash = ? AND principal_id = ? AND revoked_at IS NULL`, [input.emailHash, input.principalId],
       );
       if (update.affectedRows !== 1) throw new IdentityDeniedError();
+      // Stop queued deliveries before locking link rows, matching claimNextMail's
+      // queue-then-link lock order. The v8 link row has no email hash, so this is
+      // conservatively principal-wide across its email identities.
+      await connection.execute(
+        `UPDATE ca_meta_magic_link_mail_queue AS q
+         INNER JOIN ca_meta_magic_links AS l ON l.id = q.magic_link_id
+         SET q.status = 'DEAD', q.lease_owner = NULL, q.lease_expires_at = NULL
+         WHERE l.principal_id = ? AND q.status = 'QUEUED'`,
+        [input.principalId],
+      );
+      // Revoke every still-usable link for this principal in the same transaction.
+      // A provider call already leased may finish, but its token cannot authenticate.
+      await connection.execute(
+        `UPDATE ca_meta_magic_links
+         SET consumed_at = UTC_TIMESTAMP(6)
+         WHERE principal_id = ? AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP(6)`,
+        [input.principalId],
+      );
       await connection.execute(
         `INSERT INTO ca_meta_magic_link_identity_events
          (id, event_type, proof_ref_hash, email_hash, principal_id, actor_kind, actor_ref_hash, reason_code, created_at)
