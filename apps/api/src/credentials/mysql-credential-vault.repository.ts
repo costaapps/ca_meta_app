@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DataSource, EntityManager } from 'typeorm';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
+import type { AuditEventWriter } from '../privacy/audit.service.js';
 import type { CredentialBinding, CredentialRotationBatchResult, CredentialRotationLease,
   CredentialVaultAuditEntry, CredentialVaultRepository, CredentialVaultRotationState, EncryptedCredential,
   StoredCredential } from './credential-vault.types.js';
@@ -31,7 +32,7 @@ interface RotationRow {
 const SAFE_ROTATION_ERRORS = new Set(['KEY_UNAVAILABLE', 'CIPHERTEXT_INVALID', 'ROTATION_FAILED']);
 
 export class MysqlCredentialVaultRepository implements CredentialVaultRepository {
-  constructor(private readonly database: DurableWorkDatabase) {}
+  constructor(private readonly database: DurableWorkDatabase, private readonly privacyAudit: AuditEventWriter) {}
 
   async store(binding: CredentialBinding, envelope: EncryptedCredential, audit: CredentialVaultAuditEntry): Promise<void> {
     const dataSource = await this.database.getDataSource();
@@ -333,6 +334,15 @@ export class MysqlCredentialVaultRepository implements CredentialVaultRepository
       [randomUUID(), entry.tenantId, entry.credentialId, entry.actorRef, entry.action,
         entry.operation, entry.keyVersion, entry.correlationId],
     );
+    await this.privacyAudit.record({
+      tenantId: entry.tenantId,
+      actorRef: entry.actorRef,
+      action: 'ASSET_OPERATION',
+      targetRef: entry.credentialId,
+      correlationId: entry.correlationId,
+      retentionClass: 'SECURITY',
+      safeDiff: { reasonCode: entry.operation, version: entry.keyVersion },
+    }, executor);
   }
 
   private toStored(row: SecretRow): StoredCredential {

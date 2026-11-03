@@ -28,3 +28,11 @@
 ## External evidence
 
 Local issuer, principal, tenant and membership fixtures prove only code behavior for those inputs. They do not establish the Suite4 subject mapping, active membership, roles, cookie topology or deployed business ownership. Meta permissions/assets and staging operations are not exercised by M3.01.
+
+## M3.10 retention, audit and deletion boundary
+
+- M1.09 durations and legal purposes are proposals. M3.10 seeds no retention policy and marks any configured duration as versioned policy data with an approval reference. Runtime policy, purge, deletion and support authorization ports all fail closed until a verified authority is wired.
+- The only local purge adapter in M3.10 is `MAGIC_LINK_TRANSIENT`, scoped to tenant, environment and a fixed cutoff. It removes terminal mail-queue children before expired magic-link records, persists its cursor, and pauses while a mail row is processing. Inbox, jobs, logs, message history, audit, backups, credential versions and provider blobs require their own reviewed adapters and recovery proof.
+- Deletion requests and tombstones retain hashes, fixed enums and audit evidence only. They track a local workflow; no API call to Meta or deletion of provider-owned assets is performed. A `COMPLETED` workflow status does not attest provider erasure.
+- M3.06 authorization snapshots and M3.07 credential operations write safe events to the shared M3.10 ledger in their existing transaction. Verified-tenant identity denials use a constant target and fixed reason code. M2 replay retains its current actor/reason audit table. Exact Suite4 support roles, reauthorization semantics and provider disconnect/delete callbacks remain **Not confirmed**.
+- The M3.10 migration is schema v12, based on the integrated sequence M3.05 v10 and M3.07 v11. This package worktree began from a stale M3.07 v10 registry; reconcile the migration chain against the milestone branch before validation or PR.

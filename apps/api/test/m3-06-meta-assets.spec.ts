@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { EntityManager } from 'typeorm';
 import { META_ASSETS_MIGRATION } from '../src/database/migrations/meta-assets.js';
 import { MysqlMetaAssetsRepository } from '../src/meta-assets/mysql-meta-assets.repository.js';
+import { AuditEventWriter, privacyRefHash } from '../src/privacy/audit.service.js';
 import {
   assetIdentityHash,
   issueVerifiedMetaEvidence,
@@ -17,6 +18,7 @@ const tenantId = '00000000-0000-4000-8000-000000000001';
 const appConfigurationId = '00000000-0000-4000-8000-000000000002';
 const authorizationId = '00000000-0000-4000-8000-000000000003';
 const observedAt = '2026-10-30T12:00:00.000Z';
+const noAudit = { async record() { return '00000000-0000-4000-8000-000000000099'; } } as unknown as AuditEventWriter;
 const evidence = () => issueVerifiedMetaEvidence({
   source: 'META_API',
   observedAt,
@@ -171,12 +173,57 @@ test('outbox intent remains staged when the enclosing commit fails', async () =>
       return;
     },
   };
-  const repository = new MysqlMetaAssetsRepository(database as never, outbox);
+  const repository = new MysqlMetaAssetsRepository(database as never, outbox, noAudit);
   await assert.rejects(repository.upsert(command({ evidence: evidence() })), /synthetic commit failure/);
   assert.equal(staged.length, 1);
   assert.equal(staged[0]?.length, 1);
   assert.equal(committed.length, 0);
   assert.equal(active?.length, 1);
+});
+
+test('accepted email actor and dotted correlation refs preserve the M3.06 event while keeping audit refs safe', async () => {
+  const actorRef = 'user@example.com';
+  const correlationId = 'trace.1';
+  let transactionCompleted = false;
+  let auditParameters: unknown[] | undefined;
+  let outboxEvent: unknown;
+  const manager = {
+    async query(sql: string, parameters: unknown[] = []) {
+      if (sql.startsWith('SELECT')) return [];
+      if (sql.startsWith('INSERT INTO ca_meta_audit_events')) auditParameters = parameters;
+      return [{ affectedRows: 1 }];
+    },
+  } as unknown as EntityManager;
+  const database = {
+    async getDataSource() {
+      return {
+        async transaction<T>(work: (executor: EntityManager) => Promise<T>): Promise<T> {
+          const result = await work(manager);
+          transactionCompleted = true;
+          return result;
+        },
+      };
+    },
+  };
+  const outbox = {
+    async appendWithin(_executor: EntityManager, event: unknown): Promise<void> { outboxEvent = event; },
+  };
+  const repository = new MysqlMetaAssetsRepository(database as never, outbox, new AuditEventWriter(database as never));
+
+  await repository.upsert(command({
+    actor: { kind: 'USER', ref: actorRef },
+    correlationId,
+  }));
+
+  assert.equal(transactionCompleted, true, 'the audit write does not roll back the accepted M3.06 observation');
+  const event = outboxEvent as { actor: { readonly ref: string }; correlationId: string };
+  assert.equal(event.actor.ref, actorRef, 'the M3.06 outbox event retains the accepted actor reference');
+  assert.equal(event.correlationId, correlationId, 'the M3.06 outbox event retains the accepted correlation reference');
+  assert.ok(auditParameters);
+  assert.equal(auditParameters[2], privacyRefHash(privacyRefHash(actorRef)), 'audit stores only a hash of the sanitized actor reference');
+  assert.equal(auditParameters[5], privacyRefHash(correlationId), 'unsupported correlation syntax is stored as a digest');
+  assert.equal(JSON.stringify(auditParameters).includes(actorRef), false);
+  assert.equal(JSON.stringify(auditParameters).includes(correlationId), false);
 });
 
 test('an omitted asset grant snapshot preserves current grants and history', async () => {
@@ -227,7 +274,7 @@ test('an omitted asset grant snapshot preserves current grants and history', asy
   };
   const repository = new MysqlMetaAssetsRepository(database as never, {
     async appendWithin() { return; },
-  });
+  }, noAudit);
 
   await repository.upsert(command({
     evidence: proof,
@@ -259,7 +306,7 @@ test('older verified authorization observations cannot overwrite newer state', a
       };
     },
   };
-  const repository = new MysqlMetaAssetsRepository(database as never, { async appendWithin() { return; } });
+  const repository = new MysqlMetaAssetsRepository(database as never, { async appendWithin() { return; } }, noAudit);
   await assert.rejects(repository.upsert(command({
     evidence: evidence(),
     observedAt: '2026-10-30T12:00:00.000000Z',

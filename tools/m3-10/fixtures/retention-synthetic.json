@@ -1,0 +1,20 @@
+{
+  "classification": "synthetic-only",
+  "policy": {
+    "environment": "test",
+    "category": "MAGIC_LINK_TRANSIENT",
+    "durationSeconds": 60,
+    "version": "m3-10-v1"
+  },
+  "cutoffCases": {
+    "expiredAt": "2020-01-02 00:00:00.000000",
+    "liveExpiryOffsetSeconds": 86400,
+    "batchSize": 2,
+    "expectedDeletedRows": 5
+  },
+  "queueStates": {
+    "terminal": "DELIVERED",
+    "leased": "PROCESSING",
+    "resumedTerminal": "DEAD"
+  }
+}
