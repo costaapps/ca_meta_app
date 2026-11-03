@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { MetaAuthVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
 
 export type MetaEnvironment = 'development' | 'test' | 'staging' | 'production';
 export type AuthorizationState = 'ACTIVE' | 'PARTIAL' | 'REAUTH_REQUIRED' | 'UNKNOWN' | 'REVOKED' | 'DISCONNECTED';
@@ -79,6 +80,9 @@ export interface AuthorizationUpsertCommand {
   readonly appConfigurationId: string;
   readonly provider: 'META';
   readonly environment: MetaEnvironment;
+  /** Optional verified server context; never derive these values from a token or browser payload. */
+  readonly flowVariant?: MetaFlowVariant;
+  readonly authVariant?: MetaAuthVariant;
   readonly providerAuthorizationId?: string | null;
   readonly state: AuthorizationState;
   readonly grantedScopes: readonly string[];
@@ -146,6 +150,20 @@ export function validateAuthorizationUpsert(command: AuthorizationUpsertCommand)
     throw new MetaAssetsInputError('Actor and correlation references are required.');
   }
   if (!isIsoDate(command.observedAt)) throw new MetaAssetsInputError('Observation time must be an ISO UTC timestamp.');
+  const flowAuthVariants: Readonly<Record<MetaFlowVariant, readonly MetaAuthVariant[]>> = {
+    FACEBOOK: ['FACEBOOK_LOGIN_FOR_BUSINESS'],
+    INSTAGRAM: ['FACEBOOK_LOGIN_FOR_BUSINESS', 'INSTAGRAM_LOGIN'],
+    WHATSAPP_EXCLUSIVE: ['WHATSAPP_EMBEDDED_SIGNUP'],
+    WHATSAPP_COEXISTENCE: ['WHATSAPP_BUSINESS_APP_ONBOARDING'],
+  };
+  if ((command.flowVariant === undefined) !== (command.authVariant === undefined) ||
+      (command.flowVariant !== undefined && !flowAuthVariants[command.flowVariant]?.includes(command.authVariant!))) {
+    throw new MetaAssetsInputError('Authorization flow/auth context must be a valid complete server-owned pair.');
+  }
+  if ((command.flowVariant !== undefined || command.authVariant !== undefined) &&
+      (!command.evidence || command.actor.kind === 'USER')) {
+    throw new MetaAssetsInputError('Authorization flow/auth context requires trusted service evidence.');
+  }
   if (command.providerAuthorizationId !== undefined && command.providerAuthorizationId !== null &&
       (!command.providerAuthorizationId.length || command.providerAuthorizationId.length > 512)) {
     throw new MetaAssetsInputError('Provider authorization identifier is invalid.');

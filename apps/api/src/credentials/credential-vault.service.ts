@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import type { EntityManager } from 'typeorm';
 import { CredentialVaultDeniedError, CredentialVaultError, CredentialVaultIntegrityError, CredentialVaultKeyUnavailableError,
   CredentialVaultOperationError, CredentialVaultRecordUnavailableError, CredentialVaultRotationBusyError, CredentialVaultRotationError } from './credential-vault.errors.js';
 import { decryptCredential, encryptCredential } from './credential-vault-crypto.js';
 import type { CredentialBinding, CredentialKeyProvider, CredentialVaultActor, CredentialVaultAuthorizationPort,
   CredentialVaultRepository, CredentialVaultRotationState } from './credential-vault.types.js';
+import type { CredentialVaultConditionalWriteFence } from './credential-vault.types.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const KEY_VERSION = /^[A-Za-z0-9._-]{1,64}$/;
@@ -119,6 +121,49 @@ export class CredentialVaultService {
       await execute(secret);
     } catch {
       // Provider/library exceptions may include request headers or response bodies; never propagate them here.
+      throw new CredentialVaultOperationError();
+    } finally {
+      secret = '';
+    }
+  }
+
+  /** Replaces a secret inside the caller's lifecycle transaction after exact-version authorization fencing. */
+  async replaceIfCurrentWithin(manager: EntityManager,
+    input: CredentialBinding & CredentialVaultActor & { readonly operation: string; readonly secret: string },
+    fence: CredentialVaultConditionalWriteFence): Promise<boolean> {
+    const { secret: secretValue, operation, ...actorBinding } = input;
+    let secret = secretValue;
+    const binding: CredentialBinding = {
+      tenantId: actorBinding.tenantId, credentialId: actorBinding.credentialId,
+      authorizationId: actorBinding.authorizationId, appConfigurationId: actorBinding.appConfigurationId,
+      provider: actorBinding.provider, environment: actorBinding.environment, family: actorBinding.family,
+    };
+    this.validateBinding(binding);
+    this.validateActor(actorBinding);
+    if (operation !== 'CREDENTIAL_RENEWAL' || !Number.isSafeInteger(fence.expectedAuthorizationVersion) ||
+        fence.expectedAuthorizationVersion < 1 || !Number.isSafeInteger(fence.expectedCredentialVersion) ||
+        fence.expectedCredentialVersion < 1 || !Number.isSafeInteger(fence.expectedSecretVersion) || fence.expectedSecretVersion < 1) {
+      throw new CredentialVaultDeniedError();
+    }
+    await this.authorize({ action: 'USE', actorRef: actorBinding.actorRef, operation, binding });
+    const activeVersion = this.keyProvider.activeVersion();
+    if (!activeVersion || !KEY_VERSION.test(activeVersion)) throw new CredentialVaultKeyUnavailableError();
+    const repositoryWrite = this.repository.storeIfCurrentWithin;
+    if (!repositoryWrite) throw new CredentialVaultOperationError();
+    let envelope;
+    try {
+      envelope = encryptCredential(binding, secret, activeVersion, this.keyProvider);
+      secret = '';
+      return await repositoryWrite.call(this.repository, manager, binding, envelope, {
+        tenantId: binding.tenantId,
+        credentialId: binding.credentialId,
+        actorRef: actorBinding.actorRef,
+        correlationId: actorBinding.correlationId,
+        action: 'STORE',
+        operation,
+        keyVersion: activeVersion,
+      }, fence);
+    } catch {
       throw new CredentialVaultOperationError();
     } finally {
       secret = '';

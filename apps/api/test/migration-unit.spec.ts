@@ -13,6 +13,7 @@ import { META_CREDENTIAL_VAULT_MIGRATION, META_CREDENTIAL_VAULT_TABLES } from '.
 import { PORTAL_SESSION_ENTRY_MODE_MIGRATION } from '../src/database/migrations/portal-session-entry-mode.js';
 import { ONBOARDING_SESSIONS_MIGRATION, ONBOARDING_SESSION_TABLES } from '../src/database/migrations/onboarding-sessions.js';
 import { PRIVACY_GOVERNANCE_MIGRATION, PRIVACY_GOVERNANCE_TABLES } from '../src/database/migrations/privacy-governance.js';
+import { CREDENTIAL_LIFECYCLE_MIGRATION, CREDENTIAL_LIFECYCLE_TABLES } from '../src/database/migrations/credential-lifecycle.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -53,8 +54,8 @@ test('migration configuration rejects runtime account reuse and privileged built
 });
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
-  assert.equal(MIGRATIONS.length, 12);
-  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  assert.equal(MIGRATIONS.length, 13);
+  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -80,16 +81,25 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(ONBOARDING_SESSIONS_MIGRATION.schemaVersion, 10);
   assert.equal(META_CREDENTIAL_VAULT_MIGRATION.schemaVersion, 11);
   assert.equal(PRIVACY_GOVERNANCE_MIGRATION.schemaVersion, 12);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 6]?.id, META_ASSETS_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 5]?.id, MAGIC_LINKS_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 4]?.id, PORTAL_SESSION_ENTRY_MODE_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 3]?.id, ONBOARDING_SESSIONS_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 2]?.id, META_CREDENTIAL_VAULT_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 1]?.id, PRIVACY_GOVERNANCE_MIGRATION.id);
+  assert.equal(CREDENTIAL_LIFECYCLE_MIGRATION.schemaVersion, 13);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 7]?.id, META_ASSETS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 6]?.id, MAGIC_LINKS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 5]?.id, PORTAL_SESSION_ENTRY_MODE_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 4]?.id, ONBOARDING_SESSIONS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 3]?.id, META_CREDENTIAL_VAULT_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 2]?.id, PRIVACY_GOVERNANCE_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 1]?.id, CREDENTIAL_LIFECYCLE_MIGRATION.id);
+  const flowContextStep = CREDENTIAL_LIFECYCLE_MIGRATION.steps.find((step) => step.id === 'add-authorization-flow-auth-context');
+  assert.ok(flowContextStep && 'sql' in flowContextStep);
+  assert.deepEqual(flowContextStep.compatiblePriorSteps?.map(({ migrationId, stepId }) => ({ migrationId, stepId })), [{
+    migrationId: META_ASSETS_MIGRATION.id, stepId: 'create-meta-authorizations',
+  }]);
+  assert.match(flowContextStep.sql, /ADD COLUMN flow_variant/);
   assert.ok(META_ASSETS_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.ok(MAGIC_LINK_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.ok(ONBOARDING_SESSION_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.ok(PRIVACY_GOVERNANCE_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
+  assert.ok(CREDENTIAL_LIFECYCLE_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.ok(META_CREDENTIAL_VAULT_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.deepEqual(IDENTITY_MIGRATION.steps.map((step) => step.id), [
     'create-principals', 'create-tenant-memberships', 'create-service-identity-scopes',

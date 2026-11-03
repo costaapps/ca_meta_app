@@ -102,6 +102,8 @@ export interface CredentialResolutionCandidate {
   readonly secretVersion: number;
   readonly health: CredentialHealthObservation;
   readonly expiry: CredentialExpiry;
+  /** Data-access expiry is an independent authorization boundary and must be fresh/known. */
+  readonly dataAccessExpiry: CredentialExpiry;
 }
 
 export interface CredentialResolutionSnapshot {

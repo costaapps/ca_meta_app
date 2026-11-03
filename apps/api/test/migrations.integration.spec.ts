@@ -9,6 +9,7 @@ import type { AuditEventWriter } from '../src/privacy/audit.service.js';
 import { readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
 import { MIGRATION_STEP_LEDGER, deployMigrations, migrationLockName, readMigrationStatus } from '../src/database/migrations/migration-runner.js';
 import { MIGRATIONS } from '../src/database/migrations/migrations.js';
+import { CREDENTIAL_LIFECYCLE_MIGRATION } from '../src/database/migrations/credential-lifecycle.js';
 import { IdentityAdministrationService } from '../src/identity/identity-administration.service.js';
 import { IdentityAdministrationConflictError } from '../src/identity/mysql-identity-administration.repository.js';
 import { MysqlIdentityAdministrationRepository } from '../src/identity/mysql-identity-administration.repository.js';
@@ -163,7 +164,19 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     assert.ok(String(stepRows[0]?.cursor_value).localeCompare(uuid(9000)) > 0, 'test writer ID is behind the persisted cursor');
 
     await deployMigrations(environment, [additive]);
+    await deployMigrations(environment, MIGRATIONS.slice(0, -1));
+    await crashAt(CREDENTIAL_LIFECYCLE_MIGRATION.id, 'M2_CRASH_AFTER_DDL_STEP', 'add-authorization-flow-auth-context', 86);
+    const lifecycleFlowContextStep = await queryRows<{ state: string }>(admin,
+      `SELECT state FROM ${MIGRATION_STEP_LEDGER} WHERE migration_id = ? AND step_id = ?`,
+      [CREDENTIAL_LIFECYCLE_MIGRATION.id, 'add-authorization-flow-auth-context'],
+    );
+    assert.equal(lifecycleFlowContextStep[0]?.state, 'STARTED', 'committed v13 DDL is journaled STARTED when the worker exits before ACK');
     await deployMigrations(environment);
+    const recoveredFlowContextStep = await queryRows<{ state: string }>(admin,
+      `SELECT state FROM ${MIGRATION_STEP_LEDGER} WHERE migration_id = ? AND step_id = ?`,
+      [CREDENTIAL_LIFECYCLE_MIGRATION.id, 'add-authorization-flow-auth-context'],
+    );
+    assert.equal(recoveredFlowContextStep[0]?.state, 'APPLIED', 'full v13 target-shape verification safely recovers the STARTED DDL step');
     const identityTimestamp = '2026-10-30 12:00:00.000000';
     const identityUserId = uuid(70_001);
     const identityServiceId = uuid(70_002);

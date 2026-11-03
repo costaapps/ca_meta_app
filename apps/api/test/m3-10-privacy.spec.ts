@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MIGRATIONS } from '../src/database/migrations/migrations.js';
 import { PRIVACY_GOVERNANCE_MIGRATION } from '../src/database/migrations/privacy-governance.js';
+import { CREDENTIAL_LIFECYCLE_MIGRATION } from '../src/database/migrations/credential-lifecycle.js';
 import { FailClosedDeletionAuthorization } from '../src/privacy/deletion.service.js';
 import { redactDiagnosticValue, redactStructuredLogRecord, sanitizeAuditDiff } from '../src/privacy/redaction.js';
 import { FailClosedRetentionAuthorization, RetentionService, type RetentionAuthorizationPort } from '../src/privacy/retention.service.js';
@@ -85,7 +86,8 @@ test('support diagnostics require a scoped short-lived grant, write actor/reason
 
 test('M3.10 is schema v12, with deny-by-default policy gates and disabled duration defaults', async () => {
   assert.equal(PRIVACY_GOVERNANCE_MIGRATION.schemaVersion, 12);
-  assert.equal(MIGRATIONS.at(-1)?.id, PRIVACY_GOVERNANCE_MIGRATION.id);
+  assert.equal(MIGRATIONS.at(-2)?.id, PRIVACY_GOVERNANCE_MIGRATION.id);
+  assert.equal(MIGRATIONS.at(-1)?.id, CREDENTIAL_LIFECYCLE_MIGRATION.id);
   const policyDdl = PRIVACY_GOVERNANCE_MIGRATION.steps.find((step) => step.id === 'create-retention-policies');
   assert.ok(policyDdl && policyDdl.phase === 'expand');
   assert.match(policyDdl.sql, /DEFAULT 'DRAFT'/);

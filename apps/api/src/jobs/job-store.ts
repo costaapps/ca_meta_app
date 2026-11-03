@@ -167,6 +167,7 @@ function resourceScope(input: EnqueueJobInput, payload: JobPayload): string {
     case 'ONBOARDING_STEP': return payload.onboardingRef;
     case 'PROJECTION_RECONCILE': return payload.projectionRef;
     case 'HISTORY_SYNC': return payload.checkpointRef;
+    case 'CREDENTIAL_INSPECTION': return payload.credentialId;
   }
 }
 

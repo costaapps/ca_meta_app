@@ -3,6 +3,7 @@ import type { DataSource, EntityManager } from 'typeorm';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { AuditEventWriter } from '../privacy/audit.service.js';
 import type { CredentialBinding, CredentialRotationBatchResult, CredentialRotationLease,
+  CredentialVaultConditionalWriteFence,
   CredentialVaultAuditEntry, CredentialVaultRepository, CredentialVaultRotationState, EncryptedCredential,
   StoredCredential } from './credential-vault.types.js';
 
@@ -58,6 +59,44 @@ export class MysqlCredentialVaultRepository implements CredentialVaultRepository
       );
       await this.insertAudit(manager, audit);
     });
+  }
+
+  async storeIfCurrentWithin(manager: EntityManager, binding: CredentialBinding, envelope: EncryptedCredential,
+    audit: CredentialVaultAuditEntry, fence: CredentialVaultConditionalWriteFence): Promise<boolean> {
+    await this.lockActiveKeyVersion(manager, envelope.keyVersion);
+    const rows = await manager.query(
+      `SELECT auth.authorization_state, auth.version AS authorization_version,
+              c.status AS credential_status, c.version AS credential_version, s.version AS secret_version
+       FROM ca_meta_authorizations auth JOIN ca_meta_credentials c ON c.tenant_id = auth.tenant_id
+         AND c.authorization_id = auth.id AND c.app_configuration_id = auth.app_configuration_id
+         AND c.provider = auth.provider AND c.environment = auth.environment
+       JOIN ca_meta_credential_secrets s ON s.tenant_id = c.tenant_id AND s.credential_id = c.id
+         AND s.authorization_id = c.authorization_id AND s.app_configuration_id = c.app_configuration_id
+         AND s.provider = c.provider AND s.environment = c.environment
+       WHERE c.tenant_id = ? AND c.id = ? AND c.authorization_id = ? AND c.app_configuration_id = ?
+         AND c.provider = ? AND c.environment = ? AND c.family = ? FOR UPDATE`,
+      [binding.tenantId, binding.credentialId, binding.authorizationId, binding.appConfigurationId,
+        binding.provider, binding.environment, binding.family],
+    ) as Array<{ authorization_state: string; authorization_version: number | string; credential_status: string;
+      credential_version: number | string; secret_version: number | string }>;
+    const current = rows[0];
+    if (!current || !['ACTIVE', 'PARTIAL'].includes(current.authorization_state) || current.credential_status !== 'ACTIVE' ||
+        Number(current.authorization_version) !== fence.expectedAuthorizationVersion ||
+        Number(current.credential_version) !== fence.expectedCredentialVersion ||
+        Number(current.secret_version) !== fence.expectedSecretVersion) return false;
+    const updated = await manager.query(
+      `UPDATE ca_meta_credential_secrets
+       SET ciphertext = ?, nonce = ?, authentication_tag = ?, key_version = ?, format_version = ?,
+           version = version + 1, updated_at = UTC_TIMESTAMP(6)
+       WHERE tenant_id = ? AND credential_id = ? AND authorization_id = ? AND app_configuration_id = ?
+         AND provider = ? AND environment = ? AND version = ?`,
+      [envelope.ciphertext, envelope.nonce, envelope.authenticationTag, envelope.keyVersion, envelope.formatVersion,
+        binding.tenantId, binding.credentialId, binding.authorizationId, binding.appConfigurationId,
+        binding.provider, binding.environment, fence.expectedSecretVersion],
+    ) as { affectedRows?: number };
+    if (Number(updated?.affectedRows ?? 0) !== 1) return false;
+    await this.insertAudit(manager, audit);
+    return true;
   }
 
   async findActive(binding: CredentialBinding): Promise<StoredCredential | undefined> {

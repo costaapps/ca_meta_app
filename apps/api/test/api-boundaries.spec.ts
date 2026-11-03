@@ -355,6 +355,11 @@ test('configuration validation requires typed fields, reports names only, and re
     assert.deepEqual(parsed.allowedHosts, ['127.0.0.1', 'localhost']);
     assert.equal(parsed.database.password, 'synthetic-marker-value');
     assert.equal(parsed.portalEntryTicket, undefined);
+    assert.equal(parsed.credentialLifecycleSchedulerEnabled, false);
+    assert.equal(validateEnvironment({ ...valid, API_CREDENTIAL_LIFECYCLE_SCHEDULER_ENABLED: 'true' })
+      .credentialLifecycleSchedulerEnabled, true);
+    assert.throws(() => validateEnvironment({ ...valid, API_CREDENTIAL_LIFECYCLE_SCHEDULER_ENABLED: 'yes' }),
+      /API_CREDENTIAL_LIFECYCLE_SCHEDULER_ENABLED/);
     assert.deepEqual(parsed.suite4EmbedOrigins, []);
     assert.deepEqual(parsed.identity?.platformIdentityAdmins, []);
     assert.deepEqual(validateEnvironment({

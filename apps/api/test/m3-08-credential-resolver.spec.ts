@@ -135,6 +135,7 @@ function candidate(value: CredentialResolutionContext, overrides: Partial<Creden
     secretVersion: 1,
     health: { state: 'HEALTHY', observedAt, source: 'META_API' },
     expiry: { state: 'KNOWN', expiresAt, observedAt, source: 'META_API' },
+    dataAccessExpiry: { state: 'KNOWN', expiresAt, observedAt, source: 'META_API' },
     ...overrides,
   } satisfies CredentialResolutionCandidate;
 }
@@ -295,6 +296,7 @@ test('missing asset grant, missing scope and unknown validity fail recoverably w
     [{ grantedAssetGrants: [] }, 'ASSET_GRANT_MISSING'],
     [{ grantedAuthorizationScopes: [] }, 'META_PERMISSION_REQUIRED'],
     [{ expiry: { state: 'UNKNOWN' } }, 'DEPENDENCY_UNAVAILABLE'],
+    [{ dataAccessExpiry: { state: 'UNKNOWN' } }, 'DEPENDENCY_UNAVAILABLE'],
     [{ health: { state: 'UNKNOWN' } }, 'DEPENDENCY_UNAVAILABLE'],
   ] as const) {
     const value = context(uuid(60 + code.length));
