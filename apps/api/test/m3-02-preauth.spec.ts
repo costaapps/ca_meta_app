@@ -54,13 +54,13 @@ class FakeAbuseLimits extends AbuseLimitService {
 class FakePreAuth extends PortalPreAuthService {
   beginCalls = 0;
   verifyCalls = 0;
-  async begin(): Promise<StartedPortalPreAuth> {
+  async begin(entryMode: 'PORTAL_TOP_LEVEL' | 'SUITE4_EMBED' = 'PORTAL_TOP_LEVEL'): Promise<StartedPortalPreAuth> {
     this.beginCalls += 1;
     return Object.freeze({
       challengeRef: 'synthetic-browser-challenge-1234',
       cookieValue: markerCookie,
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
-      entryMode: 'PORTAL_TOP_LEVEL',
+      entryMode,
     });
   }
   async verifyBrowserBinding(): Promise<VerifiedPortalPreAuth | undefined> {
@@ -117,7 +117,7 @@ function ticketFor(privateKey: KeyObject): string {
   return `${signingInput}.${sign('RSA-SHA256', Buffer.from(signingInput, 'ascii'), privateKey).toString('base64url')}`;
 }
 
-async function startApp(portalTicketEnabled: boolean): Promise<{
+async function startApp(portalTicketEnabled: boolean, embedAllowed = false): Promise<{
   readonly app: INestApplication;
   readonly baseUrl: string;
   readonly origin: string;
@@ -146,6 +146,7 @@ async function startApp(portalTicketEnabled: boolean): Promise<{
     API_DATABASE_PASSWORD: 'synthetic-password-value',
     API_DATABASE_CONNECT_TIMEOUT_MS: '250',
     API_PORTAL_SESSION_RECOVERY_KEY: 'synthetic-test-session-recovery-key-32-bytes-minimum',
+    ...(embedAllowed ? { API_SUITE4_EMBED_ORIGINS: 'https://suite4.synthetic.invalid' } : {}),
     ...(portalTicketEnabled ? {
       API_PORTAL_ENTRY_TICKET_ISSUER: ISSUER,
       API_PORTAL_ENTRY_TICKET_AUDIENCE: AUDIENCE,
@@ -207,8 +208,8 @@ function sameOriginHeaders(origin: string): Record<string, string> {
   return { 'content-type': 'application/json', origin, 'sec-fetch-site': 'same-origin' };
 }
 
-test('runtime preauth is top-level only; exchange rate limit returns the safe HTTP envelope without issuing a session', async (t) => {
-  const context = await startApp(true);
+test('runtime preauth keeps top-level cookies and allows partitioned embed preauth only for configured Suite4 origins', async (t) => {
+  const context = await startApp(true, true);
   t.after(() => context.app.close());
 
   const started = await fetch(`${context.baseUrl}/api/v1/auth/preauth`, {
@@ -235,9 +236,18 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
     headers: sameOriginHeaders(context.origin),
     body: JSON.stringify({ entryMode: 'SUITE4_EMBED', returnRoute: 'connections' }),
   });
-  assert.equal(embed.status, 400);
-  assert.equal(embed.headers.get('set-cookie'), null);
-  assert.equal(context.preAuth.beginCalls, 1);
+  assert.equal(embed.status, 201);
+  assert.match(embed.headers.get('set-cookie') ?? '', /; SameSite=None; Partitioned/);
+  assert.equal(context.preAuth.beginCalls, 2);
+
+  const parentOriginAsRequestOrigin = await fetch(`${context.baseUrl}/api/v1/auth/preauth`, {
+    method: 'POST',
+    headers: { ...sameOriginHeaders(context.origin), origin: 'https://suite4.synthetic.invalid' },
+    body: JSON.stringify({ entryMode: 'SUITE4_EMBED', returnRoute: 'connections' }),
+  });
+  assert.equal(parentOriginAsRequestOrigin.status, 403);
+  assert.equal(parentOriginAsRequestOrigin.headers.get('set-cookie'), null);
+  assert.equal(context.preAuth.beginCalls, 2);
 
   context.abuseLimits.rateLimitPreAuth = true;
   const preauthLimited = await fetch(`${context.baseUrl}/api/v1/auth/preauth`, {
@@ -248,7 +258,7 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
   assert.equal(preauthLimited.status, 429);
   assert.equal(preauthLimited.headers.get('retry-after'), '60');
   assert.equal(preauthLimited.headers.get('set-cookie'), null);
-  assert.equal(context.preAuth.beginCalls, 1);
+  assert.equal(context.preAuth.beginCalls, 2);
   context.abuseLimits.rateLimitPreAuth = false;
 
   context.abuseLimits.rateLimitExchangeAttempt = true;
@@ -300,11 +310,25 @@ test('runtime preauth is top-level only; exchange rate limit returns the safe HT
   assert.equal(context.sessionIssuer.issueCalls, 0);
   assert.equal(context.preAuth.verifyCalls, 0);
   assert.deepEqual(context.abuseLimits.calls.map(({ policy }) => policy), [
-    'PORTAL_PREAUTH', 'PORTAL_PREAUTH', 'PORTAL_EXCHANGE_ATTEMPT', 'PORTAL_EXCHANGE_ATTEMPT', 'PORTAL_EXCHANGE',
+    'PORTAL_PREAUTH', 'PORTAL_PREAUTH', 'PORTAL_PREAUTH',
+    'PORTAL_EXCHANGE_ATTEMPT', 'PORTAL_EXCHANGE_ATTEMPT', 'PORTAL_EXCHANGE',
   ]);
   assert.deepEqual(context.abuseLimits.calls[2]?.dimensions, { ip: '127.0.0.1' });
-  assert.deepEqual(context.abuseLimits.calls[4]?.dimensions, { ip: '127.0.0.1', actor: `${ISSUER}\0synthetic-subject` });
+  assert.deepEqual(context.abuseLimits.calls[5]?.dimensions, { ip: '127.0.0.1', actor: `${ISSUER}\0synthetic-subject` });
   assert.equal(JSON.stringify(context.logger.records).includes(signedTicket), false);
+});
+
+test('embed preauth fails closed when no exact Suite4 parent origin is configured', async (t) => {
+  const context = await startApp(true);
+  t.after(async () => context.app.close());
+  const response = await fetch(`${context.baseUrl}/api/v1/auth/preauth`, {
+    method: 'POST',
+    headers: sameOriginHeaders(context.origin),
+    body: JSON.stringify({ entryMode: 'SUITE4_EMBED', returnRoute: 'connections' }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal(response.headers.get('set-cookie'), null);
+  assert.equal(context.preAuth.beginCalls, 0);
 });
 
 test('ticket exchange aliases and rejected query strings do not touch active session idle activity', async (t) => {

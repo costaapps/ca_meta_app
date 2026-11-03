@@ -12,6 +12,8 @@ export interface ApiEnvironment {
   readonly allowedHosts: readonly string[];
   /** Exact scheme/host/port browser origin allowlist; wildcards are never accepted. */
   readonly allowedOrigins: readonly string[];
+  /** Exact Suite4 parent origins permitted by the embed deployment. Empty disables embedding. */
+  readonly suite4EmbedOrigins: readonly string[];
   readonly trustedProxyCidrs: false | readonly string[];
   /** Sliding portal-session expiry; proposal default, not confirmed against Suite4 behavior. */
   readonly portalSessionIdleTimeoutSeconds: number;
@@ -26,6 +28,8 @@ export interface ApiEnvironment {
     readonly connectTimeoutMs: number;
   };
   readonly portalSessionRecoveryKey: string;
+  /** Optional server-side HMAC key for OAuth state; absent disables new onboarding starts. */
+  readonly onboardingStateSigningKey?: string;
   /** Absent configuration disables Suite4 ticket exchange without disabling other API routes. */
   readonly portalEntryTicket?: {
     readonly configuration: TicketExchangeConfiguration;
@@ -177,6 +181,27 @@ function allowedOriginsField(value: string, nodeEnv: string, invalid: string[]):
     return [];
   }
   return origins as string[];
+}
+
+function suite4EmbedOriginsField(value: string, invalid: string[]): readonly string[] {
+  if (value.trim() === '') return [];
+  const entries = value.split(',').map((entry) => entry.trim());
+  const origins = entries.map((entry) => {
+    try {
+      const url = new URL(entry);
+      if (entry.includes('*') || url.protocol !== 'https:' || url.origin !== entry || url.username || url.password ||
+          url.pathname !== '/' || url.search || url.hash) return undefined;
+      return url.origin;
+    } catch {
+      return undefined;
+    }
+  });
+  if (entries.some((entry) => entry.length === 0) || origins.some((origin) => origin === undefined) ||
+      new Set(origins).size !== origins.length) {
+    invalid.push('API_SUITE4_EMBED_ORIGINS');
+    return [];
+  }
+  return Object.freeze(origins as string[]);
 }
 
 function isUnspecifiedIpv6(address: string): boolean {
@@ -358,6 +383,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   const configuredOrigins = source.API_ALLOWED_ORIGINS?.trim() ?? '';
   if (configuredOrigins === '' && (nodeEnv === 'staging' || nodeEnv === 'production')) invalid.push('API_ALLOWED_ORIGINS');
   const allowedOrigins = configuredOrigins === '' ? [] : allowedOriginsField(configuredOrigins, nodeEnv, invalid);
+  const suite4EmbedOrigins = suite4EmbedOriginsField(source.API_SUITE4_EMBED_ORIGINS ?? '', invalid);
   const portalEntryTicket = portalEntryTicketField(source, nodeEnv, allowedOrigins, invalid);
   const trustedProxyCidrs = trustedProxiesField(
     required(source, 'API_TRUSTED_PROXIES', invalid),
@@ -400,6 +426,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     ? configuredRecoveryKey
     : randomBytes(32).toString('base64url');
   if (Buffer.byteLength(portalSessionRecoveryKey, 'utf8') < 32) invalid.push('API_PORTAL_SESSION_RECOVERY_KEY');
+  const onboardingStateSigningKey = optionalBase64urlKey(source.API_ONBOARDING_STATE_KEY, 'API_ONBOARDING_STATE_KEY', invalid);
   const platformIdentityAdmins = platformIdentityAdminsField(source, invalid);
 
   if (invalid.length > 0) {
@@ -413,10 +440,12 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     bindAddress,
     allowedHosts,
     allowedOrigins,
+    suite4EmbedOrigins,
     trustedProxyCidrs,
     portalSessionIdleTimeoutSeconds,
     portalSessionAbsoluteTimeoutSeconds,
     portalSessionRecoveryKey,
+    ...(onboardingStateSigningKey ? { onboardingStateSigningKey } : {}),
     ...(portalEntryTicket ? { portalEntryTicket } : {}),
     database: {
       host,
@@ -428,4 +457,15 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     },
     identity: { platformIdentityAdmins },
   };
+}
+
+function optionalBase64urlKey(value: string | undefined, field: string, invalid: string[]): string | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  try {
+    const decoded = Buffer.from(value, 'base64url');
+    if (decoded.length !== 32 || decoded.toString('base64url') !== value) invalid.push(field);
+  } catch {
+    invalid.push(field);
+  }
+  return invalid.includes(field) ? undefined : value;
 }

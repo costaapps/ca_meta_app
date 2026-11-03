@@ -323,6 +323,7 @@ test('a valid existing session proof is passed only as a rotation capability', a
         contextVersion: 4,
         contextRefHash: 'd'.repeat(64),
         csrfTokenHash: 'e'.repeat(64),
+        entryMode: 'PORTAL_TOP_LEVEL',
       };
     },
   });

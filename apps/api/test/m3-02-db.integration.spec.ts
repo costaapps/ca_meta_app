@@ -216,7 +216,7 @@ test('MariaDB persists one ticket session and recovers only for its original bro
       [tenantId, principalId],
     );
 
-    const started = await sessionsA.begin();
+    const started = await sessionsA.begin('SUITE4_EMBED');
     const challengeHash = createHash('sha256').update(started.challengeRef, 'utf8').digest('hex');
     challengeHashes.push(challengeHash);
     const jti = randomUUID();
@@ -247,11 +247,12 @@ test('MariaDB persists one ticket session and recovers only for its original bro
     assert.equal(sessionCookie(responseA.cookies), sessionCookie(responseB.cookies));
     assert.ok(sessionCookie(responseA.cookies), 'the same browser receives its opaque portal cookie');
 
-    const persistedSessions = await queryRows<{ id: string }>(admin,
-      `SELECT id FROM ca_meta_portal_sessions WHERE id = ? AND principal_id = ? AND tenant_id = ? AND revoked_at IS NULL`,
+    const persistedSessions = await queryRows<{ id: string; entry_mode: string }>(admin,
+      `SELECT id, entry_mode FROM ca_meta_portal_sessions WHERE id = ? AND principal_id = ? AND tenant_id = ? AND revoked_at IS NULL`,
       [attemptA.sessionRef, principalId, tenantId],
     );
-    assert.deepEqual(persistedSessions, [{ id: attemptA.sessionRef }], 'concurrent exchanges persist exactly one session');
+    assert.deepEqual(persistedSessions, [{ id: attemptA.sessionRef, entry_mode: 'SUITE4_EMBED' }],
+      'concurrent embed exchanges persist exactly one session with the server-verified entry mode');
     const persistedTicket = await queryRows<{ session_id: string; pre_auth_id: string; ticket_sha256: string | null }>(admin,
       'SELECT session_id, pre_auth_id, ticket_sha256 FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?',
       [issuer, jtiHash],
@@ -421,16 +422,32 @@ test('MariaDB persists one ticket session and recovers only for its original bro
       identityA.onApplicationShutdown(), identityB.onApplicationShutdown(),
     ]);
     try {
-      for (const jtiHash of jtiHashes) {
-        await admin.query('DELETE FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?', [issuer, jtiHash]);
+      const cleanup = await createConnection({
+        host: migrationEnvironment.database.host,
+        port: migrationEnvironment.database.port,
+        database: migrationEnvironment.database.name,
+        user: migrationEnvironment.apiDatabaseUser,
+        password: apiPassword,
+        connectTimeout: migrationEnvironment.database.connectTimeoutMs,
+        multipleStatements: false,
+        dateStrings: true,
+        charset: 'utf8mb4',
+        timezone: 'Z',
+      });
+      try {
+        for (const jtiHash of jtiHashes) {
+          await cleanup.query('DELETE FROM ca_meta_portal_ticket_jtis WHERE issuer = ? AND jti_hash = ?', [issuer, jtiHash]);
+        }
+        await cleanup.query('DELETE FROM ca_meta_portal_sessions WHERE principal_id = ? AND tenant_id = ?', [principalId, tenantId]);
+        for (const challengeHash of challengeHashes) {
+          await cleanup.query('DELETE FROM ca_meta_portal_pre_auth WHERE challenge_hash = ?', [challengeHash]);
+        }
+        await cleanup.query('DELETE FROM ca_meta_memberships WHERE tenant_id = ? AND principal_id = ?', [tenantId, principalId]);
+        await cleanup.query('DELETE FROM ca_meta_principals WHERE id = ?', [principalId]);
+        await cleanup.query('DELETE FROM ca_meta_tenants WHERE id = ?', [tenantId]);
+      } finally {
+        await cleanup.end();
       }
-      await admin.query('DELETE FROM ca_meta_portal_sessions WHERE principal_id = ? AND tenant_id = ?', [principalId, tenantId]);
-      for (const challengeHash of challengeHashes) {
-        await admin.query('DELETE FROM ca_meta_portal_pre_auth WHERE challenge_hash = ?', [challengeHash]);
-      }
-      await admin.query('DELETE FROM ca_meta_memberships WHERE tenant_id = ? AND principal_id = ?', [tenantId, principalId]);
-      await admin.query('DELETE FROM ca_meta_principals WHERE id = ?', [principalId]);
-      await admin.query('DELETE FROM ca_meta_tenants WHERE id = ?', [tenantId]);
     } finally {
       await admin.end();
     }

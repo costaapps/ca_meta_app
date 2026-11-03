@@ -59,6 +59,8 @@ export interface IssuedPortalSession {
   readonly tenantId: string;
   readonly expiresAt: string;
   readonly publicContext: PortalSessionPublicContext;
+  /** True only for a session issued from the server-verified SUITE4_EMBED pre-auth record. */
+  readonly cookiePartitioned?: boolean;
 }
 
 /** Must re-read active membership and atomically consume pre-auth/JTI + rotate/create session. */

@@ -12,6 +12,12 @@ const platformAdministrators = new WeakSet<object>();
 const verifiedServiceCredentials = new WeakSet<object>();
 const verifiedPersistedJobs = new WeakSet<object>();
 
+export type PortalEntryMode = 'PORTAL_TOP_LEVEL' | 'SUITE4_EMBED';
+
+export function isPortalEntryMode(value: unknown): value is PortalEntryMode {
+  return value === 'PORTAL_TOP_LEVEL' || value === 'SUITE4_EMBED';
+}
+
 export interface VerifiedPortalSession {
   readonly [verifiedPortalSessionBrand]: true;
   readonly sessionId: string;
@@ -21,6 +27,8 @@ export interface VerifiedPortalSession {
   readonly contextRefHash: string;
   /** Stored hash for the synchronizer token; the token itself is never persisted. */
   readonly csrfTokenHash: string;
+  /** Server-persisted mode from the browser-bound pre-auth record. */
+  readonly entryMode: PortalEntryMode;
 }
 
 export interface VerifiedIdentityAssertion {
@@ -55,6 +63,7 @@ export interface StoredPortalSession {
   readonly contextVersion: number;
   readonly contextRefHash: string;
   readonly csrfTokenHash: string;
+  readonly entryMode: PortalEntryMode;
 }
 
 export interface PortalSessionStore {
@@ -112,7 +121,8 @@ export class PortalSessionVerifier {
     const secretHash = createHash('sha256').update(cookieValue, 'utf8').digest();
     const row = await this.store.findActiveBySecretHash(secretHash, options);
     if (!row || !row.sessionId || !row.principalId || !row.tenantId ||
-      !Number.isSafeInteger(row.contextVersion) || row.contextVersion < 1 || !/^[a-f0-9]{64}$/.test(row.contextRefHash)) {
+      !Number.isSafeInteger(row.contextVersion) || row.contextVersion < 1 || !/^[a-f0-9]{64}$/.test(row.contextRefHash) ||
+      !isPortalEntryMode(row.entryMode)) {
       return undefined;
     }
     if (!/^[a-f0-9]{64}$/.test(row.csrfTokenHash)) return undefined;

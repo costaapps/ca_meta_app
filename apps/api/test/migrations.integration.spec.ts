@@ -277,6 +277,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
           return {
             sessionId: uuid(71_002), principalId: identityUserId, tenantId: tenantA,
             contextVersion: 1, contextRefHash: hashTenantContextReference(contextRef), csrfTokenHash: 'a'.repeat(64),
+            entryMode: 'PORTAL_TOP_LEVEL',
           };
         },
       }).verify(cookie);
@@ -301,6 +302,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
           return {
             sessionId: uuid(71_004), principalId: granted.principalId as string, tenantId: tenantA,
             contextVersion: 1, contextRefHash: hashTenantContextReference(adminContextRef), csrfTokenHash: 'b'.repeat(64),
+            entryMode: 'PORTAL_TOP_LEVEL',
           };
         },
       }).verify(adminCookie);

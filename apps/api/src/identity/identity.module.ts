@@ -18,7 +18,7 @@ import { PortalSessionController } from './portal-session.controller.js';
 import { PortalSessionsController } from './portal-sessions.controller.js';
 import { PortalSessionGuard } from './portal-session.guard.js';
 import { AbuseLimitService, MysqlAbuseLimitService } from '../common/security/abuse-limits.js';
-import { PortalPreAuthController } from '../auth-exchange/portal-preauth.controller.js';
+import { PortalPreAuthController, SUITE4_EMBED_ALLOWED_ORIGINS } from '../auth-exchange/portal-preauth.controller.js';
 
 @Module({})
 export class IdentityModule {
@@ -26,6 +26,7 @@ export class IdentityModule {
     return {
       module: IdentityModule,
       providers: [
+        { provide: SUITE4_EMBED_ALLOWED_ORIGINS, useValue: environment.suite4EmbedOrigins ?? [] },
         {
           provide: PORTAL_SESSION_STORE,
           useFactory: () => new MysqlPortalSessionStore(environment),
