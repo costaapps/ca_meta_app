@@ -3,6 +3,7 @@ import type { EntityManager } from 'typeorm';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { OutboxEventEnvelope } from '../jobs/event-validation.js';
 import type { OutboxService } from '../outbox/outbox-service.js';
+import type { AuditEventWriter } from '../privacy/audit.service.js';
 import {
   assetIdentityHash,
   isVerifiedMetaEvidence,
@@ -95,7 +96,11 @@ function isDuplicateKey(error: unknown): boolean {
 
 /** All commands run in one database transaction. OutboxService receives that same EntityManager. */
 export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
-  constructor(private readonly database: DurableWorkDatabase, private readonly outbox: OutboxAppender) {}
+  constructor(
+    private readonly database: DurableWorkDatabase,
+    private readonly outbox: OutboxAppender,
+    private readonly audit: AuditEventWriter,
+  ) {}
 
   async upsert(command: AuthorizationUpsertCommand): Promise<AuthorizationUpsertResult> {
     validateAuthorizationUpsert(command);
@@ -217,6 +222,20 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
       data: { kind: 'CONNECTION_CHANGED', connectionRef: command.authorizationId, status: this.outboxState(aggregateState), observedAt: command.observedAt },
     };
     await this.outbox.appendWithin(manager, event);
+    const auditAction = authorizationState === 'DISCONNECTED' || authorizationState === 'REVOKED'
+      ? 'AUTHORIZATION_DISCONNECTED'
+      : authEvidence && currentAuth ? 'AUTHORIZATION_REAUTHORIZED'
+        : authEvidence && !currentAuth && (authorizationState === 'ACTIVE' || authorizationState === 'PARTIAL')
+          ? 'AUTHORIZATION_CONNECTED' : 'AUTHORIZATION_OBSERVED';
+    await this.audit.record({
+      tenantId: command.tenantId,
+      actorRef: command.actor.ref,
+      action: auditAction,
+      targetRef: command.authorizationId,
+      correlationId: command.correlationId,
+      retentionClass: 'OPERATIONS',
+      safeDiff: { before: currentAuth?.authorization_state ?? 'UNKNOWN', after: aggregateState, version: authVersion },
+    }, manager);
     return Object.freeze({
       authorizationRef: command.authorizationId,
       version: authVersion,

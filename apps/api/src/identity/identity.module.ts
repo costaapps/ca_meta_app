@@ -19,12 +19,15 @@ import { PortalSessionsController } from './portal-sessions.controller.js';
 import { PortalSessionGuard } from './portal-session.guard.js';
 import { AbuseLimitService, MysqlAbuseLimitService } from '../common/security/abuse-limits.js';
 import { PortalPreAuthController } from '../auth-exchange/portal-preauth.controller.js';
+import { PrivacyModule, PRIVACY_AUDIT_WRITER } from '../privacy/privacy.module.js';
+import type { AuditEventWriter } from '../privacy/audit.service.js';
 
 @Module({})
 export class IdentityModule {
   static register(environment: ApiEnvironment): DynamicModule {
     return {
       module: IdentityModule,
+      imports: [PrivacyModule.register(environment)],
       providers: [
         {
           provide: PORTAL_SESSION_STORE,
@@ -81,9 +84,9 @@ export class IdentityModule {
         },
         {
           provide: IdentityAdministrationService,
-          useFactory: (repository: MysqlIdentityAdministrationRepository, contexts: TenantContextService) =>
-            new IdentityAdministrationService(repository, contexts),
-          inject: [IDENTITY_ADMINISTRATION_REPOSITORY, TenantContextService],
+          useFactory: (repository: MysqlIdentityAdministrationRepository, contexts: TenantContextService, audit: AuditEventWriter) =>
+            new IdentityAdministrationService(repository, contexts, audit),
+          inject: [IDENTITY_ADMINISTRATION_REPOSITORY, TenantContextService, PRIVACY_AUDIT_WRITER],
         },
       ],
       exports: [TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService,

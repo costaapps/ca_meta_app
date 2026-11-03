@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { IdentityDeniedError } from './identity.errors.js';
+import type { AuditEventWriter } from '../privacy/audit.service.js';
 import {
   isAssignableMembershipRole,
   isLegacyTenantMappingInput,
@@ -8,6 +9,7 @@ import {
   type LegacyTenantMappingInput,
 } from './identity-administration.repository.js';
 import { isAuthorizedTenantScope, TenantContextService } from './identity.service.js';
+import type { AuthorizedTenantScope } from './identity.types.js';
 import {
   isVerifiedIdentityAssertion,
   isVerifiedPlatformIdentityAdmin,
@@ -37,7 +39,20 @@ export class IdentityAdministrationService {
   constructor(
     private readonly repository: IdentityAdministrationRepository,
     private readonly contexts: TenantContextService,
+    private readonly audit: AuditEventWriter,
   ) {}
+
+  private async recordDenial(actor: VerifiedPortalSession, reasonCode: string): Promise<void> {
+    await this.audit.record({
+      tenantId: actor.tenantId,
+      actorRef: actor.principalId,
+      action: 'AUTHORIZATION_DENIED',
+      targetRef: 'identity-administration',
+      correlationId: randomUUID(),
+      retentionClass: 'SECURITY',
+      safeDiff: { reasonCode },
+    }).catch(() => undefined);
+  }
 
   async bootstrapTenant(
     actor: VerifiedPlatformIdentityAdmin,
@@ -67,13 +82,27 @@ export class IdentityAdministrationService {
     idempotencyKey: string,
   ) {
     if (!isVerifiedPortalSession(actor)) throw new IdentityDeniedError();
-    if (!isAssignableMembershipRole(role)) throw new IdentityDeniedError();
-    assertCommandInputs(target, idempotencyKey, reasonCode);
-    const scope = await this.contexts.resolveCurrent(actor, contextRef);
-    if (!isAuthorizedTenantScope(scope) || (!scope.roles.includes('owner') && !scope.roles.includes('admin'))) {
+    if (!isAssignableMembershipRole(role)) {
+      await this.recordDenial(actor, 'INVALID_ROLE');
       throw new IdentityDeniedError();
     }
-    if (role === 'admin' && !scope.roles.includes('owner')) throw new IdentityDeniedError();
+    try { assertCommandInputs(target, idempotencyKey, reasonCode); } catch (error) {
+      await this.recordDenial(actor, 'INVALID_TARGET_OR_COMMAND');
+      throw error;
+    }
+    let scope: AuthorizedTenantScope;
+    try { scope = await this.contexts.resolveCurrent(actor, contextRef); } catch (error) {
+      await this.recordDenial(actor, error instanceof IdentityDeniedError && error.code === 'CONTEXT_CHANGED' ? 'CONTEXT_CHANGED' : 'TENANT_SCOPE_DENIED');
+      throw error;
+    }
+    if (!isAuthorizedTenantScope(scope) || (!scope.roles.includes('owner') && !scope.roles.includes('admin'))) {
+      await this.recordDenial(actor, 'MEMBERSHIP_ADMIN_REQUIRED');
+      throw new IdentityDeniedError();
+    }
+    if (role === 'admin' && !scope.roles.includes('owner')) {
+      await this.recordDenial(actor, 'OWNER_REQUIRED_FOR_ADMIN_GRANT');
+      throw new IdentityDeniedError();
+    }
     return this.repository.execute({
       action: 'GRANT_MEMBERSHIP', actor, scope, target, role, reasonCode, idempotencyKey,
       requestHash: requestHash(['GRANT_MEMBERSHIP', scope.tenantId, target.issuer, target.subject, role, reasonCode]),
@@ -86,11 +115,20 @@ export class IdentityAdministrationService {
     targetPrincipalId: string,
     idempotencyKey: string,
   ) {
-    if (!isVerifiedPortalSession(actor) || !targetPrincipalId || !UUID.test(targetPrincipalId) || !UUID.test(idempotencyKey)) {
+    if (!isVerifiedPortalSession(actor)) {
       throw new IdentityDeniedError();
     }
-    const scope = await this.contexts.resolveCurrent(actor, contextRef);
+    if (!targetPrincipalId || !UUID.test(targetPrincipalId) || !UUID.test(idempotencyKey)) {
+      await this.recordDenial(actor, 'INVALID_REVOCATION_COMMAND');
+      throw new IdentityDeniedError();
+    }
+    let scope: AuthorizedTenantScope;
+    try { scope = await this.contexts.resolveCurrent(actor, contextRef); } catch (error) {
+      await this.recordDenial(actor, error instanceof IdentityDeniedError && error.code === 'CONTEXT_CHANGED' ? 'CONTEXT_CHANGED' : 'TENANT_SCOPE_DENIED');
+      throw error;
+    }
     if (!isAuthorizedTenantScope(scope) || (!scope.roles.includes('owner') && !scope.roles.includes('admin'))) {
+      await this.recordDenial(actor, 'MEMBERSHIP_ADMIN_REQUIRED');
       throw new IdentityDeniedError();
     }
     const reasonCode: IdentityAdministrationReason = 'MEMBERSHIP_REVOCATION';

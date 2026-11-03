@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { EntityManager } from 'typeorm';
 import { META_ASSETS_MIGRATION } from '../src/database/migrations/meta-assets.js';
 import { MysqlMetaAssetsRepository } from '../src/meta-assets/mysql-meta-assets.repository.js';
+import type { AuditEventWriter } from '../src/privacy/audit.service.js';
 import {
   assetIdentityHash,
   issueVerifiedMetaEvidence,
@@ -17,6 +18,7 @@ const tenantId = '00000000-0000-4000-8000-000000000001';
 const appConfigurationId = '00000000-0000-4000-8000-000000000002';
 const authorizationId = '00000000-0000-4000-8000-000000000003';
 const observedAt = '2026-10-30T12:00:00.000Z';
+const noAudit = { async record() { return '00000000-0000-4000-8000-000000000099'; } } as unknown as AuditEventWriter;
 const evidence = () => issueVerifiedMetaEvidence({
   source: 'META_API',
   observedAt,
@@ -171,7 +173,7 @@ test('outbox intent remains staged when the enclosing commit fails', async () =>
       return;
     },
   };
-  const repository = new MysqlMetaAssetsRepository(database as never, outbox);
+  const repository = new MysqlMetaAssetsRepository(database as never, outbox, noAudit);
   await assert.rejects(repository.upsert(command({ evidence: evidence() })), /synthetic commit failure/);
   assert.equal(staged.length, 1);
   assert.equal(staged[0]?.length, 1);
@@ -227,7 +229,7 @@ test('an omitted asset grant snapshot preserves current grants and history', asy
   };
   const repository = new MysqlMetaAssetsRepository(database as never, {
     async appendWithin() { return; },
-  });
+  }, noAudit);
 
   await repository.upsert(command({
     evidence: proof,
@@ -259,7 +261,7 @@ test('older verified authorization observations cannot overwrite newer state', a
       };
     },
   };
-  const repository = new MysqlMetaAssetsRepository(database as never, { async appendWithin() { return; } });
+  const repository = new MysqlMetaAssetsRepository(database as never, { async appendWithin() { return; } }, noAudit);
   await assert.rejects(repository.upsert(command({
     evidence: evidence(),
     observedAt: '2026-10-30T12:00:00.000000Z',

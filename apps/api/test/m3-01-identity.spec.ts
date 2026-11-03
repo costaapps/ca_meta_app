@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
+import type { AuditEventWriter } from '../src/privacy/audit.service.js';
 import { IdentityDeniedError } from '../src/identity/identity.errors.js';
 import { IdentityAdministrationService } from '../src/identity/identity-administration.service.js';
 import { IDENTITY_REPOSITORY } from '../src/identity/identity.repository.js';
@@ -45,6 +46,10 @@ const tenantB = 'tenant-b-internal';
 const humanId = 'principal-human-internal';
 const serviceId = 'principal-service-internal';
 const sameExternalAssetId = 'meta-external-asset-123';
+const identityDenialEvents: unknown[] = [];
+const noAudit = {
+  async record(input: unknown) { identityDenialEvents.push(input); return '00000000-0000-4000-8000-000000000099'; },
+} as unknown as AuditEventWriter;
 
 function membership(tenantId: string, roles: readonly MembershipRole[]): TenantMembership {
   return {
@@ -382,7 +387,7 @@ test('platform bootstrap fails closed until explicit allowlist authority and is 
   }]);
   const actor = authority.verify(platformIdentity);
   const repository = new FakeIdentityAdministrationRepository();
-  const service = new IdentityAdministrationService(repository, new TenantContextService(new FakeIdentityRepository()));
+  const service = new IdentityAdministrationService(repository, new TenantContextService(new FakeIdentityRepository()), noAudit);
   const mapping: LegacyTenantMappingInput = {
     legacyDatabaseId: 'synthetic-db-1', legacyCompanyId: 'synthetic-company-1', environment: 'test',
   };
@@ -403,7 +408,8 @@ test('membership admin operation denies escalation, records replay identity and 
   const identities = new FakeIdentityRepository();
   identities.memberships.set(tenantA, membership(tenantA, ['owner']));
   const adminRepository = new FakeIdentityAdministrationRepository();
-  const service = new IdentityAdministrationService(adminRepository, new TenantContextService(identities));
+  identityDenialEvents.length = 0;
+  const service = new IdentityAdministrationService(adminRepository, new TenantContextService(identities), noAudit);
   const actor = await sessionFor(tenantA, 'synthetic-context-ref-admin-grant');
   const assertion = new SyntheticAssertionVerifier().verify('synthetic-invitee-subject');
   const key = '00000000-0000-4000-8000-000000000002';
@@ -417,12 +423,15 @@ test('membership admin operation denies escalation, records replay identity and 
     IdentityDeniedError,
   );
   assert.equal(adminRepository.commands.length, commandCount, 'runtime role spoof is denied before repository execution');
+  assert.equal(identityDenialEvents.length, 1, 'denied role input creates a safe authorization audit event');
+  assert.equal(JSON.stringify(identityDenialEvents).includes('synthetic-context-ref-admin-grant'), false);
 
   identities.memberships.set(tenantA, membership(tenantA, ['admin']));
   await assert.rejects(
     service.grantMembership(actor, 'synthetic-context-ref-admin-grant', assertion, 'admin', 'ROLE_CHANGE', '00000000-0000-4000-8000-000000000003'),
     IdentityDeniedError,
   );
+  assert.equal(identityDenialEvents.length, 2, 'an admin attempting to grant admin is audited without the target identity');
   identities.memberships.set(tenantA, membership(tenantA, ['operator']));
   await assert.rejects(
     service.grantMembership(actor, 'synthetic-context-ref-admin-grant', assertion, 'viewer', 'MEMBERSHIP_GRANT', '00000000-0000-4000-8000-000000000004'),

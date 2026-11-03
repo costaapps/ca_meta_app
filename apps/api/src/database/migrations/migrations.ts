@@ -8,6 +8,7 @@ import { TICKET_RETRY_MIGRATION } from './ticket-retry.js';
 import { META_ASSETS_MIGRATION, META_ASSETS_TABLES } from './meta-assets.js';
 import { MAGIC_LINKS_MIGRATION, MAGIC_LINK_TABLES } from './magic-links.js';
 import { META_CREDENTIAL_VAULT_MIGRATION, META_CREDENTIAL_VAULT_TABLES } from './credential-vault.js';
+import { PRIVACY_GOVERNANCE_MIGRATION, PRIVACY_GOVERNANCE_TABLES } from './privacy-governance.js';
 
 function ddl(
   id: string,
@@ -267,6 +268,7 @@ const migrationsWithoutChecksums = [
   META_ASSETS_MIGRATION,
   MAGIC_LINKS_MIGRATION,
   META_CREDENTIAL_VAULT_MIGRATION,
+  PRIVACY_GOVERNANCE_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -287,6 +289,7 @@ export const DOMAIN_TABLES = [
   ...META_ASSETS_TABLES,
   ...MAGIC_LINK_TABLES,
   ...META_CREDENTIAL_VAULT_TABLES,
+  ...PRIVACY_GOVERNANCE_TABLES,
   ...DURABLE_WORK_TABLES,
 ] as const;
 

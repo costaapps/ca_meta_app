@@ -8,26 +8,28 @@ import { ConfiguredCredentialKeyProvider } from '../credentials/credential-key-p
 import { CREDENTIAL_KEY_PROVIDER, CREDENTIAL_VAULT_AUTHORIZATION, CREDENTIAL_VAULT_REPOSITORY } from '../credentials/credential-vault.types.js';
 import { CredentialVaultService, FailClosedCredentialVaultAuthorization } from '../credentials/credential-vault.service.js';
 import { MysqlCredentialVaultRepository } from '../credentials/mysql-credential-vault.repository.js';
+import { PrivacyModule, PRIVACY_AUDIT_WRITER } from '../privacy/privacy.module.js';
+import type { AuditEventWriter } from '../privacy/audit.service.js';
 
 @Module({})
 export class MetaAssetsModule {
   static register(environment: ApiEnvironment): DynamicModule {
     return {
       module: MetaAssetsModule,
-      imports: [JobsModule.register(environment)],
+      imports: [JobsModule.register(environment), PrivacyModule.register(environment)],
       providers: [
         {
           provide: META_ASSETS_REPOSITORY,
-          useFactory: (database: DurableWorkDatabase, outbox: OutboxService) =>
-            new MysqlMetaAssetsRepository(database, outbox),
-          inject: [DURABLE_WORK_DATABASE, OutboxService],
+          useFactory: (database: DurableWorkDatabase, outbox: OutboxService, audit: AuditEventWriter) =>
+            new MysqlMetaAssetsRepository(database, outbox, audit),
+          inject: [DURABLE_WORK_DATABASE, OutboxService, PRIVACY_AUDIT_WRITER],
         },
         { provide: CREDENTIAL_KEY_PROVIDER, useFactory: () => new ConfiguredCredentialKeyProvider(environment.credentialKeyRing) },
         { provide: CREDENTIAL_VAULT_AUTHORIZATION, useClass: FailClosedCredentialVaultAuthorization },
         {
           provide: CREDENTIAL_VAULT_REPOSITORY,
-          useFactory: (database: DurableWorkDatabase) => new MysqlCredentialVaultRepository(database),
-          inject: [DURABLE_WORK_DATABASE],
+          useFactory: (database: DurableWorkDatabase, audit: AuditEventWriter) => new MysqlCredentialVaultRepository(database, audit),
+          inject: [DURABLE_WORK_DATABASE, PRIVACY_AUDIT_WRITER],
         },
         {
           provide: CredentialVaultService,

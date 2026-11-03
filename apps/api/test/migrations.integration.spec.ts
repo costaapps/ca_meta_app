@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createConnection, type Connection } from 'mysql2/promise';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
+import type { AuditEventWriter } from '../src/privacy/audit.service.js';
 import { readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
 import { MIGRATION_STEP_LEDGER, deployMigrations, migrationLockName, readMigrationStatus } from '../src/database/migrations/migration-runner.js';
 import { MIGRATIONS } from '../src/database/migrations/migrations.js';
@@ -249,7 +250,10 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
         issuer: 'https://issuer.synthetic.invalid', subject: 'synthetic-platform-administrator',
       }]);
       const platformActor = authority.verify(platformAssertion);
-      const identityService = new IdentityAdministrationService(adminRepository, new TenantContextService(identityRepository));
+      const identityService = new IdentityAdministrationService(
+        adminRepository, new TenantContextService(identityRepository),
+        { async record() { return uuid(71_099); } } as unknown as AuditEventWriter,
+      );
       const legacyMapping = {
         legacyDatabaseId: 'synthetic-bootstrap-db', legacyCompanyId: 'synthetic-bootstrap-company', environment: 'test' as const,
       };
