@@ -27,6 +27,15 @@ class SyntheticVaultAuthorization implements CredentialVaultAuthorizationPort {
   async authorize(): Promise<void> {}
 }
 
+function parseMariaDbJsonObject(value: unknown): Record<string, unknown> {
+  const parsed: unknown = typeof value === 'string'
+    ? JSON.parse(value)
+    : Buffer.isBuffer(value) ? JSON.parse(value.toString('utf8')) : value;
+  assert.ok(parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed),
+    'MariaDB JSON columns are returned as an object or JSON text');
+  return parsed as Record<string, unknown>;
+}
+
 test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, and stale-version fencing', {
   skip: enabled ? false : 'Run in the disposable M2.05 MariaDB profile with M3_09_TEST=1.',
 }, async () => {
@@ -177,11 +186,11 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
     const scheduled = await dataSource.query(
       `SELECT id, idempotency_key, correlation_id, payload_json, status FROM ca_meta_jobs
        WHERE tenant_id = ? AND job_type = 'CREDENTIAL_INSPECTION'`, [tenantId],
-    ) as Array<{ id: string; idempotency_key: string; correlation_id: string; payload_json: string; status: string }>;
+    ) as Array<{ id: string; idempotency_key: string; correlation_id: string; payload_json: unknown; status: string }>;
     assert.equal(scheduled.length, 1);
     assert.equal(scheduled[0]?.status, 'QUEUED');
-    assert.ok(!scheduled[0]?.payload_json.includes(secretMarker));
-    const payload = JSON.parse(scheduled[0]!.payload_json) as Record<string, unknown>;
+    const payload = parseMariaDbJsonObject(scheduled[0]!.payload_json);
+    assert.ok(!JSON.stringify(payload).includes(secretMarker));
     const duplicate = await jobs.enqueue({ tenantId, type: 'CREDENTIAL_INSPECTION',
       idempotencyKey: scheduled[0]!.idempotency_key, correlationId: scheduled[0]!.correlation_id,
       resourceScopeRef: String(payload.credentialId), payload });
@@ -355,8 +364,8 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
       `SELECT payload_json FROM ca_meta_jobs WHERE tenant_id = ? AND job_type = 'CREDENTIAL_INSPECTION'
        AND resource_scope_ref = ? AND status = 'QUEUED' ORDER BY created_at DESC LIMIT 1`,
       [tenantId, current.binding.credentialId],
-    ) as Array<{ payload_json: string }>;
-    const currentFence = JSON.parse(currentJobRows[0]!.payload_json) as unknown as CredentialInspectionBinding;
+    ) as Array<{ payload_json: unknown }>;
+    const currentFence = parseMariaDbJsonObject(currentJobRows[0]!.payload_json) as unknown as CredentialInspectionBinding;
     const replacementCas = new CredentialReplacementCasService(database, vault);
     assert.equal(await replacementCas.replaceIfCurrent(currentFence, current.actor, replacementMarker), true,
       'a current isolated CAS atomically updates the vault secret');
@@ -376,8 +385,8 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
       `SELECT payload_json FROM ca_meta_jobs WHERE tenant_id = ? AND job_type = 'CREDENTIAL_INSPECTION'
        AND resource_scope_ref = ? AND status = 'QUEUED' ORDER BY created_at DESC LIMIT 1`,
       [tenantId, stale.binding.credentialId],
-    ) as Array<{ payload_json: string }>;
-    const staleFence = JSON.parse(staleJobRows[0]!.payload_json) as unknown as CredentialInspectionBinding;
+    ) as Array<{ payload_json: unknown }>;
+    const staleFence = parseMariaDbJsonObject(staleJobRows[0]!.payload_json) as unknown as CredentialInspectionBinding;
     const resourceIdentity = await dataSource.query(
       'SELECT external_id FROM ca_meta_assets WHERE tenant_id = ? AND id = ?', [tenantId, firstResource.assetId],
     ) as Array<{ external_id: string }>;
