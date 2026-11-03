@@ -105,7 +105,7 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
       `INSERT INTO ca_meta_assets
        (id, tenant_id, app_configuration_id, provider, environment, asset_kind, external_id, display_name, external_name, version, created_at, updated_at)
        VALUES (?, ?, ?, 'META', 'test', 'INSTAGRAM_BUSINESS_ACCOUNT', ?, NULL, NULL, 1, ?, ?)`,
-      [assetId, tenantId, `m3-09-asset-${randomUUID()}`, timestamp, timestamp],
+      [assetId, tenantId, appConfigurationId, `m3-09-asset-${randomUUID()}`, timestamp, timestamp],
     );
     await dataSource.query(
       `INSERT INTO ca_meta_asset_authorizations
