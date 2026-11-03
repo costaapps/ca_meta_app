@@ -9,6 +9,7 @@ import { META_ASSETS_MIGRATION, META_ASSETS_TABLES } from './meta-assets.js';
 import { MAGIC_LINKS_MIGRATION, MAGIC_LINK_TABLES } from './magic-links.js';
 import { META_CREDENTIAL_VAULT_MIGRATION, META_CREDENTIAL_VAULT_TABLES } from './credential-vault.js';
 import { PRIVACY_GOVERNANCE_MIGRATION, PRIVACY_GOVERNANCE_TABLES } from './privacy-governance.js';
+import { CREDENTIAL_LIFECYCLE_MIGRATION, CREDENTIAL_LIFECYCLE_TABLES } from './credential-lifecycle.js';
 import { PORTAL_SESSION_ENTRY_MODE_MIGRATION } from './portal-session-entry-mode.js';
 import { ONBOARDING_SESSIONS_MIGRATION, ONBOARDING_SESSION_TABLES } from './onboarding-sessions.js';
 
@@ -273,6 +274,7 @@ const migrationsWithoutChecksums = [
   ONBOARDING_SESSIONS_MIGRATION,
   META_CREDENTIAL_VAULT_MIGRATION,
   PRIVACY_GOVERNANCE_MIGRATION,
+  CREDENTIAL_LIFECYCLE_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -295,6 +297,7 @@ export const DOMAIN_TABLES = [
   ...ONBOARDING_SESSION_TABLES,
   ...META_CREDENTIAL_VAULT_TABLES,
   ...PRIVACY_GOVERNANCE_TABLES,
+  ...CREDENTIAL_LIFECYCLE_TABLES,
   ...DURABLE_WORK_TABLES,
 ] as const;
 

@@ -97,7 +97,9 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
   let restoredDatabase: DurableWorkDatabase | undefined;
   const keyV1 = randomBytes(32);
   const keyV2 = randomBytes(32);
-  const keyV3 = randomBytes(32);
+  const configuredKeyV3 = process.env.M3_TEST_CREDENTIAL_KEY_V3;
+  if (configuredKeyV3 !== undefined) assert.match(configuredKeyV3, /^[0-9a-f]{64}$/i);
+  const keyV3 = configuredKeyV3 === undefined ? randomBytes(32) : Buffer.from(configuredKeyV3, 'hex');
   const providerV1 = new ConfiguredCredentialKeyProvider(new CredentialKeyRingConfiguration('m3-test-v1', [{ version: 'm3-test-v1', key: keyV1 }]));
   const providerV2 = new ConfiguredCredentialKeyProvider(new CredentialKeyRingConfiguration('m3-test-v2', [
     { version: 'm3-test-v1', key: keyV1 },

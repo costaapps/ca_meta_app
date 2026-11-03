@@ -35,6 +35,8 @@ export interface ApiEnvironment {
   readonly portalSessionIdleTimeoutSeconds: number;
   /** Absolute portal-session expiry; proposal default, not confirmed against Suite4 behavior. */
   readonly portalSessionAbsoluteTimeoutSeconds: number;
+  /** Opt-in local lifecycle queueing; provider inspection remains impossible without explicit adapters. */
+  readonly credentialLifecycleSchedulerEnabled?: boolean;
   readonly database: {
     readonly host: string;
     readonly port: number;
@@ -140,6 +142,15 @@ function optionalIntegerField(
     return defaultValue;
   }
   return parsed;
+}
+
+function optionalBooleanField(source: NodeJS.ProcessEnv, key: string, defaultValue: boolean, invalid: string[]): boolean {
+  const value = source[key];
+  if (value === undefined) return defaultValue;
+  if (value.trim() === 'true') return true;
+  if (value.trim() === 'false') return false;
+  invalid.push(key);
+  return defaultValue;
 }
 
 function normalizeAllowedHost(value: string): string | undefined {
@@ -451,6 +462,9 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   if (portalSessionAbsoluteTimeoutSeconds < portalSessionIdleTimeoutSeconds) {
     invalid.push('API_PORTAL_SESSION_ABSOLUTE_TIMEOUT_SECONDS');
   }
+  const credentialLifecycleSchedulerEnabled = optionalBooleanField(
+    source, 'API_CREDENTIAL_LIFECYCLE_SCHEDULER_ENABLED', false, invalid,
+  );
   const host = required(source, 'API_DATABASE_HOST', invalid);
   if (!/^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(host) && isIP(host) === 0) {
     invalid.push('API_DATABASE_HOST');
@@ -498,6 +512,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     trustedProxyCidrs,
     portalSessionIdleTimeoutSeconds,
     portalSessionAbsoluteTimeoutSeconds,
+    credentialLifecycleSchedulerEnabled,
     portalSessionRecoveryKey,
     ...(credentialKeyRing ? { credentialKeyRing } : {}),
     ...(onboardingStateSigningKey ? { onboardingStateSigningKey } : {}),

@@ -64,6 +64,17 @@ test('verified authorization and asset evidence timestamps must match the comman
   })), MetaAssetsInputError);
 });
 
+test('authorization flow/auth context requires an exact trusted server pair and cannot be supplied by a user actor', () => {
+  assert.doesNotThrow(() => validateAuthorizationUpsert(command({ evidence: evidence(),
+    flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN' })));
+  assert.throws(() => validateAuthorizationUpsert(command({ evidence: evidence(),
+    flowVariant: 'INSTAGRAM' })), MetaAssetsInputError);
+  assert.throws(() => validateAuthorizationUpsert(command({ evidence: evidence(),
+    flowVariant: 'INSTAGRAM', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP' })), MetaAssetsInputError);
+  assert.throws(() => validateAuthorizationUpsert(command({ evidence: evidence(),
+    flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN', actor: { kind: 'USER', ref: 'browser-user' } })), MetaAssetsInputError);
+});
+
 test('browser claims cannot become granted scopes or confirmed authorization/asset data', () => {
   assert.throws(() => validateAuthorizationUpsert(command({ grantedScopes: ['whatsapp_business_messaging'] })), MetaAssetsInputError);
   assert.throws(() => validateAuthorizationUpsert(command({
@@ -108,7 +119,12 @@ test('typed Instagram-to-Page relation does not require a Facebook link for ever
 test('public authorization serialization has an allowlist and omits secret-bearing fields', () => {
   const value = {
     authorizationRef: authorizationId, provider: 'META' as const, environment: 'test' as const, state: 'ACTIVE' as const,
-    grantedScopes: ['pages_show_list'], version: 2, observedAt, assets: [],
+    grantedScopes: ['pages_show_list'], version: 2, observedAt, assets: [{
+      assetRef: '00000000-0000-4000-8000-000000000004', kind: 'INSTAGRAM_BUSINESS_ACCOUNT', externalId: 'ig-synthetic',
+      externalName: null, authorizationState: 'QUARANTINED' as const, credentialBindingState: 'UNKNOWN' as const,
+      verificationState: 'VERIFIED' as const, grants: [], relations: [], subscriptionState: 'UNKNOWN' as const,
+      projectionState: 'UNKNOWN' as const, version: 1, updatedAt: observedAt, credentialId: 'must-not-escape',
+    }],
     accessToken: 'must-not-escape', ciphertext: 'must-not-escape',
   };
   const serialized = serializeAuthorizationReadModel(value);
@@ -116,6 +132,19 @@ test('public authorization serialization has an allowlist and omits secret-beari
     'assets', 'authorizationRef', 'environment', 'grantedScopes', 'observedAt', 'provider', 'state', 'version',
   ]);
   assert.equal(JSON.stringify(serialized).includes('must-not-escape'), false);
+  assert.equal(serialized.assets[0]?.authorizationState, 'QUARANTINED');
+  assert.equal(serialized.assets[0]?.credentialBindingState, 'UNKNOWN');
+  assert.equal(Object.keys(serialized.assets[0] ?? {}).includes('credentialId'), false);
+});
+
+test('credential-to-asset binding requires trusted per-asset evidence and a server actor', () => {
+  const proof = evidence();
+  const binding = { kind: 'INSTAGRAM_BUSINESS_ACCOUNT' as const, externalId: 'ig-synthetic', credentialId: '00000000-0000-4000-8000-000000000010', evidence: proof };
+  assert.doesNotThrow(() => validateAuthorizationUpsert(command({ evidence: proof, assets: [binding] })));
+  assert.throws(() => validateAuthorizationUpsert(command({ evidence: proof,
+    assets: [{ kind: binding.kind, externalId: binding.externalId, credentialId: binding.credentialId }] })), MetaAssetsInputError);
+  assert.throws(() => validateAuthorizationUpsert(command({ evidence: proof, actor: { kind: 'USER', ref: 'browser-user' },
+    assets: [binding] })), MetaAssetsInputError);
 });
 
 test('legacy asset references remain opaque, tenant-mapped strings and are service-owned', () => {
@@ -234,7 +263,8 @@ test('an omitted asset grant snapshot preserves current grants and history', asy
   const existingAuthorization = {
     id: authorizationId, tenant_id: tenantId, app_configuration_id: appConfigurationId,
     provider: 'META', environment: 'test', provider_authorization_id: null,
-    authorization_state: 'ACTIVE', version: '1', observed_at: '2026-10-30 12:00:00.000000',
+    authorization_state: 'ACTIVE', flow_variant: null, auth_variant: null,
+    version: '1', observed_at: '2026-10-30 12:00:00.000000',
   };
   const database = {
     async getDataSource() {
@@ -297,7 +327,8 @@ test('older verified authorization observations cannot overwrite newer state', a
               return [{
                 id: authorizationId, tenant_id: tenantId, app_configuration_id: appConfigurationId,
                 provider: 'META', environment: 'test', provider_authorization_id: null,
-                authorization_state: 'ACTIVE', version: '2', observed_at: '2026-10-30 12:00:00.000001',
+                authorization_state: 'ACTIVE', flow_variant: null, auth_variant: null,
+                version: '2', observed_at: '2026-10-30 12:00:00.000001',
               }];
             },
           } as unknown as EntityManager;
@@ -312,4 +343,65 @@ test('older verified authorization observations cannot overwrite newer state', a
     observedAt: '2026-10-30T12:00:00.000000Z',
   })), MetaAssetsConflictError);
   assert.equal(queries.length, 1, 'a stale snapshot is rejected before any write');
+});
+
+test('a persisted authorization flow/auth pair cannot be changed by a later upsert', async () => {
+  let writes = 0;
+  const database = {
+    async getDataSource() {
+      return {
+        async transaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+          const manager = {
+            async query(sql: string) {
+              if (sql.startsWith('SELECT')) return [{
+                id: authorizationId, tenant_id: tenantId, app_configuration_id: appConfigurationId,
+                provider: 'META', environment: 'test', provider_authorization_id: null,
+                authorization_state: 'ACTIVE', flow_variant: 'INSTAGRAM', auth_variant: 'INSTAGRAM_LOGIN',
+                version: '1', observed_at: '2026-10-30 12:00:00.000000',
+              }];
+              writes += 1;
+              return [{ affectedRows: 1 }];
+            },
+          } as unknown as EntityManager;
+          return work(manager);
+        },
+      };
+    },
+  };
+  const repository = new MysqlMetaAssetsRepository(database as never, { async appendWithin() { return; } }, noAudit);
+  await assert.rejects(repository.upsert(command({ evidence: evidence(), flowVariant: 'INSTAGRAM',
+    authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS' })), MetaAssetsConflictError);
+  assert.equal(writes, 0, 'conflicting verified flow/auth evidence is rejected before mutation');
+});
+
+test('trusted authorization upsert persists the exact flow/auth pair while legacy commands omit it', async () => {
+  const queries: Array<{ sql: string; parameters: unknown[] }> = [];
+  const database = {
+    async getDataSource() {
+      return {
+        async transaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+          const manager = {
+            async query(sql: string, parameters: unknown[] = []) {
+              queries.push({ sql, parameters });
+              if (sql.startsWith('SELECT')) return [];
+              return [{ affectedRows: 1 }];
+            },
+          } as unknown as EntityManager;
+          return work(manager);
+        },
+      };
+    },
+  };
+  const repository = new MysqlMetaAssetsRepository(database as never, { async appendWithin() { return; } }, noAudit);
+  await repository.upsert(command({ evidence: evidence(), flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN' }));
+  const insert = queries.find(({ sql }) => sql.includes('INSERT INTO ca_meta_authorizations'));
+  assert.ok(insert);
+  assert.equal(insert?.parameters[5], 'INSTAGRAM');
+  assert.equal(insert?.parameters[6], 'INSTAGRAM_LOGIN');
+  assert.match(insert?.sql ?? '', /flow_variant, auth_variant/);
+  const history = queries.find(({ sql }) => sql.includes('INSERT INTO ca_meta_authorization_history'));
+  assert.ok(history);
+  const snapshot = JSON.parse(String(history?.parameters[5])) as Record<string, unknown>;
+  assert.equal(snapshot.flowVariant, 'INSTAGRAM');
+  assert.equal(snapshot.authVariant, 'INSTAGRAM_LOGIN');
 });

@@ -12,6 +12,7 @@ import {
   validateAuthorizationUpsert,
   type AssetClaimInput,
   type AssetReadModel,
+  type AssetAuthorizationState,
   type AssetRelationType,
   type AssetVerificationState,
   type AuthorizationReadModel,
@@ -33,7 +34,9 @@ export interface MetaAssetsRepository {
 
 interface AuthorizationRow {
   id: string; tenant_id: string; app_configuration_id: string; provider: string; environment: string;
-  provider_authorization_id: string | null; authorization_state: AuthorizationUpsertCommand['state']; version: string | number; observed_at: string | Date;
+  provider_authorization_id: string | null; authorization_state: AuthorizationUpsertCommand['state'];
+  flow_variant: AuthorizationUpsertCommand['flowVariant'] | null; auth_variant: AuthorizationUpsertCommand['authVariant'] | null;
+  version: string | number; observed_at: string | Date;
 }
 interface AssetRow {
   id: string; display_name: string | null; external_name: string | null; version: string | number; updated_at: string | Date;
@@ -47,6 +50,7 @@ interface ScopeRow { scope_name: string; status: string }
 interface AssetAuthorizationRow {
   authorization_id: string;
   asset_id: string; external_id: string; external_name: string | null; asset_kind: string;
+  credential_id: string | null; authorization_state: AssetAuthorizationState;
   verification_state: AssetVerificationState; subscription_state: SubscriptionState; projection_state: ProjectionState;
   version: string | number; updated_at: string | Date;
 }
@@ -130,7 +134,8 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     const source = sourceOf(authEvidence);
     const providerAuthorizationId = authEvidence ? command.providerAuthorizationId ?? null : null;
     const existingAuthRows = await manager.query(
-      `SELECT id, tenant_id, app_configuration_id, provider, environment, provider_authorization_id, authorization_state, version,
+      `SELECT id, tenant_id, app_configuration_id, provider, environment, provider_authorization_id, authorization_state,
+       flow_variant, auth_variant, version,
        DATE_FORMAT(observed_at, '%Y-%m-%d %H:%i:%s.%f') AS observed_at
        FROM ca_meta_authorizations WHERE tenant_id = ? AND id = ? FOR UPDATE`,
       [command.tenantId, command.authorizationId],
@@ -143,21 +148,30 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     if (currentAuth && timestamp < normalizedMysqlDate(currentAuth.observed_at)) {
       throw new MetaAssetsConflictError('Stale authorization observation cannot replace newer state.');
     }
+    if (currentAuth && command.flowVariant !== undefined && command.authVariant !== undefined &&
+        ((currentAuth.flow_variant !== null && currentAuth.flow_variant !== undefined && currentAuth.flow_variant !== command.flowVariant) ||
+         (currentAuth.auth_variant !== null && currentAuth.auth_variant !== undefined && currentAuth.auth_variant !== command.authVariant))) {
+      throw new MetaAssetsConflictError('Verified authorization flow/auth context cannot change.');
+    }
     const authorizationState = authEvidence ? command.state : currentAuth?.authorization_state ?? 'UNKNOWN';
     const authVersion = currentAuth ? asVersion(currentAuth.version) + 1 : 1;
     if (currentAuth && command.expectedVersion !== undefined && asVersion(currentAuth.version) !== command.expectedVersion) {
       throw new MetaAssetsConflictError('Authorization version changed before the update.');
     }
+    const flowVariant = authEvidence ? command.flowVariant ?? currentAuth?.flow_variant ?? null : currentAuth?.flow_variant ?? null;
+    const authVariant = authEvidence ? command.authVariant ?? currentAuth?.auth_variant ?? null : currentAuth?.auth_variant ?? null;
     if (!currentAuth) {
       await manager.query(
-        'INSERT INTO ca_meta_authorizations (id, tenant_id, app_configuration_id, provider, environment, provider_authorization_id, authorization_state, version, observed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)',
+        'INSERT INTO ca_meta_authorizations (id, tenant_id, app_configuration_id, provider, environment, flow_variant, auth_variant, provider_authorization_id, authorization_state, version, observed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)',
         [command.authorizationId, command.tenantId, command.appConfigurationId, command.provider, command.environment,
+          flowVariant, authVariant,
           providerAuthorizationId, authorizationState, timestamp, timestamp, timestamp],
       );
     } else {
       const updateResult = await manager.query(
-        'UPDATE ca_meta_authorizations SET provider_authorization_id = COALESCE(?, provider_authorization_id), authorization_state = ?, version = ?, observed_at = ?, updated_at = ? WHERE tenant_id = ? AND id = ? AND version = ?',
-        [providerAuthorizationId, authorizationState, authVersion, timestamp, timestamp,
+        'UPDATE ca_meta_authorizations SET flow_variant = COALESCE(?, flow_variant), auth_variant = COALESCE(?, auth_variant), provider_authorization_id = COALESCE(?, provider_authorization_id), authorization_state = ?, version = ?, observed_at = ?, updated_at = ? WHERE tenant_id = ? AND id = ? AND version = ?',
+        [flowVariant, authVariant,
+          providerAuthorizationId, authorizationState, authVersion, timestamp, timestamp,
           command.tenantId, command.authorizationId, currentAuth.version],
       );
       if (rowAffected(updateResult) !== 1) throw new MetaAssetsConflictError('Authorization version changed while updating.');
@@ -177,6 +191,8 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
       state: authorizationState,
       grantedScopes: scopes,
       providerAuthorizationId: providerAuthorizationId ?? currentAuth?.provider_authorization_id ?? null,
+      flowVariant,
+      authVariant,
     };
     await manager.query(
       'INSERT INTO ca_meta_authorization_history (id, tenant_id, authorization_id, version, source, snapshot_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -263,7 +279,7 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
         [input.tenantId, ...authIds],
       ) as Promise<Array<{ authorization_id: string; scope_name: string }>>,
       dataSource.query(
-        'SELECT aa.authorization_id, aa.asset_id, a.asset_kind, a.external_id, a.external_name, aa.verification_state, aa.subscription_state, aa.projection_state, aa.version, aa.updated_at FROM ca_meta_asset_authorizations aa INNER JOIN ca_meta_assets a ON a.tenant_id = aa.tenant_id AND a.id = aa.asset_id WHERE aa.tenant_id = ? AND aa.app_configuration_id = ? AND aa.environment = ? AND aa.authorization_id IN (' + placeholders + ') AND aa.state <> \'REVOKED\' ORDER BY aa.authorization_id, a.external_id',
+        'SELECT aa.authorization_id, aa.asset_id, aa.credential_id, aa.state AS authorization_state, a.asset_kind, a.external_id, a.external_name, aa.verification_state, aa.subscription_state, aa.projection_state, aa.version, aa.updated_at FROM ca_meta_asset_authorizations aa INNER JOIN ca_meta_assets a ON a.tenant_id = aa.tenant_id AND a.id = aa.asset_id WHERE aa.tenant_id = ? AND aa.app_configuration_id = ? AND aa.environment = ? AND aa.authorization_id IN (' + placeholders + ') AND aa.state <> \'REVOKED\' ORDER BY aa.authorization_id, a.external_id',
         [input.tenantId, input.appConfigurationId, input.environment, ...authIds],
       ) as Promise<AssetAuthorizationRow[]>,
     ]);
@@ -324,6 +340,14 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     ) as Array<{ app_external_id: string }>;
     const appExternalId = appRows[0]?.app_external_id;
     if (!appExternalId) throw new MetaAssetsConflictError('App configuration does not match the tenant context.');
+    if (input.credentialId !== undefined) {
+      const credentialRows = await manager.query(
+        `SELECT id FROM ca_meta_credentials WHERE tenant_id = ? AND id = ? AND authorization_id = ?
+           AND app_configuration_id = ? AND provider = ? AND environment = ? AND status = 'ACTIVE' FOR UPDATE`,
+        [command.tenantId, input.credentialId, command.authorizationId, command.appConfigurationId, command.provider, command.environment],
+      ) as Array<{ id: string }>;
+      if (credentialRows.length !== 1) throw new MetaAssetsConflictError('Credential binding is not active in the exact authorization context.');
+    }
     const identityHash = assetIdentityHash({
       provider: command.provider, appExternalId, environment: command.environment,
       kind: input.kind, externalId: input.externalId,
@@ -421,32 +445,47 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     }
 
     const linkRows = await manager.query(
-      'SELECT verification_state, verification_source, version FROM ca_meta_asset_authorizations WHERE tenant_id = ? AND authorization_id = ? AND asset_id = ? FOR UPDATE',
+      'SELECT credential_id, state, verification_state, verification_source, version FROM ca_meta_asset_authorizations WHERE tenant_id = ? AND authorization_id = ? AND asset_id = ? FOR UPDATE',
       [command.tenantId, command.authorizationId, asset.id],
-    ) as Array<{ verification_state: AssetVerificationState; verification_source: string; version: number | string }>;
+    ) as Array<{ credential_id: string | null; state: AssetAuthorizationState; verification_state: AssetVerificationState; verification_source: string; version: number | string }>;
     const existingLink = linkRows[0];
+    const newCredentialReauthorization = existingLink?.state === 'REVOKED' && input.credentialId !== undefined &&
+      input.credentialId !== existingLink.credential_id && evidence !== undefined;
+    if (existingLink?.state === 'REVOKED' && input.credentialId !== undefined && !newCredentialReauthorization) {
+      throw new MetaAssetsConflictError('A revoked asset authorization can only bind a different credential with trusted provider evidence.');
+    }
+    if (existingLink?.credential_id && input.credentialId && existingLink.credential_id !== input.credentialId &&
+        existingLink.state !== 'REVOKED') {
+      throw new MetaAssetsConflictError('An existing asset authorization cannot be rebound to another credential.');
+    }
+    const credentialId = input.credentialId ?? existingLink?.credential_id ?? null;
+    const authorizationState: AssetAuthorizationState = existingLink?.state === 'REVOKED'
+      ? newCredentialReauthorization ? 'ACTIVE' : 'REVOKED'
+      : credentialId ? 'ACTIVE' : 'QUARANTINED';
     const verificationState: AssetVerificationState = evidence || existingLink?.verification_state === 'VERIFIED' ? 'VERIFIED' : 'CLAIMED';
     const verificationSource = evidence?.source ?? existingLink?.verification_source ?? 'BROWSER_CLAIM';
     const verificationRefHash = evidence?.observationRefHash ?? null;
     const verifiedAt = evidence ? timestamp : null;
     if (!existingLink) {
       await manager.query(
-        'INSERT INTO ca_meta_asset_authorizations (tenant_id, authorization_id, asset_id, app_configuration_id, provider, environment, credential_id, state, verification_state, verification_source, verification_ref_hash, verified_at, subscription_state, projection_state, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, \'ACTIVE\', ?, ?, ?, ?, \'UNKNOWN\', \'UNKNOWN\', 1, ?, ?)',
+        'INSERT INTO ca_meta_asset_authorizations (tenant_id, authorization_id, asset_id, app_configuration_id, provider, environment, credential_id, state, verification_state, verification_source, verification_ref_hash, verified_at, subscription_state, projection_state, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \'UNKNOWN\', \'UNKNOWN\', 1, ?, ?)',
         [command.tenantId, command.authorizationId, asset.id, command.appConfigurationId, command.provider, command.environment,
-          verificationState, verificationSource, verificationRefHash, verifiedAt, timestamp, timestamp],
+          credentialId, authorizationState, verificationState, verificationSource, verificationRefHash, verifiedAt, timestamp, timestamp],
       );
     } else {
       await manager.query(
-        'UPDATE ca_meta_asset_authorizations SET verification_state = ?, verification_source = ?, verification_ref_hash = COALESCE(?, verification_ref_hash), verified_at = COALESCE(?, verified_at), version = version + 1, updated_at = ? WHERE tenant_id = ? AND authorization_id = ? AND asset_id = ? AND version = ?',
-        [verificationState, verificationSource, verificationRefHash, verifiedAt, timestamp, command.tenantId, command.authorizationId, asset.id, existingLink.version],
+        'UPDATE ca_meta_asset_authorizations SET credential_id = COALESCE(?, credential_id), state = ?, verification_state = ?, verification_source = ?, verification_ref_hash = COALESCE(?, verification_ref_hash), verified_at = COALESCE(?, verified_at), version = version + 1, updated_at = ? WHERE tenant_id = ? AND authorization_id = ? AND asset_id = ? AND version = ?',
+        [credentialId, authorizationState, verificationState, verificationSource, verificationRefHash, verifiedAt, timestamp, command.tenantId, command.authorizationId, asset.id, existingLink.version],
       );
     }
 
-    const currentGrants = await this.persistAssetGrants(manager, command, input, asset.id, timestamp, evidence?.source);
+    const currentGrants = authorizationState === 'REVOKED' ? [] :
+      await this.persistAssetGrants(manager, command, input, asset.id, timestamp, evidence?.source);
     const assetVersion = nextVersion;
     const snapshot = {
       assetRef: asset.id, kind: input.kind, externalId: input.externalId,
       externalName: evidence ? input.externalName ?? asset.external_name : asset.external_name,
+      authorizationState, credentialBindingState: credentialId ? 'BOUND' : 'UNKNOWN',
       verificationState, verificationSource, grants: currentGrants,
     };
     await manager.query(
@@ -608,6 +647,8 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
         kind: asset.asset_kind,
         externalId: asset.external_id,
         externalName: asset.external_name,
+        authorizationState: asset.authorization_state,
+        credentialBindingState: asset.credential_id ? 'BOUND' : 'UNKNOWN',
         verificationState: asset.verification_state,
         grants: Object.freeze(grantsByAsset.get(row.id + ':' + asset.asset_id) ?? []),
         relations: Object.freeze(relationsBySource.get(asset.asset_id) ?? []),

@@ -1,6 +1,7 @@
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 import { createRequire } from 'node:module';
+import type { MetaAuthVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
 
 export interface InboxEventEnvelope {
   readonly eventId: string;
@@ -35,14 +36,22 @@ export interface OutboxEventEnvelope {
   readonly data: Readonly<Record<string, unknown>>;
 }
 
-export type JobType = 'INBOX_PROCESS' | 'OUTBOX_DELIVER' | 'ONBOARDING_STEP' | 'PROJECTION_RECONCILE' | 'HISTORY_SYNC';
+export type JobType = 'INBOX_PROCESS' | 'OUTBOX_DELIVER' | 'ONBOARDING_STEP' | 'PROJECTION_RECONCILE' | 'HISTORY_SYNC' | 'CREDENTIAL_INSPECTION';
 
 export type JobPayload =
   | { readonly kind: 'INBOX_PROCESS'; readonly inboxEventRef: string }
   | { readonly kind: 'OUTBOX_DELIVER'; readonly outboxEventRef: string }
   | { readonly kind: 'ONBOARDING_STEP'; readonly onboardingRef: string; readonly stepRef: string }
   | { readonly kind: 'PROJECTION_RECONCILE'; readonly projectionRef: string; readonly sourceVersion: number }
-  | { readonly kind: 'HISTORY_SYNC'; readonly checkpointRef: string };
+  | { readonly kind: 'HISTORY_SYNC'; readonly checkpointRef: string }
+  | {
+    readonly kind: 'CREDENTIAL_INSPECTION'; readonly credentialId: string; readonly authorizationId: string;
+    readonly appConfigurationId: string; readonly provider: 'META'; readonly environment: 'development' | 'test' | 'staging' | 'production';
+    readonly flowVariant: MetaFlowVariant; readonly authVariant: MetaAuthVariant;
+    readonly family: string; readonly credentialVersion: number; readonly secretVersion: number;
+    readonly authorizationVersion: number; readonly lifecycleVersion: number; readonly generation: number;
+    readonly leaseOwner: string; readonly leaseToken: string;
+  };
 
 export type JobLane = 'WEBHOOK_URGENT' | 'ONBOARDING' | 'HISTORICAL_PROJECTION';
 export type EffectMode = 'SAFE_RETRY' | 'IDEMPOTENT' | 'AMBIGUOUS';
@@ -78,6 +87,10 @@ export const JOB_POLICIES: Readonly<Record<JobType, JobPolicy>> = Object.freeze(
   HISTORY_SYNC: {
     lane: 'HISTORICAL_PROJECTION', effectMode: 'AMBIGUOUS', maxAttempts: 3,
     maxElapsedMs: 15 * 60_000, maxHandlerMs: 60_000, retryBaseMs: 2_000, retryMaxMs: 60_000,
+  },
+  CREDENTIAL_INSPECTION: {
+    lane: 'HISTORICAL_PROJECTION', effectMode: 'IDEMPOTENT', maxAttempts: 1,
+    maxElapsedMs: 5 * 60_000, maxHandlerMs: 30_000, retryBaseMs: 1_000, retryMaxMs: 1_000,
   },
 });
 
@@ -122,6 +135,23 @@ const jobPayloadSchemas: Readonly<Record<JobType, object>> = {
   HISTORY_SYNC: {
     type: 'object', additionalProperties: false, required: ['kind', 'checkpointRef'],
     properties: { kind: { const: 'HISTORY_SYNC' }, checkpointRef: { type: 'string', minLength: 1, maxLength: 128 } },
+  },
+  CREDENTIAL_INSPECTION: {
+    type: 'object', additionalProperties: false,
+    required: ['kind', 'credentialId', 'authorizationId', 'appConfigurationId', 'provider', 'environment', 'flowVariant', 'authVariant', 'family',
+      'credentialVersion', 'secretVersion', 'authorizationVersion', 'lifecycleVersion', 'generation', 'leaseOwner', 'leaseToken'],
+    properties: {
+      kind: { const: 'CREDENTIAL_INSPECTION' }, credentialId: { type: 'string', format: 'uuid' },
+      authorizationId: { type: 'string', format: 'uuid' }, appConfigurationId: { type: 'string', format: 'uuid' },
+      provider: { const: 'META' }, environment: { enum: ['development', 'test', 'staging', 'production'] },
+      flowVariant: { enum: ['FACEBOOK', 'INSTAGRAM', 'WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE'] },
+      authVariant: { enum: ['FACEBOOK_LOGIN_FOR_BUSINESS', 'INSTAGRAM_LOGIN', 'WHATSAPP_EMBEDDED_SIGNUP', 'WHATSAPP_BUSINESS_APP_ONBOARDING'] },
+      family: { type: 'string', pattern: '^[A-Z][A-Z0-9_-]{0,31}$' },
+      credentialVersion: { type: 'integer', minimum: 1 }, secretVersion: { type: 'integer', minimum: 1 },
+      authorizationVersion: { type: 'integer', minimum: 1 }, lifecycleVersion: { type: 'integer', minimum: 1 },
+      generation: { type: 'integer', minimum: 1 }, leaseOwner: { type: 'string', pattern: '^[A-Za-z0-9:_-]{1,128}$' },
+      leaseToken: { type: 'string', format: 'uuid' },
+    },
   },
 };
 

@@ -222,7 +222,9 @@ async function verifyCompatiblePriorShape(
       `SELECT state FROM ${MIGRATION_STEP_LEDGER} WHERE migration_id = ? AND step_id = ?`,
       [candidate.migration.id, candidate.step.id],
     ) as Array<{ state: string }>;
-    if (rows[0]?.state === 'APPLIED') return candidate.verify(context);
+    // A STARTED additive DDL step may have committed before the process exited. Accept it
+    // only when its full target-shape verifier proves the new schema is already present.
+    if (rows[0]?.state === 'APPLIED' || rows[0]?.state === 'STARTED') return candidate.verify(context);
   }
   return false;
 }

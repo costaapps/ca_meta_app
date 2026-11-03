@@ -1064,27 +1064,39 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
         running ? timestamp : null, null, null, timestamp, timestamp, null,
       ]);
     }
-    for (let offset = 0; offset < bulkRows.length; offset += 100) {
-      const batch = bulkRows.slice(offset, offset + 100);
-      const values = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
-      await dataSource.query(
-        `INSERT INTO ca_meta_jobs
-         (id, tenant_id, job_type, schema_version, lane, effect_mode, resource_scope_ref, idempotency_key,
-          correlation_id, causation_id, payload_hash, payload_json, status, attempt, max_attempts,
-          next_run_at, budget_started_at, lease_owner, claim_token, lease_expires_at, heartbeat_at,
-          last_safe_error_code, last_safe_error_action, created_at, updated_at, completed_at)
-         VALUES ${values}`,
-        batch.flatMap((row) => row),
-      );
+    const bulkJobIds = bulkRows.map((row) => String(row[0]));
+    try {
+      for (let offset = 0; offset < bulkRows.length; offset += 100) {
+        const batch = bulkRows.slice(offset, offset + 100);
+        const values = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+        await dataSource.query(
+          `INSERT INTO ca_meta_jobs
+           (id, tenant_id, job_type, schema_version, lane, effect_mode, resource_scope_ref, idempotency_key,
+            correlation_id, causation_id, payload_hash, payload_json, status, attempt, max_attempts,
+            next_run_at, budget_started_at, lease_owner, claim_token, lease_expires_at, heartbeat_at,
+            last_safe_error_code, last_safe_error_action, created_at, updated_at, completed_at)
+           VALUES ${values}`,
+          batch.flatMap((row) => row),
+        );
+      }
+      await dataSource.query('ANALYZE TABLE ca_meta_jobs');
+      const explain = await dataSource.query(
+        `EXPLAIN SELECT id FROM ca_meta_jobs
+         WHERE status = 'RUNNING' AND effect_mode = 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6)
+         ORDER BY lease_expires_at, id LIMIT 64`,
+      ) as Array<{ key: string | null; type: string }>;
+      assert.equal(explain[0]?.key, 'ix_ca_meta_job_ambiguous_expired');
+      assert.notEqual(explain[0]?.type, 'ALL');
+    } finally {
+      for (let offset = 0; offset < bulkJobIds.length; offset += 100) {
+        const batch = bulkJobIds.slice(offset, offset + 100);
+        const placeholders = batch.map(() => '?').join(', ');
+        await dataSource.query(
+          `DELETE FROM ca_meta_jobs WHERE tenant_id = ? AND id IN (${placeholders})`,
+          [tenantWorker, ...batch],
+        );
+      }
     }
-    await dataSource.query('ANALYZE TABLE ca_meta_jobs');
-    const explain = await dataSource.query(
-      `EXPLAIN SELECT id FROM ca_meta_jobs
-       WHERE status = 'RUNNING' AND effect_mode = 'AMBIGUOUS' AND lease_expires_at <= UTC_TIMESTAMP(6)
-       ORDER BY lease_expires_at, id LIMIT 64`,
-    ) as Array<{ key: string | null; type: string }>;
-    assert.equal(explain[0]?.key, 'ix_ca_meta_job_ambiguous_expired');
-    assert.notEqual(explain[0]?.type, 'ALL');
   } finally {
     await database.close();
   }

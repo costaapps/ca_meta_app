@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { MetaAuthVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
 
 export type MetaEnvironment = 'development' | 'test' | 'staging' | 'production';
 export type AuthorizationState = 'ACTIVE' | 'PARTIAL' | 'REAUTH_REQUIRED' | 'UNKNOWN' | 'REVOKED' | 'DISCONNECTED';
 export type AssetVerificationState = 'CLAIMED' | 'VERIFIED' | 'QUARANTINED';
+export type AssetAuthorizationState = 'ACTIVE' | 'REVOKED' | 'QUARANTINED';
 export type AssetRelationType = 'PHONE_TO_ACCOUNT' | 'INSTAGRAM_TO_PAGE';
 export type MetaAssetKind = 'WHATSAPP_PHONE_NUMBER' | 'WHATSAPP_BUSINESS_ACCOUNT' |
   'INSTAGRAM_BUSINESS_ACCOUNT' | 'INSTAGRAM_CREATOR_ACCOUNT' | 'FACEBOOK_PAGE';
@@ -66,6 +68,8 @@ export interface AssetClaimInput {
   readonly externalId: string;
   readonly externalName?: string | null;
   readonly evidence?: VerifiedMetaEvidence;
+  /** Internal token-to-asset binding supplied only by a trusted service adapter. */
+  readonly credentialId?: string;
   /** Opaque references imported from a tenant-validated legacy mapping. */
   readonly legacyReferences?: readonly LegacyAssetReference[];
   /** Persisted only when the asset has provider evidence. */
@@ -79,6 +83,9 @@ export interface AuthorizationUpsertCommand {
   readonly appConfigurationId: string;
   readonly provider: 'META';
   readonly environment: MetaEnvironment;
+  /** Optional verified server context; never derive these values from a token or browser payload. */
+  readonly flowVariant?: MetaFlowVariant;
+  readonly authVariant?: MetaAuthVariant;
   readonly providerAuthorizationId?: string | null;
   readonly state: AuthorizationState;
   readonly grantedScopes: readonly string[];
@@ -96,6 +103,8 @@ export interface AssetReadModel {
   readonly kind: string;
   readonly externalId: string;
   readonly externalName: string | null;
+  readonly authorizationState: AssetAuthorizationState;
+  readonly credentialBindingState: 'BOUND' | 'UNKNOWN';
   readonly verificationState: AssetVerificationState;
   readonly grants: readonly string[];
   readonly relations: readonly { readonly type: AssetRelationType; readonly targetAssetRef: string }[];
@@ -146,6 +155,20 @@ export function validateAuthorizationUpsert(command: AuthorizationUpsertCommand)
     throw new MetaAssetsInputError('Actor and correlation references are required.');
   }
   if (!isIsoDate(command.observedAt)) throw new MetaAssetsInputError('Observation time must be an ISO UTC timestamp.');
+  const flowAuthVariants: Readonly<Record<MetaFlowVariant, readonly MetaAuthVariant[]>> = {
+    FACEBOOK: ['FACEBOOK_LOGIN_FOR_BUSINESS'],
+    INSTAGRAM: ['FACEBOOK_LOGIN_FOR_BUSINESS', 'INSTAGRAM_LOGIN'],
+    WHATSAPP_EXCLUSIVE: ['WHATSAPP_EMBEDDED_SIGNUP'],
+    WHATSAPP_COEXISTENCE: ['WHATSAPP_BUSINESS_APP_ONBOARDING'],
+  };
+  if ((command.flowVariant === undefined) !== (command.authVariant === undefined) ||
+      (command.flowVariant !== undefined && !flowAuthVariants[command.flowVariant]?.includes(command.authVariant!))) {
+    throw new MetaAssetsInputError('Authorization flow/auth context must be a valid complete server-owned pair.');
+  }
+  if ((command.flowVariant !== undefined || command.authVariant !== undefined) &&
+      (!command.evidence || command.actor.kind === 'USER')) {
+    throw new MetaAssetsInputError('Authorization flow/auth context requires trusted service evidence.');
+  }
   if (command.providerAuthorizationId !== undefined && command.providerAuthorizationId !== null &&
       (!command.providerAuthorizationId.length || command.providerAuthorizationId.length > 512)) {
     throw new MetaAssetsInputError('Provider authorization identifier is invalid.');
@@ -190,6 +213,10 @@ export function validateAuthorizationUpsert(command: AuthorizationUpsertCommand)
     if (asset.evidence !== undefined && !isVerifiedMetaEvidence(asset.evidence)) {
       throw new MetaAssetsInputError('Asset evidence was not issued by a trusted provider adapter.');
     }
+    if (asset.credentialId !== undefined &&
+        (!isUuid(asset.credentialId) || !asset.evidence || !isVerifiedMetaEvidence(asset.evidence) || command.actor.kind === 'USER')) {
+      throw new MetaAssetsInputError('Credential binding requires an internal credential reference and trusted asset evidence.');
+    }
     if (asset.evidence && normalizedIsoObservation(asset.evidence.observedAt) !== commandObservation) {
       throw new MetaAssetsInputError('Asset evidence time must match the command observation time.');
     }
@@ -222,6 +249,8 @@ export function serializeAuthorizationReadModel(value: AuthorizationReadModel): 
       kind: asset.kind,
       externalId: asset.externalId,
       externalName: asset.externalName,
+      authorizationState: asset.authorizationState,
+      credentialBindingState: asset.credentialBindingState,
       verificationState: asset.verificationState,
       grants: Object.freeze([...asset.grants]),
       relations: Object.freeze(asset.relations.map((relation) => Object.freeze({ ...relation }))),

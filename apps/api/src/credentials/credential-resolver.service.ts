@@ -150,6 +150,13 @@ function expirySortValue(candidate: CredentialResolutionCandidate): number | und
   return undefined;
 }
 
+function dataAccessExpiryValue(candidate: CredentialResolutionCandidate): number | undefined {
+  if (candidate.dataAccessExpiry.state === 'KNOWN' && isIsoUtc(candidate.dataAccessExpiry.expiresAt)) {
+    return Date.parse(candidate.dataAccessExpiry.expiresAt);
+  }
+  return undefined;
+}
+
 function isUsableHealth(health: CredentialHealthObservation, policy: CredentialOperationPolicy, now: number): boolean {
   if (health.state !== 'HEALTHY' && !(policy.allowExpiring && health.state === 'EXPIRING')) return false;
   return ['META_API', 'SIGNED_WEBHOOK'].includes(health.source) &&
@@ -159,7 +166,7 @@ function isUsableHealth(health: CredentialHealthObservation, policy: CredentialO
 function eligibleCandidate(candidate: CredentialResolutionCandidate, context: CredentialResolutionContext,
   policy: CredentialOperationPolicy, asset: NonNullable<Awaited<ReturnType<CredentialResolutionRepository['inspect']>>['asset']>,
   now: number): EligibleCandidate | undefined {
-  if (!candidate || !candidate.binding || !candidate.health || !candidate.expiry ||
+  if (!candidate || !candidate.binding || !candidate.health || !candidate.expiry || !candidate.dataAccessExpiry ||
       !Array.isArray(candidate.grantedAssetGrants) || !Array.isArray(candidate.grantedAuthorizationScopes) ||
       !candidateMatchesBinding(candidate, context, policy) || candidate.authorizationState !== 'ACTIVE' &&
       candidate.authorizationState !== 'PARTIAL' || candidate.credentialStatus !== 'ACTIVE' ||
@@ -180,13 +187,18 @@ function eligibleCandidate(candidate: CredentialResolutionCandidate, context: Cr
     ? ['META_API', 'SIGNED_WEBHOOK'].includes(candidate.expiry.source) &&
       isFreshObservation(candidate.expiry.observedAt, now, policy.maxHealthObservationAgeSeconds)
     : false;
+  const accessExpiryValue = dataAccessExpiryValue(candidate);
+  const accessExpiryFresh = candidate.dataAccessExpiry.state === 'KNOWN' &&
+    ['META_API', 'SIGNED_WEBHOOK'].includes(candidate.dataAccessExpiry.source) &&
+    isFreshObservation(candidate.dataAccessExpiry.observedAt, now, policy.maxHealthObservationAgeSeconds);
   if (expiryValue === undefined || (!Number.isFinite(expiryValue) && expiryValue !== Number.POSITIVE_INFINITY) ||
-      !expiryFresh || expiryValue <= now) return undefined;
+      !expiryFresh || expiryValue <= now || accessExpiryValue === undefined || !Number.isFinite(accessExpiryValue) ||
+      !accessExpiryFresh || accessExpiryValue <= now) return undefined;
   return {
     candidate,
     lineageDepth: depth,
     familyPreference: policy.preferredFamilies.indexOf(candidate.binding.family),
-    expirySortValue: expiryValue,
+    expirySortValue: Math.min(expiryValue, accessExpiryValue),
   };
 }
 
@@ -209,23 +221,28 @@ function selectionReason(candidate: EligibleCandidate): CredentialSelectionReaso
 }
 
 function failureCode(candidates: readonly CredentialResolutionCandidate[], context: CredentialResolutionContext,
-  policy: CredentialOperationPolicy, assetId: string): 'ASSET_GRANT_MISSING' | 'META_PERMISSION_REQUIRED' |
+  policy: CredentialOperationPolicy, assetId: string, now: number): 'ASSET_GRANT_MISSING' | 'META_PERMISSION_REQUIRED' |
   'META_REAUTH_REQUIRED' | 'DEPENDENCY_UNAVAILABLE' {
   const scoped = candidates.filter((candidate) => candidateMatchesBinding(candidate, context, policy));
-  if (scoped.some((candidate) => !candidate.health || !candidate.expiry || !Array.isArray(candidate.lineage) ||
+  if (scoped.some((candidate) => !candidate.health || !candidate.expiry || !candidate.dataAccessExpiry || !Array.isArray(candidate.lineage) ||
       !Array.isArray(candidate.grantedAssetGrants) || !Array.isArray(candidate.grantedAuthorizationScopes))) {
     return 'DEPENDENCY_UNAVAILABLE';
   }
   if (scoped.some((candidate) => candidate.authorizationState === 'REAUTH_REQUIRED' ||
       candidate.authorizationState === 'REVOKED' || candidate.authorizationState === 'DISCONNECTED' ||
-      candidate.credentialStatus === 'REAUTH_REQUIRED' || candidate.credentialStatus === 'REVOKED')) return 'META_REAUTH_REQUIRED';
+      candidate.credentialStatus === 'REAUTH_REQUIRED' || candidate.credentialStatus === 'REVOKED' ||
+      ['EXPIRED', 'REVOKED', 'ACTION_REQUIRED'].includes(candidate.health.state) ||
+      candidate.expiry.state === 'KNOWN' && isIsoUtc(candidate.expiry.expiresAt) && Date.parse(candidate.expiry.expiresAt) <= now ||
+      candidate.dataAccessExpiry.state === 'KNOWN' && isIsoUtc(candidate.dataAccessExpiry.expiresAt) &&
+        Date.parse(candidate.dataAccessExpiry.expiresAt) <= now)) return 'META_REAUTH_REQUIRED';
   const grants = scoped.filter((candidate) => candidate.grantAssetId === assetId || candidate.lineage.length > 0);
   if (grants.some((candidate) => policy.requiredAssetGrants.every((grant) => candidate.grantedAssetGrants.includes(grant)) &&
       !policy.requiredAuthorizationScopes.every((scope) => candidate.grantedAuthorizationScopes.includes(scope)))) {
     return 'META_PERMISSION_REQUIRED';
   }
   if (scoped.some((candidate) => candidate.health.state === 'UNKNOWN' || candidate.health.state === 'STALE' ||
-      candidate.expiry.state === 'UNKNOWN' || candidate.expiry.state === 'STALE')) return 'DEPENDENCY_UNAVAILABLE';
+      candidate.expiry.state === 'UNKNOWN' || candidate.expiry.state === 'STALE' ||
+      candidate.dataAccessExpiry.state === 'UNKNOWN' || candidate.dataAccessExpiry.state === 'STALE')) return 'DEPENDENCY_UNAVAILABLE';
   if (grants.length > 0 && !grants.some((candidate) => policy.requiredAssetGrants.every((grant) => candidate.grantedAssetGrants.includes(grant)))) {
     return 'ASSET_GRANT_MISSING';
   }
@@ -370,6 +387,7 @@ export class CredentialResolverService {
       grantedAuthorizationScopes: Object.freeze([...candidate.grantedAuthorizationScopes]),
       health: Object.freeze({ ...candidate.health }),
       expiry: Object.freeze({ ...candidate.expiry }),
+      dataAccessExpiry: Object.freeze({ ...candidate.dataAccessExpiry }),
     });
   }
 
@@ -398,7 +416,7 @@ export class CredentialResolverService {
       .filter((candidate): candidate is EligibleCandidate => candidate !== undefined)
       .sort(compareCandidates);
     if (eligible.length === 0) {
-      throw new CredentialResolutionError(failureCode(snapshot.candidates, context, policy, context.assetId));
+      throw new CredentialResolutionError(failureCode(snapshot.candidates, context, policy, context.assetId, now));
     }
     const selected = eligible[0];
     if (!selected) throw new CredentialResolutionError('ASSET_GRANT_MISSING');

@@ -32,6 +32,16 @@ interface CandidateRow {
   authorization_version: string | number;
   credential_status: string;
   credential_version: string | number;
+  health_state: string | null;
+  health_source: string | null;
+  health_observed_at: string | Date | null;
+  expires_at: string | Date | null;
+  expiry_state: string | null;
+  expiry_source: string | null;
+  expiry_observed_at: string | Date | null;
+  data_access_expires_at: string | Date | null;
+  data_access_expiry_source: string | null;
+  data_access_expiry_observed_at: string | Date | null;
   asset_auth_state: string;
   verification_state: string;
   asset_auth_version: string | number;
@@ -76,9 +86,19 @@ function knownAssetAuthorizationState(value: string): CredentialResolutionCandid
     : 'QUARANTINED';
 }
 
+function isoUtc(value: string | Date | null): string | undefined {
+  if (value === null) return undefined;
+  const result = value instanceof Date ? value.toISOString() : value.includes('T') ? value : value.replace(' ', 'T') + 'Z';
+  return Number.isFinite(Date.parse(result)) ? result : undefined;
+}
+
+function knownObservationSource(value: string | null): 'META_API' | 'SIGNED_WEBHOOK' | undefined {
+  return value === 'META_API' || value === 'SIGNED_WEBHOOK' ? value : undefined;
+}
+
 /**
  * Reads only metadata. Ciphertext, nonce, authentication tags and provider credentials are never
- * selected into this resolver query. Expiry/health remain UNKNOWN until M3.09 persists evidence.
+ * selected into this resolver query. Missing lifecycle rows map to UNKNOWN.
  */
 export class MysqlCredentialResolutionRepository implements CredentialResolutionRepository {
   constructor(private readonly database: DurableWorkDatabase) {}
@@ -116,7 +136,10 @@ export class MysqlCredentialResolutionRepository implements CredentialResolution
               auth.authorization_state, auth.version AS authorization_version,
               aa.state AS asset_auth_state, aa.verification_state, aa.version AS asset_auth_version,
               aa.asset_id AS grant_asset_id, grant_asset.asset_kind AS grant_asset_kind,
-              secret.version AS secret_version
+              secret.version AS secret_version,
+              life.health_state, life.health_source, life.health_observed_at,
+              life.expires_at, life.expiry_state, life.expiry_source, life.expiry_observed_at,
+              life.data_access_expires_at, life.data_access_expiry_source, life.data_access_expiry_observed_at
        FROM ca_meta_asset_authorizations aa
        JOIN ca_meta_assets grant_asset ON grant_asset.tenant_id = aa.tenant_id
          AND grant_asset.id = aa.asset_id AND grant_asset.app_configuration_id = aa.app_configuration_id
@@ -126,11 +149,15 @@ export class MysqlCredentialResolutionRepository implements CredentialResolution
          AND auth.provider = aa.provider AND auth.environment = aa.environment
        JOIN ca_meta_credentials c ON c.tenant_id = auth.tenant_id AND c.authorization_id = auth.id
          AND c.app_configuration_id = auth.app_configuration_id AND c.provider = auth.provider
-         AND c.environment = auth.environment
+         AND c.environment = auth.environment AND aa.credential_id = c.id
        JOIN ca_meta_credential_secrets secret ON secret.tenant_id = c.tenant_id
          AND secret.credential_id = c.id AND secret.authorization_id = c.authorization_id
          AND secret.app_configuration_id = c.app_configuration_id AND secret.provider = c.provider
          AND secret.environment = c.environment
+       LEFT JOIN ca_meta_credential_lifecycle life ON life.tenant_id = c.tenant_id
+         AND life.credential_id = c.id AND life.authorization_id = c.authorization_id
+         AND life.app_configuration_id = c.app_configuration_id AND life.provider = c.provider
+         AND life.environment = c.environment
        WHERE aa.tenant_id = ? AND aa.app_configuration_id = ? AND aa.provider = ? AND aa.environment = ?
          AND aa.asset_id IN (${placeholders(assetIds.length)}) AND c.family IN (${placeholders(policy.allowedFamilies.length)})
        ORDER BY c.id, auth.id, aa.asset_id LIMIT ${MAX_CANDIDATES + 1}`,
@@ -199,8 +226,22 @@ export class MysqlCredentialResolutionRepository implements CredentialResolution
         grantedAuthorizationScopes: Object.freeze(scopes.get(row.authorization_id) ?? []),
         secretAvailable: true,
         secretVersion: version(row.secret_version),
-        health: Object.freeze({ state: 'UNKNOWN' as const }),
-        expiry: Object.freeze({ state: 'UNKNOWN' as const }),
+        health: row.health_state && ['HEALTHY', 'EXPIRING', 'EXPIRED', 'REVOKED', 'ACTION_REQUIRED'].includes(row.health_state) &&
+          row.health_observed_at && knownObservationSource(row.health_source)
+          ? Object.freeze({ state: row.health_state as CredentialResolutionCandidate['health']['state'],
+            observedAt: isoUtc(row.health_observed_at) ?? '', source: knownObservationSource(row.health_source)! })
+          : Object.freeze({ state: row.health_state === 'STALE' ? 'STALE' as const : 'UNKNOWN' as const }),
+        expiry: row.expiry_state === 'PROVIDER_NO_EXPIRY' && row.expiry_observed_at && knownObservationSource(row.expiry_source)
+          ? Object.freeze({ state: 'PROVIDER_NO_EXPIRY' as const,
+            observedAt: isoUtc(row.expiry_observed_at) ?? '', source: knownObservationSource(row.expiry_source)! })
+          : row.expiry_state === 'KNOWN' && row.expires_at && row.expiry_observed_at && knownObservationSource(row.expiry_source)
+          ? Object.freeze({ state: 'KNOWN' as const, expiresAt: isoUtc(row.expires_at) ?? '',
+            observedAt: isoUtc(row.expiry_observed_at) ?? '', source: knownObservationSource(row.expiry_source)! })
+          : Object.freeze({ state: row.expiry_state === 'STALE' || row.health_state === 'STALE' ? 'STALE' as const : 'UNKNOWN' as const }),
+        dataAccessExpiry: row.data_access_expires_at && row.data_access_expiry_observed_at && knownObservationSource(row.data_access_expiry_source)
+          ? Object.freeze({ state: 'KNOWN' as const, expiresAt: isoUtc(row.data_access_expires_at) ?? '',
+            observedAt: isoUtc(row.data_access_expiry_observed_at) ?? '', source: knownObservationSource(row.data_access_expiry_source)! })
+          : Object.freeze({ state: row.health_state === 'STALE' ? 'STALE' as const : 'UNKNOWN' as const }),
       })];
     });
     return Object.freeze({ asset, candidates: Object.freeze(candidates) });

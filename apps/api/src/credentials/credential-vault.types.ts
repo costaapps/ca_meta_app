@@ -1,3 +1,5 @@
+import type { EntityManager } from 'typeorm';
+
 export interface CredentialBinding {
   readonly tenantId: string;
   readonly credentialId: string;
@@ -54,6 +56,12 @@ export interface CredentialVaultAuditEntry extends CredentialVaultActor {
   readonly keyVersion: string;
 }
 
+export interface CredentialVaultConditionalWriteFence {
+  readonly expectedAuthorizationVersion: number;
+  readonly expectedCredentialVersion: number;
+  readonly expectedSecretVersion: number;
+}
+
 export interface CredentialVaultRotationState {
   readonly targetKeyVersion: string;
   readonly state: 'RUNNING' | 'PAUSED' | 'COMPLETED';
@@ -74,6 +82,14 @@ export interface CredentialRotationBatchResult {
 
 export interface CredentialVaultRepository {
   store(binding: CredentialBinding, envelope: EncryptedCredential, audit: CredentialVaultAuditEntry): Promise<void>;
+  /** Used only within an already fenced lifecycle transaction; unsupported adapters fail closed. */
+  storeIfCurrentWithin?(
+    manager: EntityManager,
+    binding: CredentialBinding,
+    envelope: EncryptedCredential,
+    audit: CredentialVaultAuditEntry,
+    fence: CredentialVaultConditionalWriteFence,
+  ): Promise<boolean>;
   findActive(binding: CredentialBinding): Promise<StoredCredential | undefined>;
   audit(entry: CredentialVaultAuditEntry): Promise<void>;
   ensureRotation(targetKeyVersion: string): Promise<CredentialVaultRotationState>;

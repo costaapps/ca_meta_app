@@ -3,6 +3,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $runId = [Guid]::NewGuid().ToString('N')
 $composeProject = "m205-$runId"
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ca-meta-m205-$runId"
+$m3_09DiagnosticPath = Join-Path $tempRoot 'm3-09-safe-diagnostic.txt'
 $initSqlPath = Join-Path $tempRoot 'init.sql'
 $composeFile = Join-Path $PSScriptRoot 'compose.yaml'
 $keepEnvironment = $env:M2_05_KEEP_ENVIRONMENT -eq '1'
@@ -38,7 +39,55 @@ function New-HexSecret {
 function Invoke-Checked {
   param([string]$FilePath, [string[]]$ArgumentList)
   & $FilePath @ArgumentList
-  if ($LASTEXITCODE -ne 0) { throw "Command failed with exit code $LASTEXITCODE : $FilePath" }
+  if ($LASTEXITCODE -ne 0) {
+    $junitArgument = $ArgumentList | Where-Object { $_ -match '^--test-reporter-destination=(.+\.junit\.xml)$' } | Select-Object -First 1
+    if ($null -ne $junitArgument) {
+      $relativeReportPath = $junitArgument -replace '^--test-reporter-destination=', ''
+      $reportPath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $relativeReportPath))
+      $reportRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'artifacts\test-results')) +
+        [System.IO.Path]::DirectorySeparatorChar
+      if ($reportPath.StartsWith($reportRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+        (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+        try {
+          [xml]$report = Get-Content -LiteralPath $reportPath -Raw
+          $failedCases = @($report.SelectNodes('//testcase[failure or error or @failure or @error]'))
+          foreach ($case in $failedCases) {
+            $testFile = [System.IO.Path]::GetFileName([string]$case.file)
+            Write-Output "Failed test case: $($case.name) ($testFile)."
+            $failureNode = $case.SelectSingleNode('failure|error')
+            if ($null -ne $failureNode) {
+              $location = [regex]::Match([string]$failureNode.InnerText,
+                '(?m)^\s*at .*[/\\]apps[/\\]api[/\\]dist-test[/\\]test[/\\](?<file>[A-Za-z0-9_.-]+\.spec\.js):(?<line>\d+):(?<column>\d+)')
+              if ($location.Success) {
+                Write-Output "Failure location: $($location.Groups['file'].Value):$($location.Groups['line'].Value):$($location.Groups['column'].Value)."
+              }
+              $diagnosticParts = [System.Collections.Generic.List[string]]::new()
+              foreach ($diagnosticNode in @($case.SelectNodes('.//system-out|.//system-err|failure|error'))) {
+                $diagnosticParts.Add([string]$diagnosticNode.InnerText)
+                foreach ($attribute in $diagnosticNode.Attributes) { $diagnosticParts.Add([string]$attribute.Value) }
+              }
+              if ($env:M3_09_DIAGNOSTIC_PATH -eq $m3_09DiagnosticPath -and
+                  (Test-Path -LiteralPath $m3_09DiagnosticPath -PathType Leaf)) {
+                $diagnosticParts.Add([string](Get-Content -LiteralPath $m3_09DiagnosticPath -Raw))
+              }
+              $diagnosticText = [string]::Join("`n", $diagnosticParts)
+              $diagnostic = [regex]::Match($diagnosticText,
+                '\[M3\.09 safe diagnostic\] stage=(?<stage>claim|claim_ambiguous_scan|claim_ambiguous_job_select|claim_ambiguous_outbox_update|claim_attempt_update|claim_dead_letter_insert|claim_lane_init|claim_dispatch_lock|claim_candidates|claim_tenant_lock|claim_job_select|claim_active_count|claim_resource_count|claim_transaction|claim_transaction_commit|claim_job_update|claim_attempt_insert|claim_cursor_update|claim_other_query|handler|finish|credential-finalizer|finish-write) code=(?<code>ER_BAD_FIELD_ERROR|ER_BAD_NULL_ERROR|ER_CANNOT_ADD_FOREIGN|ER_DATA_TOO_LONG|ER_DUP_ENTRY|ER_LOCK_DEADLOCK|ER_LOCK_WAIT_TIMEOUT|ER_NO_DEFAULT_FOR_FIELD|ER_NO_REFERENCED_ROW_2|ER_NO_SUCH_TABLE|ER_PARSE_ERROR|ER_ROW_IS_REFERENCED_2|ER_TABLE_EXISTS_ERROR|ER_TRUNCATED_WRONG_VALUE|ER_WRONG_VALUE_COUNT_ON_ROW|INVALID_DURABLE_JOB_PAYLOAD|JOB_LANE_DISPATCH_MISSING|INVALID_EXPIRED_OUTBOX_PAYLOAD|MISSING_EXPIRED_OUTBOX_PROJECTION|UNCLASSIFIED) type=(?<type>Error|TypeError|SyntaxError|RangeError|NonError)(?=\s|$)')
+              if ($diagnostic.Success) {
+                Write-Output "M3.09 safe diagnostic: stage=$($diagnostic.Groups['stage'].Value) code=$($diagnostic.Groups['code'].Value) type=$($diagnostic.Groups['type'].Value)."
+              }
+            }
+          }
+          if ($failedCases.Count -eq 0) {
+            Write-Output "JUnit report recorded no failed case: $([System.IO.Path]::GetFileName($reportPath))."
+          }
+        } catch {
+          Write-Output "Could not parse sanitized JUnit failure names from $([System.IO.Path]::GetFileName($reportPath))."
+        }
+      }
+    }
+    throw "Command failed with exit code $LASTEXITCODE : $FilePath"
+  }
 }
 
 $managedEnvironment = @(
@@ -48,7 +97,8 @@ $managedEnvironment = @(
   'MIGRATION_LOCK_TIMEOUT_SECONDS', 'MIGRATION_STATEMENT_TIMEOUT_SECONDS', 'MIGRATION_MIN_SUPPORTED_API_VERSION',
   'API_DATABASE_HOST', 'API_DATABASE_PORT', 'API_DATABASE_NAME', 'API_DATABASE_USER', 'API_DATABASE_PASSWORD',
   'API_DATABASE_CONNECT_TIMEOUT_MS', 'API_PORT', 'API_BIND_ADDRESS', 'API_ALLOWED_HOSTS', 'API_TRUSTED_PROXIES',
-  'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST', 'M3_02_DB_TEST'
+  'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST', 'M3_02_DB_TEST', 'M3_09_TEST',
+  'M3_09_DIAGNOSTIC_PATH', 'M3_TEST_CREDENTIAL_KEY_V3'
 )
 $previousEnvironment = @{}
 foreach ($name in $managedEnvironment) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name) }
@@ -57,6 +107,7 @@ New-Item -ItemType Directory -Path $tempRoot | Out-Null
 $rootPassword = New-HexSecret
 $apiPassword = New-HexSecret
 $migrationPassword = New-HexSecret
+$credentialKeyV3 = New-HexSecret
 $sql = @"
 CREATE USER 'ca_meta_migrator'@'%' IDENTIFIED BY '$migrationPassword';
 GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES, TRIGGER ON ca_meta_m205.* TO 'ca_meta_migrator'@'%';
@@ -85,6 +136,7 @@ $env:API_DATABASE_NAME = 'ca_meta_m205'
 $env:API_DATABASE_USER = 'ca_meta_api'
 $env:API_DATABASE_PASSWORD = $apiPassword
 $env:M2_API_DATABASE_PASSWORD = $apiPassword
+$env:M3_TEST_CREDENTIAL_KEY_V3 = $credentialKeyV3
 $env:API_DATABASE_CONNECT_TIMEOUT_MS = '5000'
 $env:NODE_ENV = 'test'
 $env:API_PORT = '0'
@@ -94,6 +146,7 @@ $env:API_TRUSTED_PROXIES = 'none'
 $env:M2_DURABLE_WORK_TEST = '1'
 $env:M2_MIGRATION_TEST = '0'
 $env:M3_02_DB_TEST = '1'
+$env:M3_09_TEST = '1'
 
 try {
   Write-Output "Compose project: $composeProject"
@@ -104,6 +157,7 @@ try {
     Invoke-Checked -FilePath 'docker' -ArgumentList @('compose', '-p', $composeProject, '-f', $composeFile, 'up', '-d', '--wait')
     Invoke-Checked -FilePath $npmCommand -ArgumentList @('exec', '--workspace=@ca-meta/api', '--', 'tsc', '-p', 'tsconfig.test.json')
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m2-08/prepare-test-reports.mjs')
+    Write-Output 'M2.05 fixture: durable work and M3.05 onboarding.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
       '--experimental-test-coverage',
@@ -114,6 +168,7 @@ try {
       'apps/api/dist-test/test/durable-work.integration.spec.js',
       'apps/api/dist-test/test/m3-05-onboarding.integration.spec.js'
     )
+    Write-Output 'M2.05 fixture: M3.06 Meta assets.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
       '--experimental-test-coverage',
@@ -123,6 +178,7 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-06-meta-assets.lcov.info',
       'apps/api/dist-test/test/m3-06-meta-assets.integration.spec.js'
     )
+    Write-Output 'M2.05 fixture: M3.02 portal session.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
       '--experimental-test-coverage',
@@ -132,6 +188,7 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-02-portal-session.lcov.info',
       'apps/api/dist-test/test/m3-02-db.integration.spec.js'
     )
+    Write-Output 'M2.05 fixture: M3.07 credential vault.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
       '--experimental-test-coverage',
@@ -140,6 +197,17 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-07-credential-vault.junit.xml',
       '--test-reporter-destination=artifacts/test-results/m3-07-credential-vault.lcov.info',
       'apps/api/dist-test/test/m3-07-credential-vault.integration.spec.js'
+    )
+    Write-Output 'M2.05 fixture: M3.09 credential lifecycle.'
+    $env:M3_09_DIAGNOSTIC_PATH = $m3_09DiagnosticPath
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
+      '--test',
+      '--experimental-test-coverage',
+      '--test-reporter=junit',
+      '--test-reporter=lcov',
+      '--test-reporter-destination=artifacts/test-results/m3-09-credential-lifecycle.junit.xml',
+      '--test-reporter-destination=artifacts/test-results/m3-09-credential-lifecycle.lcov.info',
+      'apps/api/dist-test/test/m3-09-credential-lifecycle.integration.spec.js'
     )
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m3-07/check-vault-artifact-redaction.mjs')
   } finally { Pop-Location }

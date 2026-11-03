@@ -107,6 +107,10 @@ Implementação usa criptografia autenticada consolidada, nonce único, key vers
 
 Metadata registra tipo/família, emissor, app, scopes, emissão, datas retornadas e última inspeção. `expires_at=NULL` significa ausência de prazo conhecido; não significa token invulnerável a revogação. Troca/refresh depende da família; Business Integration token, user token, Page token e variante Instagram não recebem a mesma receita de 60 dias.
 
+M3.09 persiste observações de ciclo de vida em tabela separada do segredo: emissão, validade do token, validade de acesso aos dados, estado de saúde, proveniência, instante da checagem, motivo seguro, versão e lease de agendamento. A ausência de qualquer validade necessária permanece desconhecida e bloqueia uso. Falha transitória mantém `UNKNOWN` ou marca evidência anterior como `STALE`; ela nunca prova revogação. O resolver exige evidência atual e futura tanto para expiração do token quanto para expiração de acesso a dados.
+
+O agendador local é opt-in (`API_CREDENTIAL_LIFECYCLE_SCHEDULER_ENABLED=false` por padrão), usa orçamento por execução, jitter, lease por credencial e job durável idempotente. Um handler de inspeção só consulta o adaptador quando política da família, acesso ao segredo e inspector forem explicitamente injetados. O worker padrão não recebe esses adaptadores. Refresh permanece desabilitado neste escopo e a intenção de reautorização é apenas local/deduplicada; envio/entrega não foi implementado. TTL universal, `Never`, resposta/semântica de revogação, refresh aplicável, elegibilidade real de app/grant e gatilho periódico autorizado seguem **Not confirmed**.
+
 ## Migração e projeção
 
 Fonte central passa a ser dona de integrações/credenciais após cutover da coorte. Mapeamento de cada campo legado registra direção e escritor por fase. Importação é dry-run primeiro, com contagens/órfãos/duplicações e quarentena; token root sem grant não vira concessão de cliente por cópia.

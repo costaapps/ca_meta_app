@@ -14,7 +14,7 @@ The repository loads the target asset under exact tenant/provider/app/environmen
 
 The candidate must include every policy-required asset grant and authorization scope. Granting an ancestor is allowed only over a bounded, verified path that the policy permits: WhatsApp phone → WABA, or Instagram professional account → Page. Every edge must match the stored type/kinds and have verified provider evidence. The resolver does not infer lineage from an external ID, browser claim, shared app configuration or a token that happens to work elsewhere.
 
-Credential health must be a fresh, provenance-backed `HEALTHY` observation (or `EXPIRING` where policy explicitly allows it). Expiry must be a fresh, provenance-backed future timestamp or an explicit provider-declared no-expiry observation. `UNKNOWN`, `STALE`, absent, malformed or expired evidence is not proof of validity. Reauthorization creates a new candidate/version; only the grant explicitly covering the requested asset or an allowed verified ancestor can be selected.
+Credential health must be a fresh, provenance-backed `HEALTHY` observation (or `EXPIRING` where policy explicitly allows it). Credential expiry must be a fresh, provenance-backed future timestamp or an explicit provider-declared no-expiry observation. Data-access expiry is an independent boundary and requires a fresh, known, future timestamp. An absent data-access deadline is never interpreted as no expiry. `UNKNOWN`, `STALE`, absent, malformed or expired evidence is not proof of validity. Reauthorization creates a new candidate/version; only the grant explicitly covering the requested asset or an allowed verified ancestor can be selected.
 
 ## Selection, result and audit
 
@@ -28,7 +28,7 @@ Safe failures use M1.07 codes: `ASSET_GRANT_MISSING` (`REAUTHORIZE`), `META_PERM
 
 ## Schema and external limits
 
-M3.06/M3.07 currently persist credential family/status/version and encrypted bytes, but do not persist health or expiry observations. The MySQL adapter therefore returns `UNKNOWN`; the resolver denies database-backed use until M3.09 supplies trusted evidence. This spec adds no migration and does not infer `expires_at` from NULL or another implicit value. The app flow/policy registry also has no persisted provider grant/family facts yet, so the module's default policy is fail-closed. M3.10 must provide the durable selection-audit port. These integration gaps are not evidence of real provider access or behavior.
+M3.06/M3.07 persist family/status/version and encrypted bytes. M3.09 adds a separate lifecycle metadata table; a missing row or missing field still maps to `UNKNOWN`, and resolver use remains denied. The resolver does not infer `expires_at`, data-access expiry, or “never” from NULL or another implicit value. The app flow/policy registry still has no confirmed production provider grant/family facts, so its default policy is fail-closed. M3.10 provides the durable selection-audit port. These integration gaps are not evidence of real provider access or behavior.
 
 ## Reproducible local proof
 
