@@ -24,6 +24,7 @@ test('Nginx access logging is path-only and OAuth callback error logs cannot exp
   const oauthLocations = [
     ['browser OAuth return route', /^\s*location\s+=\s+\/oauth\/return\s+\{([\s\S]*?)^\s*\}/m],
     ['legacy product callback routes', /^\s*location\s+~\s+\^\/setup\/\(\?:callback\|\(\?:whatsapp\|facebook\|instagram\)\/callback\)\$\s+\{([\s\S]*?)^\s*\}/m],
+    ['SPA fallback reached by internal redirect', /^\s*location\s+=\s+\/index\.html\s+\{([\s\S]*?)^\s*\}/m],
     ['provider API callback route', /^\s*location\s+~\s+\^\/api\/v1\/meta\/\[\^\/\]\+\/callback\$\s+\{([\s\S]*?)^\s*\}/m],
   ];
   for (const [label, locationPattern] of oauthLocations) {
