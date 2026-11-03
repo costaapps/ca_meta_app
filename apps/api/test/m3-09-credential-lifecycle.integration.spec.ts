@@ -256,8 +256,7 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
           ? (error as { code?: unknown }).code : undefined;
         const code = typeof rawCode === 'string' && SAFE_MARIADB_ERROR_CODES.has(rawCode)
           ? rawCode : 'UNCLASSIFIED';
-        console.error(`[M3.09 safe diagnostic] stage=${workerStage} code=${code}`);
-        throw error;
+        throw new Error(`[M3.09 safe diagnostic] stage=${workerStage} code=${code}`);
       }
     };
     await runWorker();

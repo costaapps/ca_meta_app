@@ -92,6 +92,10 @@ function validFlowAuthVariant(flow: MetaFlowVariant | null, auth: MetaAuthVarian
   return flow !== null && auth !== null && FLOW_AUTH_VARIANTS[flow]?.includes(auth) === true;
 }
 
+const SUPPORTED_FLOW_AUTH_SQL = Object.entries(FLOW_AUTH_VARIANTS)
+  .flatMap(([flow, variants]) => variants.map((auth) => `(auth.flow_variant = '${flow}' AND auth.auth_variant = '${auth}')`))
+  .join(' OR ');
+
 function validPolicy(policy: CredentialLifecycleFamilyPolicy | undefined, flow: MetaFlowVariant, auth: MetaAuthVariant,
   family: string): policy is CredentialLifecycleFamilyPolicy {
   return !!policy && policy.flowVariant === flow && policy.authVariant === auth && policy.family === family &&
@@ -173,10 +177,7 @@ export class CredentialLifecycleScheduler {
            AND s.credential_id = c.id AND s.authorization_id = c.authorization_id
            AND s.app_configuration_id = c.app_configuration_id AND s.provider = c.provider AND s.environment = c.environment
          WHERE c.status = 'ACTIVE'
-           AND ((auth.flow_variant = 'FACEBOOK' AND auth.auth_variant = 'FACEBOOK_LOGIN_FOR_BUSINESS')
-             OR (auth.flow_variant = 'INSTAGRAM' AND auth.auth_variant IN ('FACEBOOK_LOGIN_FOR_BUSINESS', 'INSTAGRAM_LOGIN'))
-             OR (auth.flow_variant = 'WHATSAPP_EXCLUSIVE' AND auth.auth_variant = 'WHATSAPP_EMBEDDED_SIGNUP')
-             OR (auth.flow_variant = 'WHATSAPP_COEXISTENCE' AND auth.auth_variant = 'WHATSAPP_BUSINESS_APP_ONBOARDING'))
+           AND (${SUPPORTED_FLOW_AUTH_SQL})
            AND NOT EXISTS (
            SELECT 1 FROM ca_meta_credential_lifecycle present WHERE present.tenant_id = c.tenant_id AND present.credential_id = c.id
          )
@@ -201,11 +202,7 @@ export class CredentialLifecycleScheduler {
              AND auth.app_configuration_id = c.app_configuration_id AND auth.provider = c.provider
              AND auth.environment = c.environment AND auth.authorization_state IN ('ACTIVE', 'PARTIAL')
            WHERE c.status = 'ACTIVE' AND l.next_check_at <= UTC_TIMESTAMP(6)
-             AND auth.flow_variant IS NOT NULL AND auth.auth_variant IS NOT NULL
-             AND ((auth.flow_variant = 'FACEBOOK' AND auth.auth_variant = 'FACEBOOK_LOGIN_FOR_BUSINESS')
-               OR (auth.flow_variant = 'INSTAGRAM' AND auth.auth_variant IN ('FACEBOOK_LOGIN_FOR_BUSINESS', 'INSTAGRAM_LOGIN'))
-               OR (auth.flow_variant = 'WHATSAPP_EXCLUSIVE' AND auth.auth_variant = 'WHATSAPP_EMBEDDED_SIGNUP')
-               OR (auth.flow_variant = 'WHATSAPP_COEXISTENCE' AND auth.auth_variant = 'WHATSAPP_BUSINESS_APP_ONBOARDING'))
+             AND (${SUPPORTED_FLOW_AUTH_SQL})
              AND (l.lease_expires_at IS NULL OR l.lease_expires_at <= UTC_TIMESTAMP(6))
            ORDER BY l.next_check_at, c.tenant_id, c.id LIMIT 1 FOR UPDATE SKIP LOCKED`,
         ) as DueCredentialRow[];

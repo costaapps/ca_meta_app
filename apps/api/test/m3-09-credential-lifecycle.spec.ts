@@ -115,7 +115,8 @@ test('unknown persisted flow/auth context is excluded from scheduling', async ()
   const jobs = { async enqueueWithin() { throw new Error('unknown flow/auth must not enqueue'); } } as never;
   const scheduler = new CredentialLifecycleScheduler(fake.database, jobs, 'test-scheduler', () => 10, () => leaseToken);
   assert.equal(await scheduler.scheduleDue(1, 100), 0);
-  assert.ok(fake.scheduleStatements.some((sql) => sql.includes('auth.flow_variant IS NOT NULL AND auth.auth_variant IS NOT NULL')));
+  assert.ok(fake.scheduleStatements.some((sql) =>
+    sql.includes("auth.flow_variant = 'INSTAGRAM' AND auth.auth_variant = 'INSTAGRAM_LOGIN'")));
 });
 
 async function runSyntheticLifecycle(input: { readonly adapter: boolean; readonly health?: 'HEALTHY' | 'EXPIRING' | 'EXPIRED' | 'ACTION_REQUIRED' | 'REVOKED';
