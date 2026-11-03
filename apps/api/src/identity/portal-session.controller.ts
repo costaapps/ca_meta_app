@@ -74,7 +74,15 @@ export class PortalSessionController {
     readonly requestId: string;
   }> {
     const rotated = await this.sessions.rotateTenantContext(request.portalSession, contextRef, body.tenantRef);
-    if (response) setPortalContextCookies(response, rotated.contextRef, rotated.csrfToken, rotated.expiresAt);
+    if (response) {
+      setPortalContextCookies(
+        response,
+        rotated.contextRef,
+        rotated.csrfToken,
+        rotated.expiresAt,
+        request.portalSession.entryMode,
+      );
+    }
     return Object.freeze({
       sessionRef: request.portalSession.sessionId,
       principalRef: createHash('sha256').update(`principal-ref\0${request.portalSession.principalId}`, 'utf8').digest('hex'),

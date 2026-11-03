@@ -18,6 +18,10 @@ Onboard independently: WhatsApp Cloud API, WhatsApp + app (Coexistence), Instagr
 
 Use M1.07 `/integrations/flows`, `/onboarding-sessions`, auth preauth/exchange, jobs, connections/assets and error/event schemas. Link app, environment, `flowVariant`, `authVariant`, capability version and readiness policy to the server session. The M1.03 matrix states source/version/gate per capability; its local tests do not certify current app-review status.
 
+The onboarding aggregate has a random server-generated opaque ID and is bound to the verified starting tenant, principal and portal session. Browser input cannot set tenant or credential authority. Provider correlation state is HMAC-derived from server configuration, stored only as a digest, expires after ten minutes and is consumable once. A pending row may be replayed only with the same tenant, principal, session, idempotency key and normalized body while unexpired. Status reads remain scoped to that starting record and recheck current membership in its tenant after a context switch. Only a trusted backend adapter may complete the aggregate; a callback page, popup message, HTTP success or client `READY` value is not proof.
+
+Current runtime persistence stores only the safe onboarding metadata and digests; it does not store OAuth codes, tokens or provider payloads. Expired provider correlation is unusable, but rows have no automated purge mechanism in this scope. The operational row retention period is therefore **Not confirmed** and must be resolved before production onboarding data is used. Provider launch configuration, the real adapter and real authorization behavior also remain **Not confirmed**.
+
 ## Scenarios
 
 | ID | Given | When | Then | Evidence |

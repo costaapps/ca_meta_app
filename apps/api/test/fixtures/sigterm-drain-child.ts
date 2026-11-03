@@ -116,6 +116,7 @@ const environment: ApiEnvironment = {
   bindAddress: '127.0.0.1',
   allowedHosts: ['127.0.0.1'],
   allowedOrigins: ['http://127.0.0.1'],
+  suite4EmbedOrigins: [],
   trustedProxyCidrs: false,
   portalSessionRecoveryKey: 'synthetic-test-session-recovery-key-32-bytes-minimum',
   portalSessionIdleTimeoutSeconds: 1800,

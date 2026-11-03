@@ -3,6 +3,7 @@ import { createPool, type Pool, type PoolConnection, type ResultSetHeader, type 
 import type { ApiEnvironment } from '../config/environment.js';
 import { parseMembershipRoles } from './mysql-identity.repository.js';
 import type { MembershipRole } from './identity.types.js';
+import { isPortalEntryMode } from './identity.trust.js';
 import type { StoredPortalSession, VerifiedPortalSession } from './identity.trust.js';
 import { IdentityDeniedError } from './identity.errors.js';
 import type { PortalPreAuthRecord, PortalSessionIssueRecord, PortalSessionRecord, PortalSessionStore } from './portal-session.service.js';
@@ -23,6 +24,7 @@ interface ActiveSessionRow extends RowDataPacket {
   context_version: number | string;
   context_ref_hash: string;
   csrf_token_hash: string;
+  entry_mode?: string;
   secret_hash?: string;
   idle_expires_at: string;
   absolute_expires_at: string;
@@ -219,12 +221,12 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
       }
       await connection.execute(
         `INSERT INTO ca_meta_portal_sessions
-         (id, principal_id, tenant_id, secret_hash, csrf_token_hash, context_ref_hash, context_version,
+         (id, principal_id, tenant_id, secret_hash, csrf_token_hash, context_ref_hash, context_version, entry_mode,
           created_at, last_seen_at, idle_expires_at, absolute_expires_at, revoked_at)
-         VALUES (?, ?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6),
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6),
                  DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND), DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND), NULL)`,
         [input.sessionId, membership.principal_id, membership.tenant_id, input.sessionCookieHash,
-          input.csrfTokenHash, input.contextRefHash, this.idleTimeoutSeconds, this.absoluteTimeoutSeconds],
+          input.csrfTokenHash, input.contextRefHash, input.preAuth.entryMode, this.idleTimeoutSeconds, this.absoluteTimeoutSeconds],
       );
       await connection.execute(
         `UPDATE ca_meta_portal_pre_auth SET consumed_at = UTC_TIMESTAMP(6)
@@ -251,6 +253,7 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
         contextVersion: 1,
         contextRefHash: input.contextRefHash,
         csrfTokenHash: input.csrfTokenHash,
+        entryMode: input.preAuth.entryMode,
         roles,
         sessionCookie: input.sessionCookie,
         csrfToken: input.csrfToken,
@@ -277,7 +280,7 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
       throw new IdentityDeniedError();
     }
     const [rows] = await connection.execute<ActiveSessionRow[]>(
-      `SELECT id, principal_id, tenant_id, context_version, context_ref_hash, csrf_token_hash, secret_hash,
+      `SELECT id, principal_id, tenant_id, context_version, context_ref_hash, csrf_token_hash, secret_hash, entry_mode,
               idle_expires_at, absolute_expires_at
        FROM ca_meta_portal_sessions
        WHERE id = ? AND revoked_at IS NULL AND idle_expires_at > UTC_TIMESTAMP(6)
@@ -285,7 +288,8 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
       [ticket.session_id],
     );
     const session = rows[0];
-    if (!session || session.secret_hash !== input.sessionCookieHash || Number(session.context_version) !== 1 || session.tenant_id !== input.requestedTenantId ||
+    if (!session || !isPortalEntryMode(session.entry_mode) || session.entry_mode !== input.preAuth.entryMode ||
+      session.secret_hash !== input.sessionCookieHash || Number(session.context_version) !== 1 || session.tenant_id !== input.requestedTenantId ||
       session.context_ref_hash !== input.contextRefHash || session.csrf_token_hash !== input.csrfTokenHash) {
       throw new IdentityDeniedError();
     }
@@ -309,6 +313,7 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
       contextVersion: 1,
       contextRefHash: session.context_ref_hash,
       csrfTokenHash: session.csrf_token_hash,
+      entryMode: session.entry_mode,
       roles: safeRoles(membership.roles),
       sessionCookie: input.sessionCookie,
       csrfToken: input.csrfToken,
@@ -328,12 +333,12 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
       );
     }
     const [rows] = await this.pool.execute<ActiveSessionRow[]>(
-      `SELECT id, principal_id, tenant_id, context_version, context_ref_hash, csrf_token_hash
+      `SELECT id, principal_id, tenant_id, context_version, context_ref_hash, csrf_token_hash, entry_mode
        FROM ca_meta_portal_sessions WHERE secret_hash = ? AND revoked_at IS NULL
          AND idle_expires_at > UTC_TIMESTAMP(6) AND absolute_expires_at > UTC_TIMESTAMP(6) LIMIT 1`, [digest],
     );
     const row = rows[0];
-    if (!row) return undefined;
+    if (!row || !isPortalEntryMode(row.entry_mode)) return undefined;
     return Object.freeze({
       sessionId: row.id,
       principalId: row.principal_id,
@@ -341,6 +346,7 @@ export class MysqlPortalSessionStore implements PortalSessionStore, OnApplicatio
       contextVersion: Number(row.context_version),
       contextRefHash: row.context_ref_hash,
       csrfTokenHash: row.csrf_token_hash,
+      entryMode: row.entry_mode,
     });
   }
 
