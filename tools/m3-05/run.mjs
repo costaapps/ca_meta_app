@@ -45,6 +45,15 @@ try {
     join(apiOutput, 'test', 'm3-05-embed-config.spec.js'),
     join(apiOutput, 'test', 'm3-05-onboarding-status.spec.js'),
   ]);
+  run('API session mode and migration focused tests', process.execPath, [
+    '--test',
+    join(apiOutput, 'test', 'm3-04-session.spec.js'),
+    join(apiOutput, 'test', 'migration-unit.spec.js'),
+  ]);
+  run('Safe Nginx access-log regression test', process.execPath, [
+    '--test',
+    join(repositoryRoot, 'tools', 'm3-05', 'nginx-log.test.mjs'),
+  ]);
   run('Angular application typecheck', process.execPath, [
     ngc, '-p', join(repositoryRoot, 'apps', 'web', 'tsconfig.app.json'), '--noEmit',
   ]);

@@ -11,7 +11,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Start browser-bound pre-authentication
-         * @description Public before a portal session. Requires an exact allowlisted Origin, matching Fetch Metadata, and an HttpOnly pre-auth cookie bound to the server-created challenge. The challenge is for a trusted portal-entry handoff, not a Meta provider code. The current runtime supports PORTAL_TOP_LEVEL only; SUITE4_EMBED is reserved for M3.05 and is rejected with 400.
+         * @description Public before a portal session. Requires an exact allowlisted Origin, matching Fetch Metadata, and an HttpOnly pre-auth cookie bound to the server-created challenge. The challenge is for a trusted portal-entry handoff, not a Meta provider code. PORTAL_TOP_LEVEL uses a SameSite=Lax host-only cookie. SUITE4_EMBED is enabled only when an exact HTTPS Suite4 parent-origin allowlist is configured; its host-only pre-auth cookie is SameSite=None, Secure and Partitioned. The browser still must pass the exact portal/app Origin and same-origin Fetch Metadata checks. Empty embed-origin configuration rejects SUITE4_EMBED with 400.
          */
         readonly post: operations["startPreauth"];
         readonly delete?: never;
@@ -233,7 +233,7 @@ export interface paths {
         };
         /**
          * Read authoritative onboarding status
-         * @description The server derives READY/PARTIAL from current versioned policy and verified evidence. A code exchange, HTTP 200, popup finish event, or redirect alone never sets READY. UNKNOWN/STALE evidence stays visible and blocks READY when required.
+         * @description The server derives READY/PARTIAL from current versioned policy and verified evidence. A code exchange, HTTP 200, popup finish event, or redirect alone never sets READY. The M3.05 route is session-guarded but returns 503 until an authoritative persisted onboarding status reader is wired. UNKNOWN/STALE evidence stays visible and blocks READY when required.
          */
         readonly get: operations["getOnboardingSession"];
         readonly put?: never;
@@ -1150,7 +1150,7 @@ export interface operations {
             /** @description Sanitized success example */
             readonly 201: {
                 headers: {
-                    /** @description Host-only Secure HttpOnly `__Host-meta_preauth` cookie with SameSite=Lax; no Domain attribute. Cookie value is not in the response body. */
+                    /** @description Host-only Secure HttpOnly `__Host-meta_preauth` cookie with no Domain attribute. PORTAL_TOP_LEVEL uses SameSite=Lax; configured SUITE4_EMBED uses SameSite=None; Partitioned. Cookie value is not in the response body. */
                     readonly "Set-Cookie"?: string;
                     readonly [name: string]: unknown;
                 };

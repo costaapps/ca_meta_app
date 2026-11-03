@@ -8,9 +8,9 @@ From the repository root on Windows:
 powershell -ExecutionPolicy Bypass -File tools/m2-05/run-mariadb-tests.ps1
 ```
 
-The script sets up separate least-privilege synthetic migrator and runtime accounts, compiles the API test tree, and runs `durable-work.integration.spec.js` and `m3-06-meta-assets.integration.spec.js` with `M2_DURABLE_WORK_TEST=1`. Each integration test calls the versioned migration runner before exercising the schema. The full API/root suite is a separate candidate gate and is not repeated by this harness. No production/staging database, Meta API, provider account, real tenant data, or provider credential is used.
+The script sets up separate least-privilege synthetic migrator and runtime accounts, compiles the API test tree, and runs `durable-work.integration.spec.js` and `m3-06-meta-assets.integration.spec.js` with `M2_DURABLE_WORK_TEST=1`, followed by `m3-02-db.integration.spec.js` with `M3_02_DB_TEST=1`. The session fixture asserts that a Suite4 embed mode survives the actual MySQL session insert after the versioned migration chain is applied. The full API/root suite is a separate candidate gate and is not repeated by this harness. No production/staging database, Meta API, provider account, real tenant data, or provider credential is used.
 
-The M3.06 fixture covers concurrent upsert/shared assets, confirmed scopes and grants, typed Instagram-to-Page relation persistence, omitted-grants preservation versus explicit revocation, cross-tenant FK rejection and quarantine, exact external IDs above 2^53, and rollback after outbox staging. Its JUnit and LCOV reports are emitted as `m3-06-meta-assets.*` and uploaded by the M2.08 MariaDB workflow.
+The M3.06 fixture covers concurrent upsert/shared assets, confirmed scopes and grants, typed Instagram-to-Page relation persistence, omitted-grants preservation versus explicit revocation, cross-tenant FK rejection and quarantine, exact external IDs above 2^53, and rollback after outbox staging. Its JUnit and LCOV reports are emitted as `m3-06-meta-assets.*`. The M3.02 portal-session fixture emits `m3-02-portal-session.*`; both report sets are uploaded by the M2.08 MariaDB workflow.
 
 The MariaDB scenario checks:
 

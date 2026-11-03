@@ -7,6 +7,7 @@ import { PORTAL_SESSIONS_MIGRATION, PORTAL_SESSION_TABLES } from './portal-sessi
 import { TICKET_RETRY_MIGRATION } from './ticket-retry.js';
 import { META_ASSETS_MIGRATION, META_ASSETS_TABLES } from './meta-assets.js';
 import { MAGIC_LINKS_MIGRATION, MAGIC_LINK_TABLES } from './magic-links.js';
+import { PORTAL_SESSION_ENTRY_MODE_MIGRATION } from './portal-session-entry-mode.js';
 
 function ddl(
   id: string,
@@ -265,6 +266,7 @@ const migrationsWithoutChecksums = [
   TICKET_RETRY_MIGRATION,
   META_ASSETS_MIGRATION,
   MAGIC_LINKS_MIGRATION,
+  PORTAL_SESSION_ENTRY_MODE_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({

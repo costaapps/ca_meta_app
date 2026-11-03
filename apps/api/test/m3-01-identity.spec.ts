@@ -134,6 +134,7 @@ async function sessionFor(tenantId: string, contextRef: string, contextVersion =
         contextVersion,
         contextRefHash: hashTenantContextReference(contextRef),
         csrfTokenHash: 'a'.repeat(64),
+        entryMode: 'PORTAL_TOP_LEVEL',
       };
     },
   }).verify(cookie);

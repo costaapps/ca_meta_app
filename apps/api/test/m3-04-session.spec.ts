@@ -18,6 +18,7 @@ import type { StoredPortalSession, VerifiedPortalSession } from '../src/identity
 import type { MembershipRole, TenantMembership } from '../src/identity/identity.types.js';
 import {
   MysqlPortalSessionService,
+  PORTAL_CONTEXT_COOKIE,
   PORTAL_CSRF_COOKIE,
   PORTAL_SESSION_COOKIE,
   setPortalSessionCookies,
@@ -97,6 +98,7 @@ class SharedSessionStore implements PortalSessionStore {
       contextVersion: 1,
       contextRefHash: input.contextRefHash,
       csrfTokenHash: input.csrfTokenHash,
+      entryMode: input.preAuth.entryMode,
       roles: input.requestedTenantId === tenantA ? ['operator'] as const : ['viewer'] as const,
       sessionCookie: input.sessionCookie,
       csrfToken: input.csrfToken,
@@ -122,6 +124,7 @@ class SharedSessionStore implements PortalSessionStore {
       contextVersion: stored.contextVersion,
       contextRefHash: stored.contextRefHash,
       csrfTokenHash: stored.csrfTokenHash,
+      entryMode: stored.entryMode,
     };
   }
 
@@ -231,6 +234,67 @@ test('pre-auth binding is browser-specific; exchange is recoverable only for the
     error instanceof IdentityDeniedError && error.code === 'CONTEXT_CHANGED');
 });
 
+test('tenant-switch context cookies preserve the mode verified from the server-side session', async () => {
+  for (const entryMode of ['PORTAL_TOP_LEVEL', 'SUITE4_EMBED'] as const) {
+    const store = new SharedSessionStore();
+    const { contexts, sessions, assertions } = services(store);
+    const challenge = await sessions.begin(entryMode);
+    const preAuth = await sessions.verifyBrowserBinding(challenge.challengeRef, challenge.cookieValue);
+    assert.ok(preAuth);
+    const issued = await sessions.issueFromVerifiedAssertion(assertions.verify(), tenantA, {
+      ticketJtiSha256: hash(`tenant-switch-${entryMode}-jti`),
+      ticketSha256: hash(`tenant-switch-${entryMode}-ticket`),
+      ticketExpiresAt: new Date(Date.now() + 30_000),
+      ticketChallengeSha256: hash(challenge.challengeRef),
+      preAuth,
+    });
+    const verified = await new PortalSessionVerifier(store).verify(issued.sessionCookie);
+    assert.ok(verified);
+    assert.equal(verified.entryMode, entryMode);
+
+    const controller = new PortalSessionController(
+      contexts,
+      sessions,
+      new class extends AbuseLimitService { async consume() {} }(),
+    );
+    const cookies: string[] = [];
+    const response = { append(_name: string, value: string) { cookies.push(value); } } as unknown as Response;
+    await controller.switchTenant({
+      portalSession: verified,
+      headers: { 'x-entry-mode': 'PORTAL_TOP_LEVEL' },
+    } as unknown as PortalRequest, { tenantRef: tenantB }, issued.contextRef, response);
+
+    assert.equal(cookies.length, 2);
+    assert.ok((cookies[0] ?? '').startsWith(`${PORTAL_CONTEXT_COOKIE}=`));
+    assert.ok((cookies[1] ?? '').startsWith(`${PORTAL_CSRF_COOKIE}=`));
+    if (entryMode === 'SUITE4_EMBED') {
+      assert.match(cookies[0] ?? '', /; SameSite=None; Partitioned$/);
+      assert.match(cookies[1] ?? '', /; SameSite=None; Partitioned$/);
+    } else {
+      assert.match(cookies[0] ?? '', /; SameSite=Lax$/);
+      assert.match(cookies[1] ?? '', /; SameSite=Strict$/);
+      assert.equal(cookies.some((value) => value.includes('Partitioned')), false);
+    }
+  }
+});
+
+test('portal-session verifier rejects an unknown persisted entry mode', async () => {
+  const verifier = new PortalSessionVerifier({
+    async findActiveBySecretHash() {
+      return {
+        sessionId: 'session-unknown-mode',
+        principalId,
+        tenantId: tenantA,
+        contextVersion: 1,
+        contextRefHash: 'a'.repeat(64),
+        csrfTokenHash: 'b'.repeat(64),
+        entryMode: 'REQUEST_HEADER_VALUE',
+      } as unknown as StoredPortalSession;
+    },
+  });
+  assert.equal(await verifier.verify('session-cookie-with-sufficient-entropy-123456'), undefined);
+});
+
 function fakeResponse(): Response & { readonly statusCodeValue: () => number; readonly bodyValue: () => unknown; readonly headerValue: (name: string) => unknown } {
   let status = 200;
   let body: unknown;
@@ -275,7 +339,7 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
     assert.equal(value, sessionCookie);
     return {
       sessionId: 'session-1', principalId, tenantId: tenantA, contextVersion: 1,
-      contextRefHash: 'a'.repeat(64), csrfTokenHash: hash(csrf),
+      contextRefHash: 'a'.repeat(64), csrfTokenHash: hash(csrf), entryMode: 'PORTAL_TOP_LEVEL',
     } as VerifiedPortalSession;
   } } as PortalSessionVerifier;
   const middleware = portalRequestSecurityMiddleware(env, verifier);
@@ -421,7 +485,7 @@ test('DELETE session revokes only an owned same-tenant session; logout still rev
   assert.equal(store.revoked.has(samePrincipalOtherTenant.sessionId), false);
 
   await deleteController.revoke({ portalSession: actor } as PortalRequest, issued.sessionId, deleteResponse);
-  assert.equal(deleteResponseHeaders.length, 4);
+  assert.equal(deleteResponseHeaders.length, 8);
   assert.equal(await new PortalSessionVerifier(store).verify(issued.sessionCookie), undefined);
 
   const logoutChallenge = await sessions.begin();
@@ -446,7 +510,7 @@ test('DELETE session revokes only an owned same-tenant session; logout still rev
     portalSession: logoutSession,
   } as unknown as PortalRequest, response);
   assert.equal(store.revoked.has(logoutSession.sessionId), true);
-  assert.equal(cleared.length, 4);
+  assert.equal(cleared.length, 8);
   assert.equal(await new PortalSessionVerifier(store).verify(logoutIssued.sessionCookie), undefined);
 });
 

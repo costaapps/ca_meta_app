@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import type { Response } from 'express';
 import { IdentityDeniedError } from './identity.errors.js';
 import { isVerifiedIdentityAssertion, isVerifiedPortalSession } from './identity.trust.js';
-import type { VerifiedIdentityAssertion, VerifiedPortalSession } from './identity.trust.js';
+import type { PortalEntryMode, VerifiedIdentityAssertion, VerifiedPortalSession } from './identity.trust.js';
 import type { MembershipRole } from './identity.types.js';
 import { TenantContextService } from './identity.service.js';
 
@@ -12,7 +12,7 @@ export interface VerifiedPortalPreAuth {
   readonly id: string;
   readonly challengeHash: string;
   readonly browserBindingHash: string;
-  readonly entryMode: 'PORTAL_TOP_LEVEL' | 'SUITE4_EMBED';
+  readonly entryMode: PortalEntryMode;
   readonly [verifiedPortalPreAuthBrand]: true;
 }
 const verifiedPortalPreAuthBrand: unique symbol = Symbol('verifiedPortalPreAuth');
@@ -22,7 +22,7 @@ export interface StartedPortalPreAuth {
   readonly challengeRef: string;
   readonly cookieValue: string;
   readonly expiresAt: string;
-  readonly entryMode: 'PORTAL_TOP_LEVEL' | 'SUITE4_EMBED';
+  readonly entryMode: PortalEntryMode;
 }
 
 export interface PortalSessionIssueOptions {
@@ -65,6 +65,7 @@ export interface PortalSessionRecord {
   readonly contextVersion: number;
   readonly contextRefHash: string;
   readonly csrfTokenHash: string;
+  readonly entryMode: PortalEntryMode;
   readonly roles: readonly MembershipRole[];
   readonly sessionCookie: string;
   readonly csrfToken: string;
@@ -76,7 +77,7 @@ export interface PortalPreAuthRecord {
   readonly id: string;
   readonly challengeHash: string;
   readonly browserCookieHash: string;
-  readonly entryMode: 'PORTAL_TOP_LEVEL' | 'SUITE4_EMBED';
+  readonly entryMode: PortalEntryMode;
   readonly expiresAt: Date;
   readonly consumedAt?: Date;
 }
@@ -110,6 +111,7 @@ export interface PortalSessionStore {
     readonly contextVersion: number;
     readonly contextRefHash: string;
     readonly csrfTokenHash: string;
+    readonly entryMode: PortalEntryMode;
   } | undefined>;
   refreshActivity(session: VerifiedPortalSession): Promise<void>;
   changeContext(input: {
@@ -125,7 +127,7 @@ export interface PortalSessionStore {
 }
 
 export abstract class PortalPreAuthService {
-  abstract begin(entryMode?: 'PORTAL_TOP_LEVEL' | 'SUITE4_EMBED'): Promise<StartedPortalPreAuth>;
+  abstract begin(entryMode?: PortalEntryMode): Promise<StartedPortalPreAuth>;
   abstract verifyBrowserBinding(challengeRef: string | undefined, preAuthCookie: string | undefined): Promise<VerifiedPortalPreAuth | undefined>;
 }
 
@@ -254,7 +256,7 @@ export class MysqlPortalSessionService implements PortalPreAuthService, PortalSe
       tenantId: record.tenantId,
       expiresAt: record.expiresAt,
       publicContext,
-      ...(options.preAuth.entryMode === 'SUITE4_EMBED' ? { cookiePartitioned: true } : {}),
+      ...(record.entryMode === 'SUITE4_EMBED' ? { cookiePartitioned: true } : {}),
     });
   }
 
@@ -358,10 +360,28 @@ export function setPortalPreAuthCookie(response: Response, started: StartedPorta
   }));
 }
 
-export function setPortalContextCookies(response: Response, contextRef: string, csrfToken: string, expiresAt: string): void {
+export function setPortalContextCookies(
+  response: Response,
+  contextRef: string,
+  csrfToken: string,
+  expiresAt: string,
+  entryMode: PortalEntryMode,
+): void {
   const maxAgeSeconds = Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
-  response.append('Set-Cookie', serializeNamedCookie(PORTAL_CONTEXT_COOKIE, contextRef, { httpOnly: false, maxAgeSeconds }));
-  response.append('Set-Cookie', serializeNamedCookie(PORTAL_CSRF_COOKIE, csrfToken, { httpOnly: false, maxAgeSeconds, sameSite: 'Strict' }));
+  const contextCookieMode = entryMode === 'SUITE4_EMBED'
+    ? { sameSite: 'None' as const, partitioned: true }
+    : { sameSite: 'Lax' as const };
+  response.append('Set-Cookie', serializeNamedCookie(PORTAL_CONTEXT_COOKIE, contextRef, {
+    httpOnly: false,
+    maxAgeSeconds,
+    ...contextCookieMode,
+  }));
+  response.append('Set-Cookie', serializeNamedCookie(PORTAL_CSRF_COOKIE, csrfToken, {
+    httpOnly: false,
+    maxAgeSeconds,
+    sameSite: entryMode === 'SUITE4_EMBED' ? 'None' : 'Strict',
+    ...(entryMode === 'SUITE4_EMBED' ? { partitioned: true } : {}),
+  }));
 }
 
 export function clearPortalSessionCookies(response: Response): void {

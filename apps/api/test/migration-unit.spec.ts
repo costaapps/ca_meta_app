@@ -9,6 +9,7 @@ import { PORTAL_SESSIONS_MIGRATION } from '../src/database/migrations/portal-ses
 import { TICKET_RETRY_MIGRATION } from '../src/database/migrations/ticket-retry.js';
 import { META_ASSETS_MIGRATION, META_ASSETS_TABLES } from '../src/database/migrations/meta-assets.js';
 import { MAGIC_LINKS_MIGRATION, MAGIC_LINK_TABLES } from '../src/database/migrations/magic-links.js';
+import { PORTAL_SESSION_ENTRY_MODE_MIGRATION } from '../src/database/migrations/portal-session-entry-mode.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -49,8 +50,8 @@ test('migration configuration rejects runtime account reuse and privileged built
 });
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
-  assert.equal(MIGRATIONS.length, 8);
-  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.equal(MIGRATIONS.length, 9);
+  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -70,8 +71,11 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(IDENTITY_MIGRATION.id, '202610300001-principals-memberships');
   assert.equal(META_ASSETS_MIGRATION.schemaVersion, 7);
   assert.equal(MAGIC_LINKS_MIGRATION.schemaVersion, 8);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 2]?.id, META_ASSETS_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 1]?.id, MAGIC_LINKS_MIGRATION.id);
+  assert.equal(PORTAL_SESSION_ENTRY_MODE_MIGRATION.id, '202610300009-portal-session-entry-mode');
+  assert.equal(PORTAL_SESSION_ENTRY_MODE_MIGRATION.schemaVersion, 9);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 3]?.id, META_ASSETS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 2]?.id, MAGIC_LINKS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 1]?.id, PORTAL_SESSION_ENTRY_MODE_MIGRATION.id);
   assert.ok(META_ASSETS_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.ok(MAGIC_LINK_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.deepEqual(IDENTITY_MIGRATION.steps.map((step) => step.id), [
@@ -123,6 +127,40 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.ok(ticketHashStep.sql.includes('ticket_sha256 CHAR(64)'));
   assert.ok(ticketHashStep.sql.includes('NULL'));
   assert.ok(ticketHashStep.definition.includes('store only SHA-256'));
+  const entryModeStep = PORTAL_SESSION_ENTRY_MODE_MIGRATION.steps[0];
+  assert.ok(entryModeStep && 'sql' in entryModeStep);
+  assert.match(entryModeStep.sql, /entry_mode ENUM\('PORTAL_TOP_LEVEL','SUITE4_EMBED'\) NOT NULL DEFAULT 'PORTAL_TOP_LEVEL'/);
+  assert.match(entryModeStep.definition, /PORTAL_TOP_LEVEL/);
+});
+
+test('M3.05 entry-mode migration accepts only the additive column shape and preserves legacy default', async () => {
+  const step = PORTAL_SESSION_ENTRY_MODE_MIGRATION.steps[0];
+  assert.ok(step && 'verify' in step);
+  const validQueryRunner = {
+    async query() {
+      return [{
+        data_type: 'enum',
+        column_type: "enum('PORTAL_TOP_LEVEL','SUITE4_EMBED')",
+        is_nullable: 'NO',
+        column_default: 'PORTAL_TOP_LEVEL',
+      }];
+    },
+  } as never;
+  const invalidQueryRunner = {
+    async query() {
+      return [{
+        data_type: 'enum',
+        column_type: "enum('PORTAL_TOP_LEVEL','SUITE4_EMBED')",
+        is_nullable: 'YES',
+        column_default: null,
+      }];
+    },
+  } as never;
+  const missingQueryRunner = { async query() { return []; } } as never;
+  const context = { migrationId: PORTAL_SESSION_ENTRY_MODE_MIGRATION.id, stepId: step.id };
+  assert.equal(await step.verify({ ...context, queryRunner: validQueryRunner }), true);
+  assert.equal(await step.verify({ ...context, queryRunner: missingQueryRunner }), false);
+  await assert.rejects(step.verify({ ...context, queryRunner: invalidQueryRunner }), /unexpected portal session entry-mode column/);
 });
 
 test('migration fingerprints detect definition configuration and callback drift', () => {

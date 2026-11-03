@@ -38,6 +38,7 @@ const environment: ApiEnvironment = {
   bindAddress: '127.0.0.1',
   allowedHosts: ['localhost', '127.0.0.1'],
   allowedOrigins: ['https://portal.example.test'],
+  suite4EmbedOrigins: [],
   trustedProxyCidrs: false,
   portalSessionIdleTimeoutSeconds: 1800,
   portalSessionAbsoluteTimeoutSeconds: 28800,

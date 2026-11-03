@@ -1,6 +1,6 @@
 # M3.05 focused validation harness
 
-This harness compiles the API sources with only the M3.02 pre-auth and M3.05 embed/status tests, typechecks the Angular application, and runs the focused web config/embed tests. It uses the repository lockfile and adds no dependencies. No database, Docker service, Meta credential, Suite4 issuer, or provider call is used.
+This harness compiles the API sources with the M3.02 pre-auth and M3.05 embed/status tests, plus focused M3.04 session-cookie and migration-unit coverage. It also checks the safe Nginx access-log format, typechecks the Angular application, and runs the focused web config/embed tests. The Nginx regression test rejects default combined logging and only permits `$uri` and `$status` in the explicit access-log format. It uses the repository lockfile and adds no dependencies. No database, Docker service, Meta credential, Suite4 issuer, or provider call is used.
 
 Requirements: Node `24.x` and npm `11.x` as pinned in the root `package.json`.
 

@@ -48,7 +48,7 @@ $managedEnvironment = @(
   'MIGRATION_LOCK_TIMEOUT_SECONDS', 'MIGRATION_STATEMENT_TIMEOUT_SECONDS', 'MIGRATION_MIN_SUPPORTED_API_VERSION',
   'API_DATABASE_HOST', 'API_DATABASE_PORT', 'API_DATABASE_NAME', 'API_DATABASE_USER', 'API_DATABASE_PASSWORD',
   'API_DATABASE_CONNECT_TIMEOUT_MS', 'API_PORT', 'API_BIND_ADDRESS', 'API_ALLOWED_HOSTS', 'API_TRUSTED_PROXIES',
-  'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST'
+  'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST', 'M3_02_DB_TEST'
 )
 $previousEnvironment = @{}
 foreach ($name in $managedEnvironment) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name) }
@@ -91,6 +91,7 @@ $env:API_ALLOWED_HOSTS = 'localhost'
 $env:API_TRUSTED_PROXIES = 'none'
 $env:M2_DURABLE_WORK_TEST = '1'
 $env:M2_MIGRATION_TEST = '0'
+$env:M3_02_DB_TEST = '1'
 
 try {
   Write-Output "Compose project: $composeProject"
@@ -118,6 +119,15 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-06-meta-assets.junit.xml',
       '--test-reporter-destination=artifacts/test-results/m3-06-meta-assets.lcov.info',
       'apps/api/dist-test/test/m3-06-meta-assets.integration.spec.js'
+    )
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
+      '--test',
+      '--experimental-test-coverage',
+      '--test-reporter=junit',
+      '--test-reporter=lcov',
+      '--test-reporter-destination=artifacts/test-results/m3-02-portal-session.junit.xml',
+      '--test-reporter-destination=artifacts/test-results/m3-02-portal-session.lcov.info',
+      'apps/api/dist-test/test/m3-02-db.integration.spec.js'
     )
   } finally { Pop-Location }
 } finally {
