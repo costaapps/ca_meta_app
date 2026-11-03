@@ -136,6 +136,11 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.ok(entryModeStep && 'sql' in entryModeStep);
   assert.match(entryModeStep.sql, /entry_mode ENUM\('PORTAL_TOP_LEVEL','SUITE4_EMBED'\) NOT NULL DEFAULT 'PORTAL_TOP_LEVEL'/);
   assert.match(entryModeStep.definition, /PORTAL_TOP_LEVEL/);
+  assert.deepEqual(entryModeStep.compatiblePriorSteps?.map(({ migrationId, stepId }) => ({ migrationId, stepId })), [{
+    migrationId: PORTAL_SESSIONS_MIGRATION.id,
+    stepId: 'create-portal-sessions',
+  }]);
+  assert.match(entryModeStep.definition, /compatiblePriorSteps/);
 });
 
 test('M3.05 entry-mode migration accepts only the additive column shape and preserves legacy default', async () => {

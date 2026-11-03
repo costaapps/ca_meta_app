@@ -1,6 +1,7 @@
 import type { QueryRunner } from 'typeorm';
 import { migrationChecksum } from './migration-fingerprint.js';
 import type { DdlStep, VersionedMigration } from './migration.types.js';
+import { PORTAL_SESSIONS_MIGRATION, verifyPortalSessionTableWithEntryMode } from './portal-sessions.js';
 
 const expectedColumnType = "enum('PORTAL_TOP_LEVEL','SUITE4_EMBED')";
 const expectedColumnDefault = "'PORTAL_TOP_LEVEL'";
@@ -25,6 +26,17 @@ async function verifyEntryModeColumn(queryRunner: QueryRunner): Promise<boolean>
   return true;
 }
 
+async function verifyPortalSessionWithEntryMode(queryRunner: QueryRunner): Promise<boolean> {
+  if (!(await verifyEntryModeColumn(queryRunner))) return false;
+  return verifyPortalSessionTableWithEntryMode(queryRunner);
+}
+
+const compatiblePriorSteps: NonNullable<DdlStep['compatiblePriorSteps']> = [{
+  migrationId: PORTAL_SESSIONS_MIGRATION.id,
+  stepId: 'create-portal-sessions',
+  verify: async ({ queryRunner }) => verifyPortalSessionWithEntryMode(queryRunner),
+}];
+
 const addEntryMode: DdlStep = {
   id: 'add-portal-session-entry-mode',
   phase: 'expand',
@@ -40,9 +52,15 @@ const addEntryMode: DdlStep = {
       purpose: 'persist the verified browser-bound pre-auth mode for context-cookie recovery',
     },
     verify: verifyEntryModeColumn.toString(),
+    compatiblePriorSteps: compatiblePriorSteps.map(({ migrationId, stepId, verify }) => ({
+      migrationId,
+      stepId,
+      verify: verify.toString(),
+    })),
   }),
   retryWhenAbsent: true,
   verify: async ({ queryRunner }) => verifyEntryModeColumn(queryRunner),
+  compatiblePriorSteps,
 };
 
 const definition = {
