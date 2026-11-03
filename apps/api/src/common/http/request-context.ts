@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { MonotonicClock } from '../time/clock.port.js';
+import { redactStructuredLogRecord } from '../../privacy/redaction.js';
 
 export interface StructuredLogRecord {
   readonly level: 'info' | 'warn' | 'error';
@@ -21,7 +22,7 @@ export interface StructuredLogger {
 export const STRUCTURED_LOGGER = Symbol('STRUCTURED_LOGGER');
 export class ConsoleStructuredLogger implements StructuredLogger {
   write(record: StructuredLogRecord): void {
-    process.stdout.write(`${JSON.stringify(record)}\n`);
+    process.stdout.write(`${JSON.stringify(redactStructuredLogRecord({ ...record }))}\n`);
   }
 }
 

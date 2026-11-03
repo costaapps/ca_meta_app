@@ -18,6 +18,7 @@ import { PortalSessionVerifier } from './identity/identity.trust.js';
 import { AbuseLimitService } from './common/security/abuse-limits.js';
 import { MetaAssetsModule } from './meta-assets/meta-assets.module.js';
 import { MagicLinkModule } from './auth/magic-link.module.js';
+import { PrivacyModule } from './privacy/privacy.module.js';
 import { OnboardingStatusModule } from './onboarding/onboarding-status.module.js';
 
 @Module({})
@@ -47,6 +48,7 @@ export class ApiModule {
         identityModule,
         authExchangeModule,
         MagicLinkModule.register(environment),
+        PrivacyModule.register(environment),
         OnboardingStatusModule.register(identityModule, environment),
       ],
       providers: [

@@ -1,8 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { EntityManager } from 'typeorm';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { OutboxEventEnvelope } from '../jobs/event-validation.js';
 import type { OutboxService } from '../outbox/outbox-service.js';
+import { privacyRefHash, type AuditEventWriter } from '../privacy/audit.service.js';
+import { isSafeOpaqueReference } from '../privacy/redaction.js';
 import {
   assetIdentityHash,
   isVerifiedMetaEvidence,
@@ -85,6 +87,9 @@ function safeScopeSnapshot(scopes: readonly string[]): readonly string[] {
   return [...new Set(scopes)].sort((left, right) => left.localeCompare(right));
 }
 function json(value: unknown): string { return JSON.stringify(value); }
+function auditOpaqueReference(value: string): string {
+  return isSafeOpaqueReference(value) ? value : privacyRefHash(value);
+}
 function transientWriteConflict(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('code' in error)) return false;
   return error.code === 'ER_DUP_ENTRY' || error.code === 'ER_LOCK_DEADLOCK' || error.code === 'ER_LOCK_WAIT_TIMEOUT';
@@ -95,7 +100,11 @@ function isDuplicateKey(error: unknown): boolean {
 
 /** All commands run in one database transaction. OutboxService receives that same EntityManager. */
 export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
-  constructor(private readonly database: DurableWorkDatabase, private readonly outbox: OutboxAppender) {}
+  constructor(
+    private readonly database: DurableWorkDatabase,
+    private readonly outbox: OutboxAppender,
+    private readonly audit: AuditEventWriter,
+  ) {}
 
   async upsert(command: AuthorizationUpsertCommand): Promise<AuthorizationUpsertResult> {
     validateAuthorizationUpsert(command);
@@ -217,6 +226,20 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
       data: { kind: 'CONNECTION_CHANGED', connectionRef: command.authorizationId, status: this.outboxState(aggregateState), observedAt: command.observedAt },
     };
     await this.outbox.appendWithin(manager, event);
+    const auditAction = authorizationState === 'DISCONNECTED' || authorizationState === 'REVOKED'
+      ? 'AUTHORIZATION_DISCONNECTED'
+      : authEvidence && currentAuth ? 'AUTHORIZATION_REAUTHORIZED'
+        : authEvidence && !currentAuth && (authorizationState === 'ACTIVE' || authorizationState === 'PARTIAL')
+          ? 'AUTHORIZATION_CONNECTED' : 'AUTHORIZATION_OBSERVED';
+    await this.audit.record({
+      tenantId: command.tenantId,
+      actorRef: auditOpaqueReference(command.actor.ref),
+      action: auditAction,
+      targetRef: command.authorizationId,
+      correlationId: auditOpaqueReference(command.correlationId),
+      retentionClass: 'OPERATIONS',
+      safeDiff: { before: currentAuth?.authorization_state ?? 'UNKNOWN', after: aggregateState, version: authVersion },
+    }, manager);
     return Object.freeze({
       authorizationRef: command.authorizationId,
       version: authVersion,

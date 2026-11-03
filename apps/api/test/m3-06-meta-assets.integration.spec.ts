@@ -9,6 +9,7 @@ import { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { DurableJobStore } from '../src/jobs/job-store.js';
 import { OutboxService } from '../src/outbox/outbox-service.js';
 import { MysqlMetaAssetsRepository } from '../src/meta-assets/mysql-meta-assets.repository.js';
+import { AuditEventWriter } from '../src/privacy/audit.service.js';
 import {
   issueVerifiedMetaEvidence,
   type AssetClaimInput,
@@ -31,6 +32,7 @@ function command(input: {
   readonly externalId?: string;
   readonly grants?: readonly string[];
   readonly includeInstagramRelation?: boolean;
+  readonly state?: AuthorizationUpsertCommand['state'];
 }): AuthorizationUpsertCommand {
   const proof = evidence();
   const assets: AssetClaimInput[] = input.externalId === undefined ? [] : [{
@@ -55,7 +57,7 @@ function command(input: {
     appConfigurationId: input.appConfigurationId,
     provider: 'META',
     environment: 'test',
-    state: 'ACTIVE',
+    state: input.state ?? 'ACTIVE',
     grantedScopes: ['pages_show_list'],
     evidence: proof,
     assets,
@@ -104,13 +106,19 @@ test('M3.06 MariaDB tenant-safe asset upserts, constraints, string IDs and outbo
 
     const jobs = new DurableJobStore(database);
     const outbox = new OutboxService(database, jobs);
-    const repository = new MysqlMetaAssetsRepository(database, outbox);
+    const repository = new MysqlMetaAssetsRepository(database, outbox, new AuditEventWriter(database));
 
     const concurrentResults = await Promise.all([
       repository.upsert(command({ tenantId: tenantA, appConfigurationId: appA, authorizationId: concurrentAuthorization, externalId, grants: ['pages_read_engagement'] })),
       repository.upsert(command({ tenantId: tenantA, appConfigurationId: appA, authorizationId: concurrentAuthorization, externalId, grants: ['pages_read_engagement'] })),
     ]);
     assert.deepEqual(concurrentResults.map((result) => result.version).sort(), [1, 2]);
+    const connectionAudit = await dataSource.query(
+      `SELECT action, actor_ref_hash FROM ca_meta_audit_events WHERE tenant_id = ? AND target_ref = ? ORDER BY created_at`,
+      [tenantA, concurrentAuthorization],
+    ) as Array<{ action: string; actor_ref_hash: string }>;
+    assert.deepEqual(connectionAudit.map((row) => row.action).sort(), ['AUTHORIZATION_CONNECTED', 'AUTHORIZATION_REAUTHORIZED']);
+    assert.ok(connectionAudit.every((row) => row.actor_ref_hash !== 'm3-06-mariadb-test'));
     const firstAssetRef = concurrentResults[0]?.assets[0]?.assetRef;
     assert.ok(firstAssetRef);
     assert.equal(concurrentResults[1]?.assets[0]?.assetRef, firstAssetRef);
@@ -121,6 +129,15 @@ test('M3.06 MariaDB tenant-safe asset upserts, constraints, string IDs and outbo
     }));
     assert.equal(sharedResult.assets[0]?.assetRef, firstAssetRef, 'a second authorization in the tenant reuses the same asset');
     assert.equal(sharedResult.assets[1]?.verificationState, 'VERIFIED');
+    await repository.upsert(command({
+      tenantId: tenantA, appConfigurationId: appA, authorizationId: concurrentAuthorization,
+      state: 'DISCONNECTED',
+    }));
+    const disconnectAudit = await dataSource.query(
+      `SELECT action FROM ca_meta_audit_events WHERE tenant_id = ? AND target_ref = ? ORDER BY created_at`,
+      [tenantA, concurrentAuthorization],
+    ) as Array<{ action: string }>;
+    assert.equal(disconnectAudit.at(-1)?.action, 'AUTHORIZATION_DISCONNECTED');
     const assetRows = await dataSource.query(
       'SELECT id, external_id FROM ca_meta_assets WHERE tenant_id = ? AND app_configuration_id = ? AND asset_kind = \'FACEBOOK_PAGE\' AND external_id = ?',
       [tenantA, appA, externalId],
@@ -212,7 +229,7 @@ test('M3.06 MariaDB tenant-safe asset upserts, constraints, string IDs and outbo
         throw new Error('synthetic failure after outbox staging');
       },
     };
-    const rollbackRepository = new MysqlMetaAssetsRepository(database, rollbackOutbox);
+    const rollbackRepository = new MysqlMetaAssetsRepository(database, rollbackOutbox, new AuditEventWriter(database));
     await assert.rejects(
       rollbackRepository.upsert(command({ tenantId: tenantA, appConfigurationId: appA, authorizationId: rollbackAuthorization })),
       /synthetic failure after outbox staging/,

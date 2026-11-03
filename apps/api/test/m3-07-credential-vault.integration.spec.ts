@@ -11,6 +11,7 @@ import { ConfiguredCredentialKeyProvider } from '../src/credentials/credential-k
 import { CredentialVaultService } from '../src/credentials/credential-vault.service.js';
 import type { CredentialVaultAuthorizationPort } from '../src/credentials/credential-vault.types.js';
 import { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
+import { AuditEventWriter } from '../src/privacy/audit.service.js';
 import { deployMigrations } from '../src/database/migrations/migration-runner.js';
 import { readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
 import { MysqlCredentialVaultRepository } from '../src/credentials/mysql-credential-vault.repository.js';
@@ -92,7 +93,7 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
   const environment = validateEnvironment(process.env);
   const database = new DurableWorkDatabase(environment);
   const dataSource = await database.getDataSource();
-  const repository = new MysqlCredentialVaultRepository(database);
+  const repository = new MysqlCredentialVaultRepository(database, new AuditEventWriter(database));
   let restoredDatabase: DurableWorkDatabase | undefined;
   const keyV1 = randomBytes(32);
   const keyV2 = randomBytes(32);
@@ -255,7 +256,7 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
     restoreDatabaseDump(databaseDump);
 
     restoredDatabase = new DurableWorkDatabase(environment);
-    const restoredRepository = new MysqlCredentialVaultRepository(restoredDatabase);
+    const restoredRepository = new MysqlCredentialVaultRepository(restoredDatabase, new AuditEventWriter(restoredDatabase));
     const restoredVault = new CredentialVaultService(restoredRepository, providerV3, new AllowVaultAccess());
     const missingV3 = new CredentialVaultService(restoredRepository,
       new ConfiguredCredentialKeyProvider(new CredentialKeyRingConfiguration('m3-test-v3', [
