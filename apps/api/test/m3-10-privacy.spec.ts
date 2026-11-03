@@ -4,7 +4,7 @@ import { MIGRATIONS } from '../src/database/migrations/migrations.js';
 import { PRIVACY_GOVERNANCE_MIGRATION } from '../src/database/migrations/privacy-governance.js';
 import { FailClosedDeletionAuthorization } from '../src/privacy/deletion.service.js';
 import { redactDiagnosticValue, redactStructuredLogRecord, sanitizeAuditDiff } from '../src/privacy/redaction.js';
-import { FailClosedRetentionAuthorization, RetentionService } from '../src/privacy/retention.service.js';
+import { FailClosedRetentionAuthorization, RetentionService, type RetentionAuthorizationPort } from '../src/privacy/retention.service.js';
 import { FailClosedSupportAccessAuthorization, SupportDiagnosticService, type SupportAccessAuthorizationPort } from '../src/privacy/audit.service.js';
 
 const marker = 'M3_10_SYNTHETIC_ACCESS_TOKEN_MARKER_93A7C1';
@@ -124,4 +124,13 @@ test('retention policy writes and execution require validated NODE_ENV=test as w
   const testRuntime = new RetentionService(database, audit, undefined, undefined, 'test');
   await assert.rejects(testRuntime.startPurge({ ...testScope, environment: 'production' }), /limited to synthetic test data/);
   assert.equal(databaseReads, 0);
+
+  const allowRetention: RetentionAuthorizationPort = {
+    async authorize(input) { return { ...input, expiresAt: new Date(Date.now() + 10_000).toISOString() }; },
+  };
+  const authorizedTestRuntime = new RetentionService(database, audit, allowRetention, undefined, 'test');
+  await assert.rejects(authorizedTestRuntime.createDraftPolicy({
+    ...testScope, retentionSeconds: 60, policyVersion: 'm3-10-v1',
+  }), /unexpected database access/);
+  assert.equal(databaseReads, 1, 'a canonical random UUID and scoped grant pass policy validation');
 });

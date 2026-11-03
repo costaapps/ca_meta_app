@@ -48,7 +48,7 @@ interface RunRow {
   readonly deleted_count: string | number;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_REF = /^[A-Za-z0-9:_-]{1,128}$/;
 function validGrant(grant: RetentionAuthorizationGrant | null, input: RetentionAuthorizationRequest): boolean {
   return !!grant && grant.tenantId === input.tenantId && grant.environment === input.environment &&
