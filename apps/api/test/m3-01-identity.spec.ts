@@ -139,6 +139,7 @@ async function sessionFor(tenantId: string, contextRef: string, contextVersion =
         contextVersion,
         contextRefHash: hashTenantContextReference(contextRef),
         csrfTokenHash: 'a'.repeat(64),
+        entryMode: 'PORTAL_TOP_LEVEL',
       };
     },
   }).verify(cookie);
@@ -327,7 +328,7 @@ test('service authorization uses tenant-scoped service scopes and never human me
     services.authorize({ principalId: humanId, tenantId: tenantA, scopes: ['CREDENTIAL_USE'] } as never, 'CREDENTIAL_USE', tenantA),
   );
   const contextModule = IdentityModule.register({
-    nodeEnv: 'test', port: 0, bindAddress: '127.0.0.1', allowedHosts: ['localhost'], allowedOrigins: ['http://localhost'], trustedProxyCidrs: false,
+    nodeEnv: 'test', port: 0, bindAddress: '127.0.0.1', allowedHosts: ['localhost'], allowedOrigins: ['http://localhost'], suite4EmbedOrigins: [], trustedProxyCidrs: false,
     portalSessionRecoveryKey: 'synthetic-test-session-recovery-key-32-bytes-minimum',
     portalSessionIdleTimeoutSeconds: 1800,
     portalSessionAbsoluteTimeoutSeconds: 28800,

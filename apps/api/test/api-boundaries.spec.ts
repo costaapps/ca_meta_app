@@ -152,6 +152,7 @@ const TEST_ENVIRONMENT: ApiEnvironment = {
   bindAddress: '127.0.0.1',
   allowedHosts: ['127.0.0.1', 'localhost'],
   allowedOrigins: ['http://127.0.0.1', 'http://localhost'],
+  suite4EmbedOrigins: [],
   trustedProxyCidrs: false,
   portalSessionRecoveryKey: 'synthetic-test-session-recovery-key-32-bytes-minimum',
   portalSessionIdleTimeoutSeconds: 1800,
@@ -354,6 +355,7 @@ test('configuration validation requires typed fields, reports names only, and re
     assert.deepEqual(parsed.allowedHosts, ['127.0.0.1', 'localhost']);
     assert.equal(parsed.database.password, 'synthetic-marker-value');
     assert.equal(parsed.portalEntryTicket, undefined);
+    assert.deepEqual(parsed.suite4EmbedOrigins, []);
     assert.deepEqual(parsed.identity?.platformIdentityAdmins, []);
     assert.deepEqual(validateEnvironment({
       ...valid,

@@ -41,6 +41,8 @@ CI calls the M2.06 smoke with `-KeepImages`. On full smoke success only, it expo
 
 The release and development Dockerfiles pin Node `24.22.2-alpine3.24` to `sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85`. Its optional CI mirror is `docker.io/library/node@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85`; the NGINX mirror remains `ghcr.io/nginx/nginx-unprivileged@sha256:2daef144b574804198caccc4041819fa1801ecd5df2252a39646bfa2b1ff3bea`. Docker Hub and ECR Public returned the same Node manifest-list digest, and GHCR returned the same NGINX digest as the existing Dockerfile. The smoke accepts only those exact mirror references; they affect its build invocation, not the release tags or Compose configuration.
 
+The M2.08 remediation scope (`Refs #30`) pins the NGINX runtime's `libexpat` package to Alpine v3.24's patched `2.10.0-r0`. This addresses Trivy findings `CVE-2026-117610` and `CVE-2026-118370` reported against `2.9.0-r0`; the HIGH/CRITICAL gate remains unchanged. The package version is listed by the [official Alpine v3.24 package index](https://pkgs.alpinelinux.org/package/v3.24/main/x86_64/libexpat). The Dockerfile still uses its digest-pinned NGINX base. The image build and Trivy scan must pass in CI; a local Docker daemon was unavailable for this remediation.
+
 ## Secret and dependency scans
 
 ```powershell

@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpException,
   HttpStatus,
+  Inject,
   Post,
   Req,
   Res,
@@ -28,6 +29,8 @@ class PortalPreAuthStartRequest {
   returnRoute!: 'connections' | 'setup';
 }
 
+export const SUITE4_EMBED_ALLOWED_ORIGINS = Symbol('SUITE4_EMBED_ALLOWED_ORIGINS');
+
 function isRateLimited(error: unknown): boolean {
   return typeof error === 'object' && error !== null && Reflect.get(error, 'code') === 'RATE_LIMITED';
 }
@@ -37,6 +40,7 @@ export class PortalPreAuthController {
   constructor(
     private readonly preAuth: PortalPreAuthService,
     private readonly abuseLimits: AbuseLimitService,
+    @Inject(SUITE4_EMBED_ALLOWED_ORIGINS) private readonly suite4EmbedOrigins: readonly string[],
   ) {}
 
   @Post()
@@ -48,7 +52,7 @@ export class PortalPreAuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<{ readonly challengeRef: string; readonly expiresAt: string; readonly requestId: string }> {
     if (request.originalUrl.includes('?')) throw new BadRequestException();
-    if (body.entryMode !== 'PORTAL_TOP_LEVEL') throw new BadRequestException();
+    if (body.entryMode === 'SUITE4_EMBED' && this.suite4EmbedOrigins.length === 0) throw new BadRequestException();
     if (!request.requestId || request.requestId.length > 128 || !request.ip || request.ip.length > 128) {
       throw new ServiceUnavailableException();
     }
@@ -64,8 +68,8 @@ export class PortalPreAuthController {
     }
 
     try {
-      const started = await this.preAuth.begin();
-      if (started.entryMode !== 'PORTAL_TOP_LEVEL') throw new ServiceUnavailableException();
+      const started = await this.preAuth.begin(body.entryMode);
+      if (started.entryMode !== body.entryMode) throw new ServiceUnavailableException();
       setPortalPreAuthCookie(response, started);
       return Object.freeze({
         challengeRef: started.challengeRef,

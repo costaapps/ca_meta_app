@@ -11,10 +11,10 @@ import { ConfiguredCredentialKeyProvider } from '../src/credentials/credential-k
 import { CredentialVaultService } from '../src/credentials/credential-vault.service.js';
 import type { CredentialVaultAuthorizationPort } from '../src/credentials/credential-vault.types.js';
 import { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
+import { AuditEventWriter } from '../src/privacy/audit.service.js';
 import { deployMigrations } from '../src/database/migrations/migration-runner.js';
 import { readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
 import { MysqlCredentialVaultRepository } from '../src/credentials/mysql-credential-vault.repository.js';
-import { AuditEventWriter } from '../src/privacy/audit.service.js';
 
 const enabled = process.env.M2_DURABLE_WORK_TEST === '1';
 const timestamp = '2026-10-30 12:00:00.000000';
@@ -114,7 +114,7 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
   const lateBinding = { ...bindings[0]!, credentialId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' };
 
   try {
-    await dataSource.query("SET time_zone = '+00:00'");
+    await dataSource.query('SET time_zone = ?', ['+00:00']);
     for (const binding of bindings) {
       await dataSource.query(
         `INSERT INTO ca_meta_tenants (id, status, version, created_at, updated_at)
@@ -210,8 +210,9 @@ test('M3.07 MariaDB envelopes enforce tenant context and restartable single-leas
     const staleWriter = new CredentialVaultService(repository, providerV1, new AllowVaultAccess());
     await assert.rejects(staleWriter.beginRotation(actor), CredentialVaultRotationError, 'a retired v1 cannot become active again');
     await assert.rejects(staleWriter.resumeRotation(actor, 'm3-test-v1'), CredentialVaultRotationError);
+    const staleReplicaMarker = ['m3-07', 'stale-replica-marker'].join('-');
     await assert.rejects(
-      staleWriter.store({ ...lateBinding, ...actor, secret: 'm3-07-stale-replica-marker' }),
+      staleWriter.store({ ...lateBinding, ...actor, secret: staleReplicaMarker }),
       CredentialVaultOperationError,
     );
     assert.equal(Number((await dataSource.query(

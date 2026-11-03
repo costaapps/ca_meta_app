@@ -85,8 +85,11 @@ paths:
       summary: Start browser-bound pre-authentication
       description: Public before a portal session. Requires an exact allowlisted Origin, matching Fetch
         Metadata, and an HttpOnly pre-auth cookie bound to the server-created challenge. The
-        challenge is for a trusted portal-entry handoff, not a Meta provider code. The current runtime
-        supports PORTAL_TOP_LEVEL only; SUITE4_EMBED is reserved for M3.05 and is rejected with 400.
+        challenge is for a trusted portal-entry handoff, not a Meta provider code. PORTAL_TOP_LEVEL
+        uses a SameSite=Lax host-only cookie. SUITE4_EMBED is enabled only when an exact HTTPS
+        Suite4 parent-origin allowlist is configured; its host-only pre-auth cookie is SameSite=None,
+        Secure and Partitioned. The browser still must pass the exact portal/app Origin and same-origin
+        Fetch Metadata checks. Empty embed-origin configuration rejects SUITE4_EMBED with 400.
       security: []
       parameters:
         - $ref: "#/components/parameters/Origin"
@@ -109,8 +112,9 @@ paths:
           description: Sanitized success example
           headers:
             Set-Cookie:
-              description: Host-only Secure HttpOnly `__Host-meta_preauth` cookie with SameSite=Lax;
-                no Domain attribute. Cookie value is not in the response body.
+              description: Host-only Secure HttpOnly `__Host-meta_preauth` cookie with no Domain attribute.
+                PORTAL_TOP_LEVEL uses SameSite=Lax; configured SUITE4_EMBED uses SameSite=None; Partitioned.
+                Cookie value is not in the response body.
               schema:
                 type: string
           content:
@@ -608,8 +612,11 @@ paths:
       description: Tenant/principal/config are resolved from the current server session. Body cannot
         select a tenant, CompanyUUID, app or secret. The server generates provider state and its
         correlation to this onboarding; launch URL is server-generated from allowlisted
-        configuration. A 201 or provider redirect means only that a flow was created, never that a
-        connection is READY.
+        configuration. Persisted state is represented by a digest and is valid for ten minutes for one
+        use. Requests fail closed with a safe 503 when the required server-side signing key or
+        trusted provider-launch configuration is unavailable. The signing key is runtime-configurable;
+        its presence in any deployment is Not confirmed. A 201 or provider redirect means only that a
+        flow was created, never that a connection is READY.
       security: *a10
       parameters: &a23
         - &a26
@@ -688,8 +695,12 @@ paths:
         - Onboarding
       summary: Read authoritative onboarding status
       description: The server derives READY/PARTIAL from current versioned policy and verified evidence. A
-        code exchange, HTTP 200, popup finish event, or redirect alone never sets READY.
-        UNKNOWN/STALE evidence stays visible and blocks READY when required.
+        code exchange, HTTP 200, popup finish event, or redirect alone never sets READY. The read is
+        scoped to the verified portal session and principal, then checks current membership in the
+        onboarding's original tenant even after a tenant-context switch. Only a trusted server-side
+        completion port can update status; a front-end return signal cannot do so. Provider completion
+        remains unavailable until a verified server adapter is configured. UNKNOWN/STALE evidence stays
+        visible and blocks READY when required.
       security: *a10
       parameters: *a22
       responses:
@@ -857,7 +868,7 @@ paths:
               description: Validated same-origin portal route; never arbitrary caller URL.
               schema:
                 type: string
-                example: /setup/callback?onboardingRef=onb_example_01
+                example: /oauth/return?onboardingRef=onb_example_01
             Cache-Control:
               schema:
                 type: string

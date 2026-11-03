@@ -10,6 +10,9 @@ import { TICKET_RETRY_MIGRATION } from '../src/database/migrations/ticket-retry.
 import { META_ASSETS_MIGRATION, META_ASSETS_TABLES } from '../src/database/migrations/meta-assets.js';
 import { MAGIC_LINKS_MIGRATION, MAGIC_LINK_TABLES } from '../src/database/migrations/magic-links.js';
 import { META_CREDENTIAL_VAULT_MIGRATION, META_CREDENTIAL_VAULT_TABLES } from '../src/database/migrations/credential-vault.js';
+import { PORTAL_SESSION_ENTRY_MODE_MIGRATION } from '../src/database/migrations/portal-session-entry-mode.js';
+import { ONBOARDING_SESSIONS_MIGRATION, ONBOARDING_SESSION_TABLES } from '../src/database/migrations/onboarding-sessions.js';
+import { PRIVACY_GOVERNANCE_MIGRATION, PRIVACY_GOVERNANCE_TABLES } from '../src/database/migrations/privacy-governance.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -50,8 +53,8 @@ test('migration configuration rejects runtime account reuse and privileged built
 });
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
-  assert.equal(MIGRATIONS.length, 10);
-  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(MIGRATIONS.length, 12);
+  assert.deepEqual(MIGRATIONS.map((migration) => migration.schemaVersion), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -71,13 +74,22 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(IDENTITY_MIGRATION.id, '202610300001-principals-memberships');
   assert.equal(META_ASSETS_MIGRATION.schemaVersion, 7);
   assert.equal(MAGIC_LINKS_MIGRATION.schemaVersion, 8);
-  assert.equal(META_CREDENTIAL_VAULT_MIGRATION.schemaVersion, 10);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 4]?.id, META_ASSETS_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 3]?.id, MAGIC_LINKS_MIGRATION.id);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 2]?.schemaVersion, 9);
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 1]?.id, META_CREDENTIAL_VAULT_MIGRATION.id);
+  assert.equal(PORTAL_SESSION_ENTRY_MODE_MIGRATION.id, '202610300009-portal-session-entry-mode');
+  assert.equal(PORTAL_SESSION_ENTRY_MODE_MIGRATION.schemaVersion, 9);
+  assert.equal(ONBOARDING_SESSIONS_MIGRATION.id, '202611030010-persisted-onboarding-sessions');
+  assert.equal(ONBOARDING_SESSIONS_MIGRATION.schemaVersion, 10);
+  assert.equal(META_CREDENTIAL_VAULT_MIGRATION.schemaVersion, 11);
+  assert.equal(PRIVACY_GOVERNANCE_MIGRATION.schemaVersion, 12);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 6]?.id, META_ASSETS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 5]?.id, MAGIC_LINKS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 4]?.id, PORTAL_SESSION_ENTRY_MODE_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 3]?.id, ONBOARDING_SESSIONS_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 2]?.id, META_CREDENTIAL_VAULT_MIGRATION.id);
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 1]?.id, PRIVACY_GOVERNANCE_MIGRATION.id);
   assert.ok(META_ASSETS_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.ok(MAGIC_LINK_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
+  assert.ok(ONBOARDING_SESSION_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
+  assert.ok(PRIVACY_GOVERNANCE_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.ok(META_CREDENTIAL_VAULT_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.deepEqual(IDENTITY_MIGRATION.steps.map((step) => step.id), [
     'create-principals', 'create-tenant-memberships', 'create-service-identity-scopes',
@@ -128,6 +140,59 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.ok(ticketHashStep.sql.includes('ticket_sha256 CHAR(64)'));
   assert.ok(ticketHashStep.sql.includes('NULL'));
   assert.ok(ticketHashStep.definition.includes('store only SHA-256'));
+  const entryModeStep = PORTAL_SESSION_ENTRY_MODE_MIGRATION.steps[0];
+  assert.ok(entryModeStep && 'sql' in entryModeStep);
+  assert.match(entryModeStep.sql, /entry_mode ENUM\('PORTAL_TOP_LEVEL','SUITE4_EMBED'\) NOT NULL DEFAULT 'PORTAL_TOP_LEVEL'/);
+  assert.match(entryModeStep.definition, /PORTAL_TOP_LEVEL/);
+  assert.deepEqual(entryModeStep.compatiblePriorSteps?.map(({ migrationId, stepId }) => ({ migrationId, stepId })), [{
+    migrationId: PORTAL_SESSIONS_MIGRATION.id,
+    stepId: 'create-portal-sessions',
+  }]);
+  assert.match(entryModeStep.definition, /compatiblePriorSteps/);
+});
+
+test('M3.05 entry-mode migration accepts only the additive column shape and preserves legacy default', async () => {
+  const step = PORTAL_SESSION_ENTRY_MODE_MIGRATION.steps[0];
+  assert.ok(step && 'verify' in step);
+  const validQueryRunner = {
+    async query() {
+      return [{
+        data_type: 'enum',
+        column_type: "enum('PORTAL_TOP_LEVEL','SUITE4_EMBED')",
+        is_nullable: 'NO',
+        column_default: "'PORTAL_TOP_LEVEL'",
+      }];
+    },
+  } as never;
+  const invalidQueryRunner = {
+    async query() {
+      return [{
+        data_type: 'enum',
+        column_type: "enum('PORTAL_TOP_LEVEL','SUITE4_EMBED')",
+        is_nullable: 'YES',
+        column_default: null,
+      }];
+    },
+  } as never;
+  const missingQueryRunner = { async query() { return []; } } as never;
+  const context = { migrationId: PORTAL_SESSION_ENTRY_MODE_MIGRATION.id, stepId: step.id };
+  assert.equal(await step.verify({ ...context, queryRunner: validQueryRunner }), true);
+  assert.equal(await step.verify({ ...context, queryRunner: missingQueryRunner }), false);
+  await assert.rejects(step.verify({ ...context, queryRunner: invalidQueryRunner }), /unexpected portal session entry-mode column/);
+});
+
+test('M3.05 onboarding migration persists only scoped hashes and one-use status metadata', () => {
+  const step = ONBOARDING_SESSIONS_MIGRATION.steps[0];
+  assert.ok(step && 'sql' in step);
+  assert.equal(step.phase, 'expand');
+  assert.match(step.sql, /UNIQUE KEY uq_ca_meta_onboarding_idempotency \(tenant_id, idempotency_key_hash\)/);
+  assert.match(step.sql, /UNIQUE KEY uq_ca_meta_onboarding_provider_state \(provider_state_hash\)/);
+  assert.match(step.sql, /portal_session_id CHAR\(36\)/);
+  assert.match(step.sql, /tenant_context_hash CHAR\(64\)/);
+  assert.match(step.sql, /provider_state_consumed_at DATETIME\(6\) NULL/);
+  assert.match(step.sql, /expires_at > created_at/);
+  assert.match(step.definition, /provider state, idempotency key and request body are represented only by SHA-256 digests/);
+  assert.match(step.definition, /authorization code is never persisted/);
 });
 
 test('migration fingerprints detect definition configuration and callback drift', () => {

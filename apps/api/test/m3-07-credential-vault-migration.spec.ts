@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { META_CREDENTIAL_VAULT_MIGRATION, META_CREDENTIAL_VAULT_TABLES } from '../src/database/migrations/credential-vault.js';
 
 test('M3.07 migration is additive and binds encrypted material to tenant authorization and app context', () => {
-  assert.equal(META_CREDENTIAL_VAULT_MIGRATION.schemaVersion, 10);
+  assert.equal(META_CREDENTIAL_VAULT_MIGRATION.schemaVersion, 11);
   assert.equal(META_CREDENTIAL_VAULT_MIGRATION.id, '202610300010-credential-vault');
   assert.match(META_CREDENTIAL_VAULT_MIGRATION.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(META_CREDENTIAL_VAULT_MIGRATION.steps.map((step) => step.id), [
