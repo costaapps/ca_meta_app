@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, resolve, sep } from 'node:path';
+import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { test } from 'node:test';
 import { CredentialKeyRingConfiguration, validateEnvironment } from '../src/config/environment.js';
 import { ConfiguredCredentialKeyProvider } from '../src/credentials/credential-key-provider.js';
@@ -21,6 +21,7 @@ import { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { decodeStoredJobPayload, DurableJobStore } from '../src/jobs/job-store.js';
 import type { JobStore } from '../src/jobs/job-store.js';
 import type { JobType } from '../src/jobs/event-validation.js';
+import type { EntityManager } from 'typeorm';
 import { AuditEventWriter } from '../src/privacy/audit.service.js';
 import { DurableWorker, type JobFinalizer, type JobHandler } from '../src/worker/durable-worker.js';
 
@@ -32,6 +33,27 @@ const SAFE_MARIADB_ERROR_CODES = new Set([
   'ER_NO_REFERENCED_ROW_2', 'ER_NO_SUCH_TABLE', 'ER_PARSE_ERROR', 'ER_ROW_IS_REFERENCED_2',
   'ER_TABLE_EXISTS_ERROR', 'ER_TRUNCATED_WRONG_VALUE', 'ER_WRONG_VALUE_COUNT_ON_ROW',
 ]);
+
+type M309DiagnosticStage =
+  | 'fixture_setup'
+  | 'claim'
+  | 'claim_ambiguous_scan'
+  | 'claim_lane_init'
+  | 'claim_dispatch_lock'
+  | 'claim_candidates'
+  | 'claim_tenant_lock'
+  | 'claim_job_select'
+  | 'claim_active_count'
+  | 'claim_resource_count'
+  | 'claim_transaction'
+  | 'claim_job_update'
+  | 'claim_attempt_insert'
+  | 'claim_cursor_update'
+  | 'claim_other_query'
+  | 'handler'
+  | 'finish'
+  | 'credential-finalizer'
+  | 'finish-write';
 
 const enabled = process.env.M3_09_TEST === '1';
 const timestamp = '2026-11-03 12:00:00.000000';
@@ -69,6 +91,27 @@ function safeDiagnosticErrorType(error: unknown): 'Error' | 'TypeError' | 'Synta
   return error instanceof Error ? 'Error' : 'NonError';
 }
 
+function safeClaimQueryStage(query: unknown): M309DiagnosticStage {
+  const normalized = typeof query === 'string' ? query.trimStart().toLowerCase() : '';
+  if (normalized.startsWith('select id, tenant_id, attempt from ca_meta_jobs')) return 'claim_ambiguous_scan';
+  if (normalized.startsWith('insert ignore into ca_meta_job_lane_dispatch')) return 'claim_lane_init';
+  if (normalized.startsWith('select last_tenant_id from ca_meta_job_lane_dispatch')) return 'claim_dispatch_lock';
+  if (normalized.startsWith('select ready.tenant_id')) return 'claim_candidates';
+  if (normalized.startsWith('select id from ca_meta_tenants')) return 'claim_tenant_lock';
+  if (normalized.startsWith('select id, tenant_id, job_type, schema_version')) return 'claim_job_select';
+  if (normalized.startsWith('select count(*) as count from ca_meta_jobs')) {
+    return normalized.includes('resource_scope_ref') ? 'claim_resource_count' : 'claim_active_count';
+  }
+  if (normalized.startsWith('update ca_meta_jobs')) return 'claim_job_update';
+  if (normalized.startsWith('insert into ca_meta_job_attempts')) return 'claim_attempt_insert';
+  if (normalized.startsWith('update ca_meta_job_lane_dispatch')) return 'claim_cursor_update';
+  return 'claim_other_query';
+}
+
+function isM309ClaimStage(stage: M309DiagnosticStage): boolean {
+  return stage === 'claim' || stage.startsWith('claim_');
+}
+
 test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, and stale-version fencing', {
   skip: enabled ? false : 'Run in the disposable M2.05 MariaDB profile with M3_09_TEST=1.',
 }, async () => {
@@ -76,6 +119,51 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
   const environment = validateEnvironment(process.env);
   const database = new DurableWorkDatabase(environment);
   const dataSource = await database.getDataSource();
+  let workerStage: M309DiagnosticStage = 'fixture_setup';
+  const diagnosticDataSource = new Proxy(dataSource, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (property === 'query' && typeof value === 'function') {
+        return (...args: unknown[]) => {
+          if (isM309ClaimStage(workerStage)) workerStage = safeClaimQueryStage(args[0]);
+          return Reflect.apply(value, target, args as never[]);
+        };
+      }
+      if (property === 'transaction' && typeof value === 'function') {
+        return (...args: unknown[]) => {
+          const callbackIndex = typeof args[0] === 'function' ? 0 : 1;
+          const callback = args[callbackIndex];
+          if (typeof callback !== 'function') return Reflect.apply(value, target, args as never[]);
+          const transactionArgs = [...args];
+          transactionArgs[callbackIndex] = (manager: EntityManager) => {
+            const diagnosticManager = new Proxy(manager, {
+              get(managerTarget, managerProperty) {
+                const managerValue: unknown = Reflect.get(managerTarget, managerProperty, managerTarget);
+                if (managerProperty === 'query' && typeof managerValue === 'function') {
+                  return (...queryArgs: unknown[]) => {
+                    if (isM309ClaimStage(workerStage)) workerStage = safeClaimQueryStage(queryArgs[0]);
+                    return Reflect.apply(managerValue, managerTarget, queryArgs as never[]);
+                  };
+                }
+                return typeof managerValue === 'function' ? managerValue.bind(managerTarget) : managerValue;
+              },
+            });
+            return Reflect.apply(callback, undefined, [diagnosticManager]);
+          };
+          if (isM309ClaimStage(workerStage)) workerStage = 'claim_transaction';
+          return Reflect.apply(value, target, transactionArgs as never[]);
+        };
+      }
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const diagnosticDatabase = new Proxy(database, {
+    get(target, property) {
+      if (property === 'getDataSource') return async () => diagnosticDataSource;
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
   const keyState = await dataSource.query(
     'SELECT active_key_version FROM ca_meta_credential_vault_key_state WHERE singleton_id = 1',
   ) as Array<{ active_key_version: string }>;
@@ -105,7 +193,7 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
   const keyProvider = new ConfiguredCredentialKeyProvider(new CredentialKeyRingConfiguration(keyVersion,
     [{ version: keyVersion, key: credentialKey }]));
   const vault = new CredentialVaultService(vaultRepository, keyProvider, new SyntheticVaultAuthorization());
-  const jobs = new DurableJobStore(database, () => 0);
+  const jobs = new DurableJobStore(diagnosticDatabase, () => 0);
   const policy: CredentialLifecyclePolicyPort = {
     forCredential: (flowVariant, authVariant, family) => flowVariant === 'INSTAGRAM' && authVariant === 'INSTAGRAM_LOGIN' &&
       family === 'SYNTHETIC_FAMILY'
@@ -236,7 +324,6 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
     const processor = new CredentialInspectionWorker(database, policy, secretAccess, inspection, () => 0.5);
     const runWorker = async (): Promise<void> => {
       const controller = new AbortController();
-      let workerStage = 'claim';
       const instrumentedJobs: JobStore = new Proxy(jobs, {
         get(target, property) {
           const value: unknown = Reflect.get(target, property, target);
@@ -281,9 +368,11 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
         if (diagnosticPath) {
           try {
             const resolvedPath = resolve(diagnosticPath);
-            const tempRoot = `${resolve(tmpdir())}${sep}`;
-            if (basename(resolvedPath) === 'm3-09-safe-diagnostic.txt' &&
-                resolvedPath.toLowerCase().startsWith(tempRoot.toLowerCase())) {
+            const tempRoot = resolve(tmpdir());
+            const relativePath = relative(tempRoot, resolvedPath);
+            const isWithinTempRoot = relativePath.length > 0 && relativePath !== '..' &&
+              !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath);
+            if (basename(resolvedPath) === 'm3-09-safe-diagnostic.txt' && isWithinTempRoot) {
               await writeFile(resolvedPath,
                 `[M3.09 safe diagnostic] stage=${workerStage} code=${code} type=${errorType}`, {
                 encoding: 'utf8', flag: 'wx',
