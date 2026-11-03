@@ -159,8 +159,9 @@ export class MysqlOnboardingSessionStore implements OnboardingSessionStore, OnAp
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AWAITING_PROVIDER', 'UNKNOWN', ?, 'WAIT', ?, ?, 1)`,
         [command.id, command.tenantId, command.principalId, command.portalSessionId, command.tenantContextHash,
           command.flowVariant, JSON.stringify(command.requestedCapabilities), command.returnRoute,
-          command.idempotencyHash, command.requestHash, command.providerStateHash, command.expiresAt, command.createdAt, command.createdAt,
-          JSON.stringify([{ name: 'authorization', status: 'PENDING' }, { name: 'asset-verification', status: 'PENDING' }])],
+          command.idempotencyHash, command.requestHash, command.providerStateHash, command.expiresAt,
+          JSON.stringify([{ name: 'authorization', status: 'PENDING' }, { name: 'asset-verification', status: 'PENDING' }]),
+          command.createdAt, command.createdAt],
       );
     } catch (error) {
       if ((error as { code?: unknown })?.code !== 'ER_DUP_ENTRY') throw error;
