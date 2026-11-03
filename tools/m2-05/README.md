@@ -34,7 +34,7 @@ The M2.05/M3.06/M3.07/M3.09 MariaDB scenarios check:
 
 The API Nest module closes the lazy durable-work pool through `OnModuleDestroy`; a focused application-context test covers that hook without rerunning the M2.02 HTTP suite.
 
-Each database fixture prints a fixed label before it runs. If a fixture fails, the harness prints only failed JUnit testcase names and source file basenames; failure messages, stack traces, stdout and synthetic marker values stay out of the workflow log.
+Each database fixture prints a fixed label before it runs. If a fixture fails, the harness prints only failed JUnit testcase names, source file basenames, and a matching source line/column from the stack; failure messages, full stack traces, stdout and synthetic marker values stay out of the workflow log.
 
 Replay is an internal service with no HTTP controller. `preview()` is always dry-run. `requeue()` requires the injected `ReplayAuthorizationPort` to grant an exact tenant, dead-letter, persisted resource scope, operator, action and expiry, and refuses ambiguous effects. The default port denies all requests. Requeue creates a durable job and an audit row transactionally; it does not invoke a handler or provider.
 

@@ -164,7 +164,8 @@ function Test-AppTextContent {
 
   $credentialPattern = '(?i)-----BEGIN (?:(?:RSA|EC|OPENSSH|DSA) )?PRIVATE KEY-----|(?<!sha256:)\bEA[A-Za-z0-9]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|\b(?:META_APP_SECRET|META_ACCESS_TOKEN|API_DATABASE_PASSWORD|MARIADB_ROOT_PASSWORD)\s*[:=]\s*["'']?(?!change_me|replace_me|placeholder|synthetic_unused|your_|<)[A-Za-z0-9_./+=-]{8,}'
   if ($Content -match $credentialPattern) {
-    throw "Credential marker found in a final image application file ($ImageKind); value suppressed."
+    $displayName = [System.IO.Path]::GetFileName($Name.Replace('\', '/'))
+    throw "Credential marker found in a final image application file ($ImageKind/$displayName); value suppressed."
   }
 }
 

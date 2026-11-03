@@ -239,7 +239,7 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
     assert.match(intents[0]?.dedupe_key ?? '', new RegExp(`^authorization:${authorizationId}:impact:SYNTHETIC_AUTHORIZATION_ACCESS$`));
     assert.ok(!JSON.stringify(intents).includes(secretMarker));
 
-    // Keep the stale-version case eligible for scheduling; confirmed-revoked credentials are no longer schedulable.
+    // Use a separate active credential; the two credentials revoked above are no longer schedulable.
     const staleLifecycle = await addReauthCredential('EXPIRED');
     await dataSource.query(
       `UPDATE ca_meta_credential_lifecycle SET next_check_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)

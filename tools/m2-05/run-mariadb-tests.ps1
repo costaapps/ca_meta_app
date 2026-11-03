@@ -53,6 +53,14 @@ function Invoke-Checked {
           foreach ($case in $failedCases) {
             $testFile = [System.IO.Path]::GetFileName([string]$case.file)
             Write-Output "Failed test case: $($case.name) ($testFile)."
+            $failureNode = $case.SelectSingleNode('failure|error')
+            if ($null -ne $failureNode) {
+              $location = [regex]::Match([string]$failureNode.InnerText,
+                '(?m)^\s*at .*[/\\]apps[/\\]api[/\\]dist-test[/\\]test[/\\](?<file>[A-Za-z0-9_.-]+\.spec\.js):(?<line>\d+):(?<column>\d+)')
+              if ($location.Success) {
+                Write-Output "Failure location: $($location.Groups['file'].Value):$($location.Groups['line'].Value):$($location.Groups['column'].Value)."
+              }
+            }
           }
           if ($failedCases.Count -eq 0) {
             Write-Output "JUnit report recorded no failed case: $([System.IO.Path]::GetFileName($reportPath))."
