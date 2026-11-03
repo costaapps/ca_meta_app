@@ -331,6 +331,28 @@ test('uses the explicit server policy family preference before version tie-break
   assert.equal(runtime.audit.entries[0]?.credentialId, uuid(691));
 });
 
+test('ranks provider-declared no-expiry after known future deadlines', async () => {
+  const scope = await serviceScopeFor(tenantA);
+  const value = context(uuid(695));
+  const noExpiry = candidate(value, {
+    binding: { ...candidate(value).binding, credentialId: uuid(696), authorizationId: uuid(697) },
+    authorizationVersion: 9,
+    credentialVersion: 9,
+    expiry: { state: 'PROVIDER_NO_EXPIRY', observedAt, source: 'META_API' },
+  });
+  const knownExpiry = candidate(value, {
+    binding: { ...candidate(value).binding, credentialId: uuid(698), authorizationId: uuid(699) },
+    authorizationVersion: 1,
+    credentialVersion: 1,
+    expiry: { state: 'KNOWN', expiresAt, observedAt, source: 'META_API' },
+  });
+  const repository = new MemoryResolutionRepository();
+  repository.snapshots.set(value.assetId, { asset: asset(value.assetId), candidates: [noExpiry, knownExpiry] });
+  const runtime = resolver(repository);
+  await runtime.service.resolve(value, { serviceScope: scope, correlationId });
+  assert.equal(runtime.audit.entries[0]?.credentialId, uuid(698));
+});
+
 test('revocation and version changes invalidate one-use handles; the resolver keeps no cache', async () => {
   const scope = await serviceScopeFor(tenantA);
   const value = context(uuid(70));

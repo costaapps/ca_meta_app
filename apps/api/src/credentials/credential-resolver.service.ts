@@ -191,8 +191,13 @@ function eligibleCandidate(candidate: CredentialResolutionCandidate, context: Cr
 }
 
 function compareCandidates(left: EligibleCandidate, right: EligibleCandidate): number {
-  return left.lineageDepth - right.lineageDepth || left.familyPreference - right.familyPreference ||
-    (right.expirySortValue - left.expirySortValue) ||
+  const leftHasNoProviderExpiry = left.candidate.expiry.state === 'PROVIDER_NO_EXPIRY';
+  const rightHasNoProviderExpiry = right.candidate.expiry.state === 'PROVIDER_NO_EXPIRY';
+  const expiryOrder = leftHasNoProviderExpiry && rightHasNoProviderExpiry ? 0
+    : leftHasNoProviderExpiry ? 1
+      : rightHasNoProviderExpiry ? -1
+        : right.expirySortValue - left.expirySortValue;
+  return left.lineageDepth - right.lineageDepth || left.familyPreference - right.familyPreference || expiryOrder ||
     right.candidate.authorizationVersion - left.candidate.authorizationVersion ||
     right.candidate.credentialVersion - left.candidate.credentialVersion ||
     left.candidate.binding.authorizationId.localeCompare(right.candidate.binding.authorizationId) ||
