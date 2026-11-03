@@ -38,7 +38,32 @@ function New-HexSecret {
 function Invoke-Checked {
   param([string]$FilePath, [string[]]$ArgumentList)
   & $FilePath @ArgumentList
-  if ($LASTEXITCODE -ne 0) { throw "Command failed with exit code $LASTEXITCODE : $FilePath" }
+  if ($LASTEXITCODE -ne 0) {
+    $junitArgument = $ArgumentList | Where-Object { $_ -match '^--test-reporter-destination=(.+\.junit\.xml)$' } | Select-Object -First 1
+    if ($null -ne $junitArgument) {
+      $relativeReportPath = $junitArgument -replace '^--test-reporter-destination=', ''
+      $reportPath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $relativeReportPath))
+      $reportRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'artifacts\test-results')) +
+        [System.IO.Path]::DirectorySeparatorChar
+      if ($reportPath.StartsWith($reportRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+        (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+        try {
+          [xml]$report = Get-Content -LiteralPath $reportPath -Raw
+          $failedCases = @($report.SelectNodes('//testcase[failure or error or @failure or @error]'))
+          foreach ($case in $failedCases) {
+            $testFile = [System.IO.Path]::GetFileName([string]$case.file)
+            Write-Output "Failed test case: $($case.name) ($testFile)."
+          }
+          if ($failedCases.Count -eq 0) {
+            Write-Output "JUnit report recorded no failed case: $([System.IO.Path]::GetFileName($reportPath))."
+          }
+        } catch {
+          Write-Output "Could not parse sanitized JUnit failure names from $([System.IO.Path]::GetFileName($reportPath))."
+        }
+      }
+    }
+    throw "Command failed with exit code $LASTEXITCODE : $FilePath"
+  }
 }
 
 $managedEnvironment = @(
@@ -105,6 +130,7 @@ try {
     Invoke-Checked -FilePath 'docker' -ArgumentList @('compose', '-p', $composeProject, '-f', $composeFile, 'up', '-d', '--wait')
     Invoke-Checked -FilePath $npmCommand -ArgumentList @('exec', '--workspace=@ca-meta/api', '--', 'tsc', '-p', 'tsconfig.test.json')
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m2-08/prepare-test-reports.mjs')
+    Write-Output 'M2.05 fixture: durable work and M3.05 onboarding.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
       '--experimental-test-coverage',
@@ -115,6 +141,7 @@ try {
       'apps/api/dist-test/test/durable-work.integration.spec.js',
       'apps/api/dist-test/test/m3-05-onboarding.integration.spec.js'
     )
+    Write-Output 'M2.05 fixture: M3.06 Meta assets.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
       '--experimental-test-coverage',
@@ -124,6 +151,7 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-06-meta-assets.lcov.info',
       'apps/api/dist-test/test/m3-06-meta-assets.integration.spec.js'
     )
+    Write-Output 'M2.05 fixture: M3.02 portal session.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
       '--experimental-test-coverage',
@@ -133,6 +161,7 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-02-portal-session.lcov.info',
       'apps/api/dist-test/test/m3-02-db.integration.spec.js'
     )
+    Write-Output 'M2.05 fixture: M3.07 credential vault.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
       '--experimental-test-coverage',
@@ -142,6 +171,7 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-07-credential-vault.lcov.info',
       'apps/api/dist-test/test/m3-07-credential-vault.integration.spec.js'
     )
+    Write-Output 'M2.05 fixture: M3.09 credential lifecycle.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
       '--experimental-test-coverage',
