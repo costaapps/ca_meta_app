@@ -43,6 +43,7 @@ pnpm-debug.log*
 
 # Credential vault implementation is application source, never credential material.
 !apps/api/src/credentials/
+apps/api/src/credentials/**
 !apps/api/src/credentials/credential-key-provider.ts
 !apps/api/src/credentials/credential-vault-crypto.ts
 !apps/api/src/credentials/credential-vault.errors.ts
