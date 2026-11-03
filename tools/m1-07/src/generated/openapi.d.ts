@@ -212,7 +212,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Create an onboarding session and provider launch request
-         * @description Tenant/principal/config are resolved from the current server session. Body cannot select a tenant, CompanyUUID, app or secret. The server generates provider state and its correlation to this onboarding; launch URL is server-generated from allowlisted configuration. Persisted state is represented by a digest and is valid for ten minutes for one use. The current runtime has no configured provider launch adapter or state-signing key and fails closed with 503. A 201 or provider redirect means only that a flow was created, never that a connection is READY.
+         * @description Tenant/principal/config are resolved from the current server session. Body cannot select a tenant, CompanyUUID, app or secret. The server generates provider state and its correlation to this onboarding; launch URL is server-generated from allowlisted configuration. Persisted state is represented by a digest and is valid for ten minutes for one use. Requests fail closed with a safe 503 when the required server-side signing key or trusted provider-launch configuration is unavailable. The signing key is runtime-configurable; its presence in any deployment is Not confirmed. A 201 or provider redirect means only that a flow was created, never that a connection is READY.
          */
         readonly post: operations["createOnboardingSession"];
         readonly delete?: never;
