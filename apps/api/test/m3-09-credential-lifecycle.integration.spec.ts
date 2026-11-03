@@ -23,6 +23,13 @@ import { DurableWorker, type JobFinalizer, type JobHandler } from '../src/worker
 
 type JobFinishCallback = NonNullable<Parameters<JobStore['finish']>[3]>;
 
+const SAFE_MARIADB_ERROR_CODES = new Set([
+  'ER_BAD_FIELD_ERROR', 'ER_BAD_NULL_ERROR', 'ER_CANNOT_ADD_FOREIGN', 'ER_DATA_TOO_LONG',
+  'ER_DUP_ENTRY', 'ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT', 'ER_NO_DEFAULT_FOR_FIELD',
+  'ER_NO_REFERENCED_ROW_2', 'ER_NO_SUCH_TABLE', 'ER_PARSE_ERROR', 'ER_ROW_IS_REFERENCED_2',
+  'ER_TABLE_EXISTS_ERROR', 'ER_TRUNCATED_WRONG_VALUE', 'ER_WRONG_VALUE_COUNT_ON_ROW',
+]);
+
 const enabled = process.env.M3_09_TEST === '1';
 const timestamp = '2026-11-03 12:00:00.000000';
 
@@ -247,7 +254,7 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
       } catch (error) {
         const rawCode = error !== null && typeof error === 'object' && 'code' in error
           ? (error as { code?: unknown }).code : undefined;
-        const code = typeof rawCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(rawCode)
+        const code = typeof rawCode === 'string' && SAFE_MARIADB_ERROR_CODES.has(rawCode)
           ? rawCode : 'UNCLASSIFIED';
         console.error(`[M3.09 safe diagnostic] stage=${workerStage} code=${code}`);
         throw error;

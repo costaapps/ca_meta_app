@@ -172,7 +172,12 @@ export class CredentialLifecycleScheduler {
          JOIN ca_meta_credential_secrets s ON s.tenant_id = c.tenant_id
            AND s.credential_id = c.id AND s.authorization_id = c.authorization_id
            AND s.app_configuration_id = c.app_configuration_id AND s.provider = c.provider AND s.environment = c.environment
-         WHERE c.status = 'ACTIVE' AND NOT EXISTS (
+         WHERE c.status = 'ACTIVE'
+           AND ((auth.flow_variant = 'FACEBOOK' AND auth.auth_variant = 'FACEBOOK_LOGIN_FOR_BUSINESS')
+             OR (auth.flow_variant = 'INSTAGRAM' AND auth.auth_variant IN ('FACEBOOK_LOGIN_FOR_BUSINESS', 'INSTAGRAM_LOGIN'))
+             OR (auth.flow_variant = 'WHATSAPP_EXCLUSIVE' AND auth.auth_variant = 'WHATSAPP_EMBEDDED_SIGNUP')
+             OR (auth.flow_variant = 'WHATSAPP_COEXISTENCE' AND auth.auth_variant = 'WHATSAPP_BUSINESS_APP_ONBOARDING'))
+           AND NOT EXISTS (
            SELECT 1 FROM ca_meta_credential_lifecycle present WHERE present.tenant_id = c.tenant_id AND present.credential_id = c.id
          )
          ORDER BY c.tenant_id, c.id LIMIT ${seedLimit}`,
