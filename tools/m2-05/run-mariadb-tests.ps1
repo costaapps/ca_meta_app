@@ -3,6 +3,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $runId = [Guid]::NewGuid().ToString('N')
 $composeProject = "m205-$runId"
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ca-meta-m205-$runId"
+$m3_09DiagnosticPath = Join-Path $tempRoot 'm3-09-safe-diagnostic.txt'
 $initSqlPath = Join-Path $tempRoot 'init.sql'
 $composeFile = Join-Path $PSScriptRoot 'compose.yaml'
 $keepEnvironment = $env:M2_05_KEEP_ENVIRONMENT -eq '1'
@@ -65,6 +66,10 @@ function Invoke-Checked {
                 $diagnosticParts.Add([string]$diagnosticNode.InnerText)
                 foreach ($attribute in $diagnosticNode.Attributes) { $diagnosticParts.Add([string]$attribute.Value) }
               }
+              if ($env:M3_09_DIAGNOSTIC_PATH -eq $m3_09DiagnosticPath -and
+                  (Test-Path -LiteralPath $m3_09DiagnosticPath -PathType Leaf)) {
+                $diagnosticParts.Add([string](Get-Content -LiteralPath $m3_09DiagnosticPath -Raw))
+              }
               $diagnosticText = [string]::Join("`n", $diagnosticParts)
               $diagnostic = [regex]::Match($diagnosticText,
                 '\[M3\.09 safe diagnostic\] stage=(?<stage>claim|handler|finish|credential-finalizer|finish-write) code=(?<code>ER_BAD_FIELD_ERROR|ER_BAD_NULL_ERROR|ER_CANNOT_ADD_FOREIGN|ER_DATA_TOO_LONG|ER_DUP_ENTRY|ER_LOCK_DEADLOCK|ER_LOCK_WAIT_TIMEOUT|ER_NO_DEFAULT_FOR_FIELD|ER_NO_REFERENCED_ROW_2|ER_NO_SUCH_TABLE|ER_PARSE_ERROR|ER_ROW_IS_REFERENCED_2|ER_TABLE_EXISTS_ERROR|ER_TRUNCATED_WRONG_VALUE|ER_WRONG_VALUE_COUNT_ON_ROW|UNCLASSIFIED)(?=\s|$)')
@@ -93,7 +98,7 @@ $managedEnvironment = @(
   'API_DATABASE_HOST', 'API_DATABASE_PORT', 'API_DATABASE_NAME', 'API_DATABASE_USER', 'API_DATABASE_PASSWORD',
   'API_DATABASE_CONNECT_TIMEOUT_MS', 'API_PORT', 'API_BIND_ADDRESS', 'API_ALLOWED_HOSTS', 'API_TRUSTED_PROXIES',
   'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST', 'M3_02_DB_TEST', 'M3_09_TEST',
-  'M3_TEST_CREDENTIAL_KEY_V3'
+  'M3_09_DIAGNOSTIC_PATH', 'M3_TEST_CREDENTIAL_KEY_V3'
 )
 $previousEnvironment = @{}
 foreach ($name in $managedEnvironment) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name) }
@@ -194,6 +199,7 @@ try {
       'apps/api/dist-test/test/m3-07-credential-vault.integration.spec.js'
     )
     Write-Output 'M2.05 fixture: M3.09 credential lifecycle.'
+    $env:M3_09_DIAGNOSTIC_PATH = $m3_09DiagnosticPath
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',
       '--experimental-test-coverage',

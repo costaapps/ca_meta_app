@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, resolve, sep } from 'node:path';
 import { test } from 'node:test';
 import { CredentialKeyRingConfiguration, validateEnvironment } from '../src/config/environment.js';
 import { ConfiguredCredentialKeyProvider } from '../src/credentials/credential-key-provider.js';
@@ -256,6 +259,19 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
           ? (error as { code?: unknown }).code : undefined;
         const code = typeof rawCode === 'string' && SAFE_MARIADB_ERROR_CODES.has(rawCode)
           ? rawCode : 'UNCLASSIFIED';
+        const diagnosticPath = process.env.M3_09_DIAGNOSTIC_PATH;
+        if (diagnosticPath) {
+          try {
+            const resolvedPath = resolve(diagnosticPath);
+            const tempRoot = `${resolve(tmpdir())}${sep}`;
+            if (basename(resolvedPath) === 'm3-09-safe-diagnostic.txt' &&
+                resolvedPath.toLowerCase().startsWith(tempRoot.toLowerCase())) {
+              await writeFile(resolvedPath, `[M3.09 safe diagnostic] stage=${workerStage} code=${code}`, {
+                encoding: 'utf8', flag: 'wx',
+              });
+            }
+          } catch { /* The sanitized error remains the fallback diagnostic. */ }
+        }
         throw new Error(`[M3.09 safe diagnostic] stage=${workerStage} code=${code}`);
       }
     };
