@@ -16,9 +16,12 @@ import { issueVerifiedMetaEvidence, MetaAssetsConflictError } from '../src/meta-
 import { MysqlMetaAssetsRepository } from '../src/meta-assets/mysql-meta-assets.repository.js';
 import { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { DurableJobStore } from '../src/jobs/job-store.js';
+import type { JobStore } from '../src/jobs/job-store.js';
 import type { JobType } from '../src/jobs/event-validation.js';
 import { AuditEventWriter } from '../src/privacy/audit.service.js';
 import { DurableWorker, type JobFinalizer, type JobHandler } from '../src/worker/durable-worker.js';
+
+type JobFinishCallback = NonNullable<Parameters<JobStore['finish']>[3]>;
 
 const enabled = process.env.M3_09_TEST === '1';
 const timestamp = '2026-11-03 12:00:00.000000';
@@ -203,14 +206,52 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
     const processor = new CredentialInspectionWorker(database, policy, secretAccess, inspection, () => 0.5);
     const runWorker = async (): Promise<void> => {
       const controller = new AbortController();
+      let workerStage = 'claim';
+      const instrumentedJobs: JobStore = new Proxy(jobs, {
+        get(target, property) {
+          const value: unknown = Reflect.get(target, property, target);
+          if (property === 'claimNext' && typeof value === 'function') {
+            return async (...args: Parameters<JobStore['claimNext']>) => {
+              workerStage = 'claim';
+              const claimed = await Reflect.apply(value, target, args) as Awaited<ReturnType<JobStore['claimNext']>>;
+              if (claimed) workerStage = 'handler';
+              return claimed;
+            };
+          }
+          if (property === 'finish' && typeof value === 'function') {
+            return async (...args: Parameters<JobStore['finish']>) => {
+              const [job, outcome, random, applyWithin] = args;
+              workerStage = 'finish';
+              return Reflect.apply(value, target, [job, outcome, random, applyWithin
+                ? async (manager: Parameters<JobFinishCallback>[0], finalization: Parameters<JobFinishCallback>[1]) => {
+                    workerStage = 'credential-finalizer';
+                    await applyWithin(manager, finalization);
+                    workerStage = 'finish-write';
+                  }
+                : undefined]);
+            };
+          }
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
       const finalizer: JobFinalizer = async (manager, job, finalization) => {
           await processor.finalizer(manager, job, finalization);
           controller.abort();
         };
       const handlers = new Map<JobType, JobHandler>([['CREDENTIAL_INSPECTION', processor.handler]]);
       const finalizers = new Map<JobType, JobFinalizer>([['CREDENTIAL_INSPECTION', finalizer]]);
-      const worker = new DurableWorker(jobs, { workerRef: `m3-09-worker:${randomUUID()}`, leaseMs: 30_000 }, handlers, finalizers);
-      await worker.run(controller.signal);
+      const worker = new DurableWorker(instrumentedJobs,
+        { workerRef: `m3-09-worker:${randomUUID()}`, leaseMs: 30_000 }, handlers, finalizers);
+      try {
+        await worker.run(controller.signal);
+      } catch (error) {
+        const rawCode = error !== null && typeof error === 'object' && 'code' in error
+          ? (error as { code?: unknown }).code : undefined;
+        const code = typeof rawCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(rawCode)
+          ? rawCode : 'UNCLASSIFIED';
+        console.error(`[M3.09 safe diagnostic] stage=${workerStage} code=${code}`);
+        throw error;
+      }
     };
     await runWorker();
     assert.equal(inspectorCalls, 1);
