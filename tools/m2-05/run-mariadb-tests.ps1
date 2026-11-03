@@ -72,7 +72,7 @@ function Invoke-Checked {
               }
               $diagnosticText = [string]::Join("`n", $diagnosticParts)
               $diagnostic = [regex]::Match($diagnosticText,
-                '\[M3\.09 safe diagnostic\] stage=(?<stage>claim|handler|finish|credential-finalizer|finish-write) code=(?<code>ER_BAD_FIELD_ERROR|ER_BAD_NULL_ERROR|ER_CANNOT_ADD_FOREIGN|ER_DATA_TOO_LONG|ER_DUP_ENTRY|ER_LOCK_DEADLOCK|ER_LOCK_WAIT_TIMEOUT|ER_NO_DEFAULT_FOR_FIELD|ER_NO_REFERENCED_ROW_2|ER_NO_SUCH_TABLE|ER_PARSE_ERROR|ER_ROW_IS_REFERENCED_2|ER_TABLE_EXISTS_ERROR|ER_TRUNCATED_WRONG_VALUE|ER_WRONG_VALUE_COUNT_ON_ROW|UNCLASSIFIED) type=(?<type>Error|TypeError|SyntaxError|RangeError|NonError)(?=\s|$)')
+                '\[M3\.09 safe diagnostic\] stage=(?<stage>claim|handler|finish|credential-finalizer|finish-write) code=(?<code>ER_BAD_FIELD_ERROR|ER_BAD_NULL_ERROR|ER_CANNOT_ADD_FOREIGN|ER_DATA_TOO_LONG|ER_DUP_ENTRY|ER_LOCK_DEADLOCK|ER_LOCK_WAIT_TIMEOUT|ER_NO_DEFAULT_FOR_FIELD|ER_NO_REFERENCED_ROW_2|ER_NO_SUCH_TABLE|ER_PARSE_ERROR|ER_ROW_IS_REFERENCED_2|ER_TABLE_EXISTS_ERROR|ER_TRUNCATED_WRONG_VALUE|ER_WRONG_VALUE_COUNT_ON_ROW|INVALID_DURABLE_JOB_PAYLOAD|JOB_LANE_DISPATCH_MISSING|UNCLASSIFIED) type=(?<type>Error|TypeError|SyntaxError|RangeError|NonError)(?=\s|$)')
               if ($diagnostic.Success) {
                 Write-Output "M3.09 safe diagnostic: stage=$($diagnostic.Groups['stage'].Value) code=$($diagnostic.Groups['code'].Value) type=$($diagnostic.Groups['type'].Value)."
               }

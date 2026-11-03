@@ -18,7 +18,7 @@ import { MysqlCredentialVaultRepository } from '../src/credentials/mysql-credent
 import { issueVerifiedMetaEvidence, MetaAssetsConflictError } from '../src/meta-assets/meta-assets.types.js';
 import { MysqlMetaAssetsRepository } from '../src/meta-assets/mysql-meta-assets.repository.js';
 import { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
-import { DurableJobStore } from '../src/jobs/job-store.js';
+import { decodeStoredJobPayload, DurableJobStore } from '../src/jobs/job-store.js';
 import type { JobStore } from '../src/jobs/job-store.js';
 import type { JobType } from '../src/jobs/event-validation.js';
 import { AuditEventWriter } from '../src/privacy/audit.service.js';
@@ -41,9 +41,7 @@ class SyntheticVaultAuthorization implements CredentialVaultAuthorizationPort {
 }
 
 function parseMariaDbJsonObject(value: unknown): Record<string, unknown> {
-  const parsed: unknown = typeof value === 'string'
-    ? JSON.parse(value)
-    : Buffer.isBuffer(value) ? JSON.parse(value.toString('utf8')) : value;
+  const parsed = decodeStoredJobPayload(value);
   assert.ok(parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed),
     'MariaDB JSON columns are returned as an object or JSON text');
   return parsed as Record<string, unknown>;
@@ -56,8 +54,12 @@ function safeMariaDbErrorCode(error: unknown): string {
     return typeof code === 'string' && SAFE_MARIADB_ERROR_CODES.has(code) ? code : undefined;
   };
   if (error === null || typeof error !== 'object') return 'UNCLASSIFIED';
+  if (error instanceof Error) {
+    if (error.message === 'Invalid durable job payload.') return 'INVALID_DURABLE_JOB_PAYLOAD';
+    if (error.message === 'Job lane dispatch cursor could not be locked.') return 'JOB_LANE_DISPATCH_MISSING';
+  }
   const wrapped = error as { driverError?: unknown; cause?: unknown };
-  return codeFrom(error) ?? codeFrom(wrapped.driverError) ?? codeFrom(wrapped.cause) ?? 'UNCLASSIFIED';
+  return codeFrom(wrapped.driverError) ?? codeFrom(wrapped.cause) ?? 'UNCLASSIFIED';
 }
 
 function safeDiagnosticErrorType(error: unknown): 'Error' | 'TypeError' | 'SyntaxError' | 'RangeError' | 'NonError' {
