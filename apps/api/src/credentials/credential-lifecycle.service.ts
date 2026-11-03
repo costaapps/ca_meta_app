@@ -5,10 +5,14 @@ import type { DurableJobStore, ClaimedJob, JobFinalization, JobOutcome } from '.
 import type { JobHandler, JobFinalizer } from '../worker/durable-worker.js';
 import type { JobPayload } from '../jobs/event-validation.js';
 import type { CredentialBinding } from './credential-vault.types.js';
+import type { CredentialVaultActor } from './credential-vault.types.js';
+import type { CredentialVaultService } from './credential-vault.service.js';
 import type { MetaAuthVariant, MetaFlowVariant } from './credential-resolver.types.js';
 import type {
   CredentialInspectionBinding, CredentialInspectionObservation, CredentialInspectionPort,
-  CredentialLifecycleFamilyPolicy, CredentialLifecyclePolicyPort, CredentialLifecycleSecretPort, CredentialRenewalPort,
+  CredentialLifecycleFamilyPolicy, CredentialLifecyclePolicyPort, CredentialLifecycleSecretPort,
+  CredentialReauthAffectedAssetPage, CredentialReauthAffectedAssetView, CredentialReauthIntentPage,
+  CredentialReauthIntentView,
 } from './credential-lifecycle.types.js';
 
 const MAX_SCHEDULE_BATCH = 50;
@@ -17,6 +21,9 @@ const SCHEDULER_LEASE_SECONDS = 120;
 const SAFE_REASONS = new Set(['NONE', 'TOKEN_EXPIRED', 'ACCESS_EXPIRED', 'PERMISSION_REVOKED', 'REAUTH_REQUIRED']);
 const HEALTH_STATES = new Set(['VALID', 'HEALTHY', 'EXPIRING', 'EXPIRED', 'REVOKED', 'ACTION_REQUIRED']);
 const EXPIRY_STATES = new Set(['KNOWN', 'PROVIDER_NO_EXPIRY', 'UNKNOWN']);
+const REAUTH_INTENT_PAGE_MAX = 50;
+const REAUTH_ASSET_PAGE_MAX = 100;
+const INTERNAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 interface DueCredentialRow {
   tenant_id: string; credential_id: string; authorization_id: string; app_configuration_id: string;
@@ -90,7 +97,7 @@ function validPolicy(policy: CredentialLifecycleFamilyPolicy | undefined, flow: 
   return !!policy && policy.flowVariant === flow && policy.authVariant === auth && policy.family === family &&
     validFlowAuthVariant(flow, auth) &&
     typeof policy.inspectEnabled === 'boolean' &&
-    typeof policy.refreshEnabled === 'boolean' &&
+    policy.refreshEnabled === false &&
     typeof policy.createReauthIntent === 'boolean' && (policy.reauthImpactKey === null ||
       /^[A-Z][A-Z0-9_-]{0,63}$/.test(policy.reauthImpactKey)) &&
     (!policy.createReauthIntent || policy.reauthImpactKey !== null) && Number.isSafeInteger(policy.checkIntervalSeconds) &&
@@ -241,8 +248,9 @@ export class CredentialLifecycleScheduler {
 }
 
 /**
- * Registered durable handler and finalizer. It has no provider effect unless both ports and a
- * flow/auth/family policy are explicitly injected. Errors are reduced to a transient safe outcome.
+ * Read-only durable inspection handler and finalizer. It needs explicit secret, inspector, and
+ * exact flow/auth/family policy ports; it has no renewal/replacement or provider-write capability.
+ * Errors are reduced to a transient safe outcome.
  */
 export class CredentialInspectionWorker {
   private readonly results = new Map<string, InspectionResult>();
@@ -266,31 +274,16 @@ export class CredentialInspectionWorker {
       return { kind: 'SUCCEEDED' };
     }
     const policy = this.policies?.forCredential(binding.flowVariant, binding.authVariant, binding.family);
-    if (!validPolicy(policy, binding.flowVariant, binding.authVariant, binding.family) || !policy.inspectEnabled || !this.inspector || !this.secrets ||
-        (policy.refreshEnabled && !this.renewal) || signal.aborted) {
+    if (!validPolicy(policy, binding.flowVariant, binding.authVariant, binding.family) || !policy.inspectEnabled || !this.inspector || !this.secrets || signal.aborted) {
       this.results.set(job.id, { kind: 'TRANSIENT', cadenceSeconds: policy?.checkIntervalSeconds, jitterPercent: policy?.jitterPercent });
       return { kind: 'SUCCEEDED' };
     }
     let observation: CredentialInspectionObservation | undefined;
-    let renewalResult: Awaited<ReturnType<CredentialRenewalPort['renew']>>;
     try {
       await this.secrets.withCredential(binding, async (secret) => {
         const inspected = validateObservation(await this.inspector!.inspect(binding, secret, signal));
         if (!inspected) throw new Error('invalid-inspection-observation');
         observation = inspected;
-        if (inspected.health === 'EXPIRING' && policy.refreshEnabled) {
-          if (!this.renewal) throw new Error('renewal-adapter-unavailable');
-          renewalResult = await this.renewal.renew(binding, secret, signal);
-          if (!renewalResult || typeof renewalResult.replacementSecret !== 'string' ||
-              renewalResult.replacementSecret.length === 0 || Buffer.byteLength(renewalResult.replacementSecret, 'utf8') > 16 * 1024) {
-            throw new Error('renewal-result-invalid');
-          }
-          const renewedObservation = validateObservation(renewalResult.observation);
-          if (!renewedObservation || !['HEALTHY', 'EXPIRING'].includes(renewedObservation.health)) {
-            throw new Error('renewed-observation-invalid');
-          }
-          observation = renewedObservation;
-        }
       });
     } catch {
       this.results.set(job.id, { kind: 'TRANSIENT', cadenceSeconds: policy.checkIntervalSeconds, jitterPercent: policy.jitterPercent });
@@ -298,20 +291,6 @@ export class CredentialInspectionWorker {
     }
     if (signal.aborted || !observation) {
       this.results.set(job.id, { kind: 'TRANSIENT', cadenceSeconds: policy.checkIntervalSeconds, jitterPercent: policy.jitterPercent });
-      return { kind: 'SUCCEEDED' };
-    }
-    if (renewalResult) {
-      let replacementSecret = renewalResult.replacementSecret;
-      try {
-        await this.commitRenewal(job, binding, payload, observation, replacementSecret, policy);
-        // Finalizer is deliberately a no-op after renewal's atomic vault+lifecycle commit.
-        this.results.set(job.id, { kind: 'FENCED' });
-      } catch {
-        this.results.set(job.id, { kind: 'TRANSIENT', cadenceSeconds: policy.checkIntervalSeconds, jitterPercent: policy.jitterPercent });
-      } finally {
-        replacementSecret = '';
-        renewalResult = undefined;
-      }
       return { kind: 'SUCCEEDED' };
     }
     this.results.set(job.id, {
@@ -372,62 +351,7 @@ export class CredentialInspectionWorker {
     private readonly secrets?: CredentialLifecycleSecretPort,
     private readonly inspector?: CredentialInspectionPort,
     private readonly random: () => number = Math.random,
-    private readonly renewal?: CredentialRenewalPort,
   ) {}
-
-  private async commitRenewal(job: ClaimedJob, binding: CredentialInspectionBinding,
-    payload: Extract<JobPayload, { kind: 'CREDENTIAL_INSPECTION' }>, observation: CredentialInspectionObservation,
-    replacementSecret: string, policy: CredentialLifecycleFamilyPolicy): Promise<void> {
-    const dataSource = await this.database.getDataSource();
-    await dataSource.transaction(async (manager) => {
-      const rows = await manager.query(
-        `SELECT l.version AS lifecycle_version, l.schedule_generation AS generation,
-                l.lease_owner, l.lease_token, (l.lease_expires_at > UTC_TIMESTAMP(6)) AS lease_valid,
-                auth.authorization_state, auth.version AS authorization_version, auth.flow_variant, auth.auth_variant,
-                c.status AS credential_status, c.version AS credential_version, s.version AS secret_version
-         FROM ca_meta_credential_lifecycle l JOIN ca_meta_credentials c ON c.tenant_id = l.tenant_id
-           AND c.id = l.credential_id AND c.authorization_id = l.authorization_id
-           AND c.app_configuration_id = l.app_configuration_id AND c.provider = l.provider AND c.environment = l.environment
-         JOIN ca_meta_authorizations auth ON auth.tenant_id = c.tenant_id AND auth.id = c.authorization_id
-           AND auth.app_configuration_id = c.app_configuration_id AND auth.provider = c.provider
-           AND auth.environment = c.environment
-         JOIN ca_meta_credential_secrets s ON s.tenant_id = c.tenant_id AND s.credential_id = c.id
-           AND s.authorization_id = c.authorization_id AND s.app_configuration_id = c.app_configuration_id
-           AND s.provider = c.provider AND s.environment = c.environment
-         WHERE l.tenant_id = ? AND l.credential_id = ? FOR UPDATE`,
-        [job.tenantId, payload.credentialId],
-      ) as Array<{ lifecycle_version: number | string; generation: number | string; lease_owner: string | null;
-        lease_token: string | null; lease_valid: number | string; authorization_state: string;
-        authorization_version: number | string; credential_status: string; credential_version: number | string;
-        secret_version: number | string; flow_variant: MetaFlowVariant | null; auth_variant: MetaAuthVariant | null }>;
-      const row = rows[0];
-      if (!row) return;
-      const leaseMatches = Number(row.lease_valid) === 1 && row.lease_owner === payload.leaseOwner &&
-        row.lease_token === payload.leaseToken && version(row.lifecycle_version) === payload.lifecycleVersion &&
-        version(row.generation) === payload.generation;
-      const matches = leaseMatches && ['ACTIVE', 'PARTIAL'].includes(row.authorization_state) && row.credential_status === 'ACTIVE' &&
-        row.flow_variant === payload.flowVariant && row.auth_variant === payload.authVariant &&
-        version(row.authorization_version) === payload.authorizationVersion &&
-        version(row.credential_version) === payload.credentialVersion && version(row.secret_version) === payload.secretVersion &&
-        version(row.lifecycle_version) === payload.lifecycleVersion && version(row.generation) === payload.generation;
-      if (!matches) {
-        if (leaseMatches) await this.markLifecycleStaleWithin(manager, job.tenantId, payload);
-        return;
-      }
-      const fence = {
-        ...binding, credentialVersion: payload.credentialVersion, secretVersion: payload.secretVersion,
-        authorizationVersion: payload.authorizationVersion, lifecycleVersion: payload.lifecycleVersion,
-        generation: payload.generation, leaseOwner: payload.leaseOwner, leaseToken: payload.leaseToken,
-      };
-      const stored = await this.secrets!.replaceCredentialWithin(manager, binding, fence, replacementSecret);
-      if (!stored) {
-        await this.markLifecycleStaleWithin(manager, job.tenantId, payload);
-        return;
-      }
-      await this.writeObservationWithin(manager, job.tenantId, payload, { kind: 'OBSERVED', observation },
-        jitteredSeconds(policy.checkIntervalSeconds, policy.jitterPercent, this.random));
-    });
-  }
 
   private async writeObservationWithin(manager: EntityManager, tenantId: string,
     payload: Extract<JobPayload, { kind: 'CREDENTIAL_INSPECTION' }>,
@@ -452,6 +376,7 @@ export class CredentialInspectionWorker {
         payload.lifecycleVersion, payload.generation, payload.leaseOwner, payload.leaseToken],
     );
     if (affectedRows(updated) !== 1) throw new Error('credential-lifecycle-observation-fence-lost');
+    let reauthIntentId: string | undefined;
     if (result.reauthIntent && result.reauthImpactKey) {
       const reasonCode = observation.reasonCode === 'NONE' ? 'REAUTH_REQUIRED' : observation.reasonCode;
       const dedupeKey = `authorization:${payload.authorizationId}:impact:${result.reauthImpactKey}`;
@@ -461,12 +386,94 @@ export class CredentialInspectionWorker {
             dedupe_key, reason_code, status, occurrences, version, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, 'META', ?, ?, ?, 'PENDING', 1, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
          ON DUPLICATE KEY UPDATE credential_id = VALUES(credential_id), reason_code = VALUES(reason_code),
-           status = IF(status = 'RESOLVED', 'PENDING', status), occurrences = occurrences + 1,
+           resolved_at = IF(status = 'RESOLVED', NULL, resolved_at), status = IF(status = 'RESOLVED', 'PENDING', status), occurrences = occurrences + 1,
            version = version + 1, updated_at = UTC_TIMESTAMP(6)`,
         [randomUUID(), tenantId, payload.credentialId, payload.authorizationId, payload.appConfigurationId,
           payload.environment, dedupeKey, reasonCode],
       );
+      const intentRows = await manager.query(
+        'SELECT id FROM ca_meta_credential_reauth_intents WHERE tenant_id = ? AND dedupe_key = ? FOR UPDATE',
+        [tenantId, dedupeKey],
+      ) as Array<{ id: string }>;
+      if (!intentRows[0]) throw new Error('credential-reauth-intent-missing-after-upsert');
+      reauthIntentId = intentRows[0].id;
     }
+    const reasonCode = observation.reasonCode === 'NONE' ? 'REAUTH_REQUIRED' : observation.reasonCode;
+    if (reauthIntentId) await this.recordCredentialReauthImpactsWithin(manager, tenantId, payload, reauthIntentId, reasonCode);
+    if (observation.health === 'REVOKED') await this.applyConfirmedCredentialRevocationWithin(manager, tenantId, payload);
+  }
+
+  private async recordCredentialReauthImpactsWithin(manager: EntityManager, tenantId: string,
+    payload: Extract<JobPayload, { kind: 'CREDENTIAL_INSPECTION' }>, reauthIntentId: string,
+    reasonCode: CredentialInspectionObservation['reasonCode'] | 'REAUTH_REQUIRED'): Promise<void> {
+    await manager.query(
+      `INSERT INTO ca_meta_credential_reauth_impacts
+         (tenant_id, reauth_intent_id, credential_id, authorization_id, asset_id, app_configuration_id,
+          provider, environment, reason_code, created_at)
+       SELECT aa.tenant_id, ?, aa.credential_id, aa.authorization_id, aa.asset_id, aa.app_configuration_id,
+              aa.provider, aa.environment, ?, UTC_TIMESTAMP(6)
+       FROM ca_meta_asset_authorizations AS aa
+       WHERE aa.tenant_id = ? AND aa.authorization_id = ? AND aa.app_configuration_id = ?
+         AND aa.provider = 'META' AND aa.environment = ? AND aa.credential_id = ?
+         AND aa.state = 'ACTIVE' AND aa.verification_state = 'VERIFIED'
+       ON DUPLICATE KEY UPDATE credential_id = VALUES(credential_id), reason_code = VALUES(reason_code)`,
+      [reauthIntentId, reasonCode, tenantId, payload.authorizationId, payload.appConfigurationId,
+        payload.environment, payload.credentialId],
+    );
+  }
+
+  private async applyConfirmedCredentialRevocationWithin(manager: EntityManager, tenantId: string,
+    payload: Extract<JobPayload, { kind: 'CREDENTIAL_INSPECTION' }>): Promise<void> {
+    const revokedCredential = await manager.query(
+      `UPDATE ca_meta_credentials
+       SET status = 'REVOKED', revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP(6)), version = version + 1,
+           updated_at = UTC_TIMESTAMP(6)
+       WHERE tenant_id = ? AND id = ? AND authorization_id = ? AND app_configuration_id = ?
+         AND provider = 'META' AND environment = ? AND family = ? AND status = 'ACTIVE' AND version = ?`,
+      [tenantId, payload.credentialId, payload.authorizationId, payload.appConfigurationId, payload.environment,
+        payload.family, payload.credentialVersion],
+    );
+    if (affectedRows(revokedCredential) !== 1) throw new Error('credential-revocation-fence-lost');
+
+    await manager.query(
+      `UPDATE ca_meta_job_attempts AS attempt
+       JOIN ca_meta_jobs AS job ON job.tenant_id = attempt.tenant_id AND job.id = attempt.job_id
+       SET attempt.outcome = 'FAILED', attempt.safe_error_code = 'CREDENTIAL_REVOKED',
+           attempt.safe_error_action = 'REAUTHORIZE', attempt.finished_at = UTC_TIMESTAMP(6),
+           attempt.duration_ms = TIMESTAMPDIFF(MICROSECOND, attempt.started_at, UTC_TIMESTAMP(6)) DIV 1000
+       WHERE job.tenant_id = ? AND job.job_type = 'CREDENTIAL_INSPECTION' AND job.resource_scope_ref = ?
+         AND job.status IN ('QUEUED', 'RETRY_PENDING') AND attempt.outcome = 'RETRY_PENDING'`,
+      [tenantId, payload.credentialId],
+    );
+    await manager.query(
+      `UPDATE ca_meta_jobs
+       SET status = 'FAILED', last_safe_error_code = 'CREDENTIAL_REVOKED', last_safe_error_action = 'REAUTHORIZE',
+           completed_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6)
+       WHERE tenant_id = ? AND job_type = 'CREDENTIAL_INSPECTION' AND resource_scope_ref = ?
+         AND status IN ('QUEUED', 'RETRY_PENDING')`,
+      [tenantId, payload.credentialId],
+    );
+
+    await manager.query(
+      `UPDATE ca_meta_asset_grants AS grant_row
+       JOIN ca_meta_asset_authorizations AS asset_auth ON asset_auth.tenant_id = grant_row.tenant_id
+         AND asset_auth.authorization_id = grant_row.authorization_id AND asset_auth.asset_id = grant_row.asset_id
+         AND asset_auth.app_configuration_id = grant_row.app_configuration_id AND asset_auth.provider = grant_row.provider
+         AND asset_auth.environment = grant_row.environment
+       SET grant_row.status = 'REVOKED', grant_row.source = 'META_API', grant_row.observed_at = UTC_TIMESTAMP(6),
+           grant_row.version = grant_row.version + 1
+       WHERE asset_auth.tenant_id = ? AND asset_auth.authorization_id = ? AND asset_auth.app_configuration_id = ?
+         AND asset_auth.provider = 'META' AND asset_auth.environment = ? AND asset_auth.credential_id = ?
+         AND asset_auth.state <> 'REVOKED' AND grant_row.status = 'GRANTED'`,
+      [tenantId, payload.authorizationId, payload.appConfigurationId, payload.environment, payload.credentialId],
+    );
+    await manager.query(
+      `UPDATE ca_meta_asset_authorizations
+       SET state = 'REVOKED', version = version + 1, updated_at = UTC_TIMESTAMP(6)
+       WHERE tenant_id = ? AND authorization_id = ? AND app_configuration_id = ? AND provider = 'META'
+         AND environment = ? AND credential_id = ? AND state <> 'REVOKED'`,
+      [tenantId, payload.authorizationId, payload.appConfigurationId, payload.environment, payload.credentialId],
+    );
   }
 
   private async markLifecycleStaleWithin(manager: EntityManager, tenantId: string,
@@ -514,5 +521,171 @@ export class CredentialInspectionWorker {
       version(row.authorization_version) === payload.authorizationVersion && version(row.generation) === payload.generation &&
       row.flow_variant === payload.flowVariant && row.auth_variant === payload.authVariant &&
       row.lease_owner === payload.leaseOwner && row.lease_token === payload.leaseToken && Number(row.lease_valid) === 1;
+  }
+}
+
+/**
+ * Transaction-scoped replacement finalizer for a future dedicated ambiguous renewal job.
+ * It has no provider port and is deliberately not composed into CredentialInspectionWorker.
+ * A replacement can be committed only while the authorization, credential, secret, lifecycle,
+ * flow/auth context, generation, and lease all match the inspection snapshot exactly.
+ */
+export class CredentialReplacementCasService {
+  constructor(
+    private readonly database: DurableWorkDatabase,
+    private readonly vault: Pick<CredentialVaultService, 'replaceIfCurrentWithin'>,
+  ) {}
+
+  async replaceIfCurrent(binding: CredentialInspectionBinding, actor: CredentialVaultActor,
+    replacementSecret: string): Promise<boolean> {
+    if (!validFlowAuthVariant(binding.flowVariant, binding.authVariant) || typeof replacementSecret !== 'string' ||
+        replacementSecret.length === 0 || !Number.isSafeInteger(binding.authorizationVersion) ||
+        !Number.isSafeInteger(binding.credentialVersion) || !Number.isSafeInteger(binding.secretVersion) ||
+        !Number.isSafeInteger(binding.lifecycleVersion) || !Number.isSafeInteger(binding.generation) ||
+        binding.generation < 1 || !binding.leaseOwner || !binding.leaseToken) return false;
+    const dataSource = await this.database.getDataSource();
+    return dataSource.transaction(async (manager) => {
+      const rows = await manager.query(
+        `SELECT auth.authorization_state, auth.version AS authorization_version, auth.flow_variant, auth.auth_variant,
+                c.status AS credential_status, c.version AS credential_version, s.version AS secret_version,
+                l.version AS lifecycle_version, l.schedule_generation AS generation, l.lease_owner, l.lease_token,
+                (l.lease_expires_at > UTC_TIMESTAMP(6)) AS lease_valid
+         FROM ca_meta_authorizations auth JOIN ca_meta_credentials c ON c.tenant_id = auth.tenant_id
+           AND c.authorization_id = auth.id AND c.app_configuration_id = auth.app_configuration_id
+           AND c.provider = auth.provider AND c.environment = auth.environment
+         JOIN ca_meta_credential_secrets s ON s.tenant_id = c.tenant_id AND s.credential_id = c.id
+           AND s.authorization_id = c.authorization_id AND s.app_configuration_id = c.app_configuration_id
+           AND s.provider = c.provider AND s.environment = c.environment
+         JOIN ca_meta_credential_lifecycle l ON l.tenant_id = c.tenant_id AND l.credential_id = c.id
+           AND l.authorization_id = c.authorization_id AND l.app_configuration_id = c.app_configuration_id
+           AND l.provider = c.provider AND l.environment = c.environment
+         WHERE auth.tenant_id = ? AND c.id = ? AND auth.id = ? AND c.app_configuration_id = ?
+           AND c.provider = 'META' AND c.environment = ? AND c.family = ? FOR UPDATE`,
+        [binding.tenantId, binding.credentialId, binding.authorizationId, binding.appConfigurationId,
+          binding.environment, binding.family],
+      ) as Array<{ authorization_state: string; authorization_version: number | string;
+        flow_variant: MetaFlowVariant | null; auth_variant: MetaAuthVariant | null; credential_status: string;
+        credential_version: number | string; secret_version: number | string; lifecycle_version: number | string;
+        generation: number | string; lease_owner: string | null; lease_token: string | null; lease_valid: number | string }>;
+      const row = rows[0];
+      if (!row || !['ACTIVE', 'PARTIAL'].includes(row.authorization_state) || row.credential_status !== 'ACTIVE' ||
+          row.flow_variant !== binding.flowVariant || row.auth_variant !== binding.authVariant ||
+          version(row.authorization_version) !== binding.authorizationVersion ||
+          version(row.credential_version) !== binding.credentialVersion || version(row.secret_version) !== binding.secretVersion ||
+          version(row.lifecycle_version) !== binding.lifecycleVersion || version(row.generation) !== binding.generation ||
+          row.lease_owner !== binding.leaseOwner || row.lease_token !== binding.leaseToken || Number(row.lease_valid) !== 1) {
+        return false;
+      }
+      return this.vault.replaceIfCurrentWithin(manager, {
+        tenantId: binding.tenantId,
+        credentialId: binding.credentialId,
+        authorizationId: binding.authorizationId,
+        appConfigurationId: binding.appConfigurationId,
+        provider: binding.provider,
+        environment: binding.environment,
+        family: binding.family,
+        ...actor,
+        operation: 'CREDENTIAL_RENEWAL',
+        secret: replacementSecret,
+      }, {
+        expectedAuthorizationVersion: binding.authorizationVersion,
+        expectedCredentialVersion: binding.credentialVersion,
+        expectedSecretVersion: binding.secretVersion,
+      });
+    });
+  }
+}
+
+/**
+ * Internal, bounded read contract for the future M3.12 connection-status consumer. Callers
+ * must authorize tenant and REAUTHORIZE access before reading; this class is not a controller.
+ */
+export class CredentialReauthIntentReader {
+  constructor(private readonly database: DurableWorkDatabase) {}
+
+  async listPending(tenantId: string, afterIntentRef: string | null = null, limit = 25): Promise<CredentialReauthIntentPage> {
+    if (!INTERNAL_UUID.test(tenantId) || (afterIntentRef !== null && !INTERNAL_UUID.test(afterIntentRef)) ||
+        !Number.isSafeInteger(limit) || limit < 1 || limit > REAUTH_INTENT_PAGE_MAX) {
+      throw new RangeError('Credential reauthentication page inputs are outside their bounded range.');
+    }
+    const dataSource = await this.database.getDataSource();
+    const rows = await dataSource.query(
+      `SELECT i.id, i.authorization_id, auth.flow_variant, auth.auth_variant, i.dedupe_key, i.reason_code,
+              i.status, i.occurrences, DATE_FORMAT(i.updated_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS updated_at
+       FROM ca_meta_credential_reauth_intents i JOIN ca_meta_authorizations auth
+         ON auth.tenant_id = i.tenant_id AND auth.id = i.authorization_id
+           AND auth.app_configuration_id = i.app_configuration_id AND auth.provider = i.provider
+           AND auth.environment = i.environment
+       WHERE i.tenant_id = ? AND i.status IN ('PENDING', 'ACKNOWLEDGED')
+         AND (? IS NULL OR i.id > ?)
+       ORDER BY i.id LIMIT ${limit + 1}`,
+      [tenantId, afterIntentRef, afterIntentRef],
+    ) as Array<{ id: string; authorization_id: string; flow_variant: MetaFlowVariant | null; auth_variant: MetaAuthVariant | null;
+      dedupe_key: string; reason_code: string; status: 'PENDING' | 'ACKNOWLEDGED'; occurrences: number | string; updated_at: string }>;
+    const hasMore = rows.length > limit;
+    const items: CredentialReauthIntentView[] = rows.slice(0, limit).map((row) => {
+      const prefix = `authorization:${row.authorization_id}:impact:`;
+      const impactKey = row.dedupe_key.startsWith(prefix) ? row.dedupe_key.slice(prefix.length) : '';
+      if (!INTERNAL_UUID.test(row.id) || !INTERNAL_UUID.test(row.authorization_id) ||
+          !/^[A-Z][A-Z0-9_-]{0,63}$/.test(impactKey) || !SAFE_REASONS.has(row.reason_code) && row.reason_code !== 'REAUTH_REQUIRED' ||
+          !validFlowAuthVariant(row.flow_variant, row.auth_variant) || !validUtc(row.updated_at)) {
+        throw new Error('credential-reauth-intent-read-shape-invalid');
+      }
+      return Object.freeze({
+        intentRef: row.id, authorizationRef: row.authorization_id, flowVariant: row.flow_variant, authVariant: row.auth_variant,
+        impactKey, reasonCode: row.reason_code, status: row.status, occurrences: counter(row.occurrences), updatedAt: row.updated_at,
+      });
+    });
+    return Object.freeze({ items: Object.freeze(items), nextAfterRef: hasMore ? items.at(-1)?.intentRef ?? null : null });
+  }
+
+  async listAffectedAssets(tenantId: string, intentRef: string, afterAssetRef: string | null = null,
+    limit = 50): Promise<CredentialReauthAffectedAssetPage> {
+    if (!INTERNAL_UUID.test(tenantId) || !INTERNAL_UUID.test(intentRef) ||
+        (afterAssetRef !== null && !INTERNAL_UUID.test(afterAssetRef)) ||
+        !Number.isSafeInteger(limit) || limit < 1 || limit > REAUTH_ASSET_PAGE_MAX) {
+      throw new RangeError('Credential reauthentication asset page inputs are outside their bounded range.');
+    }
+    const dataSource = await this.database.getDataSource();
+    const rows = await dataSource.query(
+      `SELECT impact.credential_id, impact.asset_id, asset.asset_kind, credential.family, impact.reason_code
+       FROM ca_meta_credential_reauth_impacts impact
+       JOIN ca_meta_credential_reauth_intents intent ON intent.tenant_id = impact.tenant_id
+         AND intent.id = impact.reauth_intent_id AND intent.authorization_id = impact.authorization_id
+         AND intent.app_configuration_id = impact.app_configuration_id AND intent.provider = impact.provider
+         AND intent.environment = impact.environment AND intent.status IN ('PENDING', 'ACKNOWLEDGED')
+       JOIN ca_meta_asset_authorizations asset_auth ON asset_auth.tenant_id = impact.tenant_id
+         AND asset_auth.authorization_id = impact.authorization_id AND asset_auth.asset_id = impact.asset_id
+         AND asset_auth.app_configuration_id = impact.app_configuration_id AND asset_auth.provider = impact.provider
+         AND asset_auth.environment = impact.environment AND asset_auth.credential_id = impact.credential_id
+         AND asset_auth.verification_state = 'VERIFIED'
+       JOIN ca_meta_credentials credential ON credential.tenant_id = impact.tenant_id
+         AND credential.id = impact.credential_id AND credential.authorization_id = impact.authorization_id
+         AND credential.app_configuration_id = impact.app_configuration_id AND credential.provider = impact.provider
+         AND credential.environment = impact.environment
+       JOIN ca_meta_credential_lifecycle lifecycle ON lifecycle.tenant_id = credential.tenant_id
+         AND lifecycle.credential_id = credential.id AND lifecycle.authorization_id = credential.authorization_id
+         AND lifecycle.app_configuration_id = credential.app_configuration_id AND lifecycle.provider = credential.provider
+         AND lifecycle.environment = credential.environment
+       JOIN ca_meta_assets asset ON asset.tenant_id = impact.tenant_id AND asset.id = impact.asset_id
+         AND asset.app_configuration_id = impact.app_configuration_id AND asset.provider = impact.provider
+         AND asset.environment = impact.environment
+       WHERE impact.tenant_id = ? AND impact.reauth_intent_id = ? AND (? IS NULL OR impact.asset_id > ?)
+         AND ((lifecycle.health_state = 'REVOKED' AND credential.status = 'REVOKED' AND asset_auth.state = 'REVOKED')
+           OR (lifecycle.health_state IN ('EXPIRED', 'ACTION_REQUIRED') AND credential.status = 'ACTIVE' AND asset_auth.state = 'ACTIVE'))
+       ORDER BY impact.asset_id LIMIT ${limit + 1}`,
+      [tenantId, intentRef, afterAssetRef, afterAssetRef],
+    ) as Array<{ credential_id: string; asset_id: string; asset_kind: string; family: string; reason_code: string }>;
+    const hasMore = rows.length > limit;
+    const items: CredentialReauthAffectedAssetView[] = rows.slice(0, limit).map((row) => {
+      if (!INTERNAL_UUID.test(row.credential_id) || !INTERNAL_UUID.test(row.asset_id) ||
+          !/^[A-Z][A-Z0-9_-]{0,31}$/.test(row.family) || !/^[A-Z][A-Z0-9_-]{0,63}$/.test(row.asset_kind) ||
+          !SAFE_REASONS.has(row.reason_code)) {
+        throw new Error('credential-reauth-impact-read-shape-invalid');
+      }
+      return Object.freeze({ credentialRef: row.credential_id, assetRef: row.asset_id, assetKind: row.asset_kind,
+        family: row.family, reasonCode: row.reason_code });
+    });
+    return Object.freeze({ items: Object.freeze(items), nextAfterAssetRef: hasMore ? items.at(-1)?.assetRef ?? null : null });
   }
 }

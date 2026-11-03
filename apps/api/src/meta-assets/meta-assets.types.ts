@@ -4,6 +4,7 @@ import type { MetaAuthVariant, MetaFlowVariant } from '../credentials/credential
 export type MetaEnvironment = 'development' | 'test' | 'staging' | 'production';
 export type AuthorizationState = 'ACTIVE' | 'PARTIAL' | 'REAUTH_REQUIRED' | 'UNKNOWN' | 'REVOKED' | 'DISCONNECTED';
 export type AssetVerificationState = 'CLAIMED' | 'VERIFIED' | 'QUARANTINED';
+export type AssetAuthorizationState = 'ACTIVE' | 'REVOKED' | 'QUARANTINED';
 export type AssetRelationType = 'PHONE_TO_ACCOUNT' | 'INSTAGRAM_TO_PAGE';
 export type MetaAssetKind = 'WHATSAPP_PHONE_NUMBER' | 'WHATSAPP_BUSINESS_ACCOUNT' |
   'INSTAGRAM_BUSINESS_ACCOUNT' | 'INSTAGRAM_CREATOR_ACCOUNT' | 'FACEBOOK_PAGE';
@@ -67,6 +68,8 @@ export interface AssetClaimInput {
   readonly externalId: string;
   readonly externalName?: string | null;
   readonly evidence?: VerifiedMetaEvidence;
+  /** Internal token-to-asset binding supplied only by a trusted service adapter. */
+  readonly credentialId?: string;
   /** Opaque references imported from a tenant-validated legacy mapping. */
   readonly legacyReferences?: readonly LegacyAssetReference[];
   /** Persisted only when the asset has provider evidence. */
@@ -100,6 +103,8 @@ export interface AssetReadModel {
   readonly kind: string;
   readonly externalId: string;
   readonly externalName: string | null;
+  readonly authorizationState: AssetAuthorizationState;
+  readonly credentialBindingState: 'BOUND' | 'UNKNOWN';
   readonly verificationState: AssetVerificationState;
   readonly grants: readonly string[];
   readonly relations: readonly { readonly type: AssetRelationType; readonly targetAssetRef: string }[];
@@ -208,6 +213,10 @@ export function validateAuthorizationUpsert(command: AuthorizationUpsertCommand)
     if (asset.evidence !== undefined && !isVerifiedMetaEvidence(asset.evidence)) {
       throw new MetaAssetsInputError('Asset evidence was not issued by a trusted provider adapter.');
     }
+    if (asset.credentialId !== undefined &&
+        (!isUuid(asset.credentialId) || !asset.evidence || !isVerifiedMetaEvidence(asset.evidence) || command.actor.kind === 'USER')) {
+      throw new MetaAssetsInputError('Credential binding requires an internal credential reference and trusted asset evidence.');
+    }
     if (asset.evidence && normalizedIsoObservation(asset.evidence.observedAt) !== commandObservation) {
       throw new MetaAssetsInputError('Asset evidence time must match the command observation time.');
     }
@@ -240,6 +249,8 @@ export function serializeAuthorizationReadModel(value: AuthorizationReadModel): 
       kind: asset.kind,
       externalId: asset.externalId,
       externalName: asset.externalName,
+      authorizationState: asset.authorizationState,
+      credentialBindingState: asset.credentialBindingState,
       verificationState: asset.verificationState,
       grants: Object.freeze([...asset.grants]),
       relations: Object.freeze(asset.relations.map((relation) => Object.freeze({ ...relation }))),

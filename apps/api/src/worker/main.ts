@@ -3,8 +3,7 @@ import { EnvironmentValidationError, validateEnvironment } from '../config/envir
 import { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import { DurableJobStore } from '../jobs/job-store.js';
 import { CredentialInspectionWorker, CredentialLifecycleScheduler } from '../credentials/credential-lifecycle.service.js';
-import type { CredentialInspectionPort, CredentialLifecyclePolicyPort, CredentialLifecycleSecretPort,
-  CredentialRenewalPort } from '../credentials/credential-lifecycle.types.js';
+import type { CredentialInspectionPort, CredentialLifecyclePolicyPort, CredentialLifecycleSecretPort } from '../credentials/credential-lifecycle.types.js';
 import type { JobType } from '../jobs/event-validation.js';
 import { DurableWorker, type JobFinalizer, type JobHandler } from './durable-worker.js';
 
@@ -12,7 +11,6 @@ interface CredentialLifecycleAdapters {
   readonly policies: CredentialLifecyclePolicyPort;
   readonly secrets: CredentialLifecycleSecretPort;
   readonly inspector: CredentialInspectionPort;
-  readonly renewal?: CredentialRenewalPort;
 }
 
 /** No provider adapter set is installed in this package; an environment flag alone is not capability. */
@@ -32,7 +30,7 @@ export async function bootstrapWorker(): Promise<void> {
       ? configuredCredentialLifecycleAdapters() : undefined;
     if (lifecycleAdapters) {
       const inspection = new CredentialInspectionWorker(database, lifecycleAdapters.policies, lifecycleAdapters.secrets,
-        lifecycleAdapters.inspector, Math.random, lifecycleAdapters.renewal);
+        lifecycleAdapters.inspector, Math.random);
       handlers.set('CREDENTIAL_INSPECTION', inspection.handler);
       finalizers.set('CREDENTIAL_INSPECTION', inspection.finalizer);
       lifecycleScheduler = new CredentialLifecycleScheduler(database, new DurableJobStore(database), `api-worker:${process.pid}`);

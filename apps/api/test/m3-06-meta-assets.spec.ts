@@ -119,7 +119,12 @@ test('typed Instagram-to-Page relation does not require a Facebook link for ever
 test('public authorization serialization has an allowlist and omits secret-bearing fields', () => {
   const value = {
     authorizationRef: authorizationId, provider: 'META' as const, environment: 'test' as const, state: 'ACTIVE' as const,
-    grantedScopes: ['pages_show_list'], version: 2, observedAt, assets: [],
+    grantedScopes: ['pages_show_list'], version: 2, observedAt, assets: [{
+      assetRef: '00000000-0000-4000-8000-000000000004', kind: 'INSTAGRAM_BUSINESS_ACCOUNT', externalId: 'ig-synthetic',
+      externalName: null, authorizationState: 'QUARANTINED' as const, credentialBindingState: 'UNKNOWN' as const,
+      verificationState: 'VERIFIED' as const, grants: [], relations: [], subscriptionState: 'UNKNOWN' as const,
+      projectionState: 'UNKNOWN' as const, version: 1, updatedAt: observedAt, credentialId: 'must-not-escape',
+    }],
     accessToken: 'must-not-escape', ciphertext: 'must-not-escape',
   };
   const serialized = serializeAuthorizationReadModel(value);
@@ -127,6 +132,19 @@ test('public authorization serialization has an allowlist and omits secret-beari
     'assets', 'authorizationRef', 'environment', 'grantedScopes', 'observedAt', 'provider', 'state', 'version',
   ]);
   assert.equal(JSON.stringify(serialized).includes('must-not-escape'), false);
+  assert.equal(serialized.assets[0]?.authorizationState, 'QUARANTINED');
+  assert.equal(serialized.assets[0]?.credentialBindingState, 'UNKNOWN');
+  assert.equal(Object.keys(serialized.assets[0] ?? {}).includes('credentialId'), false);
+});
+
+test('credential-to-asset binding requires trusted per-asset evidence and a server actor', () => {
+  const proof = evidence();
+  const binding = { kind: 'INSTAGRAM_BUSINESS_ACCOUNT' as const, externalId: 'ig-synthetic', credentialId: '00000000-0000-4000-8000-000000000010', evidence: proof };
+  assert.doesNotThrow(() => validateAuthorizationUpsert(command({ evidence: proof, assets: [binding] })));
+  assert.throws(() => validateAuthorizationUpsert(command({ evidence: proof,
+    assets: [{ kind: binding.kind, externalId: binding.externalId, credentialId: binding.credentialId }] })), MetaAssetsInputError);
+  assert.throws(() => validateAuthorizationUpsert(command({ evidence: proof, actor: { kind: 'USER', ref: 'browser-user' },
+    assets: [binding] })), MetaAssetsInputError);
 });
 
 test('legacy asset references remain opaque, tenant-mapped strings and are service-owned', () => {

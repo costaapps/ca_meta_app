@@ -149,7 +149,7 @@ export class MysqlCredentialResolutionRepository implements CredentialResolution
          AND auth.provider = aa.provider AND auth.environment = aa.environment
        JOIN ca_meta_credentials c ON c.tenant_id = auth.tenant_id AND c.authorization_id = auth.id
          AND c.app_configuration_id = auth.app_configuration_id AND c.provider = auth.provider
-         AND c.environment = auth.environment
+         AND c.environment = auth.environment AND aa.credential_id = c.id
        JOIN ca_meta_credential_secrets secret ON secret.tenant_id = c.tenant_id
          AND secret.credential_id = c.id AND secret.authorization_id = c.authorization_id
          AND secret.app_configuration_id = c.app_configuration_id AND secret.provider = c.provider

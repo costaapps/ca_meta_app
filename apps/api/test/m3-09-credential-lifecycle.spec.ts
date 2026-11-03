@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { EntityManager } from 'typeorm';
-import { CredentialInspectionWorker, CredentialLifecycleScheduler } from '../src/credentials/credential-lifecycle.service.js';
-import type { CredentialInspectionPort, CredentialLifecyclePolicyPort, CredentialLifecycleSecretPort } from '../src/credentials/credential-lifecycle.types.js';
+import { CredentialInspectionWorker, CredentialLifecycleScheduler, CredentialReauthIntentReader,
+  CredentialReplacementCasService } from '../src/credentials/credential-lifecycle.service.js';
+import type { CredentialInspectionBinding, CredentialInspectionPort, CredentialLifecyclePolicyPort, CredentialLifecycleSecretPort } from '../src/credentials/credential-lifecycle.types.js';
 import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { JOB_POLICIES, parseJobPayload } from '../src/jobs/event-validation.js';
 import type { ClaimedJob, JobStore } from '../src/jobs/job-store.js';
@@ -16,28 +17,17 @@ const leaseToken = '00000000-0000-4000-8000-000000000005';
 const observedAt = '2026-11-03T12:00:00.000Z';
 const expiryAt = '2026-11-04T12:00:00.000Z';
 
-function syntheticPorts(callCounts: { secret: number; inspect: number; renew: number; replace: number;
-  replacementMatched: boolean; fenceMatched: boolean }, health: 'HEALTHY' | 'EXPIRING' | 'REVOKED' = 'HEALTHY',
-  expiryState: 'KNOWN' | 'PROVIDER_NO_EXPIRY' | 'UNKNOWN' = 'KNOWN', options: {
-    readonly refreshEnabled?: boolean;
-    readonly onRenewal?: () => Promise<void>;
-  } = {}) {
+function syntheticPorts(callCounts: { secret: number; inspect: number }, health: 'HEALTHY' | 'EXPIRING' | 'EXPIRED' | 'ACTION_REQUIRED' | 'REVOKED' = 'HEALTHY',
+  expiryState: 'KNOWN' | 'PROVIDER_NO_EXPIRY' | 'UNKNOWN' = 'KNOWN') {
   const policies: CredentialLifecyclePolicyPort = {
     forCredential: (flowVariant, authVariant, family) => family === 'SYNTHETIC_FAMILY' &&
       flowVariant === 'INSTAGRAM' && authVariant === 'INSTAGRAM_LOGIN'
-      ? { flowVariant, authVariant, family, inspectEnabled: true, refreshEnabled: options.refreshEnabled ?? false, createReauthIntent: true,
+      ? { flowVariant, authVariant, family, inspectEnabled: true, refreshEnabled: false, createReauthIntent: true,
         reauthImpactKey: 'SYNTHETIC_CREDENTIAL_ACCESS', checkIntervalSeconds: 3600, jitterPercent: 0 }
       : undefined,
   };
   const secrets: CredentialLifecycleSecretPort = {
     async withCredential(_binding, execute) { callCounts.secret += 1; await execute('synthetic-only-secret'); },
-    async replaceCredentialWithin(_manager, _binding, fence, replacementSecret) {
-      callCounts.replace += 1;
-      callCounts.replacementMatched = replacementSecret === 'synthetic-renewal-result';
-      callCounts.fenceMatched = fence.authorizationVersion === 3 && fence.credentialVersion === 7 &&
-        fence.secretVersion === 4 && fence.lifecycleVersion === 2 && fence.generation === 1;
-      return true;
-    },
   };
   const inspector: CredentialInspectionPort = {
     async inspect(_binding, secret) {
@@ -45,20 +35,11 @@ function syntheticPorts(callCounts: { secret: number; inspect: number; renew: nu
       callCounts.inspect += 1;
       return { health, issuedAt: observedAt, expiryState,
         expiresAt: expiryState === 'KNOWN' ? expiryAt : null, dataAccessExpiresAt: expiryAt,
-        reasonCode: health === 'REVOKED' ? 'PERMISSION_REVOKED' : 'NONE' };
+        reasonCode: health === 'REVOKED' ? 'PERMISSION_REVOKED' : health === 'EXPIRED' ? 'TOKEN_EXPIRED' :
+          health === 'ACTION_REQUIRED' ? 'REAUTH_REQUIRED' : 'NONE' };
     },
   };
-  const renewal = options.refreshEnabled ? {
-    async renew() {
-      callCounts.renew += 1;
-      await options.onRenewal?.();
-      return { replacementSecret: 'synthetic-renewal-result', observation: {
-        health: 'HEALTHY' as const, issuedAt: observedAt, expiryState: 'KNOWN' as const,
-        expiresAt: expiryAt, dataAccessExpiresAt: expiryAt, reasonCode: 'NONE' as const,
-      } };
-    },
-  } : undefined;
-  return { policies, secrets, inspector, renewal };
+  return { policies, secrets, inspector };
 }
 
 function fakeDatabase(flowAuthConfigured = true) {
@@ -90,6 +71,13 @@ function fakeDatabase(flowAuthConfigured = true) {
         credential_status: 'ACTIVE', credential_version: 7, secret_version: 4,
         flow_variant: 'INSTAGRAM', auth_variant: 'INSTAGRAM_LOGIN',
       }];
+      if (sql.includes('SELECT auth.authorization_state, auth.version AS authorization_version')) return [{
+        authorization_state: authorizationState, authorization_version: authorizationVersion,
+        flow_variant: 'INSTAGRAM', auth_variant: 'INSTAGRAM_LOGIN', credential_status: 'ACTIVE',
+        credential_version: 7, secret_version: 4, lifecycle_version: 2, generation: 1,
+        lease_owner: 'test-scheduler', lease_token: leaseToken, lease_valid: 1,
+      }];
+      if (sql.includes('SELECT id FROM ca_meta_credential_reauth_intents')) return [{ id: '00000000-0000-4000-8000-000000000008' }];
       if (sql.includes('SELECT c.version AS credential_version')) return [{
         credential_version: 7, secret_version: 4, lifecycle_version: 2, generation: 1,
         authorization_version: 3, lease_owner: 'test-scheduler', lease_token: leaseToken, lease_valid: 1,
@@ -130,9 +118,8 @@ test('unknown persisted flow/auth context is excluded from scheduling', async ()
   assert.ok(fake.scheduleStatements.some((sql) => sql.includes('auth.flow_variant IS NOT NULL AND auth.auth_variant IS NOT NULL')));
 });
 
-async function runSyntheticLifecycle(input: { readonly adapter: boolean; readonly health?: 'HEALTHY' | 'EXPIRING' | 'REVOKED';
-  readonly expiryState?: 'KNOWN' | 'PROVIDER_NO_EXPIRY' | 'UNKNOWN'; readonly refreshEnabled?: boolean;
-  readonly authorizationChangesDuringRenewal?: boolean }) {
+async function runSyntheticLifecycle(input: { readonly adapter: boolean; readonly health?: 'HEALTHY' | 'EXPIRING' | 'EXPIRED' | 'ACTION_REQUIRED' | 'REVOKED';
+  readonly expiryState?: 'KNOWN' | 'PROVIDER_NO_EXPIRY' | 'UNKNOWN' }) {
   const fake = fakeDatabase();
   const jobController = new AbortController();
   let claimed = false;
@@ -173,14 +160,10 @@ async function runSyntheticLifecycle(input: { readonly adapter: boolean; readonl
   const payload = fake.payload;
   assert.ok(payload);
 
-  const calls = { secret: 0, inspect: 0, renew: 0, replace: 0, replacementMatched: false, fenceMatched: false };
-  const ports = syntheticPorts(calls, input.health, input.expiryState, {
-    refreshEnabled: input.refreshEnabled,
-    onRenewal: input.authorizationChangesDuringRenewal
-      ? async () => fake.setAuthorization('REVOKED', 4) : undefined,
-  });
+  const calls = { secret: 0, inspect: 0 };
+  const ports = syntheticPorts(calls, input.health, input.expiryState);
   const processor = input.adapter
-    ? new CredentialInspectionWorker(fake.database, ports.policies, ports.secrets, ports.inspector, () => 0.5, ports.renewal)
+    ? new CredentialInspectionWorker(fake.database, ports.policies, ports.secrets, ports.inspector, () => 0.5)
     : new CredentialInspectionWorker(fake.database, undefined, undefined, undefined, () => 0.5);
   const worker = new DurableWorker(store, { workerRef: 'synthetic-worker', leaseMs: 1_000, idlePollMs: 1 },
     new Map([['CREDENTIAL_INSPECTION', processor.handler]]), new Map([['CREDENTIAL_INSPECTION', processor.finalizer]]));
@@ -210,20 +193,36 @@ test('provider no-expiry is persisted only through the explicit discriminant; NU
   assert.equal(update?.parameters[2], 'PROVIDER_NO_EXPIRY');
 });
 
-test('explicit synthetic renewal commits only with matching credential, secret, lifecycle, lease and authorization versions', async () => {
-  const current = await runSyntheticLifecycle({ adapter: true, health: 'EXPIRING', refreshEnabled: true });
-  assert.equal(current.calls.renew, 1);
-  assert.equal(current.calls.replace, 1);
-  assert.equal(current.calls.replacementMatched, true);
-  assert.equal(current.calls.fenceMatched, true);
-  assert.ok(current.fake.finalizedStatements.some(({ sql }) => sql.includes('SET issued_at = ?')));
+test('isolated replacement CAS writes only for the current exact fence and rejects changed authorization state/version', async () => {
+  const binding: CredentialInspectionBinding = {
+    tenantId, credentialId, authorizationId, appConfigurationId, provider: 'META', environment: 'test',
+    flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN', family: 'SYNTHETIC_FAMILY',
+    credentialVersion: 7, secretVersion: 4, authorizationVersion: 3, lifecycleVersion: 2,
+    generation: 1, leaseOwner: 'test-scheduler', leaseToken,
+  };
+  const current = fakeDatabase();
+  const writes: Array<{ secret: string; authorizationVersion: number; credentialVersion: number; secretVersion: number }> = [];
+  const vault = {
+    async replaceIfCurrentWithin(manager: EntityManager, input: { secret: string }, fence: {
+      expectedAuthorizationVersion: number; expectedCredentialVersion: number; expectedSecretVersion: number;
+    }) {
+      assert.equal(manager, current.manager);
+      writes.push({ secret: input.secret, authorizationVersion: fence.expectedAuthorizationVersion,
+        credentialVersion: fence.expectedCredentialVersion, secretVersion: fence.expectedSecretVersion });
+      return true;
+    },
+  };
+  const cas = new CredentialReplacementCasService(current.database, vault as never);
+  assert.equal(await cas.replaceIfCurrent(binding, { actorRef: 'synthetic-actor', correlationId: 'synthetic-correlation' },
+    'synthetic-replacement-only'), true);
+  assert.deepEqual(writes, [{ secret: 'synthetic-replacement-only', authorizationVersion: 3, credentialVersion: 7, secretVersion: 4 }]);
 
-  const concurrent = await runSyntheticLifecycle({ adapter: true, health: 'EXPIRING', refreshEnabled: true,
-    authorizationChangesDuringRenewal: true });
-  assert.equal(concurrent.calls.renew, 1);
-  assert.equal(concurrent.calls.replace, 0, 'revoked and version-changed authorization prevents a late secret write');
-  assert.ok(concurrent.fake.finalizedStatements.some(({ sql }) => sql.includes("IF(health_state = 'UNKNOWN', 'UNKNOWN', 'STALE')")));
-  assert.equal(concurrent.fake.finalizedStatements.some(({ sql }) => sql.includes('SET issued_at = ?')), false);
+  const stale = fakeDatabase();
+  stale.setAuthorization('REVOKED', 4);
+  const staleVault = { async replaceIfCurrentWithin() { throw new Error('stale result must not reach vault write'); } };
+  const staleCas = new CredentialReplacementCasService(stale.database, staleVault as never);
+  assert.equal(await staleCas.replaceIfCurrent(binding, { actorRef: 'synthetic-actor', correlationId: 'synthetic-correlation' },
+    'synthetic-late-result'), false);
 });
 
 test('missing adapter preserves fail-closed state; validated revocation creates only a local deduplicated intent', async () => {
@@ -238,4 +237,44 @@ test('missing adapter preserves fail-closed state; validated revocation creates 
   assert.ok(intent);
   assert.equal(intent?.parameters[7], 'PERMISSION_REVOKED');
   assert.equal(intent?.parameters.includes('synthetic-only-secret'), false);
+});
+
+test('EXPIRED and ACTION_REQUIRED reauth intents record exact active resource impacts without revoking grants', async () => {
+  for (const [health, expectedReason] of [['EXPIRED', 'TOKEN_EXPIRED'], ['ACTION_REQUIRED', 'REAUTH_REQUIRED']] as const) {
+    const result = await runSyntheticLifecycle({ adapter: true, health });
+    const impact = result.fake.finalizedStatements.find(({ sql }) => sql.includes('INSERT INTO ca_meta_credential_reauth_impacts'));
+    assert.ok(impact, `${health} intent records its affected exact resource links`);
+    assert.ok(impact?.sql.includes('aa.credential_id = ?'));
+    assert.ok(impact?.sql.includes("aa.state = 'ACTIVE'"));
+    assert.equal(impact?.parameters.at(-1), credentialId);
+    assert.equal(impact?.parameters[1], expectedReason);
+    assert.equal(result.fake.finalizedStatements.some(({ sql }) => sql.includes('UPDATE ca_meta_asset_grants')), false,
+      `${health} does not revoke resource grants`);
+    assert.equal(result.fake.finalizedStatements.some(({ sql }) => sql.includes("SET state = 'REVOKED'")), false,
+      `${health} does not revoke asset authorizations`);
+  }
+});
+
+test('bounded reauth impact reader exposes only exact current resource references without provider data', async () => {
+  let queryText = '';
+  const database = {
+    async getDataSource() {
+      return { async query(sql: string) {
+        queryText = sql;
+        return [{ credential_id: credentialId, asset_id: '00000000-0000-4000-8000-000000000006',
+          asset_kind: 'INSTAGRAM_BUSINESS_ACCOUNT', family: 'SYNTHETIC_FAMILY', reason_code: 'TOKEN_EXPIRED' }];
+      } };
+    },
+  } as unknown as DurableWorkDatabase;
+  const reader = new CredentialReauthIntentReader(database);
+  const page = await reader.listAffectedAssets(tenantId, '00000000-0000-4000-8000-000000000007', null, 1);
+  assert.deepEqual(page.items, [{ credentialRef: credentialId, assetRef: '00000000-0000-4000-8000-000000000006',
+    assetKind: 'INSTAGRAM_BUSINESS_ACCOUNT', family: 'SYNTHETIC_FAMILY', reasonCode: 'TOKEN_EXPIRED' }]);
+  assert.equal(page.nextAfterAssetRef, null);
+  assert.ok(queryText.includes('asset_auth.credential_id = impact.credential_id'));
+  assert.ok(queryText.includes('credential.id = impact.credential_id'));
+  assert.ok(queryText.includes('intent.authorization_id = impact.authorization_id'));
+  assert.ok(queryText.includes('asset.app_configuration_id = impact.app_configuration_id'));
+  assert.ok(queryText.includes('lifecycle.health_state IN (\'EXPIRED\', \'ACTION_REQUIRED\')'));
+  assert.equal(JSON.stringify(page).includes('token'), false, 'the internal reader returns no provider data or secret fields');
 });

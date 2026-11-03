@@ -55,6 +55,9 @@ apps/api/src/credentials/**
 !apps/api/src/credentials/credential-resolver.types.ts
 !apps/api/src/credentials/mysql-credential-resolver.repository.ts
 !apps/api/src/database/migrations/credential-vault.ts
+!apps/api/src/credentials/credential-lifecycle.service.ts
+!apps/api/src/credentials/credential-lifecycle.types.ts
+!apps/api/src/database/migrations/credential-lifecycle.ts
 
 # PHP legacy/local tree is not part of the new web/API images.
 backend/

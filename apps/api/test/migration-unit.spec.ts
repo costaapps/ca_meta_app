@@ -82,6 +82,19 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(META_CREDENTIAL_VAULT_MIGRATION.schemaVersion, 11);
   assert.equal(PRIVACY_GOVERNANCE_MIGRATION.schemaVersion, 12);
   assert.equal(CREDENTIAL_LIFECYCLE_MIGRATION.schemaVersion, 13);
+  const lifecycleTableStep = CREDENTIAL_LIFECYCLE_MIGRATION.steps.find((step) => step.id === 'create-credential-lifecycle');
+  const reauthTableStep = CREDENTIAL_LIFECYCLE_MIGRATION.steps.find((step) => step.id === 'create-credential-reauth-intents');
+  const impactTableStep = CREDENTIAL_LIFECYCLE_MIGRATION.steps.find((step) => step.id === 'create-credential-reauth-impacts');
+  const quarantineUnboundStep = CREDENTIAL_LIFECYCLE_MIGRATION.steps.find((step) => step.id === 'quarantine-unbound-asset-authorizations');
+  assert.ok(lifecycleTableStep && reauthTableStep && impactTableStep && quarantineUnboundStep);
+  assert.ok('sql' in quarantineUnboundStep);
+  assert.ok(lifecycleTableStep.definition.includes('ix_ca_meta_lifecycle_credential_context'),
+    'the lifecycle composite foreign key has an explicit support index for deterministic MariaDB shape verification');
+  assert.ok(reauthTableStep.definition.includes('ix_ca_meta_reauth_credential_context'));
+  assert.ok(impactTableStep.definition.includes('ix_ca_meta_reauth_impact_credential') &&
+    impactTableStep.definition.includes('ix_ca_meta_reauth_impact_asset'));
+  assert.ok(quarantineUnboundStep.sql.includes("SET state = 'QUARANTINED'") &&
+    quarantineUnboundStep.sql.includes('WHERE credential_id IS NULL AND state = \'ACTIVE\''));
   assert.equal(MIGRATIONS[MIGRATIONS.length - 7]?.id, META_ASSETS_MIGRATION.id);
   assert.equal(MIGRATIONS[MIGRATIONS.length - 6]?.id, MAGIC_LINKS_MIGRATION.id);
   assert.equal(MIGRATIONS[MIGRATIONS.length - 5]?.id, PORTAL_SESSION_ENTRY_MODE_MIGRATION.id);

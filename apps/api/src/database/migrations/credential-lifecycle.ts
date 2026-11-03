@@ -14,6 +14,10 @@ const REAUTH_COLUMNS = [
   'id', 'tenant_id', 'credential_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment',
   'dedupe_key', 'reason_code', 'status', 'occurrences', 'version', 'created_at', 'updated_at', 'resolved_at',
 ] as const;
+const REAUTH_IMPACT_COLUMNS = [
+  'tenant_id', 'reauth_intent_id', 'credential_id', 'authorization_id', 'asset_id', 'app_configuration_id',
+  'provider', 'environment', 'reason_code', 'created_at',
+] as const;
 
 interface IndexShape { readonly name: string; readonly columns: readonly string[]; readonly unique: boolean }
 interface ForeignKeyShape { readonly name: string; readonly columns: readonly string[]; readonly table: string; readonly referencedColumns: readonly string[] }
@@ -139,6 +143,7 @@ const createLifecycle = tableStep('create-credential-lifecycle', 'ca_meta_creden
   [
     { name: 'PRIMARY', columns: ['tenant_id', 'credential_id'], unique: true },
     { name: 'ix_ca_meta_credential_lifecycle_due', columns: ['next_check_at', 'lease_expires_at', 'tenant_id', 'credential_id'], unique: false },
+    { name: 'ix_ca_meta_lifecycle_credential_context', columns: ['tenant_id', 'credential_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'], unique: false },
   ],
   [{ name: 'fk_ca_meta_lifecycle_credential', columns: ['tenant_id', 'credential_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'],
     table: 'ca_meta_credentials', referencedColumns: ['tenant_id', 'id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'] }],
@@ -165,6 +170,7 @@ const createLifecycle = tableStep('create-credential-lifecycle', 'ca_meta_creden
     created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (tenant_id, credential_id),
     KEY ix_ca_meta_credential_lifecycle_due (next_check_at, lease_expires_at, tenant_id, credential_id),
+    KEY ix_ca_meta_lifecycle_credential_context (tenant_id, credential_id, authorization_id, app_configuration_id, provider, environment),
     CONSTRAINT ck_ca_meta_lifecycle_health CHECK (health_state IN ('HEALTHY','EXPIRING','EXPIRED','REVOKED','ACTION_REQUIRED','UNKNOWN','STALE')),
     CONSTRAINT ck_ca_meta_lifecycle_expiry CHECK (expiry_state IN ('KNOWN','PROVIDER_NO_EXPIRY','UNKNOWN','STALE')),
     CONSTRAINT ck_ca_meta_lifecycle_lease CHECK ((lease_owner IS NULL AND lease_token IS NULL AND lease_expires_at IS NULL) OR
@@ -177,8 +183,10 @@ const createLifecycle = tableStep('create-credential-lifecycle', 'ca_meta_creden
 const createReauthIntent = tableStep('create-credential-reauth-intents', 'ca_meta_credential_reauth_intents', REAUTH_COLUMNS,
   [
     { name: 'PRIMARY', columns: ['id'], unique: true },
+    { name: 'uq_ca_meta_reauth_tenant_id', columns: ['tenant_id', 'id'], unique: true },
     { name: 'uq_ca_meta_reauth_dedupe', columns: ['tenant_id', 'dedupe_key'], unique: true },
     { name: 'ix_ca_meta_reauth_pending', columns: ['tenant_id', 'status', 'updated_at'], unique: false },
+    { name: 'ix_ca_meta_reauth_credential_context', columns: ['tenant_id', 'credential_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'], unique: false },
   ],
   [{ name: 'fk_ca_meta_reauth_credential', columns: ['tenant_id', 'credential_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'],
     table: 'ca_meta_credentials', referencedColumns: ['tenant_id', 'id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'] }],
@@ -195,18 +203,77 @@ const createReauthIntent = tableStep('create-credential-reauth-intents', 'ca_met
     status VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'PENDING',
     occurrences INT UNSIGNED NOT NULL DEFAULT 1, version BIGINT UNSIGNED NOT NULL DEFAULT 1,
     created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL, resolved_at DATETIME(6) NULL,
-    PRIMARY KEY (id), UNIQUE KEY uq_ca_meta_reauth_dedupe (tenant_id, dedupe_key),
+    PRIMARY KEY (id), UNIQUE KEY uq_ca_meta_reauth_tenant_id (tenant_id, id),
+    UNIQUE KEY uq_ca_meta_reauth_dedupe (tenant_id, dedupe_key),
     KEY ix_ca_meta_reauth_pending (tenant_id, status, updated_at),
+    KEY ix_ca_meta_reauth_credential_context (tenant_id, credential_id, authorization_id, app_configuration_id, provider, environment),
     CONSTRAINT ck_ca_meta_reauth_status CHECK (status IN ('PENDING','ACKNOWLEDGED','RESOLVED')),
     CONSTRAINT fk_ca_meta_reauth_credential FOREIGN KEY (tenant_id, credential_id, authorization_id, app_configuration_id, provider, environment)
       REFERENCES ca_meta_credentials (tenant_id, id, authorization_id, app_configuration_id, provider, environment)
       ON UPDATE RESTRICT ON DELETE RESTRICT
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`);
 
+const createReauthImpact = tableStep('create-credential-reauth-impacts', 'ca_meta_credential_reauth_impacts', REAUTH_IMPACT_COLUMNS,
+  [
+    { name: 'PRIMARY', columns: ['tenant_id', 'reauth_intent_id', 'asset_id'], unique: true },
+    { name: 'ix_ca_meta_reauth_impact_credential', columns: ['tenant_id', 'credential_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'], unique: false },
+    { name: 'ix_ca_meta_reauth_impact_asset', columns: ['tenant_id', 'authorization_id', 'asset_id', 'app_configuration_id', 'provider', 'environment'], unique: false },
+  ],
+  [
+    { name: 'fk_ca_meta_reauth_impact_intent', columns: ['tenant_id', 'reauth_intent_id'], table: 'ca_meta_credential_reauth_intents', referencedColumns: ['tenant_id', 'id'] },
+    { name: 'fk_ca_meta_reauth_impact_credential', columns: ['tenant_id', 'credential_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'], table: 'ca_meta_credentials', referencedColumns: ['tenant_id', 'id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'] },
+    { name: 'fk_ca_meta_reauth_impact_asset', columns: ['tenant_id', 'authorization_id', 'asset_id', 'app_configuration_id', 'provider', 'environment'], table: 'ca_meta_asset_authorizations', referencedColumns: ['tenant_id', 'authorization_id', 'asset_id', 'app_configuration_id', 'provider', 'environment'] },
+  ],
+  `CREATE TABLE IF NOT EXISTS ca_meta_credential_reauth_impacts (
+    tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    reauth_intent_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    credential_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    authorization_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    asset_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    app_configuration_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    provider VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    environment VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    reason_code VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (tenant_id, reauth_intent_id, asset_id),
+    KEY ix_ca_meta_reauth_impact_credential (tenant_id, credential_id, authorization_id, app_configuration_id, provider, environment),
+    KEY ix_ca_meta_reauth_impact_asset (tenant_id, authorization_id, asset_id, app_configuration_id, provider, environment),
+    CONSTRAINT ck_ca_meta_reauth_impact_provider CHECK (provider = 'META'),
+    CONSTRAINT fk_ca_meta_reauth_impact_intent FOREIGN KEY (tenant_id, reauth_intent_id)
+      REFERENCES ca_meta_credential_reauth_intents (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_ca_meta_reauth_impact_credential FOREIGN KEY (tenant_id, credential_id, authorization_id, app_configuration_id, provider, environment)
+      REFERENCES ca_meta_credentials (tenant_id, id, authorization_id, app_configuration_id, provider, environment) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_ca_meta_reauth_impact_asset FOREIGN KEY (tenant_id, authorization_id, asset_id, app_configuration_id, provider, environment)
+      REFERENCES ca_meta_asset_authorizations (tenant_id, authorization_id, asset_id, app_configuration_id, provider, environment) ON UPDATE RESTRICT ON DELETE RESTRICT
+  ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`);
+
+const quarantineUnboundAssetAuthorizations: DdlStep = {
+  id: 'quarantine-unbound-asset-authorizations',
+  phase: 'expand',
+  definitionVersion: 'v1',
+  definition: JSON.stringify({
+    table: 'ca_meta_asset_authorizations',
+    predicate: "credential_id IS NULL AND state = 'ACTIVE'",
+    transition: "state = 'QUARANTINED'; credential binding remains UNKNOWN",
+  }),
+  retryWhenAbsent: true,
+  sql: `UPDATE ca_meta_asset_authorizations
+        SET state = 'QUARANTINED', version = version + 1, updated_at = UTC_TIMESTAMP(6)
+        WHERE credential_id IS NULL AND state = 'ACTIVE'`,
+  verify: async ({ queryRunner }) => {
+    const rows = await queryRunner.query(
+      `SELECT COUNT(*) AS count FROM ca_meta_asset_authorizations WHERE credential_id IS NULL AND state = 'ACTIVE'`,
+    ) as Array<{ count: number | string }>;
+    return Number(rows[0]?.count ?? 0) === 0;
+  },
+};
+
 const definition = {
   id: '202611030013-credential-lifecycle', schemaVersion: 13, minimumSupportedApiVersion: 1,
-  steps: [addAuthorizationFlowContext, createLifecycle, createReauthIntent],
+  steps: [addAuthorizationFlowContext, createLifecycle, createReauthIntent, createReauthImpact, quarantineUnboundAssetAuthorizations],
 } as const;
 
 export const CREDENTIAL_LIFECYCLE_MIGRATION: VersionedMigration = { ...definition, checksum: migrationChecksum(definition) };
-export const CREDENTIAL_LIFECYCLE_TABLES = ['ca_meta_credential_lifecycle', 'ca_meta_credential_reauth_intents'] as const;
+export const CREDENTIAL_LIFECYCLE_TABLES = [
+  'ca_meta_credential_lifecycle', 'ca_meta_credential_reauth_intents', 'ca_meta_credential_reauth_impacts',
+] as const;

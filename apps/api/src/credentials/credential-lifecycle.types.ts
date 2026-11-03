@@ -20,8 +20,8 @@ export interface CredentialLifecycleFamilyPolicy {
   readonly authVariant: MetaAuthVariant | null;
   readonly family: string;
   readonly inspectEnabled: boolean;
-  /** An exact flow/auth/family capability may opt into injected renewal; no Meta family is enabled in production. */
-  readonly refreshEnabled: boolean;
+  /** M3.09 has no renewal job; false is a type-level guard against enabling refresh in inspection. */
+  readonly refreshEnabled: false;
   readonly createReauthIntent: boolean;
   /** Safe server-owned impact class used with authorizationId to coalesce affected credentials. */
   readonly reauthImpactKey: string | null;
@@ -46,11 +46,39 @@ export interface CredentialLifecyclePolicyPort {
   forCredential(flowVariant: MetaFlowVariant, authVariant: MetaAuthVariant, family: string): CredentialLifecycleFamilyPolicy | undefined;
 }
 
+export interface CredentialReauthIntentView {
+  readonly intentRef: string;
+  readonly authorizationRef: string;
+  readonly flowVariant: MetaFlowVariant | null;
+  readonly authVariant: MetaAuthVariant | null;
+  readonly impactKey: string;
+  readonly reasonCode: string;
+  readonly status: 'PENDING' | 'ACKNOWLEDGED';
+  readonly occurrences: number;
+  readonly updatedAt: string;
+}
+
+export interface CredentialReauthIntentPage {
+  readonly items: readonly CredentialReauthIntentView[];
+  readonly nextAfterRef: string | null;
+}
+
+export interface CredentialReauthAffectedAssetView {
+  readonly credentialRef: string;
+  readonly assetRef: string;
+  readonly assetKind: string;
+  readonly family: string;
+  readonly reasonCode: string;
+}
+
+export interface CredentialReauthAffectedAssetPage {
+  readonly items: readonly CredentialReauthAffectedAssetView[];
+  readonly nextAfterAssetRef: string | null;
+}
+
 /** The adapter receives plaintext only inside this callback and must not return or log it. */
 export interface CredentialLifecycleSecretPort {
   withCredential(binding: CredentialBinding, execute: (secret: string) => Promise<void>): Promise<void>;
-  replaceCredentialWithin(manager: import('typeorm').EntityManager, binding: CredentialBinding,
-    fence: CredentialInspectionBinding, replacementSecret: string): Promise<boolean>;
 }
 
 /** A provider adapter must validate its response before returning this allowlisted shape. */
@@ -58,13 +86,7 @@ export interface CredentialInspectionPort {
   inspect(binding: CredentialInspectionBinding, secret: string, signal: AbortSignal): Promise<CredentialInspectionObservation>;
 }
 
-/** Family-specific adapter. No endpoint or exchange recipe is provided by this port. */
-export interface CredentialRenewalPort {
-  renew(binding: CredentialInspectionBinding, currentSecret: string, signal: AbortSignal): Promise<{
-    readonly replacementSecret: string;
-    readonly observation: CredentialInspectionObservation;
-  } | undefined>;
-}
+/** Future renewal requires a separate CREDENTIAL_RENEWAL durable job with AMBIGUOUS effect mode and CAS finalization. */
 
 export const DEFAULT_CREDENTIAL_LIFECYCLE_POLICY: CredentialLifecycleFamilyPolicy = Object.freeze({
   flowVariant: null, authVariant: null, family: 'UNCONFIGURED', inspectEnabled: false, refreshEnabled: false, createReauthIntent: false,

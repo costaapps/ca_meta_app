@@ -419,6 +419,7 @@ test('MySQL adapter binds every read to the exact context and treats absent heal
     binding: { ...candidate(value).binding, credentialId: uuid(91), authorizationId: uuid(92) },
   });
   const queries: Array<{ readonly sql: string; readonly parameters: readonly unknown[] }> = [];
+  let exactCredentialLinkExists = true;
   const dataSource = {
     async query(sql: string, parameters: readonly unknown[] = []) {
       queries.push({ sql, parameters });
@@ -427,6 +428,7 @@ test('MySQL adapter binds every read to the exact context and treats absent heal
       }
       if (sql.includes('FROM ca_meta_asset_relations ar')) return [];
       if (sql.includes('FROM ca_meta_asset_authorizations aa')) {
+        if (!exactCredentialLinkExists) return [];
         return [{
           tenant_id: value.tenantId,
           credential_id: source.binding.credentialId,
@@ -465,6 +467,9 @@ test('MySQL adapter binds every read to the exact context and treats absent heal
   assert.equal(snapshot.candidates.length, 1);
   assert.equal(snapshot.candidates[0]?.health.state, 'UNKNOWN');
   assert.equal(snapshot.candidates[0]?.expiry.state, 'UNKNOWN');
+  const candidateQuery = queries.find(({ sql }) => sql.includes('FROM ca_meta_asset_authorizations aa') && sql.includes('JOIN ca_meta_credentials c'));
+  assert.ok(candidateQuery?.sql.includes('AND aa.credential_id = c.id'),
+    'the candidate query requires the exact credential linked to each asset authorization');
   for (const query of queries) {
     assert.ok(query.parameters.includes(value.tenantId));
     assert.ok(query.parameters.includes(value.appConfigurationId));
@@ -474,4 +479,7 @@ test('MySQL adapter binds every read to the exact context and treats absent heal
     assert.equal(query.sql.includes('authentication_tag'), false);
     assert.equal(query.sql.includes('credential_ref'), false);
   }
+  exactCredentialLinkExists = false;
+  const unboundSnapshot = await repository.inspect(value, policyFor(value));
+  assert.equal(unboundSnapshot.candidates.length, 0, 'a NULL/unbound asset authorization cannot borrow another credential under the authorization');
 });
