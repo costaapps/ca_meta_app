@@ -1,6 +1,24 @@
 import type { MembershipRole } from '../identity/identity.types.js';
 
 export const MAGIC_LINK_STORE = Symbol('MAGIC_LINK_STORE');
+export const MAGIC_LINK_IDENTITY_STORE = Symbol('MAGIC_LINK_IDENTITY_STORE');
+
+export type MagicLinkIdentityRevocationReason = 'IDENTITY_CORRECTION' | 'COMPROMISE_REPORTED';
+
+export interface MagicLinkIdentityStore {
+  associateVerifiedIdentity(input: {
+    readonly emailHash: string;
+    readonly principalId: string;
+    readonly proofReferenceHash: string;
+    readonly proofExpiresAt: string;
+  }): Promise<void>;
+  revokeIdentity(input: {
+    readonly emailHash: string;
+    readonly principalId: string;
+    readonly actorReferenceHash: string;
+    readonly reasonCode: MagicLinkIdentityRevocationReason;
+  }): Promise<void>;
+}
 
 export interface InvitedIdentityTarget {
   readonly principalId: string;

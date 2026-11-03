@@ -96,8 +96,8 @@ $managedEnvironment = @(
   'MIGRATION_DATABASE_USER', 'MIGRATION_DATABASE_PASSWORD', 'MIGRATION_DATABASE_CONNECT_TIMEOUT_MS',
   'MIGRATION_LOCK_TIMEOUT_SECONDS', 'MIGRATION_STATEMENT_TIMEOUT_SECONDS', 'MIGRATION_MIN_SUPPORTED_API_VERSION',
   'API_DATABASE_HOST', 'API_DATABASE_PORT', 'API_DATABASE_NAME', 'API_DATABASE_USER', 'API_DATABASE_PASSWORD',
-  'API_DATABASE_CONNECT_TIMEOUT_MS', 'API_PORT', 'API_BIND_ADDRESS', 'API_ALLOWED_HOSTS', 'API_TRUSTED_PROXIES',
-  'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST', 'M3_02_DB_TEST', 'M3_09_TEST',
+  'API_DATABASE_CONNECT_TIMEOUT_MS', 'API_PORTAL_SESSION_RECOVERY_KEY', 'API_PORT', 'API_BIND_ADDRESS', 'API_ALLOWED_HOSTS', 'API_TRUSTED_PROXIES',
+  'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST', 'M3_02_DB_TEST', 'M3_03_TEST', 'M3_09_TEST',
   'M3_09_DIAGNOSTIC_PATH', 'M3_TEST_CREDENTIAL_KEY_V3'
 )
 $previousEnvironment = @{}
@@ -108,6 +108,7 @@ $rootPassword = New-HexSecret
 $apiPassword = New-HexSecret
 $migrationPassword = New-HexSecret
 $credentialKeyV3 = New-HexSecret
+$portalRecoveryKey = New-HexSecret
 $sql = @"
 CREATE USER 'ca_meta_migrator'@'%' IDENTIFIED BY '$migrationPassword';
 GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES, TRIGGER ON ca_meta_m205.* TO 'ca_meta_migrator'@'%';
@@ -137,6 +138,7 @@ $env:API_DATABASE_USER = 'ca_meta_api'
 $env:API_DATABASE_PASSWORD = $apiPassword
 $env:M2_API_DATABASE_PASSWORD = $apiPassword
 $env:M3_TEST_CREDENTIAL_KEY_V3 = $credentialKeyV3
+$env:API_PORTAL_SESSION_RECOVERY_KEY = $portalRecoveryKey
 $env:API_DATABASE_CONNECT_TIMEOUT_MS = '5000'
 $env:NODE_ENV = 'test'
 $env:API_PORT = '0'
@@ -146,6 +148,7 @@ $env:API_TRUSTED_PROXIES = 'none'
 $env:M2_DURABLE_WORK_TEST = '1'
 $env:M2_MIGRATION_TEST = '0'
 $env:M3_02_DB_TEST = '1'
+$env:M3_03_TEST = '1'
 $env:M3_09_TEST = '1'
 
 try {
@@ -208,6 +211,16 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-09-credential-lifecycle.junit.xml',
       '--test-reporter-destination=artifacts/test-results/m3-09-credential-lifecycle.lcov.info',
       'apps/api/dist-test/test/m3-09-credential-lifecycle.integration.spec.js'
+    )
+    Write-Output 'M2.05 fixture: M3.03 verified magic-link identity.'
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
+      '--test',
+      '--experimental-test-coverage',
+      '--test-reporter=junit',
+      '--test-reporter=lcov',
+      '--test-reporter-destination=artifacts/test-results/m3-03-magic-link-identity.junit.xml',
+      '--test-reporter-destination=artifacts/test-results/m3-03-magic-link-identity.lcov.info',
+      'apps/api/dist-test/test/m3-03-magic-link-identity.integration.spec.js'
     )
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m3-07/check-vault-artifact-redaction.mjs')
   } finally { Pop-Location }
