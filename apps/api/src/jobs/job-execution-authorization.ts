@@ -59,7 +59,7 @@ const REQUIRED_JOB_SCOPES: Readonly<Partial<Record<JobType, ServiceScope>>> = Ob
   HISTORY_SYNC: 'TENANT_RESOURCE_READ',
   CREDENTIAL_INSPECTION: 'CREDENTIAL_USE',
   ASSET_REFRESH: 'META_CONNECTION_EXECUTE',
-} as const satisfies Readonly<Record<JobType, ServiceScope>>);
+} as const satisfies Readonly<Partial<Record<JobType, ServiceScope>>>);
 
 function resourceReference(type: JobType, payload: JobPayload): string | undefined {
   if (payload.kind !== type) return undefined;
