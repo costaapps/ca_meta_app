@@ -24,18 +24,18 @@ class SyntheticEmailProofVerifier extends MagicLinkEmailProofVerifier {
     readonly principalId: string;
     readonly proofGeneration: number;
   }>();
-  private readonly generationReader: Pick<MysqlMagicLinkStore, 'readProofGeneration'>;
+  private readonly proofGenerationReader: Pick<MysqlMagicLinkStore, 'readProofGeneration'>;
 
   constructor(
     private readonly recoveryKeyForFixture: string,
     generationReader: Pick<MysqlMagicLinkStore, 'readProofGeneration'>,
   ) {
     super(recoveryKeyForFixture, generationReader);
-    this.generationReader = generationReader;
+    this.proofGenerationReader = generationReader;
   }
 
   async add(input: { readonly email: string; readonly principalId: string; readonly proofReference: string }): Promise<string> {
-    const proofGeneration = await this.generationReader.readProofGeneration(
+    const proofGeneration = await this.proofGenerationReader.readProofGeneration(
       hashMagicLinkEmail(input.email, this.recoveryKeyForFixture),
     );
     this.proofs.set(input.proofReference, { email: input.email, principalId: input.principalId, proofGeneration });
@@ -123,7 +123,7 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
     const initialTarget = await store.findEligibleTarget(emailHash);
     assert.ok(initialTarget);
     assert.equal(initialTarget.principalId, principalA);
-    assert.ok([tenantA, tenantB].includes(initialTarget.tenantId));
+    assert.ok(initialTarget.tenantId === tenantA || initialTarget.tenantId === tenantB);
     const pendingLinkTokenHash = createHash('sha256').update(randomUUID(), 'utf8').digest('hex');
     assert.equal(await store.enqueueForInvitedIdentity({
       emailHash, recipient: email, target: initialTarget, linkId: randomUUID(), tokenHash: pendingLinkTokenHash,

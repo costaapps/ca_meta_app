@@ -168,15 +168,15 @@ class SyntheticMagicLinkEmailProofVerifier extends MagicLinkEmailProofVerifier {
     readonly proofGeneration: number;
     readonly expiresAt: string;
   }>();
-  private readonly generationReader: Pick<MagicLinkIdentityStore, 'readProofGeneration'>;
+  private readonly proofGenerationReader: Pick<MagicLinkIdentityStore, 'readProofGeneration'>;
 
   constructor(generationReader: Pick<MagicLinkIdentityStore, 'readProofGeneration'>, now: () => number) {
     super(recoveryKey, generationReader, now);
-    this.generationReader = generationReader;
+    this.proofGenerationReader = generationReader;
   }
 
   async addProof(proofReference: string, email: string, principalId: string, expiresAt: string): Promise<void> {
-    const proofGeneration = await this.generationReader.readProofGeneration(hashMagicLinkEmail(email, recoveryKey));
+    const proofGeneration = await this.proofGenerationReader.readProofGeneration(hashMagicLinkEmail(email, recoveryKey));
     this.proofs.set(proofReference, { email, principalId, proofGeneration, expiresAt });
   }
 
