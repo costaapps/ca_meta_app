@@ -198,12 +198,23 @@ export class MysqlJobExecutionAuthorizationPort implements JobExecutionAuthoriza
       }
       case 'ONBOARDING_STEP': {
         const rows = await database.query(
-          `SELECT steps_json FROM ca_meta_onboarding_sessions
-           WHERE id = ? AND tenant_id = ?
-             AND status IN ('AWAITING_PROVIDER', 'CODE_RECEIVED', 'EXCHANGING', 'ASSETS_VERIFIED', 'PROVISIONING', 'PARTIAL')
+          `SELECT onboarding.steps_json
+           FROM ca_meta_onboarding_sessions AS onboarding
+           INNER JOIN ca_meta_memberships AS m ON m.tenant_id = onboarding.tenant_id
+             AND m.principal_id = onboarding.principal_id AND m.principal_kind = 'USER' AND m.status = 'ACTIVE'
+           INNER JOIN ca_meta_principals AS p ON p.id = onboarding.principal_id
+             AND p.kind = 'USER' AND p.status = 'ACTIVE'
+           INNER JOIN ca_meta_tenants AS t ON t.id = onboarding.tenant_id AND t.status = 'ACTIVE'
+           WHERE onboarding.id = ? AND onboarding.tenant_id = ?
+             AND onboarding.status IN ('AWAITING_PROVIDER', 'CODE_RECEIVED', 'EXCHANGING', 'ASSETS_VERIFIED', 'PROVISIONING', 'PARTIAL')
+             AND onboarding.expires_at > UTC_TIMESTAMP(6)
+             AND (JSON_CONTAINS(m.roles, JSON_QUOTE('owner'))
+               OR JSON_CONTAINS(m.roles, JSON_QUOTE('admin'))
+               OR JSON_CONTAINS(m.roles, JSON_QUOTE('operator')))
            LIMIT 1`,
           [payload.onboardingRef, tenantId],
         ) as OnboardingResourceRow[];
+        // The session's persisted tenant/principal stay authoritative across tenant switches; a revoked CONNECT role blocks the next provider step.
         return !!rows[0] && onboardingStepExists(rows[0].steps_json, payload.stepRef);
       }
       case 'PROJECTION_RECONCILE':
@@ -239,12 +250,20 @@ export class MysqlJobExecutionAuthorizationPort implements JobExecutionAuthoriza
       }
       case 'ASSET_REFRESH': {
         const rows = await database.query(
-          `SELECT id FROM ca_meta_assets
-           WHERE tenant_id = ? AND id = ? AND app_configuration_id = ?
-             AND environment = ? AND provider = 'META'
+          `SELECT a.id
+           FROM ca_meta_assets AS a
+           INNER JOIN ca_meta_asset_authorizations AS aa ON aa.tenant_id = a.tenant_id AND aa.asset_id = a.id
+             AND aa.app_configuration_id = a.app_configuration_id AND aa.provider = a.provider AND aa.environment = a.environment
+           INNER JOIN ca_meta_authorizations AS auth ON auth.tenant_id = aa.tenant_id AND auth.id = aa.authorization_id
+             AND auth.app_configuration_id = aa.app_configuration_id AND auth.provider = aa.provider AND auth.environment = aa.environment
+           WHERE a.tenant_id = ? AND a.id = ? AND a.app_configuration_id = ?
+             AND a.environment = ? AND a.provider = 'META'
+             AND aa.state = 'ACTIVE' AND aa.verification_state = 'VERIFIED'
+             AND auth.authorization_state IN ('ACTIVE', 'PARTIAL')
            LIMIT 1`,
           [tenantId, payload.assetId, payload.appConfigurationId, payload.environment],
         ) as Array<{ id: string }>;
+        // Match the current usable-authorization states required by the M3.08 credential resolver.
         return rows.length === 1;
       }
     }

@@ -21,12 +21,15 @@ const proof = 'synthetic-worker-proof-with-more-than-32-bytes';
 function jobFor(type: JobType): ClaimedJob {
   const payload: ClaimedJob['payload'] = type === 'ASSET_REFRESH'
     ? { kind: 'ASSET_REFRESH', assetId: '00000000-0000-4000-8000-000000000004', appConfigurationId: '00000000-0000-4000-8000-000000000005', environment: 'test' }
-    : type === 'PROJECTION_RECONCILE'
+    : type === 'ONBOARDING_STEP'
+      ? { kind: 'ONBOARDING_STEP', onboardingRef: '00000000-0000-4000-8000-000000000009', stepRef: 'step-synthetic' }
+      : type === 'PROJECTION_RECONCILE'
       ? { kind: 'PROJECTION_RECONCILE', projectionRef: 'projection-synthetic', sourceVersion: 1 }
       : type === 'HISTORY_SYNC'
         ? { kind: 'HISTORY_SYNC', checkpointRef: 'checkpoint-synthetic' }
         : { kind: 'OUTBOX_DELIVER', outboxEventRef: '00000000-0000-4000-8000-000000000008' };
-  const resourceScopeRef = type === 'ASSET_REFRESH' ? 'asset-scope-synthetic' : 'reference-only-synthetic';
+  const resourceScopeRef = type === 'ASSET_REFRESH' ? 'asset-scope-synthetic'
+    : type === 'ONBOARDING_STEP' ? 'onboarding-scope-synthetic' : 'reference-only-synthetic';
   return {
     id: '00000000-0000-4000-8000-000000000006',
     tenantId: tenantA,
@@ -52,6 +55,9 @@ function authorizationFor(options: {
   readonly tenantId?: string;
   readonly activeClaim?: boolean;
   readonly assetExists?: boolean;
+  readonly assetRelationship?: 'ACTIVE_VERIFIED' | 'MISSING' | 'REVOKED' | 'UNVERIFIED';
+  readonly assetAuthorizationState?: 'ACTIVE' | 'PARTIAL' | 'REVOKED' | 'DISCONNECTED';
+  readonly onboardingMembership?: 'ACTIVE_CONNECT' | 'REVOKED' | 'VIEWER';
   readonly scopes?: ServiceTenantGrant['scopes'];
 } = {}) {
   const job = jobFor(options.type ?? 'ASSET_REFRESH');
@@ -69,12 +75,34 @@ function authorizationFor(options: {
     attempt: job.attempt,
     max_attempts: job.maxAttempts,
   };
+  const statements: string[] = [];
   const database = {
     async getDataSource() {
       return {
         async query(sql: string) {
+          statements.push(sql);
           if (sql.includes('FROM ca_meta_jobs')) return options.activeClaim === false ? [] : [activeRow];
-          if (sql.includes('FROM ca_meta_assets')) return options.assetExists === false ? [] : [{ id: job.payload.kind === 'ASSET_REFRESH' ? job.payload.assetId : '' }];
+          if (sql.includes('FROM ca_meta_assets')) {
+            const hasAuthorizationFence = sql.includes('JOIN ca_meta_asset_authorizations AS aa') &&
+              sql.includes("aa.state = 'ACTIVE'") && sql.includes("aa.verification_state = 'VERIFIED'") &&
+              sql.includes('JOIN ca_meta_authorizations AS auth') &&
+              sql.includes("auth.authorization_state IN ('ACTIVE', 'PARTIAL')");
+            const relationship = options.assetRelationship ?? 'ACTIVE_VERIFIED';
+            const authorizationState = options.assetAuthorizationState ?? 'ACTIVE';
+            const verifiedRelationship = relationship === 'ACTIVE_VERIFIED';
+            const activeAuthorization = authorizationState === 'ACTIVE' || authorizationState === 'PARTIAL';
+            return options.assetExists === false || !hasAuthorizationFence || !verifiedRelationship || !activeAuthorization
+              ? [] : [{ id: job.payload.kind === 'ASSET_REFRESH' ? job.payload.assetId : '' }];
+          }
+          if (sql.includes('FROM ca_meta_onboarding_sessions')) {
+            const hasMembershipFence = sql.includes('JOIN ca_meta_memberships AS m') &&
+              sql.includes("m.status = 'ACTIVE'") && sql.includes("p.status = 'ACTIVE'") &&
+              sql.includes("t.status = 'ACTIVE'") && sql.includes("JSON_QUOTE('owner')") &&
+              sql.includes("JSON_QUOTE('admin')") && sql.includes("JSON_QUOTE('operator')") &&
+              sql.includes('onboarding.expires_at > UTC_TIMESTAMP(6)');
+            return options.onboardingMembership === 'ACTIVE_CONNECT' && hasMembershipFence
+              ? [{ steps_json: JSON.stringify([{ id: 'step-synthetic' }]) }] : [];
+          }
           return [];
         },
       };
@@ -99,7 +127,7 @@ function authorizationFor(options: {
   }]).verify(proof);
   if (!identity) throw new Error('Synthetic worker identity was not issued.');
   const services = new ServiceTenantAuthorizationService(repository);
-  return { job, authorization: new MysqlJobExecutionAuthorizationPort(database, services, identity) };
+  return { job, authorization: new MysqlJobExecutionAuthorizationPort(database, services, identity), statements };
 }
 
 test('job authorization derives tenant from the live claim, checks the service grant and verifies the backing asset', async () => {
@@ -126,6 +154,42 @@ test('job authorization denies stale claims, tenant substitution, missing resour
 
   const missingScope = authorizationFor({ scopes: ['TENANT_RESOURCE_READ'] });
   assert.equal(await missingScope.authorization.authorize(missingScope.job), undefined);
+});
+
+test('asset refresh requires an active verified asset authorization and a currently usable authorization', async () => {
+  for (const relationship of ['MISSING', 'REVOKED', 'UNVERIFIED'] as const) {
+    const candidate = authorizationFor({ assetRelationship: relationship });
+    assert.equal(await candidate.authorization.authorize(candidate.job), undefined);
+  }
+  for (const state of ['REVOKED', 'DISCONNECTED'] as const) {
+    const candidate = authorizationFor({ assetAuthorizationState: state });
+    assert.equal(await candidate.authorization.authorize(candidate.job), undefined);
+  }
+
+  const active = authorizationFor();
+  assert.ok(await active.authorization.authorize(active.job));
+  const assetQuery = active.statements.find((sql) => sql.includes('FROM ca_meta_assets'));
+  assert.ok(assetQuery?.includes('JOIN ca_meta_asset_authorizations AS aa'));
+  assert.ok(assetQuery?.includes("aa.state = 'ACTIVE'"));
+  assert.ok(assetQuery?.includes("aa.verification_state = 'VERIFIED'"));
+  assert.ok(assetQuery?.includes('JOIN ca_meta_authorizations AS auth'));
+  assert.ok(assetQuery?.includes("auth.authorization_state IN ('ACTIVE', 'PARTIAL')"));
+});
+
+test('onboarding jobs recheck the persisted initiator current CONNECT membership', async () => {
+  const active = authorizationFor({ type: 'ONBOARDING_STEP', onboardingMembership: 'ACTIVE_CONNECT' });
+  assert.ok(await active.authorization.authorize(active.job));
+  const onboardingQuery = active.statements.find((sql) => sql.includes('FROM ca_meta_onboarding_sessions'));
+  assert.ok(onboardingQuery?.includes('JOIN ca_meta_memberships AS m'));
+  assert.ok(onboardingQuery?.includes("m.status = 'ACTIVE'"));
+  assert.ok(onboardingQuery?.includes("JSON_QUOTE('owner')"));
+  assert.ok(onboardingQuery?.includes("JSON_QUOTE('admin')"));
+  assert.ok(onboardingQuery?.includes("JSON_QUOTE('operator')"));
+
+  for (const membership of ['REVOKED', 'VIEWER'] as const) {
+    const candidate = authorizationFor({ type: 'ONBOARDING_STEP', onboardingMembership: membership });
+    assert.equal(await candidate.authorization.authorize(candidate.job), undefined);
+  }
 });
 
 test('reference-only projection and history jobs are denied until a tenant-owned resource mapping exists', async () => {
