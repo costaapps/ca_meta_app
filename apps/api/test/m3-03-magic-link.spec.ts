@@ -164,7 +164,9 @@ class FakeMagicLinkStore implements MagicLinkStore {
 class SyntheticMagicLinkEmailProofVerifier extends MagicLinkEmailProofVerifier {
   private readonly proofs = new Map<string, { readonly email: string; readonly principalId: string; readonly expiresAt: string }>();
 
-  constructor(now: () => number) { super(recoveryKey, now); }
+  constructor(generationReader: Pick<MagicLinkIdentityStore, 'readProofGeneration'>, now: () => number) {
+    super(recoveryKey, generationReader, now);
+  }
 
   addProof(proofReference: string, email: string, principalId: string, expiresAt: string): void {
     this.proofs.set(proofReference, { email, principalId, expiresAt });
@@ -177,26 +179,32 @@ class SyntheticMagicLinkEmailProofVerifier extends MagicLinkEmailProofVerifier {
 }
 
 class FakeMagicLinkIdentityStore implements MagicLinkIdentityStore {
-  readonly identities = new Map<string, { readonly principalId: string; revoked: boolean }>();
+  readonly identities = new Map<string, { readonly principalId: string; revoked: boolean; generation: number }>();
   readonly consumedProofs = new Set<string>();
   readonly events: Array<{ readonly eventType: 'ASSOCIATED' | 'REVOKED'; readonly actorKind: string; readonly reasonCode: string }> = [];
 
   constructor(private readonly now: () => number) {}
+
+  async readProofGeneration(emailHash: string): Promise<number> {
+    return this.identities.get(emailHash)?.generation ?? 0;
+  }
 
   async associateVerifiedIdentity(input: {
     readonly emailHash: string;
     readonly principalId: string;
     readonly proofReferenceHash: string;
     readonly proofExpiresAt: string;
+    readonly proofGeneration: number;
   }): Promise<void> {
     if (Date.parse(input.proofExpiresAt) <= this.now() || this.consumedProofs.has(input.proofReferenceHash)) {
       throw new IdentityDeniedError();
     }
     const current = this.identities.get(input.emailHash);
     if (current && current.principalId !== input.principalId) throw new IdentityDeniedError();
+    if ((current?.generation ?? 0) !== input.proofGeneration) throw new IdentityDeniedError();
     this.consumedProofs.add(input.proofReferenceHash);
     if (current) current.revoked = false;
-    else this.identities.set(input.emailHash, { principalId: input.principalId, revoked: false });
+    else this.identities.set(input.emailHash, { principalId: input.principalId, revoked: false, generation: input.proofGeneration });
     this.events.push({ eventType: 'ASSOCIATED', actorKind: 'EMAIL_PROOF_VERIFIER', reasonCode: 'VERIFIED_EMAIL' });
   }
 
@@ -211,6 +219,7 @@ class FakeMagicLinkIdentityStore implements MagicLinkIdentityStore {
       throw new IdentityDeniedError();
     }
     current.revoked = true;
+    current.generation += 1;
     this.events.push({ eventType: 'REVOKED', actorKind: 'PLATFORM_IDENTITY_ADMIN', reasonCode: input.reasonCode });
   }
 }
@@ -363,8 +372,8 @@ test('derived link token has URL-safe high entropy and a tenant cannot be select
 
 test('email identity writer accepts only opaque, unexpired capabilities from a server proof verifier', async () => {
   let now = Date.now();
-  const verifier = new SyntheticMagicLinkEmailProofVerifier(() => now);
   const store = new FakeMagicLinkIdentityStore(() => now);
+  const verifier = new SyntheticMagicLinkEmailProofVerifier(store, () => now);
   const service = new MagicLinkIdentityProvisioningService(store, () => now);
   const expiry = new Date(now + 60_000).toISOString();
   verifier.addProof('synthetic-provider-proof-00000001', invitedEmail, principal, expiry);
@@ -392,8 +401,8 @@ test('email identity writer accepts only opaque, unexpired capabilities from a s
 
 test('email identity association consumes proof references once, audits changes, and allows only same-principal reverification', async () => {
   let now = Date.now();
-  const verifier = new SyntheticMagicLinkEmailProofVerifier(() => now);
   const store = new FakeMagicLinkIdentityStore(() => now);
+  const verifier = new SyntheticMagicLinkEmailProofVerifier(store, () => now);
   const service = new MagicLinkIdentityProvisioningService(store, () => now);
   const expiresAt = () => new Date(now + 60_000).toISOString();
   verifier.addProof('synthetic-provider-proof-00000002', invitedEmail, principal, expiresAt());
@@ -416,13 +425,23 @@ test('email identity association consumes proof references once, audits changes,
   const issuer = 'https://identity.synthetic.invalid';
   const actor = new PlatformIdentityAdminAuthority([{ issuer, subject: 'admin-01' }])
     .verify(identityAssertionVerifier.issue('admin-01'));
+  verifier.addProof('synthetic-provider-proof-00000005', invitedEmail, principal, expiresAt());
+  const proofIssuedBeforeRevocation = await verifier.verifyProof('synthetic-provider-proof-00000005');
+  assert.ok(proofIssuedBeforeRevocation);
   await service.revoke(actor, firstProof.emailHash, principal, 'IDENTITY_CORRECTION');
   assert.equal(store.identities.get(firstProof.emailHash)?.revoked, true);
+  assert.equal(store.identities.get(firstProof.emailHash)?.generation, 1);
   await assert.rejects(service.revoke(actor, firstProof.emailHash, principal, 'IDENTITY_CORRECTION'), IdentityDeniedError);
+  await assert.rejects(
+    service.associate(proofIssuedBeforeRevocation),
+    IdentityDeniedError,
+    'a capability issued in the revoked generation cannot reactivate the identity',
+  );
 
   verifier.addProof('synthetic-provider-proof-00000004', invitedEmail, principal, expiresAt());
   const reverificationProof = await verifier.verifyProof('synthetic-provider-proof-00000004');
   assert.ok(reverificationProof);
+  assert.equal(reverificationProof.proofGeneration, 1);
   await service.associate(reverificationProof);
   assert.equal(store.identities.get(firstProof.emailHash)?.revoked, false);
   assert.deepEqual(store.events.map(({ eventType, actorKind, reasonCode }) => ({ eventType, actorKind, reasonCode })), [

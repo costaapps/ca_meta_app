@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { IdentityDeniedError } from '../identity/identity.errors.js';
 import {
   isVerifiedPlatformIdentityAdmin,
@@ -20,6 +20,7 @@ export interface VerifiedMagicLinkEmailIdentity {
   readonly emailHash: string;
   readonly principalId: string;
   readonly proofReferenceHash: string;
+  readonly proofGeneration: number;
   readonly expiresAt: string;
 }
 
@@ -34,17 +35,18 @@ export function isVerifiedMagicLinkEmailIdentity(value: unknown): value is Verif
 export abstract class MagicLinkEmailProofVerifier {
   protected constructor(
     private readonly recoveryKey: string,
+    private readonly generationReader: Pick<MagicLinkIdentityStore, 'readProofGeneration'>,
     private readonly now: () => number = Date.now,
   ) {}
 
   abstract verifyProof(proofReference: string): Promise<VerifiedMagicLinkEmailIdentity | undefined>;
 
-  protected issueVerifiedIdentity(input: {
+  protected async issueVerifiedIdentity(input: {
     readonly email: string;
     readonly principalId: string;
     readonly proofReference: string;
     readonly expiresAt: string;
-  }): VerifiedMagicLinkEmailIdentity {
+  }): Promise<VerifiedMagicLinkEmailIdentity> {
     const expiry = Date.parse(input.expiresAt);
     const now = this.now();
     if (!UUID.test(input.principalId) || typeof input.proofReference !== 'string' ||
@@ -59,11 +61,24 @@ export abstract class MagicLinkEmailProofVerifier {
     } catch {
       throw new IdentityDeniedError();
     }
-    const proofReferenceHash = createHash('sha256')
-      .update('ca-meta-magic-link-verified-email-proof-v1\0', 'utf8')
+    const proofReferenceHash = createHmac('sha256', this.recoveryKey)
+      .update('ca-meta-magic-link-verified-email-proof-v2\0', 'utf8')
       .update(input.proofReference, 'utf8')
       .digest('hex');
-    const result = Object.freeze({ emailHash, principalId: input.principalId, proofReferenceHash, expiresAt: new Date(expiry).toISOString() }) as VerifiedMagicLinkEmailIdentity;
+    let proofGeneration: number;
+    try {
+      proofGeneration = await this.generationReader.readProofGeneration(emailHash);
+    } catch {
+      throw new IdentityDeniedError();
+    }
+    if (!Number.isSafeInteger(proofGeneration) || proofGeneration < 0) throw new IdentityDeniedError();
+    const result = Object.freeze({
+      emailHash,
+      principalId: input.principalId,
+      proofReferenceHash,
+      proofGeneration,
+      expiresAt: new Date(expiry).toISOString(),
+    }) as VerifiedMagicLinkEmailIdentity;
     verifiedMagicLinkEmailIdentities.add(result);
     return result;
   }
@@ -79,6 +94,7 @@ export class MagicLinkIdentityProvisioningService {
   async associate(proof: VerifiedMagicLinkEmailIdentity): Promise<void> {
     if (!isVerifiedMagicLinkEmailIdentity(proof) || !UUID.test(proof.principalId) ||
       !SHA256.test(proof.emailHash) || !SHA256.test(proof.proofReferenceHash) ||
+      !Number.isSafeInteger(proof.proofGeneration) || proof.proofGeneration < 0 ||
       !Number.isFinite(Date.parse(proof.expiresAt)) || Date.parse(proof.expiresAt) <= this.now()) {
       throw new IdentityDeniedError();
     }
@@ -87,6 +103,7 @@ export class MagicLinkIdentityProvisioningService {
       principalId: proof.principalId,
       proofReferenceHash: proof.proofReferenceHash,
       proofExpiresAt: proof.expiresAt,
+      proofGeneration: proof.proofGeneration,
     });
   }
 

@@ -3,9 +3,96 @@ import { assertExpectedColumns, tableExists } from './schema-inspection.js';
 import type { DdlStep, VersionedMigration } from './migration.types.js';
 
 const identityEventsTable = 'ca_meta_magic_link_identity_events';
+const identityAssociationsTable = 'ca_meta_magic_link_identities';
+const identityAssociationColumnsWithGeneration = [
+  'email_hash', 'principal_id', 'verified_at', 'revoked_at', 'revocation_generation', 'created_at',
+] as const;
 const identityEventColumns = [
   'id', 'event_type', 'proof_ref_hash', 'email_hash', 'principal_id', 'actor_kind', 'actor_ref_hash', 'reason_code', 'created_at',
 ] as const;
+
+async function verifyProofGenerationColumn(queryRunner: import('typeorm').QueryRunner): Promise<boolean> {
+  const rows = await queryRunner.query(
+    `SELECT data_type, column_type, is_nullable, column_default FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = ? AND column_name = 'revocation_generation'`,
+    [identityAssociationsTable],
+  ) as Array<{ data_type: string; column_type: string; is_nullable: string; column_default: string | null }>;
+  if (rows.length === 0) return false;
+  const column = rows[0];
+  if (!column || column.data_type.toLowerCase() !== 'bigint' || column.column_type.toLowerCase() !== 'bigint unsigned' ||
+    column.is_nullable !== 'NO' || column.column_default !== '0') {
+    throw new Error('Magic-link identity associations have an unexpected proof generation column.');
+  }
+  return true;
+}
+
+async function verifyIdentityAssociationsWithProofGeneration(
+  queryRunner: import('typeorm').QueryRunner,
+): Promise<boolean> {
+  if (!(await tableExists(queryRunner, identityAssociationsTable))) return false;
+  await assertExpectedColumns(queryRunner, identityAssociationsTable, identityAssociationColumnsWithGeneration);
+  if (!(await verifyProofGenerationColumn(queryRunner))) return false;
+
+  const indexes = await queryRunner.query(
+    `SELECT index_name AS name, column_name, non_unique FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = ? ORDER BY index_name, seq_in_index`,
+    [identityAssociationsTable],
+  ) as Array<{ name: string; column_name: string; non_unique: number | string }>;
+  const actualIndexes = new Map<string, { columns: string[]; nonUnique: number }>();
+  for (const row of indexes) {
+    const index = actualIndexes.get(row.name) ?? { columns: [], nonUnique: Number(row.non_unique) };
+    index.columns.push(row.column_name);
+    actualIndexes.set(row.name, index);
+  }
+  const expectedIndexes = [
+    { name: 'PRIMARY', columns: ['email_hash'], nonUnique: 0 },
+    { name: 'ix_ca_meta_magic_identity_principal', columns: ['principal_id', 'revoked_at'], nonUnique: 1 },
+  ];
+  if (actualIndexes.size !== expectedIndexes.length || expectedIndexes.some((expected) => {
+    const actual = actualIndexes.get(expected.name);
+    return !actual || actual.nonUnique !== expected.nonUnique || actual.columns.join(',') !== expected.columns.join(',');
+  })) {
+    throw new Error('Magic-link identity associations have an unexpected proof generation index shape.');
+  }
+
+  const foreignKeys = await queryRunner.query(
+    `SELECT constraint_name AS name, column_name, referenced_table_name AS referenced_table,
+            referenced_column_name AS referenced_column
+     FROM information_schema.key_column_usage
+     WHERE table_schema = DATABASE() AND table_name = ? AND referenced_table_name IS NOT NULL`,
+    [identityAssociationsTable],
+  ) as Array<{ name: string; column_name: string; referenced_table: string; referenced_column: string }>;
+  if (foreignKeys.length !== 1 || foreignKeys[0]?.name !== 'fk_ca_meta_magic_identity_principal' ||
+    foreignKeys[0]?.column_name !== 'principal_id' || foreignKeys[0]?.referenced_table !== 'ca_meta_principals' ||
+    foreignKeys[0]?.referenced_column !== 'id') {
+    throw new Error('Magic-link identity associations have an unexpected proof generation foreign key shape.');
+  }
+  return true;
+}
+
+const compatibleMagicLinkIdentityPriorSteps: NonNullable<DdlStep['compatiblePriorSteps']> = [{
+  migrationId: '202610300008-magic-link-invitations',
+  stepId: 'create-magic-link-identity-associations',
+  verify: async ({ queryRunner }) => verifyIdentityAssociationsWithProofGeneration(queryRunner),
+}];
+
+const addProofGeneration: DdlStep = {
+  id: 'add-magic-link-identity-proof-generation',
+  phase: 'expand',
+  sql: `ALTER TABLE ${identityAssociationsTable}
+    ADD COLUMN revocation_generation BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER revoked_at`,
+  definitionVersion: 'v1',
+  definition: JSON.stringify({
+    table: identityAssociationsTable,
+    column: { name: 'revocation_generation', type: 'BIGINT UNSIGNED', nullable: false, default: 0 },
+    compatiblePriorSteps: compatibleMagicLinkIdentityPriorSteps.map(({ migrationId, stepId, verify }) => ({
+      migrationId, stepId, verify: verify.toString(),
+    })),
+  }),
+  retryWhenAbsent: true,
+  verify: async ({ queryRunner }) => verifyProofGenerationColumn(queryRunner),
+  compatiblePriorSteps: compatibleMagicLinkIdentityPriorSteps,
+};
 
 const createIdentityEvents: DdlStep = {
   id: 'create-magic-link-identity-events',
@@ -114,7 +201,7 @@ const migrationDefinition = {
   id: '202611030014-magic-link-identity-ledger',
   schemaVersion: 14,
   minimumSupportedApiVersion: 1,
-  steps: [createIdentityEvents, identityEventsNoUpdate, identityEventsNoDelete],
+  steps: [createIdentityEvents, addProofGeneration, identityEventsNoUpdate, identityEventsNoDelete],
 };
 
 export const MAGIC_LINK_IDENTITY_LEDGER_MIGRATION: VersionedMigration = {

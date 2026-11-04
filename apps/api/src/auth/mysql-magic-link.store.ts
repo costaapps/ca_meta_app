@@ -54,6 +54,10 @@ interface SessionExpiryRow extends RowDataPacket {
   absolute_expires_at: string;
 }
 
+interface ProofGenerationRow extends RowDataPacket {
+  revocation_generation: number | string;
+}
+
 function dateValue(value: string): Date {
   return new Date(`${value.replace(' ', 'T')}Z`);
 }
@@ -195,14 +199,28 @@ export class MysqlMagicLinkStore implements MagicLinkStore, MagicLinkIdentitySto
     }
   }
 
+  async readProofGeneration(emailHash: string): Promise<number> {
+    if (!/^[a-f0-9]{64}$/.test(emailHash)) throw new IdentityDeniedError();
+    const [rows] = await this.pool.execute<ProofGenerationRow[]>(
+      `SELECT revocation_generation FROM ca_meta_magic_link_identities WHERE email_hash = ? LIMIT 1`,
+      [emailHash],
+    );
+    if (!rows[0]) return 0;
+    const generation = Number(rows[0].revocation_generation);
+    if (!Number.isSafeInteger(generation) || generation < 0) throw new IdentityDeniedError();
+    return generation;
+  }
+
   async associateVerifiedIdentity(input: {
     readonly emailHash: string;
     readonly principalId: string;
     readonly proofReferenceHash: string;
     readonly proofExpiresAt: string;
+    readonly proofGeneration: number;
   }): Promise<void> {
     if (!/^[a-f0-9]{64}$/.test(input.emailHash) || !/^[a-f0-9]{64}$/.test(input.proofReferenceHash) ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.principalId) ||
+      !Number.isSafeInteger(input.proofGeneration) || input.proofGeneration < 0 ||
       !Number.isFinite(Date.parse(input.proofExpiresAt))) throw new IdentityDeniedError();
 
     const connection = await this.pool.getConnection();
@@ -226,12 +244,16 @@ export class MysqlMagicLinkStore implements MagicLinkStore, MagicLinkIdentitySto
       );
       if (!membershipRows[0]) throw new IdentityDeniedError();
 
-      const [identityRows] = await connection.execute<Array<{ principal_id: string; revoked_at: string | null } & RowDataPacket>>(
-        'SELECT principal_id, revoked_at FROM ca_meta_magic_link_identities WHERE email_hash = ? LIMIT 1 FOR UPDATE',
+      const [identityRows] = await connection.execute<Array<{
+        principal_id: string; revoked_at: string | null; revocation_generation: number | string;
+      } & RowDataPacket>>(
+        'SELECT principal_id, revoked_at, revocation_generation FROM ca_meta_magic_link_identities WHERE email_hash = ? LIMIT 1 FOR UPDATE',
         [input.emailHash],
       );
       const existing = identityRows[0];
       if (existing && existing.principal_id !== input.principalId) throw new IdentityDeniedError();
+      const currentGeneration = existing ? Number(existing.revocation_generation) : 0;
+      if (!Number.isSafeInteger(currentGeneration) || currentGeneration !== input.proofGeneration) throw new IdentityDeniedError();
 
       await connection.execute(
         `INSERT INTO ca_meta_magic_link_identity_events
@@ -246,8 +268,10 @@ export class MysqlMagicLinkStore implements MagicLinkStore, MagicLinkIdentitySto
         );
       } else {
         await connection.execute(
-          `INSERT INTO ca_meta_magic_link_identities (email_hash, principal_id, verified_at, revoked_at, created_at)
-           VALUES (?, ?, UTC_TIMESTAMP(6), NULL, UTC_TIMESTAMP(6))`, [input.emailHash, input.principalId],
+          `INSERT INTO ca_meta_magic_link_identities
+           (email_hash, principal_id, verified_at, revoked_at, revocation_generation, created_at)
+           VALUES (?, ?, UTC_TIMESTAMP(6), NULL, ?, UTC_TIMESTAMP(6))`,
+          [input.emailHash, input.principalId, input.proofGeneration],
         );
       }
       await connection.commit();
@@ -275,8 +299,10 @@ export class MysqlMagicLinkStore implements MagicLinkStore, MagicLinkIdentitySto
     const connection = await this.pool.getConnection();
     await connection.beginTransaction();
     try {
-      const [identityRows] = await connection.execute<Array<{ principal_id: string; revoked_at: string | null } & RowDataPacket>>(
-        `SELECT principal_id, revoked_at FROM ca_meta_magic_link_identities
+      const [identityRows] = await connection.execute<Array<{
+        principal_id: string; revoked_at: string | null; revocation_generation: number | string;
+      } & RowDataPacket>>(
+        `SELECT principal_id, revoked_at, revocation_generation FROM ca_meta_magic_link_identities
          WHERE email_hash = ? LIMIT 1 FOR UPDATE`, [input.emailHash],
       );
       const existing = identityRows[0];
@@ -284,7 +310,8 @@ export class MysqlMagicLinkStore implements MagicLinkStore, MagicLinkIdentitySto
         throw new IdentityDeniedError();
       }
       const [update] = await connection.execute<ResultSetHeader>(
-        `UPDATE ca_meta_magic_link_identities SET revoked_at = UTC_TIMESTAMP(6)
+        `UPDATE ca_meta_magic_link_identities
+         SET revoked_at = UTC_TIMESTAMP(6), revocation_generation = revocation_generation + 1
          WHERE email_hash = ? AND principal_id = ? AND revoked_at IS NULL`, [input.emailHash, input.principalId],
       );
       if (update.affectedRows !== 1) throw new IdentityDeniedError();

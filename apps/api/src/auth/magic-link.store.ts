@@ -6,11 +6,13 @@ export const MAGIC_LINK_IDENTITY_STORE = Symbol('MAGIC_LINK_IDENTITY_STORE');
 export type MagicLinkIdentityRevocationReason = 'IDENTITY_CORRECTION' | 'COMPROMISE_REPORTED';
 
 export interface MagicLinkIdentityStore {
+  readProofGeneration(emailHash: string): Promise<number>;
   associateVerifiedIdentity(input: {
     readonly emailHash: string;
     readonly principalId: string;
     readonly proofReferenceHash: string;
     readonly proofExpiresAt: string;
+    readonly proofGeneration: number;
   }): Promise<void>;
   revokeIdentity(input: {
     readonly emailHash: string;

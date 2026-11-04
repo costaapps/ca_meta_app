@@ -21,7 +21,9 @@ const timestamp = '2026-11-03 12:00:00.000000';
 class SyntheticEmailProofVerifier extends MagicLinkEmailProofVerifier {
   private readonly proofs = new Map<string, { readonly email: string; readonly principalId: string }>();
 
-  constructor(recoveryKey: string) { super(recoveryKey); }
+  constructor(recoveryKey: string, generationReader: Pick<MysqlMagicLinkStore, 'readProofGeneration'>) {
+    super(recoveryKey, generationReader);
+  }
 
   add(input: { readonly email: string; readonly principalId: string; readonly proofReference: string }): string {
     this.proofs.set(input.proofReference, { email: input.email, principalId: input.principalId });
@@ -59,7 +61,7 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
   const email = `m3-03-${randomUUID()}@example.test`;
   const recoveryKey = environment.portalSessionRecoveryKey;
   const emailHash = hashMagicLinkEmail(email, recoveryKey);
-  const proofVerifier = new SyntheticEmailProofVerifier(recoveryKey);
+  const proofVerifier = new SyntheticEmailProofVerifier(recoveryKey, store);
 
   try {
     await dataSource.query("SET time_zone = '+00:00'");
@@ -131,6 +133,11 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
     const adminAssertion = assertionVerifier.issue();
     const actor = new PlatformIdentityAdminAuthority([{ issuer: adminAssertion.issuer, subject: adminAssertion.subject }])
       .verify(adminAssertion);
+    const proofIssuedBeforeRevocationReference = proofVerifier.add({
+      email, principalId: principalA, proofReference: `proof-${randomUUID()}`,
+    });
+    const proofIssuedBeforeRevocation = await proofVerifier.verifyProof(proofIssuedBeforeRevocationReference);
+    assert.ok(proofIssuedBeforeRevocation);
     await associations.revoke(actor, emailHash, principalA, 'IDENTITY_CORRECTION');
     assert.equal(await store.findEligibleTarget(emailHash), undefined, 'revocation blocks magic-link lookup for every tenant');
     const [revokedLinkRows] = await dataSource.query(
@@ -144,11 +151,17 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
       store.consumeAndIssueSession(pendingLinkTokenHash, pendingSessionMaterial), IdentityDeniedError,
       'a link issued before identity revocation cannot create a session',
     );
+    await assert.rejects(
+      associations.associate(proofIssuedBeforeRevocation),
+      IdentityDeniedError,
+      'a proof capability from the pre-revocation generation cannot restore the identity',
+    );
     await assert.rejects(associations.revoke(actor, emailHash, principalA, 'IDENTITY_CORRECTION'), IdentityDeniedError);
 
     const reverificationReference = proofVerifier.add({ email, principalId: principalA, proofReference: `proof-${randomUUID()}` });
     const reverificationProof = await proofVerifier.verifyProof(reverificationReference);
     assert.ok(reverificationProof);
+    assert.equal(reverificationProof.proofGeneration, 1);
     await associations.associate(reverificationProof);
     assert.equal((await store.findEligibleTarget(emailHash))?.principalId, principalA);
 

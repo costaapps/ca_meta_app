@@ -86,6 +86,13 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.schemaVersion, 14);
   assert.ok(MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.steps.some((step) => step.id === 'magic-link-identity-events-no-update'));
   assert.ok(MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.steps.some((step) => step.id === 'magic-link-identity-events-no-delete'));
+  const proofGenerationStep = MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.steps.find((step) => step.id === 'add-magic-link-identity-proof-generation');
+  assert.ok(proofGenerationStep && 'sql' in proofGenerationStep);
+  assert.match(proofGenerationStep.sql, /ADD COLUMN revocation_generation BIGINT UNSIGNED NOT NULL DEFAULT 0/);
+  assert.deepEqual(proofGenerationStep.compatiblePriorSteps?.map(({ migrationId, stepId }) => ({ migrationId, stepId })), [{
+    migrationId: '202610300008-magic-link-invitations',
+    stepId: 'create-magic-link-identity-associations',
+  }]);
   assert.ok(MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.steps[0]?.definition.includes('uq_ca_meta_magic_identity_proof'));
   const lifecycleTableStep = CREDENTIAL_LIFECYCLE_MIGRATION.steps.find((step) => step.id === 'create-credential-lifecycle');
   const reauthTableStep = CREDENTIAL_LIFECYCLE_MIGRATION.steps.find((step) => step.id === 'create-credential-reauth-intents');
