@@ -13,6 +13,7 @@ import { PRIVACY_GOVERNANCE_MIGRATION, PRIVACY_GOVERNANCE_TABLES } from './priva
 import { CREDENTIAL_LIFECYCLE_MIGRATION, CREDENTIAL_LIFECYCLE_TABLES } from './credential-lifecycle.js';
 import { PORTAL_SESSION_ENTRY_MODE_MIGRATION } from './portal-session-entry-mode.js';
 import { ONBOARDING_SESSIONS_MIGRATION, ONBOARDING_SESSION_TABLES } from './onboarding-sessions.js';
+import { LEGACY_IMPORT_MIGRATION, LEGACY_IMPORT_TABLES } from './legacy-import-ledger.js';
 
 function ddl(
   id: string,
@@ -277,6 +278,7 @@ const migrationsWithoutChecksums = [
   PRIVACY_GOVERNANCE_MIGRATION,
   CREDENTIAL_LIFECYCLE_MIGRATION,
   MAGIC_LINK_IDENTITY_LEDGER_MIGRATION,
+  LEGACY_IMPORT_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -302,5 +304,6 @@ export const DOMAIN_TABLES = [
   ...PRIVACY_GOVERNANCE_TABLES,
   ...CREDENTIAL_LIFECYCLE_TABLES,
   ...DURABLE_WORK_TABLES,
+  ...LEGACY_IMPORT_TABLES,
 ] as const;
 

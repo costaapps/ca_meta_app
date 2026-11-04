@@ -20,7 +20,7 @@ function assertCheckpoint(plan: LegacyImportPlan, checkpoint: LegacyImportBatchC
 
 /**
  * Storage-neutral resumable runner. It is intentionally not wired to an API route or production CLI.
- * A production port must atomically commit its metadata-only target write with each checkpoint.
+ * Its MariaDB port atomically commits an unverified metadata-only claim with each checkpoint.
  */
 export async function executeLegacyImportPlan(plan: LegacyImportPlan, targetAndLedger: LegacyImportApplyPort): Promise<LegacyImportBatchCheckpoint> {
   let checkpoint = await targetAndLedger.beginOrResume(plan);

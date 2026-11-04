@@ -1,6 +1,6 @@
-# ADR-010 — M3.11 legacy import preflight boundary
+# ADR-010 — M3.11 legacy import preflight and ledger boundary
 
-Status: proposed. Issue/spec: [#39](https://github.com/costaapps/ca_meta_app/issues/39), [legacy import preflight](../specs/legacy-import.md). Functional owner role: backend / data / DBA. Evidence SHA/date: implementation candidate pending; no production source was accessed.
+Status: implementation candidate. Issue/spec: [#39](https://github.com/costaapps/ca_meta_app/issues/39), [legacy import preflight](../specs/legacy-import.md). Functional owner role: backend / data / DBA. Evidence SHA/date: pending candidate commit and coordinator CI; no production source was accessed.
 
 ## Contexto comprovado
 
@@ -15,9 +15,9 @@ The M1.02 inventory and field mapping are based on reviewed versioned source cod
 
 ## Decision and consequence
 
-Implement the first option. The M3.11 command reads only the checked-in synthetic snapshot, defaults to dry-run, and rejects apply. The planner emits metadata-only `CLAIMED` candidates and quarantines uncertainty. It never reads GeneralSettings, raw tokens or unknown fields. Each item separates stable source identity from an allowlisted payload fingerprint so a future ledger can quarantine changed rows. Report identifiers are HMAC references generated from a future operator-supplied key; the local fixture uses an explicitly non-operational test key.
+Implement the first option. The M3.11 command reads only the checked-in synthetic snapshot, defaults to dry-run, and rejects apply. The planner emits metadata-only candidates and quarantines uncertainty. It never reads GeneralSettings, raw tokens or unknown fields. Schema v15 adds persistent batch, item and unique source-claim tables. Their adapter commits each fixed metadata-only claim/item outcome with the checkpoint in one transaction; it detects duplicate HMAC identities and quarantines a changed payload or target context. It persists HMAC references, internal target references and fixed classifications only; no source row ID, provider ID, credential or raw payload is stored. The durable claim is explicitly unverified and never creates a trusted `ca_meta_assets`, authorization, grant or relation row. Report identifiers are HMAC references generated from a future operator-supplied key; the local fixture uses an explicitly non-operational test key.
 
-Storage remains behind typed ports. Do not add tables, migration versions or registry entries until the M3.03 schema-v14 change is integrated; then add the persistent batch/item ledger as schema v15 and review the exact candidate again. No live database adapter or credential writer is part of this package. Any M5 apply requires separately authorized source DDL, read-only snapshot, approved tenant/app map, verified grant evidence, a same-transaction version fence and checkpoint, and a rollback plan.
+Storage remains behind typed ports. The v15 migration is a separate candidate from M3.03 schema v14; this implementation worktree was based on v13 before the v14 integration completed. Rebase the v15 entry after accepted v14, resolve registry/harness overlap, and validate the complete ordered schema 1–15 chain before acceptance. No live source database adapter or credential writer is part of this package. Any M5 apply requires separately authorized source DDL, read-only snapshot, approved tenant/app map, verified grant evidence, a same-transaction version fence and checkpoint, and a rollback plan.
 
 ## Segurança, efeitos e reversibilidade
 

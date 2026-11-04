@@ -21,10 +21,10 @@ export interface LegacyImportApplyResult {
 }
 
 /**
- * Future runtime adapter. A metadata candidate is written as an unverified claim with its legacy
- * reference only; this port has no method that accepts a token or creates a grant/relation.
- * Implementations must commit the target change and checkpoint in one transaction, compare the stable
- * sourceRecordHash and sourcePayloadHash on replay, and quarantine changed source rows instead of overwriting.
+ * A metadata candidate is persisted only as an unverified metadata claim, not as a trusted asset,
+ * authorization, grant or relation. The port has no method that accepts a source payload or credential.
+ * Implementations must commit that claim/item outcome and its checkpoint in one transaction, compare
+ * sourceRecordHash/sourcePayloadHash and exact target context on replay, and quarantine changes.
  */
 export interface LegacyImportApplyPort {
   beginOrResume(plan: LegacyImportPlan): Promise<LegacyImportBatchCheckpoint>;
