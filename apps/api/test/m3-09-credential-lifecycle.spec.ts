@@ -8,6 +8,7 @@ import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { JOB_POLICIES, parseJobPayload } from '../src/jobs/event-validation.js';
 import { decodeStoredJobPayload, type ClaimedJob, type JobStore } from '../src/jobs/job-store.js';
 import { DurableWorker } from '../src/worker/durable-worker.js';
+import { syntheticJobAuthorization } from './fixtures/authorized-worker.js';
 
 const tenantId = '00000000-0000-4000-8000-000000000001';
 const credentialId = '00000000-0000-4000-8000-000000000002';
@@ -141,11 +142,13 @@ async function runSyntheticLifecycle(input: { readonly adapter: boolean; readonl
       assert.equal(job.idempotencyKey, `credential-inspection:${credentialId}:1`);
       claim = {
         id: 'synthetic-job-id', tenantId, type: 'CREDENTIAL_INSPECTION',
+        resourceScopeRef: credentialId,
         lane: JOB_POLICIES.CREDENTIAL_INSPECTION.lane, effectMode: JOB_POLICIES.CREDENTIAL_INSPECTION.effectMode,
         payload, idempotencyKey: job.idempotencyKey, correlationId: job.correlationId, causationId: null,
         attempt: 1, maxAttempts: 1, claimToken: 'synthetic-claim-token', workerRef: 'synthetic-worker',
         budgetStartedAt: observedAt, createdAt: observedAt,
       };
+      assert.ok(claim);
       return { id: claim.id, duplicate: false };
     },
     async claimNext() {
@@ -173,7 +176,8 @@ async function runSyntheticLifecycle(input: { readonly adapter: boolean; readonl
     ? new CredentialInspectionWorker(fake.database, ports.policies, ports.secrets, ports.inspector, () => 0.5)
     : new CredentialInspectionWorker(fake.database, undefined, undefined, undefined, () => 0.5);
   const worker = new DurableWorker(store, { workerRef: 'synthetic-worker', leaseMs: 1_000, idlePollMs: 1 },
-    new Map([['CREDENTIAL_INSPECTION', processor.handler]]), new Map([['CREDENTIAL_INSPECTION', processor.finalizer]]));
+    new Map([['CREDENTIAL_INSPECTION', processor.handler]]), syntheticJobAuthorization,
+    new Map([['CREDENTIAL_INSPECTION', processor.finalizer]]));
   await worker.run(jobController.signal);
   return { fake, calls };
 }

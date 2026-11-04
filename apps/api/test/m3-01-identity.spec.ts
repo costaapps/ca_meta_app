@@ -17,8 +17,10 @@ import {
   PlatformIdentityAdminAuthority,
   PortalSessionVerifier,
   ServiceCredentialVerifier,
+  WorkerServiceIdentityVerifier,
   type VerifiedIdentityAssertion,
   type VerifiedPortalSession,
+  isVerifiedWorkerServiceIdentity,
 } from '../src/identity/identity.trust.js';
 import { IdentityAdministrationConflictError, MysqlIdentityAdministrationRepository } from '../src/identity/mysql-identity-administration.repository.js';
 import type { IdentityRepository, LegacyTenantMapping } from '../src/identity/identity.repository.js';
@@ -322,6 +324,22 @@ test('service authorization uses tenant-scoped service scopes and never human me
   await services.authorize(serviceScope, 'CREDENTIAL_USE', tenantA);
   await assert.rejects(services.authorize(serviceScope, 'WEBHOOK_ROUTE', tenantA));
   await assert.rejects(services.authorize(serviceScope, 'CREDENTIAL_USE', tenantB));
+
+  const workerProof = 'synthetic-worker-proof-with-more-than-32-bytes';
+  const workerIdentityVerifier = new WorkerServiceIdentityVerifier([{
+    principalId: serviceId,
+    credentialSha256: createHash('sha256').update(workerProof).digest('hex'),
+  }]);
+  assert.equal(workerIdentityVerifier.verify('untrusted-worker-proof-with-more-than-32-bytes'), undefined);
+  const workerIdentity = workerIdentityVerifier.verify(workerProof);
+  assert.ok(workerIdentity);
+  assert.equal(isVerifiedWorkerServiceIdentity(workerIdentity), true);
+  assert.equal(Object.hasOwn(workerIdentity, 'credential'), false);
+  const workerScope = await services.resolveJobScope(workerIdentity, tenantA);
+  await services.authorize(workerScope, 'CREDENTIAL_USE', tenantA);
+  await assert.rejects(services.resolveJobScope(workerIdentity, tenantB), IdentityDeniedError);
+  await assert.rejects(services.resolveJobScope({ principalId: serviceId } as never, tenantA), IdentityDeniedError);
+
   await assert.rejects(services.resolveScope({ principalId: serviceId, tenantId: tenantA } as never), IdentityDeniedError);
   await assert.rejects(services.resolveScope(serviceId as never), IdentityDeniedError);
   await assert.rejects(

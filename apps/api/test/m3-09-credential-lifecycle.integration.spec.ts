@@ -24,6 +24,7 @@ import type { JobType } from '../src/jobs/event-validation.js';
 import type { EntityManager } from 'typeorm';
 import { AuditEventWriter } from '../src/privacy/audit.service.js';
 import { DurableWorker, type JobFinalizer, type JobHandler } from '../src/worker/durable-worker.js';
+import { syntheticJobAuthorization } from './fixtures/authorized-worker.js';
 
 type JobFinishCallback = NonNullable<Parameters<JobStore['finish']>[3]>;
 
@@ -373,7 +374,7 @@ test('M3.09 MariaDB v13 schema, due lease/idempotent job, reauth impact dedupe, 
       const handlers = new Map<JobType, JobHandler>([['CREDENTIAL_INSPECTION', processor.handler]]);
       const finalizers = new Map<JobType, JobFinalizer>([['CREDENTIAL_INSPECTION', finalizer]]);
       const worker = new DurableWorker(instrumentedJobs,
-        { workerRef: `m3-09-worker:${randomUUID()}`, leaseMs: 30_000 }, handlers, finalizers);
+        { workerRef: `m3-09-worker:${randomUUID()}`, leaseMs: 30_000 }, handlers, syntheticJobAuthorization, finalizers);
       try {
         await worker.run(controller.signal);
       } catch (error) {

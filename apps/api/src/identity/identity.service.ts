@@ -15,10 +15,12 @@ import {
   isVerifiedPersistedJobContext,
   isVerifiedPortalSession,
   isVerifiedServiceCredential,
+  isVerifiedWorkerServiceIdentity,
   type VerifiedPersistedJobContext,
   type VerifiedPortalSession,
   type VerifiedIdentityAssertion,
   type VerifiedServiceCredential,
+  type VerifiedWorkerServiceIdentity,
 } from './identity.trust.js';
 
 const ALLOWED_ROLES = new Set<MembershipRole>(['owner', 'admin', 'operator', 'viewer']);
@@ -249,6 +251,16 @@ export class ServiceTenantAuthorizationService {
   async resolveScope(credential: VerifiedServiceCredential): Promise<VerifiedServiceTenantScope> {
     if (!isVerifiedServiceCredential(credential)) throw new IdentityDeniedError();
     const { principalId, tenantId } = credential;
+    return this.resolveForPrincipalTenant(principalId, tenantId);
+  }
+
+  /** Resolve a worker identity only against the tenant derived from an active persisted job row. */
+  async resolveJobScope(identity: VerifiedWorkerServiceIdentity, tenantId: string): Promise<VerifiedServiceTenantScope> {
+    if (!isVerifiedWorkerServiceIdentity(identity) || !tenantId) throw new IdentityDeniedError();
+    return this.resolveForPrincipalTenant(identity.principalId, tenantId);
+  }
+
+  private async resolveForPrincipalTenant(principalId: string, tenantId: string): Promise<VerifiedServiceTenantScope> {
     const grant = await this.repository.findServiceTenantGrant(principalId, tenantId);
     if (
       !grant ||

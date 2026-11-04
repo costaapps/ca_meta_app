@@ -1,15 +1,17 @@
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 
 declare const verifiedPortalSessionBrand: unique symbol;
 declare const verifiedIdentityAssertionBrand: unique symbol;
 declare const platformIdentityAdminBrand: unique symbol;
 declare const verifiedServiceCredentialBrand: unique symbol;
+declare const verifiedWorkerServiceIdentityBrand: unique symbol;
 declare const verifiedPersistedJobContextBrand: unique symbol;
 
 const verifiedPortalSessions = new WeakSet<object>();
 const verifiedAssertions = new WeakSet<object>();
 const platformAdministrators = new WeakSet<object>();
 const verifiedServiceCredentials = new WeakSet<object>();
+const verifiedWorkerServiceIdentities = new WeakSet<object>();
 const verifiedPersistedJobs = new WeakSet<object>();
 
 export type PortalEntryMode = 'PORTAL_TOP_LEVEL' | 'SUITE4_EMBED';
@@ -47,6 +49,18 @@ export interface VerifiedServiceCredential {
   readonly [verifiedServiceCredentialBrand]: true;
   readonly principalId: string;
   readonly tenantId: string;
+}
+
+/** Authenticated worker principal. Tenant authority is resolved separately from the persisted job. */
+export interface VerifiedWorkerServiceIdentity {
+  readonly [verifiedWorkerServiceIdentityBrand]: true;
+  readonly principalId: string;
+}
+
+export interface WorkerServiceCredentialHash {
+  readonly principalId: string;
+  /** Lowercase SHA-256 hex digest of a high-entropy worker proof. The proof itself is never configured here. */
+  readonly credentialSha256: string;
 }
 
 export interface VerifiedPersistedJobContext {
@@ -108,6 +122,10 @@ export function isVerifiedServiceCredential(value: unknown): value is VerifiedSe
   return typeof value === 'object' && value !== null && verifiedServiceCredentials.has(value);
 }
 
+export function isVerifiedWorkerServiceIdentity(value: unknown): value is VerifiedWorkerServiceIdentity {
+  return typeof value === 'object' && value !== null && verifiedWorkerServiceIdentities.has(value);
+}
+
 export function isVerifiedPersistedJobContext(value: unknown): value is VerifiedPersistedJobContext {
   return typeof value === 'object' && value !== null && verifiedPersistedJobs.has(value);
 }
@@ -140,6 +158,35 @@ export abstract class ServiceCredentialVerifier implements ServiceCredentialProo
     if (!principalId || !tenantId) throw new Error('The verified service credential context is malformed.');
     const result = Object.freeze({ principalId, tenantId }) as VerifiedServiceCredential;
     verifiedServiceCredentials.add(result);
+    return result;
+  }
+}
+
+/** Verifies a worker process proof against a hash-only server configuration. */
+export class WorkerServiceIdentityVerifier {
+  private readonly credentials: readonly { readonly principalId: string; readonly digest: Buffer }[];
+
+  constructor(credentials: readonly WorkerServiceCredentialHash[]) {
+    this.credentials = Object.freeze(credentials.map(({ principalId, credentialSha256 }) => {
+      if (!principalId || !/^[a-f0-9]{64}$/.test(credentialSha256)) {
+        throw new Error('Worker service credential configuration is malformed.');
+      }
+      return Object.freeze({ principalId, digest: Buffer.from(credentialSha256, 'hex') });
+    }));
+  }
+
+  verify(credential: string | undefined): VerifiedWorkerServiceIdentity | undefined {
+    if (typeof credential !== 'string' || Buffer.byteLength(credential, 'utf8') < 32 ||
+        Buffer.byteLength(credential, 'utf8') > 512) return undefined;
+    const candidate = createHash('sha256').update(credential, 'utf8').digest();
+    let match: string | undefined;
+    for (const configured of this.credentials) {
+      if (timingSafeEqual(candidate, configured.digest)) match = configured.principalId;
+    }
+    candidate.fill(0);
+    if (!match) return undefined;
+    const result = Object.freeze({ principalId: match }) as VerifiedWorkerServiceIdentity;
+    verifiedWorkerServiceIdentities.add(result);
     return result;
   }
 }
