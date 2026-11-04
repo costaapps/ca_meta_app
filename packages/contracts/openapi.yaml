@@ -2822,6 +2822,7 @@ components:
         - readiness
         - observedAt
         - stale
+        - assetCount
       properties:
         id:
           type: string
