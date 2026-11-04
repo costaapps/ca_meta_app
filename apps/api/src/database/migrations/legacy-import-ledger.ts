@@ -70,7 +70,7 @@ const claimSql = `CREATE TABLE IF NOT EXISTS ca_meta_legacy_import_claims (
   tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   app_configuration_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   provider VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'META',
-  environment ENUM('development','test','staging','production') CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  environment VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   asset_kind ENUM('FACEBOOK_PAGE','WHATSAPP_BUSINESS_ACCOUNT','WHATSAPP_PHONE_NUMBER') CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   target_asset_ref CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   credential_disposition ENUM('ABSENT','REQUIRES_REAUTH') CHARACTER SET ascii COLLATE ascii_bin NOT NULL,

@@ -114,6 +114,22 @@ test('M3.11 MariaDB ledger resumes atomically, deduplicates stable claims and qu
       [repeatedPlan.batchId],
     ) as Array<{ item_state: string }>;
     assert.equal(repeatedItem[0]?.item_state, 'REPLAYED');
+    const originalCandidate = originalPlan.items[0];
+    assert.ok(originalCandidate);
+    await assert.rejects(
+      ledger.rollbackMetadataCandidateAndCheckpoint(resumed, originalCandidate, 1),
+      /cannot be rolled back after another batch replayed it/,
+    );
+    const replayedItemAfterRollbackAttempt = await dataSource.query(
+      'SELECT item_state FROM ca_meta_legacy_import_items WHERE batch_id = ? AND sequence = 1',
+      [repeatedPlan.batchId],
+    ) as Array<{ item_state: string }>;
+    const ownerClaimAfterRollbackAttempt = await dataSource.query(
+      'SELECT created_batch_id FROM ca_meta_legacy_import_claims WHERE source_record_hash = ?',
+      [originalCandidate.sourceRecordHash],
+    ) as Array<{ created_batch_id: string }>;
+    assert.equal(replayedItemAfterRollbackAttempt[0]?.item_state, 'REPLAYED');
+    assert.equal(ownerClaimAfterRollbackAttempt[0]?.created_batch_id, originalPlan.batchId);
 
     const changedPlan = plan('synthetic-watermark-v3', 'synthetic-provider-id-changed-payload');
     assert.equal(changedPlan.items[0]?.sourceRecordHash, originalPlan.items[0]?.sourceRecordHash);

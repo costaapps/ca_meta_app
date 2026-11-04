@@ -38,6 +38,12 @@ interface ClaimRow {
   credential_disposition: LegacyImportPlanItem['credentialDisposition'];
   expiry_observation: LegacyImportPlanItem['expiryObservation'];
 }
+interface OwnedClaimRow extends ClaimRow {
+  created_batch_id: string;
+  created_sequence: number | string;
+  version: number | string;
+  claim_state: string;
+}
 
 export class LegacyImportLedgerConflictError extends Error {
   constructor(message = 'Legacy import ledger state conflicts with the requested checkpoint.') {
@@ -349,10 +355,30 @@ export class MysqlLegacyImportLedger implements LegacyImportApplyPort {
         throw new LegacyImportLedgerConflictError('Only a claim created by this batch can be rolled back.');
       }
       assertPersistedItem(persistedItem, item);
+      const ownerClaimRows = await manager.query(
+        `SELECT source_payload_hash, tenant_id, app_configuration_id, environment, asset_kind,
+           target_asset_ref, credential_disposition, expiry_observation, created_batch_id, created_sequence, version, claim_state
+         FROM ca_meta_legacy_import_claims WHERE source_record_hash = ? FOR UPDATE`,
+        [persistedItem.source_record_hash],
+      ) as OwnedClaimRow[];
+      const ownerClaim = ownerClaimRows[0];
+      if (!ownerClaim || ownerClaim.created_batch_id !== batch.batch_id ||
+          Number(ownerClaim.created_sequence) !== item.sequence || Number(ownerClaim.version) !== expectedImportedAssetVersion ||
+          ownerClaim.claim_state !== 'UNVERIFIED_METADATA_ONLY' || !sameClaim(ownerClaim, item)) {
+        throw new LegacyImportLedgerConflictError('Legacy metadata claim changed or was replayed by another batch.');
+      }
+      const replayedRows = await manager.query(
+        `SELECT batch_id FROM ca_meta_legacy_import_items
+         WHERE source_record_hash = ? AND batch_id <> ? AND item_state = 'REPLAYED' LIMIT 1`,
+        [persistedItem.source_record_hash, batch.batch_id],
+      ) as Array<{ batch_id: string }>;
+      if (replayedRows.length > 0) {
+        throw new LegacyImportLedgerConflictError('Legacy metadata claim cannot be rolled back after another batch replayed it.');
+      }
       const removed = await manager.query(
         `DELETE FROM ca_meta_legacy_import_claims WHERE source_record_hash = ? AND created_batch_id = ?
            AND created_sequence = ? AND version = ? AND claim_state = 'UNVERIFIED_METADATA_ONLY'`,
-        [item.sourceRecordHash, batch.batch_id, item.sequence, expectedImportedAssetVersion],
+        [persistedItem.source_record_hash, batch.batch_id, item.sequence, expectedImportedAssetVersion],
       );
       if (affectedRows(removed) !== 1) throw new LegacyImportLedgerConflictError('Legacy metadata claim changed or was replayed by another batch.');
       const changed = await manager.query(
