@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { EntityManager } from 'typeorm';
+import type { MetaAuthVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { OutboxEventEnvelope } from '../jobs/event-validation.js';
 import type { OutboxService } from '../outbox/outbox-service.js';
@@ -7,18 +8,31 @@ import { privacyRefHash, type AuditEventWriter } from '../privacy/audit.service.
 import { isSafeOpaqueReference } from '../privacy/redaction.js';
 import {
   assetIdentityHash,
+  isMetaAssetKind,
   isVerifiedMetaEvidence,
   MetaAssetsConflictError,
   validateAuthorizationUpsert,
   type AssetClaimInput,
   type AssetReadModel,
   type AssetAuthorizationState,
+  type AssetCatalogPage,
+  type AssetCatalogPageQuery,
+  type AssetCatalogReadModel,
+  type AssetCapabilityEvidence,
+  type AssetDiagnostics,
+  type ConnectionCatalogPage,
+  type ConnectionCatalogPageQuery,
+  type ConnectionCatalogReadModel,
+  type FlowCatalogApps,
+  type EvidenceSource,
+  type TokenHealthState,
+  type TokenExpiryState,
   type AssetRelationType,
   type AssetVerificationState,
+  type AuthorizationState,
   type AuthorizationReadModel,
   type AuthorizationUpsertCommand,
   type AuthorizationUpsertResult,
-  type EvidenceSource,
   type LegacyAssetReference,
   type MetaEnvironment,
   type ProjectionState,
@@ -27,9 +41,18 @@ import {
 
 export const META_ASSETS_REPOSITORY = Symbol('META_ASSETS_REPOSITORY');
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string): boolean { return UUID.test(value); }
+
 export interface MetaAssetsRepository {
   upsert(command: AuthorizationUpsertCommand): Promise<AuthorizationUpsertResult>;
   listReadModels(input: { readonly tenantId: string; readonly appConfigurationId: string; readonly environment: MetaEnvironment }): Promise<readonly AuthorizationReadModel[]>;
+  listAssetCatalog(input: AssetCatalogPageQuery): Promise<AssetCatalogPage>;
+  findAssetCatalog(input: { readonly tenantId: string; readonly environment: MetaEnvironment; readonly assetRef: string }): Promise<AssetCatalogReadModel | undefined>;
+  listConnectionCatalog(input: ConnectionCatalogPageQuery): Promise<ConnectionCatalogPage>;
+  findConnectionCatalog(input: { readonly tenantId: string; readonly environment: MetaEnvironment; readonly connectionRef: string }): Promise<ConnectionCatalogReadModel | undefined>;
+  listFlowCatalogApps(input: { readonly tenantId: string; readonly environment: MetaEnvironment }): Promise<FlowCatalogApps>;
 }
 
 interface AuthorizationRow {
@@ -54,6 +77,93 @@ interface AssetAuthorizationRow {
   verification_state: AssetVerificationState; subscription_state: SubscriptionState; projection_state: ProjectionState;
   version: string | number; updated_at: string | Date;
 }
+interface AssetCatalogRow {
+  id: string;
+  app_configuration_id: string;
+  asset_kind: string;
+  status: AssetCatalogReadModel['status'];
+  authorization_status: AssetCatalogReadModel['authorizationStatus'];
+  observed_at: string | Date;
+  last_verified_at: string | Date | null;
+  reauthorization_required: number | string;
+}
+interface ConnectionCatalogRow {
+  id: string;
+  flow_variant: string | null;
+  auth_variant: string | null;
+  authorization_state: AuthorizationState;
+  observed_at: string | Date;
+  last_verified_at: string | Date | null;
+  verification_source: string | null;
+  token_health: string | null;
+  token_health_observed_at: string | Date | null;
+  subscription_state: string | null;
+  projection_state: string | null;
+  asset_count: string | number;
+  verified_asset_count: string | number;
+  stale: number | string;
+}
+
+function isMetaFlowVariant(value: string | null): value is MetaFlowVariant {
+  return value === 'FACEBOOK' || value === 'INSTAGRAM' || value === 'WHATSAPP_EXCLUSIVE' || value === 'WHATSAPP_COEXISTENCE';
+}
+
+function isMetaAuthVariant(value: string | null): value is MetaAuthVariant {
+  return value === 'FACEBOOK_LOGIN_FOR_BUSINESS' || value === 'INSTAGRAM_LOGIN' ||
+    value === 'WHATSAPP_EMBEDDED_SIGNUP' || value === 'WHATSAPP_BUSINESS_APP_ONBOARDING';
+}
+
+function publicFlowVariant(flow: string | null, auth: string | null): ConnectionCatalogReadModel['flowVariant'] | undefined {
+  if (flow === 'FACEBOOK' && auth === 'FACEBOOK_LOGIN_FOR_BUSINESS') return 'FACEBOOK_LOGIN';
+  if (flow === 'INSTAGRAM' && auth === 'INSTAGRAM_LOGIN') return 'INSTAGRAM_LOGIN';
+  if (flow === 'INSTAGRAM' && auth === 'FACEBOOK_LOGIN_FOR_BUSINESS') return 'INSTAGRAM_VIA_FACEBOOK_LOGIN';
+  if (flow === 'WHATSAPP_EXCLUSIVE' && auth === 'WHATSAPP_EMBEDDED_SIGNUP') return 'WHATSAPP_CLOUD_API';
+  if (flow === 'WHATSAPP_COEXISTENCE' && auth === 'WHATSAPP_BUSINESS_APP_ONBOARDING') return 'WHATSAPP_COEXISTENCE';
+  return undefined;
+}
+
+function evidenceSource(value: string | null): EvidenceSource | null {
+  return value === 'META_API' || value === 'SIGNED_WEBHOOK' ? value : null;
+}
+
+function tokenHealth(value: string | null): TokenHealthState {
+  return value === 'HEALTHY' || value === 'EXPIRING' || value === 'EXPIRED' || value === 'REVOKED' ||
+    value === 'ACTION_REQUIRED' || value === 'STALE' ? value : 'UNKNOWN';
+}
+
+function tokenExpiryState(value: string | null): TokenExpiryState {
+  return value === 'KNOWN' || value === 'PROVIDER_NO_EXPIRY' || value === 'STALE' ? value : 'UNKNOWN';
+}
+
+function subscriptionState(value: string | null): SubscriptionState {
+  return value === 'PENDING' || value === 'ACTIVE' || value === 'FAILED' || value === 'REMOVED' ? value : 'UNKNOWN';
+}
+
+function projectionState(value: string | null): ProjectionState {
+  return value === 'PENDING' || value === 'SYNCED' || value === 'STALE' || value === 'FAILED' ? value : 'UNKNOWN';
+}
+
+function sameOrUnknown<T extends string>(values: readonly T[], fallback: T): T {
+  if (values.length === 0) return fallback;
+  return values.every((value) => value === values[0]) ? values[0]! : fallback;
+}
+
+function latestTimestamp(values: readonly (string | null)[]): string | null {
+  const valid = values.filter((value): value is string => value !== null && Number.isFinite(Date.parse(value)));
+  return valid.sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+}
+
+function summarizeDiagnostics(evidence: readonly AssetCapabilityEvidence[], metaObservedAt: string | null): AssetDiagnostics {
+  return Object.freeze({
+    onboardingStatus: 'UNKNOWN', onboardingReadiness: 'UNKNOWN', onboardingNextAction: 'UNKNOWN',
+    tokenHealth: sameOrUnknown(evidence.map((item) => item.tokenHealth), 'UNKNOWN'),
+    tokenHealthObservedAt: latestTimestamp(evidence.map((item) => item.tokenHealthObservedAt)),
+    metaState: sameOrUnknown(evidence.map((item) => item.authorizationState), 'UNKNOWN'),
+    metaObservedAt,
+    subscriptionState: sameOrUnknown(evidence.map((item) => item.subscriptionState), 'UNKNOWN'),
+    projectionState: sameOrUnknown(evidence.map((item) => item.projectionState), 'UNKNOWN'),
+  });
+}
 interface OutboxAppender { appendWithin(manager: EntityManager, event: unknown): Promise<unknown> }
 
 const GRANTABLE_RELATIONS: Readonly<Record<AssetRelationType, { source: readonly string[]; target: readonly string[] }>> = {
@@ -74,6 +184,7 @@ function normalizedMysqlDate(value: string | Date): string {
 function dateString(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : new Date(value.replace(' ', 'T') + (value.includes('Z') ? '' : 'Z')).toISOString();
 }
+function formatDate(value: string | Date): string { return dateString(value); }
 function rowAffected(result: unknown): number {
   const header = Array.isArray(result) ? result[0] : result;
   if (typeof header === 'object' && header !== null && 'affectedRows' in header) return Number((header as { affectedRows?: number }).affectedRows ?? 0);
@@ -297,6 +408,326 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     ]);
     return this.mapReadModels(rows, scopeRows, assetRows, grantRows, relationRows);
   }
+
+  async listAssetCatalog(input: AssetCatalogPageQuery): Promise<AssetCatalogPage> {
+    const maximumPage = input.authorizationRef ? 500 : 100;
+    if (!isUuid(input.tenantId) || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > maximumPage ||
+        (input.authorizationRef !== undefined && !isUuid(input.authorizationRef))) {
+      throw new MetaAssetsConflictError('Asset catalog query is invalid.');
+    }
+    const dataSource = await this.database.getDataSource();
+    const activeVerified = `MAX(CASE WHEN aa.state = 'ACTIVE' AND aa.verification_state = 'VERIFIED' AND auth.authorization_state = 'ACTIVE' THEN 1 ELSE 0 END)`;
+    const revoked = `MAX(CASE WHEN aa.state = 'REVOKED' OR auth.authorization_state IN ('REVOKED', 'DISCONNECTED') THEN 1 ELSE 0 END)`;
+    const statusExpression = `CASE
+      WHEN MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) IS NOT NULL
+        AND MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 24 HOUR) THEN 'STALE'
+      WHEN ${activeVerified} = 1 THEN 'ACTIVE'
+      WHEN ${revoked} = 1 THEN 'INACTIVE'
+      ELSE 'UNKNOWN' END`;
+    const authorizationStatusExpression = `CASE
+      WHEN ${activeVerified} = 1 THEN 'VERIFIED'
+      WHEN ${revoked} = 1 THEN 'REVOKED'
+      ELSE 'UNKNOWN' END`;
+    const clauses = [
+      'a.tenant_id = ?',
+      'a.environment = ?',
+      "app.provider = 'META'",
+    ];
+    const values: Array<string | number> = [input.tenantId, input.environment];
+    if (input.assetRef) { clauses.push('a.id = ?'); values.push(input.assetRef); }
+    if (input.authorizationRef) { clauses.push('auth.id = ?'); values.push(input.authorizationRef); }
+    if (input.cursor) { clauses.push('a.id > ?'); values.push(input.cursor); }
+    if (input.channel === 'FACEBOOK') { clauses.push("auth.flow_variant = 'FACEBOOK'"); }
+    if (input.channel === 'INSTAGRAM') { clauses.push("auth.flow_variant = 'INSTAGRAM'"); }
+    if (input.channel === 'WHATSAPP') { clauses.push("auth.flow_variant IN ('WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE')"); }
+    if (input.number !== undefined) {
+      clauses.push("a.asset_kind = 'WHATSAPP_PHONE_NUMBER' AND a.external_id = ?");
+      values.push(input.number);
+    }
+    values.push(input.limit + 1);
+    const rows = await dataSource.query(
+      `SELECT a.id, a.app_configuration_id, a.asset_kind,
+              ${statusExpression} AS status,
+              ${authorizationStatusExpression} AS authorization_status,
+              MAX(auth.observed_at) AS observed_at,
+              MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) AS last_verified_at,
+              MAX(CASE WHEN auth.authorization_state = 'REAUTH_REQUIRED' OR EXISTS (
+                SELECT 1 FROM ca_meta_credential_reauth_impacts impact
+                INNER JOIN ca_meta_credential_reauth_intents intent
+                  ON intent.tenant_id = impact.tenant_id AND intent.id = impact.reauth_intent_id
+                 AND intent.authorization_id = impact.authorization_id
+                 AND intent.app_configuration_id = impact.app_configuration_id
+                 AND intent.provider = impact.provider AND intent.environment = impact.environment
+                WHERE impact.tenant_id = a.tenant_id AND impact.asset_id = a.id
+                  AND impact.authorization_id = aa.authorization_id
+                  AND impact.app_configuration_id = aa.app_configuration_id
+                  AND impact.provider = 'META' AND impact.environment = a.environment
+                  AND intent.status IN ('PENDING', 'ACKNOWLEDGED')
+              ) THEN 1 ELSE 0 END) AS reauthorization_required
+       FROM ca_meta_assets a
+       INNER JOIN ca_meta_app_configurations app
+         ON app.tenant_id = a.tenant_id AND app.id = a.app_configuration_id
+        AND app.provider = 'META' AND app.environment = a.environment
+       INNER JOIN ca_meta_asset_authorizations aa
+         ON aa.tenant_id = a.tenant_id AND aa.asset_id = a.id
+        AND aa.app_configuration_id = a.app_configuration_id AND aa.environment = a.environment
+       INNER JOIN ca_meta_authorizations auth
+         ON auth.tenant_id = aa.tenant_id AND auth.id = aa.authorization_id
+        AND auth.app_configuration_id = aa.app_configuration_id AND auth.environment = aa.environment
+       WHERE ${clauses.join(' AND ')}
+       GROUP BY a.id, a.asset_kind
+       ${input.status ? `HAVING ${statusExpression} = ?` : ''}
+       ORDER BY a.id ASC LIMIT ?`,
+      input.status ? [...values.slice(0, -1), input.status, input.limit + 1] : values,
+    ) as AssetCatalogRow[];
+    const hasMore = rows.length > input.limit;
+    const pageRows = hasMore ? rows.slice(0, input.limit) : rows;
+    const assetIds = pageRows.map((row) => row.id);
+    const appConfigurationIds = [...new Set(pageRows.map((row) => row.app_configuration_id))];
+    const capabilityRows = assetIds.length === 0 ? [] : await dataSource.query(
+      `SELECT aa.asset_id, aa.authorization_id, aa.state AS asset_authorization_state,
+              aa.verification_state, aa.verified_at, aa.verification_source,
+              aa.subscription_state, aa.projection_state,
+              auth.flow_variant, auth.auth_variant, auth.authorization_state, auth.observed_at AS authorization_observed_at,
+              lifecycle.health_state AS token_health, lifecycle.health_source AS token_health_source,
+              lifecycle.health_observed_at AS token_health_observed_at,
+              lifecycle.expiry_state AS token_expiry_state, lifecycle.expires_at AS token_expires_at,
+              lifecycle.expiry_source AS token_expiry_source, lifecycle.expiry_observed_at AS token_expiry_observed_at,
+              lifecycle.data_access_expires_at AS data_access_expires_at,
+              lifecycle.data_access_expiry_source AS data_access_expiry_source,
+              lifecycle.data_access_expiry_observed_at AS data_access_expiry_observed_at,
+              g.grant_name
+       FROM ca_meta_asset_authorizations aa
+       INNER JOIN ca_meta_authorizations auth
+         ON auth.tenant_id = aa.tenant_id AND auth.id = aa.authorization_id
+        AND auth.app_configuration_id = aa.app_configuration_id AND auth.environment = aa.environment
+       INNER JOIN ca_meta_app_configurations app
+         ON app.tenant_id = aa.tenant_id AND app.id = aa.app_configuration_id
+        AND app.provider = 'META' AND app.environment = aa.environment
+       LEFT JOIN ca_meta_credentials credential
+         ON credential.tenant_id = aa.tenant_id AND credential.id = aa.credential_id
+        AND credential.authorization_id = aa.authorization_id AND credential.app_configuration_id = aa.app_configuration_id
+        AND credential.provider = 'META' AND credential.environment = aa.environment
+       LEFT JOIN ca_meta_credential_lifecycle lifecycle
+         ON lifecycle.tenant_id = credential.tenant_id AND lifecycle.credential_id = credential.id
+        AND lifecycle.authorization_id = aa.authorization_id AND lifecycle.app_configuration_id = aa.app_configuration_id
+        AND lifecycle.provider = 'META' AND lifecycle.environment = aa.environment
+       LEFT JOIN ca_meta_asset_grants g
+         ON g.tenant_id = aa.tenant_id AND g.authorization_id = aa.authorization_id
+        AND g.asset_id = aa.asset_id AND g.app_configuration_id = aa.app_configuration_id
+        AND g.environment = aa.environment AND g.status = 'GRANTED'
+       WHERE aa.tenant_id = ? AND aa.environment = ?
+         AND aa.app_configuration_id IN (${appConfigurationIds.map(() => '?').join(', ')})
+         AND aa.asset_id IN (${assetIds.map(() => '?').join(', ')})
+       ORDER BY aa.asset_id, aa.authorization_id, g.grant_name`,
+      [input.tenantId, input.environment, ...appConfigurationIds, ...assetIds],
+    ) as Array<{
+      asset_id: string; authorization_id: string; asset_authorization_state: AssetAuthorizationState;
+      verification_state: AssetVerificationState; verified_at: string | Date | null; verification_source: string | null;
+      subscription_state: SubscriptionState; projection_state: ProjectionState;
+      flow_variant: string | null; auth_variant: string | null; authorization_state: AuthorizationState;
+      authorization_observed_at: string | Date; token_health: string | null; token_health_observed_at: string | Date | null;
+      token_health_source: string | null; token_expiry_state: string | null; token_expires_at: string | Date | null;
+      token_expiry_source: string | null; token_expiry_observed_at: string | Date | null;
+      data_access_expires_at: string | Date | null; data_access_expiry_source: string | null;
+      data_access_expiry_observed_at: string | Date | null;
+      grant_name: string | null;
+    }>;
+    const evidenceByAsset = new Map<string, Map<string, { evidence: Omit<AssetCapabilityEvidence, 'grantNames'>; grants: Set<string> }>>();
+    for (const row of capabilityRows) {
+      let byAuthorization = evidenceByAsset.get(row.asset_id);
+      if (!byAuthorization) { byAuthorization = new Map(); evidenceByAsset.set(row.asset_id, byAuthorization); }
+      let entry = byAuthorization.get(row.authorization_id);
+      if (!entry) {
+        entry = {
+          evidence: {
+            flowVariant: isMetaFlowVariant(row.flow_variant) ? row.flow_variant : null,
+            authVariant: isMetaAuthVariant(row.auth_variant) ? row.auth_variant : null,
+            authorizationState: row.authorization_state,
+            assetAuthorizationState: row.asset_authorization_state,
+            verificationState: row.verification_state,
+            verifiedAt: row.verification_state === 'VERIFIED' && row.verified_at ? formatDate(row.verified_at) : null,
+            verificationSource: row.verification_state === 'VERIFIED' ? evidenceSource(row.verification_source) : null,
+            tokenHealth: tokenHealth(row.token_health),
+            tokenHealthSource: evidenceSource(row.token_health_source),
+            tokenHealthObservedAt: row.token_health_observed_at ? formatDate(row.token_health_observed_at) : null,
+            tokenExpiryState: tokenExpiryState(row.token_expiry_state),
+            tokenExpiresAt: row.token_expires_at ? formatDate(row.token_expires_at) : null,
+            tokenExpirySource: evidenceSource(row.token_expiry_source),
+            tokenExpiryObservedAt: row.token_expiry_observed_at ? formatDate(row.token_expiry_observed_at) : null,
+            dataAccessExpiresAt: row.data_access_expires_at ? formatDate(row.data_access_expires_at) : null,
+            dataAccessExpirySource: evidenceSource(row.data_access_expiry_source),
+            dataAccessExpiryObservedAt: row.data_access_expiry_observed_at ? formatDate(row.data_access_expiry_observed_at) : null,
+            subscriptionState: subscriptionState(row.subscription_state),
+            projectionState: projectionState(row.projection_state),
+          },
+          grants: new Set(),
+        };
+        byAuthorization.set(row.authorization_id, entry);
+      }
+      if (row.grant_name) entry.grants.add(row.grant_name);
+    }
+    const items = pageRows.flatMap((row) => {
+      if (!isMetaAssetKind(row.asset_kind)) return [];
+      const evidence = [...(evidenceByAsset.get(row.id)?.values() ?? [])].map((entry) => Object.freeze({
+        ...entry.evidence, grantNames: Object.freeze([...entry.grants].sort()),
+      }));
+      const verified = evidence.filter((item) => item.verificationState === 'VERIFIED' && item.verifiedAt !== null && item.verificationSource !== null)
+        .sort((left, right) => Date.parse(right.verifiedAt!) - Date.parse(left.verifiedAt!));
+      return [Object.freeze({
+        assetRef: row.id,
+        appConfigurationId: row.app_configuration_id,
+        kind: row.asset_kind,
+        status: row.status,
+        authorizationStatus: row.authorization_status,
+        observedAt: formatDate(row.observed_at),
+        lastVerifiedAt: row.last_verified_at ? formatDate(row.last_verified_at) : null,
+        verificationSource: verified[0]?.verificationSource ?? null,
+        stale: row.status === 'STALE',
+        capabilityEvidence: Object.freeze(evidence),
+        diagnostics: summarizeDiagnostics(evidence, formatDate(row.observed_at)),
+        reauthorizationRequired: Number(row.reauthorization_required) === 1,
+      })];
+    });
+    return Object.freeze({
+      items: Object.freeze(items),
+      nextCursor: hasMore && pageRows.length > 0 ? pageRows[pageRows.length - 1]!.id : null,
+    });
+  }
+
+  async findAssetCatalog(input: { readonly tenantId: string; readonly environment: MetaEnvironment; readonly assetRef: string }): Promise<AssetCatalogReadModel | undefined> {
+    if (!isUuid(input.tenantId) || !isUuid(input.assetRef)) return undefined;
+    const page = await this.listAssetCatalog({
+      tenantId: input.tenantId, environment: input.environment, assetRef: input.assetRef, limit: 1,
+    });
+    return page.items[0];
+  }
+
+  async listConnectionCatalog(input: ConnectionCatalogPageQuery): Promise<ConnectionCatalogPage> {
+    if (!isUuid(input.tenantId) || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100 ||
+        (input.connectionRef !== undefined && !isUuid(input.connectionRef))) {
+      throw new MetaAssetsConflictError('Connection catalog query is invalid.');
+    }
+    const dataSource = await this.database.getDataSource();
+    const connectionStatus = `CASE WHEN auth.authorization_state IN ('REVOKED', 'DISCONNECTED') THEN 'DISCONNECTED'
+      WHEN auth.authorization_state IN ('ACTIVE', 'PARTIAL', 'REAUTH_REQUIRED', 'UNKNOWN') THEN auth.authorization_state ELSE 'UNKNOWN' END`;
+    const verifiedCount = `COUNT(DISTINCT CASE WHEN aa.state = 'ACTIVE' AND aa.verification_state = 'VERIFIED' THEN aa.asset_id END)`;
+    const clauses = [
+      'auth.tenant_id = ?', 'auth.environment = ?', "app.provider = 'META'",
+      `((auth.flow_variant = 'FACEBOOK' AND auth.auth_variant = 'FACEBOOK_LOGIN_FOR_BUSINESS') OR
+        (auth.flow_variant = 'INSTAGRAM' AND auth.auth_variant IN ('FACEBOOK_LOGIN_FOR_BUSINESS', 'INSTAGRAM_LOGIN')) OR
+        (auth.flow_variant = 'WHATSAPP_EXCLUSIVE' AND auth.auth_variant = 'WHATSAPP_EMBEDDED_SIGNUP') OR
+        (auth.flow_variant = 'WHATSAPP_COEXISTENCE' AND auth.auth_variant = 'WHATSAPP_BUSINESS_APP_ONBOARDING'))`,
+    ];
+    const values: Array<string | number> = [input.tenantId, input.environment];
+    if (input.connectionRef) { clauses.push('auth.id = ?'); values.push(input.connectionRef); }
+    if (input.cursor) { clauses.push('auth.id > ?'); values.push(input.cursor); }
+    if (input.channel === 'FACEBOOK') clauses.push("auth.flow_variant = 'FACEBOOK'");
+    if (input.channel === 'INSTAGRAM') clauses.push("auth.flow_variant = 'INSTAGRAM'");
+    if (input.channel === 'WHATSAPP') clauses.push("auth.flow_variant IN ('WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE')");
+    if (input.number !== undefined) {
+      clauses.push(`EXISTS (SELECT 1 FROM ca_meta_asset_authorizations naa
+        INNER JOIN ca_meta_assets na ON na.tenant_id = naa.tenant_id AND na.id = naa.asset_id
+         AND na.app_configuration_id = naa.app_configuration_id AND na.environment = naa.environment
+        WHERE naa.tenant_id = auth.tenant_id AND naa.authorization_id = auth.id
+          AND naa.app_configuration_id = auth.app_configuration_id AND naa.environment = auth.environment
+          AND na.asset_kind = 'WHATSAPP_PHONE_NUMBER' AND na.external_id = ?)`);
+      values.push(input.number);
+    }
+    values.push(input.limit + 1);
+    const rows = await dataSource.query(
+      `SELECT auth.id, auth.flow_variant, auth.auth_variant, auth.authorization_state, auth.observed_at,
+              COUNT(DISTINCT aa.asset_id) AS asset_count, ${verifiedCount} AS verified_asset_count,
+              MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) AS last_verified_at,
+              SUBSTRING_INDEX(GROUP_CONCAT(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verification_source END
+                ORDER BY aa.verified_at DESC, aa.asset_id ASC SEPARATOR ','), ',', 1) AS verification_source,
+              CASE WHEN COUNT(DISTINCT COALESCE(lifecycle.health_state, 'UNKNOWN')) = 1
+                THEN COALESCE(MAX(lifecycle.health_state), 'UNKNOWN') ELSE 'UNKNOWN' END AS token_health,
+              MAX(lifecycle.health_observed_at) AS token_health_observed_at,
+              CASE WHEN COUNT(DISTINCT COALESCE(aa.subscription_state, 'UNKNOWN')) = 1
+                THEN COALESCE(MAX(aa.subscription_state), 'UNKNOWN') ELSE 'UNKNOWN' END AS subscription_state,
+              CASE WHEN COUNT(DISTINCT COALESCE(aa.projection_state, 'UNKNOWN')) = 1
+                THEN COALESCE(MAX(aa.projection_state), 'UNKNOWN') ELSE 'UNKNOWN' END AS projection_state,
+              CASE WHEN MAX(aa.verified_at) IS NOT NULL AND MAX(aa.verified_at) < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 24 HOUR)
+                THEN 1 ELSE 0 END AS stale
+       FROM ca_meta_authorizations auth
+       INNER JOIN ca_meta_app_configurations app
+         ON app.tenant_id = auth.tenant_id AND app.id = auth.app_configuration_id
+        AND app.provider = 'META' AND app.environment = auth.environment
+       LEFT JOIN ca_meta_asset_authorizations aa
+         ON aa.tenant_id = auth.tenant_id AND aa.authorization_id = auth.id
+        AND aa.app_configuration_id = auth.app_configuration_id AND aa.environment = auth.environment
+       LEFT JOIN ca_meta_credentials credential
+         ON credential.tenant_id = aa.tenant_id AND credential.id = aa.credential_id
+        AND credential.authorization_id = aa.authorization_id AND credential.app_configuration_id = aa.app_configuration_id
+        AND credential.provider = 'META' AND credential.environment = aa.environment
+       LEFT JOIN ca_meta_credential_lifecycle lifecycle
+         ON lifecycle.tenant_id = credential.tenant_id AND lifecycle.credential_id = credential.id
+        AND lifecycle.authorization_id = auth.id AND lifecycle.app_configuration_id = auth.app_configuration_id
+        AND lifecycle.provider = 'META' AND lifecycle.environment = auth.environment
+       WHERE ${clauses.join(' AND ')}
+       GROUP BY auth.id, auth.flow_variant, auth.auth_variant, auth.authorization_state, auth.observed_at
+       ${input.status ? `HAVING ${connectionStatus} = ?` : ''}
+       ORDER BY auth.id ASC LIMIT ?`,
+      input.status ? [...values.slice(0, -1), input.status, input.limit + 1] : values,
+    ) as ConnectionCatalogRow[];
+    const hasMore = rows.length > input.limit;
+    const pageRows = hasMore ? rows.slice(0, input.limit) : rows;
+    const items = pageRows.flatMap((row): ConnectionCatalogReadModel[] => {
+      const flowVariant = publicFlowVariant(row.flow_variant, row.auth_variant);
+      if (!flowVariant) return [];
+      const state: ConnectionCatalogReadModel['status'] = row.authorization_state === 'REVOKED' || row.authorization_state === 'DISCONNECTED'
+        ? 'DISCONNECTED'
+        : row.authorization_state === 'ACTIVE' || row.authorization_state === 'PARTIAL' || row.authorization_state === 'REAUTH_REQUIRED'
+          ? row.authorization_state : 'UNKNOWN';
+      const stale = Number(row.stale) === 1;
+      const verifiedAssets = Number(row.verified_asset_count);
+      const readiness: ConnectionCatalogReadModel['readiness'] = stale ? 'UNKNOWN'
+        : state === 'ACTIVE' && verifiedAssets > 0 ? 'READY'
+          : state === 'ACTIVE' || state === 'PARTIAL' || state === 'REAUTH_REQUIRED' ? 'PARTIAL' : 'UNKNOWN';
+      const diagnostics: AssetDiagnostics = Object.freeze({
+        onboardingStatus: 'UNKNOWN', onboardingReadiness: 'UNKNOWN', onboardingNextAction: 'UNKNOWN',
+        tokenHealth: tokenHealth(row.token_health),
+        tokenHealthObservedAt: row.token_health_observed_at ? formatDate(row.token_health_observed_at) : null,
+        metaState: row.authorization_state,
+        metaObservedAt: formatDate(row.observed_at),
+        subscriptionState: subscriptionState(row.subscription_state),
+        projectionState: projectionState(row.projection_state),
+      });
+      return [Object.freeze({ connectionRef: row.id, flowVariant, status: state, readiness,
+        observedAt: formatDate(row.observed_at),
+        lastVerifiedAt: row.last_verified_at ? formatDate(row.last_verified_at) : null,
+        verificationSource: evidenceSource(row.verification_source), stale, assetCount: Number(row.asset_count), diagnostics })];
+    });
+    return Object.freeze({ items: Object.freeze(items), nextCursor: hasMore && pageRows.length > 0 ? pageRows[pageRows.length - 1]!.id : null });
+  }
+
+  async listFlowCatalogApps(input: { readonly tenantId: string; readonly environment: MetaEnvironment }): Promise<FlowCatalogApps> {
+    if (!isUuid(input.tenantId)) throw new MetaAssetsConflictError('Flow catalog context is invalid.');
+    const dataSource = await this.database.getDataSource();
+    const rows = await dataSource.query(
+      `SELECT id FROM ca_meta_app_configurations
+       WHERE tenant_id = ? AND provider = 'META' AND environment = ?
+       ORDER BY id LIMIT 17`,
+      [input.tenantId, input.environment],
+    ) as Array<{ id: string }>;
+    const truncated = rows.length > 16;
+    const items = rows.slice(0, 16).map((row) => Object.freeze({
+      appConfigurationRef: row.id, environment: input.environment,
+    }));
+    return Object.freeze({ items: Object.freeze(items), truncated });
+  }
+
+  async findConnectionCatalog(input: { readonly tenantId: string; readonly environment: MetaEnvironment; readonly connectionRef: string }): Promise<ConnectionCatalogReadModel | undefined> {
+    if (!isUuid(input.tenantId) || !isUuid(input.connectionRef)) return undefined;
+    const page = await this.listConnectionCatalog({ ...input, limit: 1 });
+    const connection = page.items[0];
+    if (!connection) return undefined;
+    const assets = await this.listAssetCatalog({ tenantId: input.tenantId, environment: input.environment,
+      authorizationRef: connection.connectionRef, limit: 500 });
+    return Object.freeze({ ...connection, assets: assets.items });
+  }
+
   private async persistScopes(manager: EntityManager, command: AuthorizationUpsertCommand,
     grantedScopes: readonly string[], source: EvidenceSource | 'BROWSER_CLAIM', timestamp: string): Promise<void> {
     if (source === 'BROWSER_CLAIM') return;

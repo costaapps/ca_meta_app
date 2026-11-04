@@ -44,7 +44,7 @@ export class ApiModule {
       module: ApiModule,
       imports: [
         HealthModule.register(environment),
-        MetaAssetsModule.register(environment),
+        MetaAssetsModule.register(identityModule, environment),
         identityModule,
         authExchangeModule,
         MagicLinkModule.register(environment),

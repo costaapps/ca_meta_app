@@ -11,6 +11,8 @@ export type MetaAssetKind = 'WHATSAPP_PHONE_NUMBER' | 'WHATSAPP_BUSINESS_ACCOUNT
 export type SubscriptionState = 'UNKNOWN' | 'PENDING' | 'ACTIVE' | 'FAILED' | 'REMOVED';
 export type ProjectionState = 'UNKNOWN' | 'PENDING' | 'SYNCED' | 'STALE' | 'FAILED';
 export type EvidenceSource = 'META_API' | 'SIGNED_WEBHOOK';
+export type TokenHealthState = 'HEALTHY' | 'EXPIRING' | 'EXPIRED' | 'REVOKED' | 'ACTION_REQUIRED' | 'STALE' | 'UNKNOWN';
+export type TokenExpiryState = 'KNOWN' | 'PROVIDER_NO_EXPIRY' | 'UNKNOWN' | 'STALE';
 
 const verifiedEvidence = new WeakSet<object>();
 const supportedAssetKinds: ReadonlySet<string> = new Set([
@@ -123,6 +125,129 @@ export interface AuthorizationReadModel {
   readonly version: number;
   readonly observedAt: string;
   readonly assets: readonly AssetReadModel[];
+}
+
+export type AssetCatalogStatus = 'ACTIVE' | 'INACTIVE' | 'UNKNOWN' | 'STALE';
+export type AssetCatalogAuthorizationStatus = 'VERIFIED' | 'REVOKED' | 'UNKNOWN';
+export type AssetCatalogChannel = 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP';
+
+export interface AssetCapabilityEvidence {
+  readonly flowVariant: MetaFlowVariant | null;
+  readonly authVariant: MetaAuthVariant | null;
+  readonly authorizationState: AuthorizationState;
+  readonly assetAuthorizationState: AssetAuthorizationState;
+  readonly verificationState: AssetVerificationState;
+  readonly verifiedAt: string | null;
+  readonly verificationSource: EvidenceSource | null;
+  readonly tokenHealth: TokenHealthState;
+  readonly tokenHealthSource: EvidenceSource | null;
+  readonly tokenHealthObservedAt: string | null;
+  readonly tokenExpiryState: TokenExpiryState;
+  readonly tokenExpiresAt: string | null;
+  readonly tokenExpirySource: EvidenceSource | null;
+  readonly tokenExpiryObservedAt: string | null;
+  readonly dataAccessExpiresAt: string | null;
+  readonly dataAccessExpirySource: EvidenceSource | null;
+  readonly dataAccessExpiryObservedAt: string | null;
+  readonly subscriptionState: SubscriptionState;
+  readonly projectionState: ProjectionState;
+  readonly grantNames: readonly string[];
+}
+
+export interface AssetDiagnostics {
+  readonly onboardingStatus: 'CREATED' | 'AWAITING_PROVIDER' | 'CODE_RECEIVED' | 'EXCHANGING' | 'ASSETS_VERIFIED' |
+    'PROVISIONING' | 'READY' | 'PARTIAL' | 'CANCELLED' | 'EXPIRED' | 'FAILED' | 'UNKNOWN';
+  readonly onboardingReadiness: 'READY' | 'PARTIAL' | 'UNKNOWN';
+  readonly onboardingNextAction: 'WAIT' | 'CHECK_STATUS' | 'REAUTHORIZE' | 'RECONCILE' | 'RESOLVE_CONFLICT' | 'NONE' | 'UNKNOWN';
+  readonly tokenHealth: TokenHealthState;
+  readonly tokenHealthObservedAt: string | null;
+  readonly metaState: AuthorizationState;
+  readonly metaObservedAt: string | null;
+  readonly subscriptionState: SubscriptionState;
+  readonly projectionState: ProjectionState;
+}
+
+/** Normalized tenant-scoped projection used only by the portal catalog. */
+export interface AssetCatalogReadModel {
+  readonly assetRef: string;
+  /** Internal app configuration reference; omitted from API serializers. */
+  readonly appConfigurationId: string;
+  readonly kind: MetaAssetKind;
+  readonly status: AssetCatalogStatus;
+  readonly authorizationStatus: AssetCatalogAuthorizationStatus;
+  readonly observedAt: string;
+  readonly lastVerifiedAt: string | null;
+  readonly verificationSource: EvidenceSource | null;
+  readonly stale: boolean;
+  readonly capabilityEvidence: readonly AssetCapabilityEvidence[];
+  readonly diagnostics: AssetDiagnostics;
+  readonly reauthorizationRequired: boolean;
+}
+
+export interface AssetCatalogPageQuery {
+  readonly tenantId: string;
+  readonly environment: MetaEnvironment;
+  readonly assetRef?: string;
+  /** Server-owned authorization filter used for connection detail assembly. */
+  readonly authorizationRef?: string;
+  readonly cursor?: string;
+  readonly limit: number;
+  readonly channel?: AssetCatalogChannel;
+  readonly number?: string;
+  readonly status?: AssetCatalogStatus;
+}
+
+export interface AssetCatalogPage {
+  readonly items: readonly AssetCatalogReadModel[];
+  readonly nextCursor: string | null;
+}
+
+export type PublicMetaFlowVariant = 'FACEBOOK_LOGIN' | 'INSTAGRAM_VIA_FACEBOOK_LOGIN' | 'INSTAGRAM_LOGIN' |
+  'WHATSAPP_CLOUD_API' | 'WHATSAPP_COEXISTENCE';
+export type ConnectionCatalogStatus = 'ACTIVE' | 'PARTIAL' | 'REAUTH_REQUIRED' | 'UNKNOWN' | 'DISCONNECTED';
+export type ConnectionReadiness = 'READY' | 'PARTIAL' | 'UNKNOWN';
+
+export interface ConnectionCatalogReadModel {
+  readonly connectionRef: string;
+  readonly flowVariant: PublicMetaFlowVariant;
+  readonly status: ConnectionCatalogStatus;
+  readonly readiness: ConnectionReadiness;
+  readonly observedAt: string;
+  readonly lastVerifiedAt: string | null;
+  readonly verificationSource: EvidenceSource | null;
+  readonly stale: boolean;
+  readonly assetCount: number;
+  readonly diagnostics: AssetDiagnostics;
+  readonly assets?: readonly AssetCatalogReadModel[];
+}
+
+export type FlowCatalogVariant = MetaFlowVariant;
+export type FlowCatalogAvailability = 'CONFIGURATION_MISSING' | 'ADAPTER_UNAVAILABLE' | 'UNKNOWN' | 'AVAILABLE';
+
+export interface FlowCatalogAppContext {
+  readonly appConfigurationRef: string;
+  readonly environment: MetaEnvironment;
+}
+
+export interface FlowCatalogApps {
+  readonly items: readonly FlowCatalogAppContext[];
+  readonly truncated: boolean;
+}
+
+export interface ConnectionCatalogPageQuery {
+  readonly tenantId: string;
+  readonly environment: MetaEnvironment;
+  readonly connectionRef?: string;
+  readonly cursor?: string;
+  readonly limit: number;
+  readonly channel?: AssetCatalogChannel;
+  readonly number?: string;
+  readonly status?: ConnectionCatalogStatus;
+}
+
+export interface ConnectionCatalogPage {
+  readonly items: readonly ConnectionCatalogReadModel[];
+  readonly nextCursor: string | null;
 }
 
 export interface AuthorizationUpsertResult {
