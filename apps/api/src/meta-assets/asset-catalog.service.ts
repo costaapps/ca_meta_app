@@ -54,26 +54,25 @@ function canOperate(roles: readonly MembershipRole[]): boolean {
 }
 
 function capabilitySnapshot(item: AssetCatalogReadModel, roles: readonly MembershipRole[]): components['schemas']['AssetCapabilities'] {
-  // Grant-to-operation mappings are advisory; exact Meta eligibility is Not confirmed.
+  // Mappings remain advisory; unsupported variant/operation pairs stay false until confirmed.
   const active = item.status === 'ACTIVE' && item.authorizationStatus === 'VERIFIED' && !item.stale;
   const operator = canOperate(roles);
   const verifiedEvidence = item.capabilityEvidence.filter((evidence) =>
     evidence.authorizationState === 'ACTIVE' && evidence.assetAuthorizationState === 'ACTIVE' &&
-    evidence.verificationState === 'VERIFIED' && item.status === 'ACTIVE' && !item.stale,
+    evidence.verificationState === 'VERIFIED' && evidence.verifiedAt !== null && evidence.verificationSource !== null &&
+    (evidence.tokenHealth === 'HEALTHY' || evidence.tokenHealth === 'EXPIRING') && item.status === 'ACTIVE' && !item.stale,
   );
-  const hasGrant = (flow: string, grantName: string): boolean => verifiedEvidence.some((evidence) =>
-    evidence.flowVariant === flow && evidence.grantNames.includes(grantName),
+  const hasGrant = (flow: string, auth: string, grantName: string): boolean => verifiedEvidence.some((evidence) =>
+    evidence.flowVariant === flow && evidence.authVariant === auth && evidence.grantNames.includes(grantName),
   );
   const whatsapp = item.kind === 'WHATSAPP_PHONE_NUMBER' || item.kind === 'WHATSAPP_BUSINESS_ACCOUNT';
   const instagram = item.kind === 'INSTAGRAM_BUSINESS_ACCOUNT' || item.kind === 'INSTAGRAM_CREATOR_ACCOUNT';
-  const facebook = item.kind === 'FACEBOOK_PAGE';
   return Object.freeze({
-    canSend: operator && active && ((whatsapp && hasGrant('WHATSAPP_EXCLUSIVE', 'whatsapp_business_messaging')) ||
-      (instagram && hasGrant('INSTAGRAM', 'instagram_business_manage_messages'))),
-    canManageTemplates: operator && active && whatsapp &&
-      (hasGrant('WHATSAPP_EXCLUSIVE', 'whatsapp_business_management') || hasGrant('WHATSAPP_COEXISTENCE', 'whatsapp_business_management')),
-    canSubscribe: operator && active && ((whatsapp && hasGrant('WHATSAPP_EXCLUSIVE', 'whatsapp_business_management')) ||
-      ((instagram || facebook) && hasGrant(facebook ? 'FACEBOOK' : 'INSTAGRAM', 'pages_manage_metadata'))),
+    canSend: operator && active && ((whatsapp && hasGrant('WHATSAPP_EXCLUSIVE', 'WHATSAPP_EMBEDDED_SIGNUP', 'whatsapp_business_messaging')) ||
+      (instagram && hasGrant('INSTAGRAM', 'INSTAGRAM_LOGIN', 'instagram_business_manage_messages'))),
+    // The accepted capability matrix leaves exact template and subscription grants unconfirmed.
+    canManageTemplates: false,
+    canSubscribe: false,
     canReauthorize: operator && item.reauthorizationRequired,
     canDisconnect: roles.some((role) => role === 'owner' || role === 'admin') && active,
   });

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { AssetCatalogService, AssetCatalogInputError, AssetRefreshUnavailableError } from '../src/meta-assets/asset-catalog.service.js';
 import { AssetRefreshCoordinator } from '../src/meta-assets/asset-refresh.service.js';
 import type {
+  AssetCapabilityEvidence,
   AssetCatalogReadModel,
   AssetCatalogPageQuery,
   ConnectionCatalogPageQuery,
@@ -21,6 +22,28 @@ const secondTenantId = '00000000-0000-4000-8000-000000000007';
 const assetId = '00000000-0000-4000-8000-000000000002';
 const appConfigurationId = '00000000-0000-4000-8000-000000000003';
 const contextRef = 'synthetic-tenant-context-reference-0001';
+
+function capabilityEvidence(input: {
+  flowVariant: AssetCapabilityEvidence['flowVariant'];
+  authVariant: AssetCapabilityEvidence['authVariant'];
+  grant: string;
+  tokenHealth?: AssetCapabilityEvidence['tokenHealth'];
+}): AssetCapabilityEvidence {
+  return {
+    flowVariant: input.flowVariant,
+    authVariant: input.authVariant,
+    authorizationState: 'ACTIVE',
+    assetAuthorizationState: 'ACTIVE',
+    verificationState: 'VERIFIED',
+    verifiedAt: '2026-11-01T12:00:00.000Z',
+    verificationSource: 'META_API',
+    tokenHealth: input.tokenHealth ?? 'HEALTHY',
+    tokenHealthObservedAt: '2026-11-01T12:00:00.000Z',
+    subscriptionState: 'UNKNOWN',
+    projectionState: 'UNKNOWN',
+    grantNames: [input.grant],
+  };
+}
 
 async function sessionFor(tenant: string = tenantId): Promise<VerifiedPortalSession> {
   const verifier = new PortalSessionVerifier({
@@ -152,6 +175,46 @@ test('asset response is an explicit allowlist and does not serialize provider or
   assert.deepEqual(result.items[0]?.capabilities, {
     canSend: false, canManageTemplates: false, canSubscribe: false, canReauthorize: false, canDisconnect: false,
   });
+});
+
+test('capabilities require a supported auth variant and healthy token evidence', async () => {
+  const instagramPageLogin = asset({
+    kind: 'INSTAGRAM_BUSINESS_ACCOUNT',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'INSTAGRAM', authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS', grant: 'instagram_business_manage_messages',
+    })],
+  });
+  const instagramLogin = asset({
+    kind: 'INSTAGRAM_BUSINESS_ACCOUNT',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN', grant: 'instagram_business_manage_messages',
+    })],
+  });
+  const expiredInstagramLogin = asset({
+    kind: 'INSTAGRAM_BUSINESS_ACCOUNT',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN', grant: 'instagram_business_manage_messages', tokenHealth: 'EXPIRED',
+    })],
+  });
+  const coexistence = asset({
+    kind: 'WHATSAPP_BUSINESS_ACCOUNT',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'WHATSAPP_COEXISTENCE', authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING', grant: 'whatsapp_business_management',
+    })],
+  });
+  const page = asset({
+    kind: 'FACEBOOK_PAGE',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'FACEBOOK', authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS', grant: 'pages_manage_metadata',
+    })],
+  });
+  const { service } = setup({ assets: [instagramPageLogin, instagramLogin, expiredInstagramLogin, coexistence, page] });
+  const result = await service.listAssets(await sessionFor(), contextRef, { limit: 50 }, 'request-synthetic');
+  assert.equal(result.items[0]?.capabilities.canSend, false, 'Facebook Login evidence cannot transfer to Instagram Login');
+  assert.equal(result.items[1]?.capabilities.canSend, true, 'documented Instagram Login evidence can inform the advisory flag');
+  assert.equal(result.items[2]?.capabilities.canSend, false, 'expired credentials cannot produce a positive capability');
+  assert.equal(result.items[3]?.capabilities.canManageTemplates, false, 'Coexistence template mapping remains unconfirmed');
+  assert.equal(result.items[4]?.capabilities.canSubscribe, false, 'Facebook subscription mapping remains unconfirmed');
 });
 
 test('connection detail preserves stale evidence and keeps viewer capabilities read-only', async () => {

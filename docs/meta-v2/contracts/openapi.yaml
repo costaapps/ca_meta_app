@@ -2918,7 +2918,11 @@ components:
         - status
         - readiness
         - observedAt
+        - lastVerifiedAt
+        - verificationSource
         - stale
+        - assetCount
+        - diagnostics
         - assets
         - requestId
       properties:
@@ -2945,8 +2949,23 @@ components:
         observedAt:
           type: string
           format: date-time
+        lastVerifiedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        verificationSource:
+          type:
+            - string
+            - "null"
+          enum: [META_API, SIGNED_WEBHOOK, null]
         stale:
           type: boolean
+        assetCount:
+          type: integer
+          minimum: 0
+        diagnostics:
+          $ref: "#/components/schemas/AssetDiagnostics"
         assets:
           type: array
           maxItems: 500

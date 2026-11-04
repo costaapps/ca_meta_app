@@ -858,7 +858,13 @@ export interface components {
             readonly readiness: "READY" | "PARTIAL" | "UNKNOWN";
             /** Format: date-time */
             readonly observedAt: string;
+            /** Format: date-time */
+            readonly lastVerifiedAt: string | null;
+            /** @enum {string|null} */
+            readonly verificationSource: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
+            readonly assetCount: number;
+            readonly diagnostics: components["schemas"]["AssetDiagnostics"];
             readonly assets: readonly components["schemas"]["ConnectionAsset"][];
             readonly requestId: string;
         };
