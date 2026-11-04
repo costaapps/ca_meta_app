@@ -190,7 +190,7 @@ export interface paths {
         };
         /**
          * List configured flow choices
-         * @description Returns only server-enabled flow configurations for the current tenant. Product variant names distinguish Facebook, Instagram variants, WhatsApp Cloud API and WhatsApp Coexistence; their actual availability, grants and eligibility are Not confirmed.
+         * @description Returns the four explicit Meta flow variants for each app configuration in the current tenant and environment. A variant is enabled only when its tenant feature flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled.
          */
         readonly get: operations["listIntegrationFlows"];
         readonly put?: never;
@@ -738,13 +738,29 @@ export interface components {
          * @enum {string}
          */
         readonly FlowVariant: "FACEBOOK_LOGIN" | "INSTAGRAM_VIA_FACEBOOK_LOGIN" | "INSTAGRAM_LOGIN" | "WHATSAPP_CLOUD_API" | "WHATSAPP_COEXISTENCE";
+        /** @enum {string} */
+        readonly MetaFlowVariant: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP_EXCLUSIVE" | "WHATSAPP_COEXISTENCE";
         readonly FlowDefinition: {
-            readonly variant: components["schemas"]["FlowVariant"];
+            readonly variant: components["schemas"]["MetaFlowVariant"];
+            readonly journeys: readonly components["schemas"]["FlowVariant"][];
+            /** Format: uuid */
+            readonly appConfigurationRef: string | null;
+            /** @enum {string} */
+            readonly environment: "development" | "test" | "staging" | "production";
             readonly enabled: boolean;
+            /** @enum {string} */
+            readonly availability: "CONFIGURATION_MISSING" | "ADAPTER_UNAVAILABLE" | "UNKNOWN" | "AVAILABLE";
+            readonly prerequisites: {
+                readonly metaAppConfigured: boolean;
+                readonly serverAdapterRegistered: boolean;
+                /** @enum {string} */
+                readonly tenantFeatureFlag: "ENABLED" | "DISABLED" | "UNKNOWN";
+            };
             readonly requestedCapabilities: readonly string[];
         };
         readonly FlowList: {
             readonly items: readonly components["schemas"]["FlowDefinition"][];
+            readonly truncated: boolean;
             readonly requestId: string;
         };
         readonly OnboardingCreateRequest: {
@@ -807,8 +823,13 @@ export interface components {
             readonly readiness: "READY" | "PARTIAL" | "UNKNOWN";
             /** Format: date-time */
             readonly observedAt: string;
+            /** Format: date-time */
+            readonly lastVerifiedAt: string | null;
+            /** @enum {string|null} */
+            readonly verificationSource: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
             readonly assetCount: number;
+            readonly diagnostics: components["schemas"]["AssetDiagnostics"];
         };
         readonly ConnectionAsset: {
             readonly id: string;
@@ -820,6 +841,13 @@ export interface components {
             readonly authorizationStatus: "VERIFIED" | "REVOKED" | "UNKNOWN";
             /** Format: date-time */
             readonly observedAt: string;
+            /** Format: date-time */
+            readonly lastVerifiedAt: string | null;
+            /** @enum {string|null} */
+            readonly verificationSource: "META_API" | "SIGNED_WEBHOOK" | null;
+            readonly stale: boolean;
+            readonly diagnostics: components["schemas"]["AssetDiagnostics"];
+            readonly capabilities: components["schemas"]["AssetCapabilities"];
         };
         readonly ConnectionDetail: {
             readonly id: string;
@@ -849,8 +877,13 @@ export interface components {
             readonly authorizationStatus: "VERIFIED" | "REVOKED" | "UNKNOWN";
             /** Format: date-time */
             readonly observedAt: string;
+            /** Format: date-time */
+            readonly lastVerifiedAt: string | null;
+            /** @enum {string|null} */
+            readonly verificationSource: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
             readonly capabilities: components["schemas"]["AssetCapabilities"];
+            readonly diagnostics: components["schemas"]["AssetDiagnostics"];
             readonly requestId: string;
         };
         readonly AssetListItem: {
@@ -863,8 +896,34 @@ export interface components {
             readonly authorizationStatus: "VERIFIED" | "REVOKED" | "UNKNOWN";
             /** Format: date-time */
             readonly observedAt: string;
+            /** Format: date-time */
+            readonly lastVerifiedAt: string | null;
+            /** @enum {string|null} */
+            readonly verificationSource: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
             readonly capabilities: components["schemas"]["AssetCapabilities"];
+            readonly diagnostics: components["schemas"]["AssetDiagnostics"];
+        };
+        /** @description Safe summaries from tenant-scoped read models. Onboarding is UNKNOWN because no persisted asset or authorization binding exists; raw provider diagnostics are never returned. */
+        readonly AssetDiagnostics: {
+            /** @enum {string} */
+            readonly onboardingStatus: "CREATED" | "AWAITING_PROVIDER" | "CODE_RECEIVED" | "EXCHANGING" | "ASSETS_VERIFIED" | "PROVISIONING" | "READY" | "PARTIAL" | "CANCELLED" | "EXPIRED" | "FAILED" | "UNKNOWN";
+            /** @enum {string} */
+            readonly onboardingReadiness: "READY" | "PARTIAL" | "UNKNOWN";
+            /** @enum {string} */
+            readonly onboardingNextAction: "WAIT" | "CHECK_STATUS" | "REAUTHORIZE" | "RECONCILE" | "RESOLVE_CONFLICT" | "NONE" | "UNKNOWN";
+            /** @enum {string} */
+            readonly tokenHealth: "HEALTHY" | "EXPIRING" | "EXPIRED" | "REVOKED" | "ACTION_REQUIRED" | "STALE" | "UNKNOWN";
+            /** Format: date-time */
+            readonly tokenHealthObservedAt: string | null;
+            /** @enum {string} */
+            readonly metaState: "ACTIVE" | "PARTIAL" | "REAUTH_REQUIRED" | "UNKNOWN" | "REVOKED" | "DISCONNECTED";
+            /** Format: date-time */
+            readonly metaObservedAt: string | null;
+            /** @enum {string} */
+            readonly subscriptionState: "UNKNOWN" | "PENDING" | "ACTIVE" | "FAILED" | "REMOVED";
+            /** @enum {string} */
+            readonly projectionState: "UNKNOWN" | "PENDING" | "SYNCED" | "STALE" | "FAILED";
         };
         /** @description Advisory snapshot derived from verified evidence and current membership. Exact Meta operation-to-grant eligibility is Not confirmed; these flags do not authorize server operations. */
         readonly AssetCapabilities: {

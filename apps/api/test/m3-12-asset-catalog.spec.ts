@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { AssetCatalogService, AssetCatalogInputError, AssetRefreshUnavailableError } from '../src/meta-assets/asset-catalog.service.js';
 import { AssetRefreshCoordinator } from '../src/meta-assets/asset-refresh.service.js';
-import type { AssetCatalogReadModel, AssetCatalogPageQuery, ConnectionCatalogPageQuery } from '../src/meta-assets/meta-assets.types.js';
+import type {
+  AssetCatalogReadModel,
+  AssetCatalogPageQuery,
+  ConnectionCatalogPageQuery,
+  ConnectionCatalogReadModel,
+} from '../src/meta-assets/meta-assets.types.js';
 import type { MetaAssetsRepository } from '../src/meta-assets/mysql-meta-assets.repository.js';
 import { IdentityDeniedError } from '../src/identity/identity.errors.js';
 import { PortalSessionVerifier, type VerifiedPortalSession } from '../src/identity/identity.trust.js';
@@ -35,12 +40,20 @@ async function sessionFor(tenant: string = tenantId): Promise<VerifiedPortalSess
 function asset(overrides: Partial<AssetCatalogReadModel> = {}): AssetCatalogReadModel {
   return {
     assetRef: assetId, appConfigurationId, kind: 'WHATSAPP_PHONE_NUMBER', status: 'ACTIVE',
-    authorizationStatus: 'VERIFIED', observedAt: '2026-11-01T12:00:00.000Z', stale: false,
+    authorizationStatus: 'VERIFIED', observedAt: '2026-11-01T12:00:00.000Z',
+    lastVerifiedAt: '2026-11-01T12:00:00.000Z', verificationSource: 'META_API', stale: false,
+    diagnostics: {
+      onboardingStatus: 'UNKNOWN', onboardingReadiness: 'UNKNOWN', onboardingNextAction: 'UNKNOWN',
+      tokenHealth: 'UNKNOWN', tokenHealthObservedAt: null, metaState: 'UNKNOWN', metaObservedAt: null,
+      subscriptionState: 'UNKNOWN', projectionState: 'UNKNOWN',
+    },
     capabilityEvidence: [], reauthorizationRequired: false, ...overrides,
   };
 }
 
-function setup(options: { roles?: readonly MembershipRole[]; adapter?: object; assets?: readonly AssetCatalogReadModel[] } = {}) {
+function setup(options: { roles?: readonly MembershipRole[]; adapter?: object; assets?: readonly AssetCatalogReadModel[];
+  flowApps?: readonly { appConfigurationRef: string; environment: 'test' }[];
+  connection?: ConnectionCatalogReadModel } = {}) {
   const roles = options.roles ?? ['operator'];
   const readQueries: AssetCatalogPageQuery[] = [];
   const connectionQueries: ConnectionCatalogPageQuery[] = [];
@@ -55,7 +68,8 @@ function setup(options: { roles?: readonly MembershipRole[]; adapter?: object; a
       connectionQueries.push(query);
       return { items: [], nextCursor: null };
     },
-    async findConnectionCatalog() { return undefined; },
+    async findConnectionCatalog() { return options.connection; },
+    async listFlowCatalogApps() { return { items: options.flowApps ?? [], truncated: false }; },
   } as unknown as MetaAssetsRepository;
   const contexts = {
     async resolveCurrent(session: VerifiedPortalSession) {
@@ -78,8 +92,17 @@ test('catalog rejects forged sessions and viewer access stays read-only', async 
   await assert.rejects(service.listFlows({} as VerifiedPortalSession, contextRef, 'request-synthetic'), IdentityDeniedError);
   const session = await sessionFor();
   const flows = await service.listFlows(session, contextRef, 'request-synthetic');
-  assert.equal(flows.items.length, 5);
+  assert.deepEqual(flows.items.map((item) => item.variant), [
+    'FACEBOOK', 'INSTAGRAM', 'WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE',
+  ]);
   assert.ok(flows.items.every((item) => item.enabled === false));
+  assert.ok(flows.items.every((item) => item.availability === 'CONFIGURATION_MISSING'));
+  assert.ok(flows.items.every((item) => item.prerequisites.tenantFeatureFlag === 'UNKNOWN'));
+  const configured = setup({ flowApps: [{ appConfigurationRef: appConfigurationId, environment: 'test' }] });
+  const configuredFlows = await configured.service.listFlows(session, contextRef, 'request-synthetic');
+  assert.equal(configuredFlows.items.length, 4);
+  assert.ok(configuredFlows.items.every((item) => item.appConfigurationRef === appConfigurationId));
+  assert.ok(configuredFlows.items.every((item) => item.availability === 'ADAPTER_UNAVAILABLE'));
   await assert.rejects(service.refreshAsset(session, contextRef, assetId, 'request-synthetic'), IdentityDeniedError);
 });
 
@@ -123,7 +146,53 @@ test('asset response is an explicit allowlist and does not serialize provider or
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes('synthetic-secret-never-return'), false);
   assert.equal(serialized.includes('raw-provider-object'), false);
+  assert.equal(result.items[0]?.lastVerifiedAt, '2026-11-01T12:00:00.000Z');
+  assert.equal(result.items[0]?.verificationSource, 'META_API');
+  assert.equal(result.items[0]?.diagnostics.onboardingStatus, 'UNKNOWN');
   assert.deepEqual(result.items[0]?.capabilities, {
+    canSend: false, canManageTemplates: false, canSubscribe: false, canReauthorize: false, canDisconnect: false,
+  });
+});
+
+test('connection detail preserves stale evidence and keeps viewer capabilities read-only', async () => {
+  const staleAsset = asset({
+    status: 'STALE', authorizationStatus: 'UNKNOWN', stale: true,
+    lastVerifiedAt: '2026-10-30T11:00:00.000Z',
+  });
+  const diagnostics = {
+    onboardingStatus: 'UNKNOWN' as const,
+    onboardingReadiness: 'UNKNOWN' as const,
+    onboardingNextAction: 'UNKNOWN' as const,
+    tokenHealth: 'UNKNOWN' as const,
+    tokenHealthObservedAt: null,
+    metaState: 'UNKNOWN' as const,
+    metaObservedAt: null,
+    subscriptionState: 'UNKNOWN' as const,
+    projectionState: 'UNKNOWN' as const,
+  };
+  const { service } = setup({ roles: ['viewer'], connection: {
+    connectionRef: appConfigurationId,
+    flowVariant: 'WHATSAPP_COEXISTENCE',
+    status: 'PARTIAL',
+    readiness: 'UNKNOWN',
+    observedAt: '2026-11-01T12:00:00.000Z',
+    lastVerifiedAt: '2026-10-30T11:00:00.000Z',
+    verificationSource: 'SIGNED_WEBHOOK',
+    stale: true,
+    assetCount: 1,
+    diagnostics,
+    assets: [staleAsset],
+  } });
+  const result = await service.getConnection(await sessionFor(), contextRef, appConfigurationId, 'request-synthetic');
+  assert.ok(result);
+  assert.equal(result.flowVariant, 'WHATSAPP_COEXISTENCE');
+  assert.equal(result.status, 'PARTIAL', 'staleness does not become a disconnect claim');
+  assert.equal(result.lastVerifiedAt, '2026-10-30T11:00:00.000Z');
+  assert.equal(result.verificationSource, 'SIGNED_WEBHOOK');
+  assert.equal(result.assets[0]?.status, 'STALE');
+  assert.equal(result.assets[0]?.lastVerifiedAt, '2026-10-30T11:00:00.000Z');
+  assert.equal(result.assets[0]?.verificationSource, 'META_API');
+  assert.deepEqual(result.assets[0]?.capabilities, {
     canSend: false, canManageTemplates: false, canSubscribe: false, canReauthorize: false, canDisconnect: false,
   });
 });

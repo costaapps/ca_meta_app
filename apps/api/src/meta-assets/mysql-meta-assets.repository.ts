@@ -19,16 +19,19 @@ import {
   type AssetCatalogPageQuery,
   type AssetCatalogReadModel,
   type AssetCapabilityEvidence,
+  type AssetDiagnostics,
   type ConnectionCatalogPage,
   type ConnectionCatalogPageQuery,
   type ConnectionCatalogReadModel,
+  type FlowCatalogApps,
+  type EvidenceSource,
+  type TokenHealthState,
   type AssetRelationType,
   type AssetVerificationState,
   type AuthorizationState,
   type AuthorizationReadModel,
   type AuthorizationUpsertCommand,
   type AuthorizationUpsertResult,
-  type EvidenceSource,
   type LegacyAssetReference,
   type MetaEnvironment,
   type ProjectionState,
@@ -44,6 +47,7 @@ export interface MetaAssetsRepository {
   findAssetCatalog(input: { readonly tenantId: string; readonly environment: MetaEnvironment; readonly assetRef: string }): Promise<AssetCatalogReadModel | undefined>;
   listConnectionCatalog(input: ConnectionCatalogPageQuery): Promise<ConnectionCatalogPage>;
   findConnectionCatalog(input: { readonly tenantId: string; readonly environment: MetaEnvironment; readonly connectionRef: string }): Promise<ConnectionCatalogReadModel | undefined>;
+  listFlowCatalogApps(input: { readonly tenantId: string; readonly environment: MetaEnvironment }): Promise<FlowCatalogApps>;
 }
 
 interface AuthorizationRow {
@@ -75,6 +79,7 @@ interface AssetCatalogRow {
   status: AssetCatalogReadModel['status'];
   authorization_status: AssetCatalogReadModel['authorizationStatus'];
   observed_at: string | Date;
+  last_verified_at: string | Date | null;
   reauthorization_required: number | string;
 }
 interface ConnectionCatalogRow {
@@ -83,6 +88,12 @@ interface ConnectionCatalogRow {
   auth_variant: string | null;
   authorization_state: AuthorizationState;
   observed_at: string | Date;
+  last_verified_at: string | Date | null;
+  verification_source: string | null;
+  token_health: string | null;
+  token_health_observed_at: string | Date | null;
+  subscription_state: string | null;
+  projection_state: string | null;
   asset_count: string | number;
   verified_asset_count: string | number;
   stale: number | string;
@@ -104,6 +115,45 @@ function publicFlowVariant(flow: string | null, auth: string | null): Connection
   if (flow === 'WHATSAPP_EXCLUSIVE' && auth === 'WHATSAPP_EMBEDDED_SIGNUP') return 'WHATSAPP_CLOUD_API';
   if (flow === 'WHATSAPP_COEXISTENCE' && auth === 'WHATSAPP_BUSINESS_APP_ONBOARDING') return 'WHATSAPP_COEXISTENCE';
   return undefined;
+}
+
+function evidenceSource(value: string | null): EvidenceSource | null {
+  return value === 'META_API' || value === 'SIGNED_WEBHOOK' ? value : null;
+}
+
+function tokenHealth(value: string | null): TokenHealthState {
+  return value === 'HEALTHY' || value === 'EXPIRING' || value === 'EXPIRED' || value === 'REVOKED' ||
+    value === 'ACTION_REQUIRED' || value === 'STALE' ? value : 'UNKNOWN';
+}
+
+function subscriptionState(value: string | null): SubscriptionState {
+  return value === 'PENDING' || value === 'ACTIVE' || value === 'FAILED' || value === 'REMOVED' ? value : 'UNKNOWN';
+}
+
+function projectionState(value: string | null): ProjectionState {
+  return value === 'PENDING' || value === 'SYNCED' || value === 'STALE' || value === 'FAILED' ? value : 'UNKNOWN';
+}
+
+function sameOrUnknown<T extends string>(values: readonly T[], fallback: T): T {
+  if (values.length === 0) return fallback;
+  return values.every((value) => value === values[0]) ? values[0]! : fallback;
+}
+
+function latestTimestamp(values: readonly (string | null)[]): string | null {
+  const valid = values.filter((value): value is string => value !== null && Number.isFinite(Date.parse(value)));
+  return valid.sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+}
+
+function summarizeDiagnostics(evidence: readonly AssetCapabilityEvidence[], metaObservedAt: string | null): AssetDiagnostics {
+  return Object.freeze({
+    onboardingStatus: 'UNKNOWN', onboardingReadiness: 'UNKNOWN', onboardingNextAction: 'UNKNOWN',
+    tokenHealth: sameOrUnknown(evidence.map((item) => item.tokenHealth), 'UNKNOWN'),
+    tokenHealthObservedAt: latestTimestamp(evidence.map((item) => item.tokenHealthObservedAt)),
+    metaState: sameOrUnknown(evidence.map((item) => item.authorizationState), 'UNKNOWN'),
+    metaObservedAt,
+    subscriptionState: sameOrUnknown(evidence.map((item) => item.subscriptionState), 'UNKNOWN'),
+    projectionState: sameOrUnknown(evidence.map((item) => item.projectionState), 'UNKNOWN'),
+  });
 }
 interface OutboxAppender { appendWithin(manager: EntityManager, event: unknown): Promise<unknown> }
 
@@ -359,7 +409,8 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     const activeVerified = `MAX(CASE WHEN aa.state = 'ACTIVE' AND aa.verification_state = 'VERIFIED' AND auth.authorization_state = 'ACTIVE' THEN 1 ELSE 0 END)`;
     const revoked = `MAX(CASE WHEN aa.state = 'REVOKED' OR auth.authorization_state IN ('REVOKED', 'DISCONNECTED') THEN 1 ELSE 0 END)`;
     const statusExpression = `CASE
-      WHEN MAX(auth.observed_at) < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 24 HOUR) THEN 'STALE'
+      WHEN MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) IS NOT NULL
+        AND MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 24 HOUR) THEN 'STALE'
       WHEN ${activeVerified} = 1 THEN 'ACTIVE'
       WHEN ${revoked} = 1 THEN 'INACTIVE'
       ELSE 'UNKNOWN' END`;
@@ -389,6 +440,7 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
               ${statusExpression} AS status,
               ${authorizationStatusExpression} AS authorization_status,
               MAX(auth.observed_at) AS observed_at,
+              MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) AS last_verified_at,
               MAX(CASE WHEN auth.authorization_state = 'REAUTH_REQUIRED' THEN 1 ELSE 0 END) AS reauthorization_required
        FROM ca_meta_assets a
        INNER JOIN ca_meta_app_configurations app
@@ -412,7 +464,10 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     const appConfigurationIds = [...new Set(pageRows.map((row) => row.app_configuration_id))];
     const capabilityRows = assetIds.length === 0 ? [] : await dataSource.query(
       `SELECT aa.asset_id, aa.authorization_id, aa.state AS asset_authorization_state,
-              aa.verification_state, auth.flow_variant, auth.auth_variant, auth.authorization_state,
+              aa.verification_state, aa.verified_at, aa.verification_source,
+              aa.subscription_state, aa.projection_state,
+              auth.flow_variant, auth.auth_variant, auth.authorization_state, auth.observed_at AS authorization_observed_at,
+              lifecycle.health_state AS token_health, lifecycle.health_observed_at AS token_health_observed_at,
               g.grant_name
        FROM ca_meta_asset_authorizations aa
        INNER JOIN ca_meta_authorizations auth
@@ -421,6 +476,14 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
        INNER JOIN ca_meta_app_configurations app
          ON app.tenant_id = aa.tenant_id AND app.id = aa.app_configuration_id
         AND app.provider = 'META' AND app.environment = aa.environment
+       LEFT JOIN ca_meta_credentials credential
+         ON credential.tenant_id = aa.tenant_id AND credential.id = aa.credential_id
+        AND credential.authorization_id = aa.authorization_id AND credential.app_configuration_id = aa.app_configuration_id
+        AND credential.provider = 'META' AND credential.environment = aa.environment
+       LEFT JOIN ca_meta_credential_lifecycle lifecycle
+         ON lifecycle.tenant_id = credential.tenant_id AND lifecycle.credential_id = credential.id
+        AND lifecycle.authorization_id = aa.authorization_id AND lifecycle.app_configuration_id = aa.app_configuration_id
+        AND lifecycle.provider = 'META' AND lifecycle.environment = aa.environment
        LEFT JOIN ca_meta_asset_grants g
          ON g.tenant_id = aa.tenant_id AND g.authorization_id = aa.authorization_id
         AND g.asset_id = aa.asset_id AND g.app_configuration_id = aa.app_configuration_id
@@ -432,8 +495,11 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
       [input.tenantId, input.environment, ...appConfigurationIds, ...assetIds],
     ) as Array<{
       asset_id: string; authorization_id: string; asset_authorization_state: AssetAuthorizationState;
-      verification_state: AssetVerificationState; flow_variant: string | null; auth_variant: string | null;
-      authorization_state: AuthorizationState; grant_name: string | null;
+      verification_state: AssetVerificationState; verified_at: string | Date | null; verification_source: string | null;
+      subscription_state: SubscriptionState; projection_state: ProjectionState;
+      flow_variant: string | null; auth_variant: string | null; authorization_state: AuthorizationState;
+      authorization_observed_at: string | Date; token_health: string | null; token_health_observed_at: string | Date | null;
+      grant_name: string | null;
     }>;
     const evidenceByAsset = new Map<string, Map<string, { evidence: Omit<AssetCapabilityEvidence, 'grantNames'>; grants: Set<string> }>>();
     for (const row of capabilityRows) {
@@ -448,6 +514,12 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
             authorizationState: row.authorization_state,
             assetAuthorizationState: row.asset_authorization_state,
             verificationState: row.verification_state,
+            verifiedAt: row.verification_state === 'VERIFIED' && row.verified_at ? formatDate(row.verified_at) : null,
+            verificationSource: row.verification_state === 'VERIFIED' ? evidenceSource(row.verification_source) : null,
+            tokenHealth: tokenHealth(row.token_health),
+            tokenHealthObservedAt: row.token_health_observed_at ? formatDate(row.token_health_observed_at) : null,
+            subscriptionState: subscriptionState(row.subscription_state),
+            projectionState: projectionState(row.projection_state),
           },
           grants: new Set(),
         };
@@ -460,6 +532,8 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
       const evidence = [...(evidenceByAsset.get(row.id)?.values() ?? [])].map((entry) => Object.freeze({
         ...entry.evidence, grantNames: Object.freeze([...entry.grants].sort()),
       }));
+      const verified = evidence.filter((item) => item.verificationState === 'VERIFIED' && item.verifiedAt !== null && item.verificationSource !== null)
+        .sort((left, right) => Date.parse(right.verifiedAt!) - Date.parse(left.verifiedAt!));
       return [Object.freeze({
         assetRef: row.id,
         appConfigurationId: row.app_configuration_id,
@@ -467,8 +541,11 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
         status: row.status,
         authorizationStatus: row.authorization_status,
         observedAt: formatDate(row.observed_at),
+        lastVerifiedAt: row.last_verified_at ? formatDate(row.last_verified_at) : null,
+        verificationSource: verified[0]?.verificationSource ?? null,
         stale: row.status === 'STALE',
         capabilityEvidence: Object.freeze(evidence),
+        diagnostics: summarizeDiagnostics(evidence, formatDate(row.observed_at)),
         reauthorizationRequired: Number(row.reauthorization_required) === 1,
       })];
     });
@@ -521,7 +598,18 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     const rows = await dataSource.query(
       `SELECT auth.id, auth.flow_variant, auth.auth_variant, auth.authorization_state, auth.observed_at,
               COUNT(DISTINCT aa.asset_id) AS asset_count, ${verifiedCount} AS verified_asset_count,
-              CASE WHEN auth.observed_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 24 HOUR) THEN 1 ELSE 0 END AS stale
+              MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) AS last_verified_at,
+              SUBSTRING_INDEX(GROUP_CONCAT(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verification_source END
+                ORDER BY aa.verified_at DESC, aa.asset_id ASC SEPARATOR ','), ',', 1) AS verification_source,
+              CASE WHEN COUNT(DISTINCT COALESCE(lifecycle.health_state, 'UNKNOWN')) = 1
+                THEN COALESCE(MAX(lifecycle.health_state), 'UNKNOWN') ELSE 'UNKNOWN' END AS token_health,
+              MAX(lifecycle.health_observed_at) AS token_health_observed_at,
+              CASE WHEN COUNT(DISTINCT COALESCE(aa.subscription_state, 'UNKNOWN')) = 1
+                THEN COALESCE(MAX(aa.subscription_state), 'UNKNOWN') ELSE 'UNKNOWN' END AS subscription_state,
+              CASE WHEN COUNT(DISTINCT COALESCE(aa.projection_state, 'UNKNOWN')) = 1
+                THEN COALESCE(MAX(aa.projection_state), 'UNKNOWN') ELSE 'UNKNOWN' END AS projection_state,
+              CASE WHEN MAX(aa.verified_at) IS NOT NULL AND MAX(aa.verified_at) < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 24 HOUR)
+                THEN 1 ELSE 0 END AS stale
        FROM ca_meta_authorizations auth
        INNER JOIN ca_meta_app_configurations app
          ON app.tenant_id = auth.tenant_id AND app.id = auth.app_configuration_id
@@ -529,6 +617,14 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
        LEFT JOIN ca_meta_asset_authorizations aa
          ON aa.tenant_id = auth.tenant_id AND aa.authorization_id = auth.id
         AND aa.app_configuration_id = auth.app_configuration_id AND aa.environment = auth.environment
+       LEFT JOIN ca_meta_credentials credential
+         ON credential.tenant_id = aa.tenant_id AND credential.id = aa.credential_id
+        AND credential.authorization_id = aa.authorization_id AND credential.app_configuration_id = aa.app_configuration_id
+        AND credential.provider = 'META' AND credential.environment = aa.environment
+       LEFT JOIN ca_meta_credential_lifecycle lifecycle
+         ON lifecycle.tenant_id = credential.tenant_id AND lifecycle.credential_id = credential.id
+        AND lifecycle.authorization_id = auth.id AND lifecycle.app_configuration_id = auth.app_configuration_id
+        AND lifecycle.provider = 'META' AND lifecycle.environment = auth.environment
        WHERE ${clauses.join(' AND ')}
        GROUP BY auth.id, auth.flow_variant, auth.auth_variant, auth.authorization_state, auth.observed_at
        ${input.status ? `HAVING ${connectionStatus} = ?` : ''}
@@ -549,10 +645,37 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
       const readiness: ConnectionCatalogReadModel['readiness'] = stale ? 'UNKNOWN'
         : state === 'ACTIVE' && verifiedAssets > 0 ? 'READY'
           : state === 'ACTIVE' || state === 'PARTIAL' || state === 'REAUTH_REQUIRED' ? 'PARTIAL' : 'UNKNOWN';
+      const diagnostics: AssetDiagnostics = Object.freeze({
+        onboardingStatus: 'UNKNOWN', onboardingReadiness: 'UNKNOWN', onboardingNextAction: 'UNKNOWN',
+        tokenHealth: tokenHealth(row.token_health),
+        tokenHealthObservedAt: row.token_health_observed_at ? formatDate(row.token_health_observed_at) : null,
+        metaState: row.authorization_state,
+        metaObservedAt: formatDate(row.observed_at),
+        subscriptionState: subscriptionState(row.subscription_state),
+        projectionState: projectionState(row.projection_state),
+      });
       return [Object.freeze({ connectionRef: row.id, flowVariant, status: state, readiness,
-        observedAt: formatDate(row.observed_at), stale, assetCount: Number(row.asset_count) })];
+        observedAt: formatDate(row.observed_at),
+        lastVerifiedAt: row.last_verified_at ? formatDate(row.last_verified_at) : null,
+        verificationSource: evidenceSource(row.verification_source), stale, assetCount: Number(row.asset_count), diagnostics })];
     });
     return Object.freeze({ items: Object.freeze(items), nextCursor: hasMore && pageRows.length > 0 ? pageRows[pageRows.length - 1]!.id : null });
+  }
+
+  async listFlowCatalogApps(input: { readonly tenantId: string; readonly environment: MetaEnvironment }): Promise<FlowCatalogApps> {
+    if (!isUuid(input.tenantId)) throw new MetaAssetsConflictError('Flow catalog context is invalid.');
+    const dataSource = await this.database.getDataSource();
+    const rows = await dataSource.query(
+      `SELECT id FROM ca_meta_app_configurations
+       WHERE tenant_id = ? AND provider = 'META' AND environment = ?
+       ORDER BY id LIMIT 17`,
+      [input.tenantId, input.environment],
+    ) as Array<{ id: string }>;
+    const truncated = rows.length > 16;
+    const items = rows.slice(0, 16).map((row) => Object.freeze({
+      appConfigurationRef: row.id, environment: input.environment,
+    }));
+    return Object.freeze({ items: Object.freeze(items), truncated });
   }
 
   async findConnectionCatalog(input: { readonly tenantId: string; readonly environment: MetaEnvironment; readonly connectionRef: string }): Promise<ConnectionCatalogReadModel | undefined> {

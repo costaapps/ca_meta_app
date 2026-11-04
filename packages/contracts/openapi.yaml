@@ -610,10 +610,11 @@ paths:
       tags:
         - Integrations
       summary: List configured flow choices
-      description: Returns only server-enabled flow configurations for the current
-        tenant. Product variant names distinguish Facebook, Instagram variants,
-        WhatsApp Cloud API and WhatsApp Coexistence; their actual availability,
-        grants and eligibility are Not confirmed.
+      description: Returns the four explicit Meta flow variants for each app
+        configuration in the current tenant and environment. A variant is
+        enabled only when its tenant feature flag and a registered server
+        adapter are confirmed; either unknown or unavailable prerequisite keeps
+        it disabled.
       security: *a10
       parameters: &a22
         - $ref: "#/components/parameters/TenantContext"
@@ -629,10 +630,56 @@ paths:
                   summary: Sanitized success example
                   value:
                     items:
-                      - variant: WHATSAPP_COEXISTENCE
+                      - variant: FACEBOOK
+                        journeys:
+                          - FACEBOOK_LOGIN
+                        appConfigurationRef: 00000000-0000-4000-8000-000000000003
+                        environment: test
                         enabled: false
-                        requestedCapabilities:
-                          - READ_STATUS
+                        availability: ADAPTER_UNAVAILABLE
+                        prerequisites:
+                          metaAppConfigured: true
+                          serverAdapterRegistered: false
+                          tenantFeatureFlag: UNKNOWN
+                        requestedCapabilities: []
+                      - variant: INSTAGRAM
+                        journeys:
+                          - INSTAGRAM_VIA_FACEBOOK_LOGIN
+                          - INSTAGRAM_LOGIN
+                        appConfigurationRef: 00000000-0000-4000-8000-000000000003
+                        environment: test
+                        enabled: false
+                        availability: ADAPTER_UNAVAILABLE
+                        prerequisites:
+                          metaAppConfigured: true
+                          serverAdapterRegistered: false
+                          tenantFeatureFlag: UNKNOWN
+                        requestedCapabilities: []
+                      - variant: WHATSAPP_EXCLUSIVE
+                        journeys:
+                          - WHATSAPP_CLOUD_API
+                        appConfigurationRef: 00000000-0000-4000-8000-000000000003
+                        environment: test
+                        enabled: false
+                        availability: ADAPTER_UNAVAILABLE
+                        prerequisites:
+                          metaAppConfigured: true
+                          serverAdapterRegistered: false
+                          tenantFeatureFlag: UNKNOWN
+                        requestedCapabilities: []
+                      - variant: WHATSAPP_COEXISTENCE
+                        journeys:
+                          - WHATSAPP_COEXISTENCE
+                        appConfigurationRef: 00000000-0000-4000-8000-000000000003
+                        environment: test
+                        enabled: false
+                        availability: ADAPTER_UNAVAILABLE
+                        prerequisites:
+                          metaAppConfigured: true
+                          serverAdapterRegistered: false
+                          tenantFeatureFlag: UNKNOWN
+                        requestedCapabilities: []
+                    truncated: false
                     requestId: req_example_19
         "400": *a11
         "401": *a12
@@ -981,8 +1028,20 @@ paths:
                         status: PARTIAL
                         readiness: PARTIAL
                         observedAt: 2026-10-29T11:59:00Z
+                        lastVerifiedAt: 2026-10-29T11:59:00Z
+                        verificationSource: META_API
                         stale: false
                         assetCount: 1
+                        diagnostics:
+                          onboardingStatus: UNKNOWN
+                          onboardingReadiness: UNKNOWN
+                          onboardingNextAction: UNKNOWN
+                          tokenHealth: UNKNOWN
+                          tokenHealthObservedAt: null
+                          metaState: PARTIAL
+                          metaObservedAt: 2026-10-29T11:59:00Z
+                          subscriptionState: UNKNOWN
+                          projectionState: UNKNOWN
                     nextCursor: null
                     requestId: req_example_23
         "400": *a11
@@ -1040,13 +1099,45 @@ paths:
                     status: PARTIAL
                     readiness: PARTIAL
                     observedAt: 2026-10-29T11:59:00Z
+                    lastVerifiedAt: 2026-10-29T11:59:00Z
+                    verificationSource: META_API
                     stale: false
+                    assetCount: 1
+                    diagnostics:
+                      onboardingStatus: UNKNOWN
+                      onboardingReadiness: UNKNOWN
+                      onboardingNextAction: UNKNOWN
+                      tokenHealth: UNKNOWN
+                      tokenHealthObservedAt: null
+                      metaState: PARTIAL
+                      metaObservedAt: 2026-10-29T11:59:00Z
+                      subscriptionState: UNKNOWN
+                      projectionState: UNKNOWN
                     assets:
                       - id: asset_example_01
                         kind: PHONE_NUMBER
                         status: ACTIVE
                         authorizationStatus: VERIFIED
                         observedAt: 2026-10-29T11:59:00Z
+                        lastVerifiedAt: 2026-10-29T11:59:00Z
+                        verificationSource: META_API
+                        stale: false
+                        diagnostics:
+                          onboardingStatus: UNKNOWN
+                          onboardingReadiness: UNKNOWN
+                          onboardingNextAction: UNKNOWN
+                          tokenHealth: UNKNOWN
+                          tokenHealthObservedAt: null
+                          metaState: PARTIAL
+                          metaObservedAt: 2026-10-29T11:59:00Z
+                          subscriptionState: UNKNOWN
+                          projectionState: UNKNOWN
+                        capabilities:
+                          canSend: false
+                          canManageTemplates: false
+                          canSubscribe: false
+                          canReauthorize: false
+                          canDisconnect: false
                     requestId: req_example_24
         "400": *a11
         "401": *a12
@@ -1196,7 +1287,19 @@ paths:
                         status: ACTIVE
                         authorizationStatus: VERIFIED
                         observedAt: 2026-10-29T11:59:00Z
+                        lastVerifiedAt: 2026-10-29T11:59:00Z
+                        verificationSource: META_API
                         stale: false
+                        diagnostics:
+                          onboardingStatus: UNKNOWN
+                          onboardingReadiness: UNKNOWN
+                          onboardingNextAction: UNKNOWN
+                          tokenHealth: UNKNOWN
+                          tokenHealthObservedAt: null
+                          metaState: ACTIVE
+                          metaObservedAt: 2026-10-29T11:59:00Z
+                          subscriptionState: UNKNOWN
+                          projectionState: UNKNOWN
                         capabilities:
                           canSend: false
                           canManageTemplates: false
@@ -2445,18 +2548,73 @@ components:
         - WHATSAPP_COEXISTENCE
       description: Distinct configured journeys. Availability, permissions and
         eligibility are Not confirmed.
+    MetaFlowVariant:
+      type: string
+      enum:
+        - FACEBOOK
+        - INSTAGRAM
+        - WHATSAPP_EXCLUSIVE
+        - WHATSAPP_COEXISTENCE
     FlowDefinition:
       type: object
       additionalProperties: false
       required:
         - variant
+        - journeys
+        - appConfigurationRef
+        - environment
         - enabled
+        - availability
+        - prerequisites
         - requestedCapabilities
       properties:
         variant:
-          $ref: "#/components/schemas/FlowVariant"
+          $ref: "#/components/schemas/MetaFlowVariant"
+        journeys:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/FlowVariant"
+        appConfigurationRef:
+          type:
+            - string
+            - "null"
+          format: uuid
+        environment:
+          type: string
+          enum:
+            - development
+            - test
+            - staging
+            - production
         enabled:
           type: boolean
+        availability:
+          type: string
+          enum:
+            - CONFIGURATION_MISSING
+            - ADAPTER_UNAVAILABLE
+            - UNKNOWN
+            - AVAILABLE
+        prerequisites:
+          type: object
+          additionalProperties: false
+          required:
+            - metaAppConfigured
+            - serverAdapterRegistered
+            - tenantFeatureFlag
+          properties:
+            metaAppConfigured:
+              type: boolean
+            serverAdapterRegistered:
+              type: boolean
+            tenantFeatureFlag:
+              type: string
+              enum:
+                - ENABLED
+                - DISABLED
+                - UNKNOWN
         requestedCapabilities:
           type: array
           maxItems: 32
@@ -2469,13 +2627,16 @@ components:
       additionalProperties: false
       required:
         - items
+        - truncated
         - requestId
       properties:
         items:
           type: array
-          maxItems: 32
+          maxItems: 64
           items:
             $ref: "#/components/schemas/FlowDefinition"
+        truncated:
+          type: boolean
         requestId:
           type: string
           minLength: 1
@@ -2665,8 +2826,11 @@ components:
         - status
         - readiness
         - observedAt
+        - lastVerifiedAt
+        - verificationSource
         - stale
         - assetCount
+        - diagnostics
       properties:
         id:
           type: string
@@ -2691,11 +2855,26 @@ components:
         observedAt:
           type: string
           format: date-time
+        lastVerifiedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        verificationSource:
+          type:
+            - string
+            - "null"
+          enum:
+            - META_API
+            - SIGNED_WEBHOOK
+            - null
         stale:
           type: boolean
         assetCount:
           type: integer
           minimum: 0
+        diagnostics:
+          $ref: "#/components/schemas/AssetDiagnostics"
     ConnectionAsset:
       type: object
       additionalProperties: false
@@ -2705,6 +2884,11 @@ components:
         - status
         - authorizationStatus
         - observedAt
+        - lastVerifiedAt
+        - verificationSource
+        - stale
+        - diagnostics
+        - capabilities
       properties:
         id:
           type: string
@@ -2733,6 +2917,25 @@ components:
         observedAt:
           type: string
           format: date-time
+        lastVerifiedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        verificationSource:
+          type:
+            - string
+            - "null"
+          enum:
+            - META_API
+            - SIGNED_WEBHOOK
+            - null
+        stale:
+          type: boolean
+        diagnostics:
+          $ref: "#/components/schemas/AssetDiagnostics"
+        capabilities:
+          $ref: "#/components/schemas/AssetCapabilities"
     ConnectionDetail:
       type: object
       additionalProperties: false
@@ -2811,8 +3014,11 @@ components:
         - status
         - authorizationStatus
         - observedAt
+        - lastVerifiedAt
+        - verificationSource
         - stale
         - capabilities
+        - diagnostics
         - requestId
       properties:
         id:
@@ -2842,10 +3048,25 @@ components:
         observedAt:
           type: string
           format: date-time
+        lastVerifiedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        verificationSource:
+          type:
+            - string
+            - "null"
+          enum:
+            - META_API
+            - SIGNED_WEBHOOK
+            - null
         stale:
           type: boolean
         capabilities:
           $ref: "#/components/schemas/AssetCapabilities"
+        diagnostics:
+          $ref: "#/components/schemas/AssetDiagnostics"
         requestId:
           type: string
           minLength: 1
@@ -2859,8 +3080,11 @@ components:
         - status
         - authorizationStatus
         - observedAt
+        - lastVerifiedAt
+        - verificationSource
         - stale
         - capabilities
+        - diagnostics
       properties:
         id:
           type: string
@@ -2889,10 +3113,118 @@ components:
         observedAt:
           type: string
           format: date-time
+        lastVerifiedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        verificationSource:
+          type:
+            - string
+            - "null"
+          enum:
+            - META_API
+            - SIGNED_WEBHOOK
+            - null
         stale:
           type: boolean
         capabilities:
           $ref: "#/components/schemas/AssetCapabilities"
+        diagnostics:
+          $ref: "#/components/schemas/AssetDiagnostics"
+    AssetDiagnostics:
+      type: object
+      additionalProperties: false
+      description: Safe summaries from tenant-scoped read models. Onboarding is
+        UNKNOWN because no persisted asset or authorization binding exists; raw
+        provider diagnostics are never returned.
+      required:
+        - onboardingStatus
+        - onboardingReadiness
+        - onboardingNextAction
+        - tokenHealth
+        - tokenHealthObservedAt
+        - metaState
+        - metaObservedAt
+        - subscriptionState
+        - projectionState
+      properties:
+        onboardingStatus:
+          type: string
+          enum:
+            - CREATED
+            - AWAITING_PROVIDER
+            - CODE_RECEIVED
+            - EXCHANGING
+            - ASSETS_VERIFIED
+            - PROVISIONING
+            - READY
+            - PARTIAL
+            - CANCELLED
+            - EXPIRED
+            - FAILED
+            - UNKNOWN
+        onboardingReadiness:
+          type: string
+          enum:
+            - READY
+            - PARTIAL
+            - UNKNOWN
+        onboardingNextAction:
+          type: string
+          enum:
+            - WAIT
+            - CHECK_STATUS
+            - REAUTHORIZE
+            - RECONCILE
+            - RESOLVE_CONFLICT
+            - NONE
+            - UNKNOWN
+        tokenHealth:
+          type: string
+          enum:
+            - HEALTHY
+            - EXPIRING
+            - EXPIRED
+            - REVOKED
+            - ACTION_REQUIRED
+            - STALE
+            - UNKNOWN
+        tokenHealthObservedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        metaState:
+          type: string
+          enum:
+            - ACTIVE
+            - PARTIAL
+            - REAUTH_REQUIRED
+            - UNKNOWN
+            - REVOKED
+            - DISCONNECTED
+        metaObservedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        subscriptionState:
+          type: string
+          enum:
+            - UNKNOWN
+            - PENDING
+            - ACTIVE
+            - FAILED
+            - REMOVED
+        projectionState:
+          type: string
+          enum:
+            - UNKNOWN
+            - PENDING
+            - SYNCED
+            - STALE
+            - FAILED
     AssetCapabilities:
       type: object
       additionalProperties: false

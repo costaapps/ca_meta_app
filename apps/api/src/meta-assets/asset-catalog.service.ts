@@ -5,7 +5,7 @@ import { TenantAuthorizationService, TenantContextService } from '../identity/id
 import type { MembershipRole } from '../identity/identity.types.js';
 import type {
   AssetCatalogChannel, AssetCatalogPageQuery, AssetCatalogReadModel, ConnectionCatalogPageQuery,
-  ConnectionCatalogReadModel, MetaEnvironment,
+  ConnectionCatalogReadModel, FlowCatalogVariant, MetaEnvironment,
 } from './meta-assets.types.js';
 import type { MetaAssetsRepository } from './mysql-meta-assets.repository.js';
 import { AssetRefreshCoordinator, AssetRefreshUnavailableError } from './asset-refresh.service.js';
@@ -24,13 +24,19 @@ export interface ConnectionCatalogQuery extends Omit<AssetCatalogQuery, 'status'
   readonly status?: ConnectionCatalogReadModel['status'];
 }
 
-const FLOW_CATALOG: readonly components['schemas']['FlowVariant'][] = [
-  'FACEBOOK_LOGIN',
-  'INSTAGRAM_VIA_FACEBOOK_LOGIN',
-  'INSTAGRAM_LOGIN',
-  'WHATSAPP_CLOUD_API',
+const FLOW_CATALOG: readonly FlowCatalogVariant[] = [
+  'FACEBOOK',
+  'INSTAGRAM',
+  'WHATSAPP_EXCLUSIVE',
   'WHATSAPP_COEXISTENCE',
 ];
+
+const PUBLIC_JOURNEYS: Readonly<Record<FlowCatalogVariant, readonly components['schemas']['FlowVariant'][]>> = {
+  FACEBOOK: ['FACEBOOK_LOGIN'],
+  INSTAGRAM: ['INSTAGRAM_VIA_FACEBOOK_LOGIN', 'INSTAGRAM_LOGIN'],
+  WHATSAPP_EXCLUSIVE: ['WHATSAPP_CLOUD_API'],
+  WHATSAPP_COEXISTENCE: ['WHATSAPP_COEXISTENCE'],
+};
 
 function publicAssetKind(value: string): components['schemas']['AssetListItem']['kind'] {
   switch (value) {
@@ -80,7 +86,10 @@ function toAssetListItem(item: AssetCatalogReadModel, roles: readonly Membership
     status: item.status,
     authorizationStatus: item.authorizationStatus,
     observedAt: item.observedAt,
+    lastVerifiedAt: item.lastVerifiedAt,
+    verificationSource: item.verificationSource,
     stale: item.stale,
+    diagnostics: item.diagnostics,
     capabilities: capabilitySnapshot(item, roles),
   });
 }
@@ -92,18 +101,26 @@ function toConnection(item: ConnectionCatalogReadModel): components['schemas']['
     status: item.status,
     readiness: item.readiness,
     observedAt: item.observedAt,
+    lastVerifiedAt: item.lastVerifiedAt,
+    verificationSource: item.verificationSource,
     stale: item.stale,
     assetCount: item.assetCount,
+    diagnostics: item.diagnostics,
   });
 }
 
-function toConnectionAsset(item: AssetCatalogReadModel): components['schemas']['ConnectionAsset'] {
+function toConnectionAsset(item: AssetCatalogReadModel, roles: readonly MembershipRole[]): components['schemas']['ConnectionAsset'] {
   return Object.freeze({
     id: item.assetRef,
     kind: publicAssetKind(item.kind),
     status: item.status,
     authorizationStatus: item.authorizationStatus,
     observedAt: item.observedAt,
+    lastVerifiedAt: item.lastVerifiedAt,
+    verificationSource: item.verificationSource,
+    stale: item.stale,
+    diagnostics: item.diagnostics,
+    capabilities: capabilitySnapshot(item, roles),
   });
 }
 
@@ -135,17 +152,35 @@ export class AssetCatalogService {
     private readonly authorization: TenantAuthorizationService,
     private readonly environment: MetaEnvironment,
     private readonly refreshCoordinator: AssetRefreshCoordinator,
-    private readonly registeredFlowVariants: ReadonlySet<components['schemas']['FlowVariant']>,
+    private readonly registeredFlowVariants: ReadonlySet<FlowCatalogVariant>,
   ) {}
 
   async listFlows(session: VerifiedPortalSession, tenantContextRef: string, requestId: string): Promise<components['schemas']['FlowList']> {
     const scope = await this.readScope(session, tenantContextRef);
     await this.authorization.authorize(scope, 'RESOURCE_READ', scope.tenantId);
-    // Availability is derived from server-registered flow adapters; browser flags cannot enable a journey.
-    const items = FLOW_CATALOG.map((variant) => Object.freeze({
-      variant, enabled: this.registeredFlowVariants.has(variant), requestedCapabilities: Object.freeze([]),
+    const apps = await this.repository.listFlowCatalogApps({ tenantId: scope.tenantId, environment: this.environment });
+    const contexts = apps.items.length > 0 ? apps.items : [{ appConfigurationRef: null, environment: this.environment }];
+    const items = contexts.flatMap((app) => FLOW_CATALOG.map((variant) => {
+      const appConfigured = app.appConfigurationRef !== null;
+      const adapterRegistered = this.registeredFlowVariants.has(variant);
+      const availability = !appConfigured ? 'CONFIGURATION_MISSING'
+        : !adapterRegistered ? 'ADAPTER_UNAVAILABLE' : 'UNKNOWN';
+      return Object.freeze({
+        variant,
+        journeys: PUBLIC_JOURNEYS[variant],
+        appConfigurationRef: app.appConfigurationRef,
+        environment: app.environment,
+        enabled: false,
+        availability,
+        prerequisites: Object.freeze({
+          metaAppConfigured: appConfigured,
+          serverAdapterRegistered: adapterRegistered,
+          tenantFeatureFlag: 'UNKNOWN' as const,
+        }),
+        requestedCapabilities: Object.freeze([]),
+      });
     }));
-    return Object.freeze({ items: Object.freeze(items), requestId });
+    return Object.freeze({ items: Object.freeze(items), truncated: apps.truncated, requestId });
   }
 
   async listAssets(session: VerifiedPortalSession, tenantContextRef: string, query: AssetCatalogQuery,
@@ -203,7 +238,7 @@ export class AssetCatalogService {
     const item = await this.repository.findConnectionCatalog({ tenantId: scope.tenantId,
       environment: this.environment, connectionRef });
     if (!item) return undefined;
-    return Object.freeze({ ...toConnection(item), assets: Object.freeze((item.assets ?? []).map(toConnectionAsset)), requestId });
+    return Object.freeze({ ...toConnection(item), assets: Object.freeze((item.assets ?? []).map((asset) => toConnectionAsset(asset, scope.roles))), requestId });
   }
 
   async refreshAsset(session: VerifiedPortalSession, tenantContextRef: string, assetRef: string,

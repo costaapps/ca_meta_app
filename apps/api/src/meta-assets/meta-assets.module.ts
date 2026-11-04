@@ -1,5 +1,4 @@
 import { DynamicModule, Module } from '@nestjs/common';
-import type { components } from '@ca-meta/contracts';
 import type { ApiEnvironment } from '../config/environment.js';
 import { JobsModule, DURABLE_JOB_STORE, DURABLE_WORK_DATABASE } from '../jobs/jobs.module.js';
 import { DurableWorkDatabase } from '../jobs/durable-work-database.js';
@@ -33,6 +32,7 @@ import { PortalSessionGuard } from '../identity/portal-session.guard.js';
 import { AssetCatalogController } from './asset-catalog.controller.js';
 import { AssetCatalogService, META_FLOW_ADAPTER_VARIANTS } from './asset-catalog.service.js';
 import { AssetRefreshCoordinator, META_ASSET_REFRESH_ADAPTER, type MetaAssetRefreshAdapter } from './asset-refresh.service.js';
+import type { FlowCatalogVariant } from './meta-assets.types.js';
 
 @Module({})
 export class MetaAssetsModule {
@@ -51,13 +51,13 @@ export class MetaAssetsModule {
           provide: AssetCatalogService,
           useFactory: (repository: MysqlMetaAssetsRepository, contexts: TenantContextService,
             authorization: TenantAuthorizationService, refresh: AssetRefreshCoordinator,
-            flowVariants: ReadonlySet<components['schemas']['FlowVariant']>) =>
+            flowVariants: ReadonlySet<FlowCatalogVariant>) =>
             new AssetCatalogService(repository, contexts, authorization, environment.nodeEnv, refresh, flowVariants),
           inject: [META_ASSETS_REPOSITORY, TenantContextService, TenantAuthorizationService,
             AssetRefreshCoordinator, META_FLOW_ADAPTER_VARIANTS],
         },
         // No real flow adapter is installed in this runtime.
-        { provide: META_FLOW_ADAPTER_VARIANTS, useFactory: (): ReadonlySet<components['schemas']['FlowVariant']> => new Set() },
+        { provide: META_FLOW_ADAPTER_VARIANTS, useFactory: (): ReadonlySet<FlowCatalogVariant> => new Set() },
         // No real Meta adapter ships with this runtime; tests may inject an isolated fake.
         { provide: META_ASSET_REFRESH_ADAPTER, useFactory: (): MetaAssetRefreshAdapter | null => null },
         {
