@@ -156,11 +156,11 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
     });
     await associations.revoke(actor, emailHash, principalA, 'IDENTITY_CORRECTION');
     assert.equal(await store.findEligibleTarget(emailHash), undefined, 'revocation blocks magic-link lookup for every tenant');
-    const [revokedLinkRows] = await dataSource.query(
+    const revokedLinkRows = await dataSource.query(
       `SELECT l.consumed_at, q.status FROM ca_meta_magic_links AS l
        INNER JOIN ca_meta_magic_link_mail_queue AS q ON q.magic_link_id = l.id
        WHERE l.token_hash = ?`, [pendingLinkTokenHash],
-    ) as [Array<{ consumed_at: string | null; status: string }>, unknown];
+    ) as Array<{ consumed_at: string | null; status: string }>;
     assert.ok(revokedLinkRows[0]?.consumed_at, 'revocation consumes outstanding link tokens');
     assert.equal(revokedLinkRows[0]?.status, 'DEAD', 'revocation prevents queued email delivery');
     await assert.rejects(
@@ -186,12 +186,12 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
     await associations.associate(reverificationProof);
     assert.equal((await store.findEligibleTarget(emailHash))?.principalId, principalA);
 
-    const [eventRows] = await dataSource.query(
+    const eventRows = await dataSource.query(
       `SELECT event_type, proof_ref_hash, email_hash, principal_id, actor_kind, actor_ref_hash, reason_code
        FROM ca_meta_magic_link_identity_events WHERE email_hash = ? AND principal_id = ? ORDER BY created_at, id`,
       [emailHash, principalA],
-    ) as [Array<{ event_type: string; proof_ref_hash: string | null; email_hash: string; principal_id: string;
-      actor_kind: string; actor_ref_hash: string | null; reason_code: string }>, unknown];
+    ) as Array<{ event_type: string; proof_ref_hash: string | null; email_hash: string; principal_id: string;
+      actor_kind: string; actor_ref_hash: string | null; reason_code: string }>;
     assert.equal(eventRows.length, 3);
     const associationEvents = eventRows.filter((row) => row.event_type === 'ASSOCIATED');
     const revocationEvent = eventRows.find((row) => row.event_type === 'REVOKED');
