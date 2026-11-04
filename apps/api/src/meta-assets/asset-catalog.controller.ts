@@ -39,12 +39,12 @@ function requestId(request: PortalRequest): string { return request.requestId ??
 
 function parseAssetQuery(query: Record<string, unknown>) {
   const rawLimit = query.limit;
-  const limit = rawLimit === undefined ? 50 : typeof rawLimit === 'string' && /^\d{1,2}$/.test(rawLimit) ? Number(rawLimit) : NaN;
+  const limit = rawLimit === undefined ? 50 : typeof rawLimit === 'string' && /^\d{1,3}$/.test(rawLimit) ? Number(rawLimit) : NaN;
   const channel = query.channel;
   const status = query.status;
   const cursor = query.cursor;
   const number = query.number;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50 ||
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
       (channel !== undefined && (typeof channel !== 'string' || !CHANNELS.has(channel))) ||
       (status !== undefined && (typeof status !== 'string' || !STATUSES.has(status))) ||
       (cursor !== undefined && typeof cursor !== 'string') ||
@@ -62,12 +62,12 @@ function parseAssetQuery(query: Record<string, unknown>) {
 
 function parseConnectionQuery(query: Record<string, unknown>): ConnectionCatalogQuery {
   const rawLimit = query.limit;
-  const limit = rawLimit === undefined ? 50 : typeof rawLimit === 'string' && /^\d{1,2}$/.test(rawLimit) ? Number(rawLimit) : NaN;
+  const limit = rawLimit === undefined ? 50 : typeof rawLimit === 'string' && /^\d{1,3}$/.test(rawLimit) ? Number(rawLimit) : NaN;
   const channel = query.channel;
   const status = query.status;
   const cursor = query.cursor;
   const number = query.number;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50 ||
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
       (channel !== undefined && (typeof channel !== 'string' || !CHANNELS.has(channel))) ||
       (status !== undefined && (typeof status !== 'string' || !CONNECTION_STATUSES.has(status))) ||
       (cursor !== undefined && typeof cursor !== 'string') ||

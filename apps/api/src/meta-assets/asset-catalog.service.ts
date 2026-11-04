@@ -191,14 +191,15 @@ export class AssetCatalogService {
     await this.authorization.authorize(scope, 'RESOURCE_READ', scope.tenantId);
     const apps = await this.repository.listFlowCatalogApps({ tenantId: scope.tenantId, environment: this.environment });
     const contexts = apps.items.length > 0 ? apps.items : [{ appConfigurationRef: null, environment: this.environment }];
-    const items = contexts.flatMap((app) => FLOW_CATALOG.map((variant) => {
+    const allItems = contexts.flatMap((app) => FLOW_CATALOG.flatMap((flowVariant) => PUBLIC_JOURNEYS[flowVariant].map((variant) => {
       const appConfigured = app.appConfigurationRef !== null;
-      const adapterRegistered = this.registeredFlowVariants.has(variant);
+      const adapterRegistered = this.registeredFlowVariants.has(flowVariant);
       const availability = !appConfigured ? 'CONFIGURATION_MISSING'
         : !adapterRegistered ? 'ADAPTER_UNAVAILABLE' : 'UNKNOWN';
       return Object.freeze({
         variant,
-        journeys: PUBLIC_JOURNEYS[variant],
+        flowVariant,
+        journeys: PUBLIC_JOURNEYS[flowVariant],
         appConfigurationRef: app.appConfigurationRef,
         environment: app.environment,
         enabled: false,
@@ -210,8 +211,9 @@ export class AssetCatalogService {
         }),
         requestedCapabilities: Object.freeze([]),
       });
-    }));
-    return Object.freeze({ items: Object.freeze(items), truncated: apps.truncated, requestId });
+    })));
+    const items = allItems.slice(0, 32);
+    return Object.freeze({ items: Object.freeze(items), truncated: apps.truncated || allItems.length > items.length, requestId });
   }
 
   async listAssets(session: VerifiedPortalSession, tenantContextRef: string, query: AssetCatalogQuery,

@@ -569,9 +569,11 @@ paths:
       tags:
         - Integrations
       summary: List configured flow choices
-      description: Returns the four explicit Meta flow variants for each app configuration in the current
-        tenant and environment. A variant is enabled only when its tenant feature flag and a registered
-        server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled.
+      description: Returns the five existing authorization journeys for each app configuration in the
+        current tenant and environment. `variant` remains the journey identifier; optional `flowVariant`
+        groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature
+        flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite
+        keeps it disabled.
       security: *a10
       parameters: &a22
         - $ref: "#/components/parameters/TenantContext"
@@ -587,7 +589,8 @@ paths:
                   summary: Sanitized success example
                   value:
                     items:
-                      - variant: FACEBOOK
+                      - variant: FACEBOOK_LOGIN
+                        flowVariant: FACEBOOK
                         journeys: [FACEBOOK_LOGIN]
                         appConfigurationRef: 00000000-0000-4000-8000-000000000003
                         environment: test
@@ -595,7 +598,8 @@ paths:
                         availability: ADAPTER_UNAVAILABLE
                         prerequisites: { metaAppConfigured: true, serverAdapterRegistered: false, tenantFeatureFlag: UNKNOWN }
                         requestedCapabilities: []
-                      - variant: INSTAGRAM
+                      - variant: INSTAGRAM_VIA_FACEBOOK_LOGIN
+                        flowVariant: INSTAGRAM
                         journeys: [INSTAGRAM_VIA_FACEBOOK_LOGIN, INSTAGRAM_LOGIN]
                         appConfigurationRef: 00000000-0000-4000-8000-000000000003
                         environment: test
@@ -603,7 +607,17 @@ paths:
                         availability: ADAPTER_UNAVAILABLE
                         prerequisites: { metaAppConfigured: true, serverAdapterRegistered: false, tenantFeatureFlag: UNKNOWN }
                         requestedCapabilities: []
-                      - variant: WHATSAPP_EXCLUSIVE
+                      - variant: INSTAGRAM_LOGIN
+                        flowVariant: INSTAGRAM
+                        journeys: [INSTAGRAM_VIA_FACEBOOK_LOGIN, INSTAGRAM_LOGIN]
+                        appConfigurationRef: 00000000-0000-4000-8000-000000000003
+                        environment: test
+                        enabled: false
+                        availability: ADAPTER_UNAVAILABLE
+                        prerequisites: { metaAppConfigured: true, serverAdapterRegistered: false, tenantFeatureFlag: UNKNOWN }
+                        requestedCapabilities: []
+                      - variant: WHATSAPP_CLOUD_API
+                        flowVariant: WHATSAPP_EXCLUSIVE
                         journeys: [WHATSAPP_CLOUD_API]
                         appConfigurationRef: 00000000-0000-4000-8000-000000000003
                         environment: test
@@ -612,6 +626,7 @@ paths:
                         prerequisites: { metaAppConfigured: true, serverAdapterRegistered: false, tenantFeatureFlag: UNKNOWN }
                         requestedCapabilities: []
                       - variant: WHATSAPP_COEXISTENCE
+                        flowVariant: WHATSAPP_COEXISTENCE
                         journeys: [WHATSAPP_COEXISTENCE]
                         appConfigurationRef: 00000000-0000-4000-8000-000000000003
                         environment: test
@@ -932,7 +947,7 @@ paths:
       parameters: &a25
         - $ref: "#/components/parameters/TenantContext"
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/ConnectionCatalogLimit"
+        - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/AssetCatalogChannel"
         - $ref: "#/components/parameters/AssetCatalogNumber"
         - $ref: "#/components/parameters/ConnectionCatalogStatus"
@@ -1183,7 +1198,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/TenantContext"
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/AssetCatalogLimit"
+        - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/AssetCatalogChannel"
         - $ref: "#/components/parameters/AssetCatalogNumber"
         - $ref: "#/components/parameters/AssetCatalogStatus"
@@ -2195,26 +2210,6 @@ components:
       schema:
         type: string
         maxLength: 512
-    AssetCatalogLimit:
-      name: limit
-      in: query
-      required: false
-      description: Bounded page size, default 50, maximum 50.
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 50
-        default: 50
-    ConnectionCatalogLimit:
-      name: limit
-      in: query
-      required: false
-      description: Bounded page size, default 50, maximum 50.
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 50
-        default: 50
     AssetCatalogChannel:
       name: channel
       in: query
@@ -2553,15 +2548,12 @@ components:
       additionalProperties: false
       required:
         - variant
-        - journeys
-        - appConfigurationRef
-        - environment
         - enabled
-        - availability
-        - prerequisites
         - requestedCapabilities
       properties:
         variant:
+          $ref: "#/components/schemas/FlowVariant"
+        flowVariant:
           $ref: "#/components/schemas/MetaFlowVariant"
         journeys:
           type: array
@@ -2606,12 +2598,11 @@ components:
       additionalProperties: false
       required:
         - items
-        - truncated
         - requestId
       properties:
         items:
           type: array
-          maxItems: 64
+          maxItems: 32
           items:
             $ref: "#/components/schemas/FlowDefinition"
         truncated:
@@ -2805,11 +2796,8 @@ components:
         - status
         - readiness
         - observedAt
-        - lastVerifiedAt
-        - verificationSource
         - stale
         - assetCount
-        - diagnostics
       properties:
         id:
           type: string
@@ -2860,11 +2848,6 @@ components:
         - status
         - authorizationStatus
         - observedAt
-        - lastVerifiedAt
-        - verificationSource
-        - stale
-        - diagnostics
-        - capabilities
       properties:
         id:
           type: string
@@ -2918,11 +2901,8 @@ components:
         - status
         - readiness
         - observedAt
-        - lastVerifiedAt
-        - verificationSource
         - stale
         - assetCount
-        - diagnostics
         - assets
         - requestId
       properties:
@@ -3006,11 +2986,7 @@ components:
         - status
         - authorizationStatus
         - observedAt
-        - lastVerifiedAt
-        - verificationSource
         - stale
-        - capabilities
-        - diagnostics
         - requestId
       properties:
         id:
@@ -3069,11 +3045,7 @@ components:
         - status
         - authorizationStatus
         - observedAt
-        - lastVerifiedAt
-        - verificationSource
         - stale
-        - capabilities
-        - diagnostics
       properties:
         id:
           type: string

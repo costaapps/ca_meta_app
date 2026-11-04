@@ -410,7 +410,7 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
   }
 
   async listAssetCatalog(input: AssetCatalogPageQuery): Promise<AssetCatalogPage> {
-    const maximumPage = input.authorizationRef ? 500 : 50;
+    const maximumPage = input.authorizationRef ? 500 : 100;
     if (!isUuid(input.tenantId) || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > maximumPage ||
         (input.authorizationRef !== undefined && !isUuid(input.authorizationRef))) {
       throw new MetaAssetsConflictError('Asset catalog query is invalid.');
@@ -604,7 +604,7 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
   }
 
   async listConnectionCatalog(input: ConnectionCatalogPageQuery): Promise<ConnectionCatalogPage> {
-    if (!isUuid(input.tenantId) || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 50 ||
+    if (!isUuid(input.tenantId) || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100 ||
         (input.connectionRef !== undefined && !isUuid(input.connectionRef))) {
       throw new MetaAssetsConflictError('Connection catalog query is invalid.');
     }

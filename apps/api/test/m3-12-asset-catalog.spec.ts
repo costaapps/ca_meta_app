@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AssetCatalogService, AssetCatalogInputError, AssetRefreshUnavailableError } from '../src/meta-assets/asset-catalog.service.js';
-import { AssetRefreshCoordinator } from '../src/meta-assets/asset-refresh.service.js';
+import { AssetCatalogService, AssetCatalogInputError } from '../src/meta-assets/asset-catalog.service.js';
+import { AssetRefreshCoordinator, AssetRefreshUnavailableError } from '../src/meta-assets/asset-refresh.service.js';
 import type {
   AssetCapabilityEvidence,
   AssetCatalogReadModel,
@@ -132,14 +132,19 @@ test('catalog rejects forged sessions and viewer access stays read-only', async 
   const session = await sessionFor();
   const flows = await service.listFlows(session, contextRef, 'request-synthetic');
   assert.deepEqual(flows.items.map((item) => item.variant), [
-    'FACEBOOK', 'INSTAGRAM', 'WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE',
+    'FACEBOOK_LOGIN', 'INSTAGRAM_VIA_FACEBOOK_LOGIN', 'INSTAGRAM_LOGIN', 'WHATSAPP_CLOUD_API', 'WHATSAPP_COEXISTENCE',
   ]);
+  assert.deepEqual(flows.items.map((item) => item.flowVariant), [
+    'FACEBOOK', 'INSTAGRAM', 'INSTAGRAM', 'WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE',
+  ]);
+  assert.deepEqual(flows.items.find((item) => item.variant === 'INSTAGRAM_LOGIN')?.journeys,
+    ['INSTAGRAM_VIA_FACEBOOK_LOGIN', 'INSTAGRAM_LOGIN']);
   assert.ok(flows.items.every((item) => item.enabled === false));
   assert.ok(flows.items.every((item) => item.availability === 'CONFIGURATION_MISSING'));
-  assert.ok(flows.items.every((item) => item.prerequisites.tenantFeatureFlag === 'UNKNOWN'));
+  assert.ok(flows.items.every((item) => item.prerequisites?.tenantFeatureFlag === 'UNKNOWN'));
   const configured = setup({ flowApps: [{ appConfigurationRef: appConfigurationId, environment: 'test' }] });
   const configuredFlows = await configured.service.listFlows(session, contextRef, 'request-synthetic');
-  assert.equal(configuredFlows.items.length, 4);
+  assert.equal(configuredFlows.items.length, 5);
   assert.ok(configuredFlows.items.every((item) => item.appConfigurationRef === appConfigurationId));
   assert.ok(configuredFlows.items.every((item) => item.availability === 'ADAPTER_UNAVAILABLE'));
   await assert.rejects(service.refreshAsset(session, contextRef, assetId, 'request-synthetic'), IdentityDeniedError);
@@ -187,7 +192,7 @@ test('asset response is an explicit allowlist and does not serialize provider or
   assert.equal(serialized.includes('raw-provider-object'), false);
   assert.equal(result.items[0]?.lastVerifiedAt, '2026-11-01T12:00:00.000Z');
   assert.equal(result.items[0]?.verificationSource, 'META_API');
-  assert.equal(result.items[0]?.diagnostics.onboardingStatus, 'UNKNOWN');
+  assert.equal(result.items[0]?.diagnostics?.onboardingStatus, 'UNKNOWN');
   assert.deepEqual(result.items[0]?.capabilities, {
     canSend: false, canManageTemplates: false, canSubscribe: false, canReauthorize: false, canDisconnect: false,
   });
@@ -275,18 +280,18 @@ test('capabilities require a supported auth variant and healthy token evidence',
     expiredAccessInstagramLogin, staleExpiryInstagramLogin, expiredTokenInstagramLogin, phoneNumber, noExpiryInstagramLogin,
     whatsappBusinessAccount, coexistence, page] });
   const result = await service.listAssets(await sessionFor(), contextRef, { limit: 50 }, 'request-synthetic');
-  assert.equal(result.items[0]?.capabilities.canSend, false, 'Facebook Login evidence cannot transfer to Instagram Login');
-  assert.equal(result.items[1]?.capabilities.canSend, true, 'documented Instagram Login evidence can inform the advisory flag');
-  assert.equal(result.items[2]?.capabilities.canSend, false, 'expired credentials cannot produce a positive capability');
-  assert.equal(result.items[3]?.capabilities.canSend, false, 'stale health observations cannot produce a positive capability');
-  assert.equal(result.items[4]?.capabilities.canSend, false, 'expired data access cannot produce a positive capability');
-  assert.equal(result.items[5]?.capabilities.canSend, false, 'stale token-expiry observations cannot produce a positive capability');
-  assert.equal(result.items[6]?.capabilities.canSend, false, 'expired tokens cannot produce a positive capability');
-  assert.equal(result.items[7]?.capabilities.canSend, true, 'WhatsApp send maps to a verified phone number');
-  assert.equal(result.items[8]?.capabilities.canSend, true, 'fresh provider-declared no-expiry evidence is accepted');
-  assert.equal(result.items[9]?.capabilities.canSend, false, 'a WABA parent is not a send target');
-  assert.equal(result.items[10]?.capabilities.canManageTemplates, false, 'Coexistence template mapping remains unconfirmed');
-  assert.equal(result.items[11]?.capabilities.canSubscribe, false, 'Facebook subscription mapping remains unconfirmed');
+  assert.equal(result.items[0]?.capabilities?.canSend, false, 'Facebook Login evidence cannot transfer to Instagram Login');
+  assert.equal(result.items[1]?.capabilities?.canSend, true, 'documented Instagram Login evidence can inform the advisory flag');
+  assert.equal(result.items[2]?.capabilities?.canSend, false, 'expired credentials cannot produce a positive capability');
+  assert.equal(result.items[3]?.capabilities?.canSend, false, 'stale health observations cannot produce a positive capability');
+  assert.equal(result.items[4]?.capabilities?.canSend, false, 'expired data access cannot produce a positive capability');
+  assert.equal(result.items[5]?.capabilities?.canSend, false, 'stale token-expiry observations cannot produce a positive capability');
+  assert.equal(result.items[6]?.capabilities?.canSend, false, 'expired tokens cannot produce a positive capability');
+  assert.equal(result.items[7]?.capabilities?.canSend, true, 'WhatsApp send maps to a verified phone number');
+  assert.equal(result.items[8]?.capabilities?.canSend, true, 'fresh provider-declared no-expiry evidence is accepted');
+  assert.equal(result.items[9]?.capabilities?.canSend, false, 'a WABA parent is not a send target');
+  assert.equal(result.items[10]?.capabilities?.canManageTemplates, false, 'Coexistence template mapping remains unconfirmed');
+  assert.equal(result.items[11]?.capabilities?.canSubscribe, false, 'Facebook subscription mapping remains unconfirmed');
 });
 
 test('reauthorization reflects M3.09 open impacts in exact tenant, environment, authorization and asset scope', async () => {
@@ -329,11 +334,11 @@ test('reauthorization capability is limited to operators with an open M3.09 inte
   const pending = asset({ reauthorizationRequired: true });
   const operator = setup({ assets: [pending] });
   const operatorPage = await operator.service.listAssets(await sessionFor(), contextRef, { limit: 10 }, 'request-synthetic');
-  assert.equal(operatorPage.items[0]?.capabilities.canReauthorize, true);
+  assert.equal(operatorPage.items[0]?.capabilities?.canReauthorize, true);
 
   const viewer = setup({ roles: ['viewer'], assets: [pending] });
   const viewerPage = await viewer.service.listAssets(await sessionFor(), contextRef, { limit: 10 }, 'request-synthetic');
-  assert.equal(viewerPage.items[0]?.capabilities.canReauthorize, false);
+  assert.equal(viewerPage.items[0]?.capabilities?.canReauthorize, false);
 });
 
 test('connection detail preserves stale evidence and keeps viewer capabilities read-only', async () => {

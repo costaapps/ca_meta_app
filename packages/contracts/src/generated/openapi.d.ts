@@ -190,7 +190,7 @@ export interface paths {
         };
         /**
          * List configured flow choices
-         * @description Returns the four explicit Meta flow variants for each app configuration in the current tenant and environment. A variant is enabled only when its tenant feature flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled.
+         * @description Returns the five existing authorization journeys for each app configuration in the current tenant and environment. `variant` remains the journey identifier; optional `flowVariant` groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled.
          */
         readonly get: operations["listIntegrationFlows"];
         readonly put?: never;
@@ -741,16 +741,17 @@ export interface components {
         /** @enum {string} */
         readonly MetaFlowVariant: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP_EXCLUSIVE" | "WHATSAPP_COEXISTENCE";
         readonly FlowDefinition: {
-            readonly variant: components["schemas"]["MetaFlowVariant"];
-            readonly journeys: readonly components["schemas"]["FlowVariant"][];
+            readonly variant: components["schemas"]["FlowVariant"];
+            readonly flowVariant?: components["schemas"]["MetaFlowVariant"];
+            readonly journeys?: readonly components["schemas"]["FlowVariant"][];
             /** Format: uuid */
-            readonly appConfigurationRef: string | null;
+            readonly appConfigurationRef?: string | null;
             /** @enum {string} */
-            readonly environment: "development" | "test" | "staging" | "production";
+            readonly environment?: "development" | "test" | "staging" | "production";
             readonly enabled: boolean;
             /** @enum {string} */
-            readonly availability: "CONFIGURATION_MISSING" | "ADAPTER_UNAVAILABLE" | "UNKNOWN" | "AVAILABLE";
-            readonly prerequisites: {
+            readonly availability?: "CONFIGURATION_MISSING" | "ADAPTER_UNAVAILABLE" | "UNKNOWN" | "AVAILABLE";
+            readonly prerequisites?: {
                 readonly metaAppConfigured: boolean;
                 readonly serverAdapterRegistered: boolean;
                 /** @enum {string} */
@@ -760,7 +761,7 @@ export interface components {
         };
         readonly FlowList: {
             readonly items: readonly components["schemas"]["FlowDefinition"][];
-            readonly truncated: boolean;
+            readonly truncated?: boolean;
             readonly requestId: string;
         };
         readonly OnboardingCreateRequest: {
@@ -824,12 +825,12 @@ export interface components {
             /** Format: date-time */
             readonly observedAt: string;
             /** Format: date-time */
-            readonly lastVerifiedAt: string | null;
+            readonly lastVerifiedAt?: string | null;
             /** @enum {string|null} */
-            readonly verificationSource: "META_API" | "SIGNED_WEBHOOK" | null;
+            readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
             readonly assetCount: number;
-            readonly diagnostics: components["schemas"]["AssetDiagnostics"];
+            readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
         };
         readonly ConnectionAsset: {
             readonly id: string;
@@ -842,12 +843,12 @@ export interface components {
             /** Format: date-time */
             readonly observedAt: string;
             /** Format: date-time */
-            readonly lastVerifiedAt: string | null;
+            readonly lastVerifiedAt?: string | null;
             /** @enum {string|null} */
-            readonly verificationSource: "META_API" | "SIGNED_WEBHOOK" | null;
-            readonly stale: boolean;
-            readonly diagnostics: components["schemas"]["AssetDiagnostics"];
-            readonly capabilities: components["schemas"]["AssetCapabilities"];
+            readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
+            readonly stale?: boolean;
+            readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
+            readonly capabilities?: components["schemas"]["AssetCapabilities"];
         };
         readonly ConnectionDetail: {
             readonly id: string;
@@ -859,12 +860,12 @@ export interface components {
             /** Format: date-time */
             readonly observedAt: string;
             /** Format: date-time */
-            readonly lastVerifiedAt: string | null;
+            readonly lastVerifiedAt?: string | null;
             /** @enum {string|null} */
-            readonly verificationSource: "META_API" | "SIGNED_WEBHOOK" | null;
+            readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
             readonly assetCount: number;
-            readonly diagnostics: components["schemas"]["AssetDiagnostics"];
+            readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
             readonly assets: readonly components["schemas"]["ConnectionAsset"][];
             readonly requestId: string;
         };
@@ -884,12 +885,12 @@ export interface components {
             /** Format: date-time */
             readonly observedAt: string;
             /** Format: date-time */
-            readonly lastVerifiedAt: string | null;
+            readonly lastVerifiedAt?: string | null;
             /** @enum {string|null} */
-            readonly verificationSource: "META_API" | "SIGNED_WEBHOOK" | null;
+            readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
-            readonly capabilities: components["schemas"]["AssetCapabilities"];
-            readonly diagnostics: components["schemas"]["AssetDiagnostics"];
+            readonly capabilities?: components["schemas"]["AssetCapabilities"];
+            readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
             readonly requestId: string;
         };
         readonly AssetListItem: {
@@ -903,12 +904,12 @@ export interface components {
             /** Format: date-time */
             readonly observedAt: string;
             /** Format: date-time */
-            readonly lastVerifiedAt: string | null;
+            readonly lastVerifiedAt?: string | null;
             /** @enum {string|null} */
-            readonly verificationSource: "META_API" | "SIGNED_WEBHOOK" | null;
+            readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
-            readonly capabilities: components["schemas"]["AssetCapabilities"];
-            readonly diagnostics: components["schemas"]["AssetDiagnostics"];
+            readonly capabilities?: components["schemas"]["AssetCapabilities"];
+            readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
         };
         /** @description Safe summaries from tenant-scoped read models. Onboarding is UNKNOWN because no persisted asset or authorization binding exists; raw provider diagnostics are never returned. */
         readonly AssetDiagnostics: {
@@ -1189,10 +1190,6 @@ export interface components {
         readonly IfMatch: string;
         /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
         readonly Cursor: string;
-        /** @description Bounded page size, default 50, maximum 50. */
-        readonly AssetCatalogLimit: number;
-        /** @description Bounded page size, default 50, maximum 50. */
-        readonly ConnectionCatalogLimit: number;
         readonly AssetCatalogChannel: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP";
         /** @description Exact opaque WhatsApp phone number filter. */
         readonly AssetCatalogNumber: string;
@@ -1807,8 +1804,8 @@ export interface operations {
             readonly query?: {
                 /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
                 readonly cursor?: components["parameters"]["Cursor"];
-                /** @description Bounded page size, default 50, maximum 50. */
-                readonly limit?: components["parameters"]["ConnectionCatalogLimit"];
+                /** @description Page size, default 50, maximum 100. */
+                readonly limit?: components["parameters"]["Limit"];
                 readonly channel?: components["parameters"]["AssetCatalogChannel"];
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
@@ -1995,8 +1992,8 @@ export interface operations {
             readonly query?: {
                 /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
                 readonly cursor?: components["parameters"]["Cursor"];
-                /** @description Bounded page size, default 50, maximum 50. */
-                readonly limit?: components["parameters"]["AssetCatalogLimit"];
+                /** @description Page size, default 50, maximum 100. */
+                readonly limit?: components["parameters"]["Limit"];
                 readonly channel?: components["parameters"]["AssetCatalogChannel"];
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
@@ -2356,8 +2353,8 @@ export interface operations {
             readonly query?: {
                 /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
                 readonly cursor?: components["parameters"]["Cursor"];
-                /** @description Bounded page size, default 50, maximum 50. */
-                readonly limit?: components["parameters"]["ConnectionCatalogLimit"];
+                /** @description Page size, default 50, maximum 100. */
+                readonly limit?: components["parameters"]["Limit"];
                 readonly channel?: components["parameters"]["AssetCatalogChannel"];
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
@@ -2460,8 +2457,8 @@ export interface operations {
             readonly query?: {
                 /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
                 readonly cursor?: components["parameters"]["Cursor"];
-                /** @description Bounded page size, default 50, maximum 50. */
-                readonly limit?: components["parameters"]["ConnectionCatalogLimit"];
+                /** @description Page size, default 50, maximum 100. */
+                readonly limit?: components["parameters"]["Limit"];
                 readonly channel?: components["parameters"]["AssetCatalogChannel"];
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
