@@ -30,7 +30,10 @@ export function isVerifiedMagicLinkEmailIdentity(value: unknown): value is Verif
 
 /**
  * Trusted email-provider adapters subclass this verifier after consuming their own proof and
- * resolving its invitation target from server-side state. It has no HTTP controller or DTO.
+ * resolving its invitation target from server-side state. The adapter must include the
+ * revocation generation captured in the server-side proof-issuance record; it must never accept
+ * that value from a caller. This verifier compares the captured value with current state when
+ * the proof is consumed. It has no HTTP controller or DTO.
  */
 export abstract class MagicLinkEmailProofVerifier {
   protected constructor(
@@ -45,6 +48,7 @@ export abstract class MagicLinkEmailProofVerifier {
     readonly email: string;
     readonly principalId: string;
     readonly proofReference: string;
+    readonly proofGeneration: number;
     readonly expiresAt: string;
   }): Promise<VerifiedMagicLinkEmailIdentity> {
     const expiry = Date.parse(input.expiresAt);
@@ -52,6 +56,7 @@ export abstract class MagicLinkEmailProofVerifier {
     if (!UUID.test(input.principalId) || typeof input.proofReference !== 'string' ||
       input.proofReference.length < 16 || input.proofReference.length > 512 ||
       /[\u0000-\u001f\u007f]/u.test(input.proofReference) ||
+      !Number.isSafeInteger(input.proofGeneration) || input.proofGeneration < 0 ||
       !Number.isFinite(expiry) || expiry <= now || expiry - now > MAX_PROOF_LIFETIME_MS) {
       throw new IdentityDeniedError();
     }
@@ -65,18 +70,19 @@ export abstract class MagicLinkEmailProofVerifier {
       .update('ca-meta-magic-link-verified-email-proof-v2\0', 'utf8')
       .update(input.proofReference, 'utf8')
       .digest('hex');
-    let proofGeneration: number;
+    let currentGeneration: number;
     try {
-      proofGeneration = await this.generationReader.readProofGeneration(emailHash);
+      currentGeneration = await this.generationReader.readProofGeneration(emailHash);
     } catch {
       throw new IdentityDeniedError();
     }
-    if (!Number.isSafeInteger(proofGeneration) || proofGeneration < 0) throw new IdentityDeniedError();
+    if (!Number.isSafeInteger(currentGeneration) || currentGeneration < 0 ||
+      currentGeneration !== input.proofGeneration) throw new IdentityDeniedError();
     const result = Object.freeze({
       emailHash,
       principalId: input.principalId,
       proofReferenceHash,
-      proofGeneration,
+      proofGeneration: input.proofGeneration,
       expiresAt: new Date(expiry).toISOString(),
     }) as VerifiedMagicLinkEmailIdentity;
     verifiedMagicLinkEmailIdentities.add(result);

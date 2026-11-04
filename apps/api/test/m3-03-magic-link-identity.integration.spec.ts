@@ -19,14 +19,26 @@ const enabled = process.env.M3_03_TEST === '1';
 const timestamp = '2026-11-03 12:00:00.000000';
 
 class SyntheticEmailProofVerifier extends MagicLinkEmailProofVerifier {
-  private readonly proofs = new Map<string, { readonly email: string; readonly principalId: string }>();
+  private readonly proofs = new Map<string, {
+    readonly email: string;
+    readonly principalId: string;
+    readonly proofGeneration: number;
+  }>();
+  private readonly generationReader: Pick<MysqlMagicLinkStore, 'readProofGeneration'>;
 
-  constructor(recoveryKey: string, generationReader: Pick<MysqlMagicLinkStore, 'readProofGeneration'>) {
-    super(recoveryKey, generationReader);
+  constructor(
+    private readonly recoveryKeyForFixture: string,
+    generationReader: Pick<MysqlMagicLinkStore, 'readProofGeneration'>,
+  ) {
+    super(recoveryKeyForFixture, generationReader);
+    this.generationReader = generationReader;
   }
 
-  add(input: { readonly email: string; readonly principalId: string; readonly proofReference: string }): string {
-    this.proofs.set(input.proofReference, { email: input.email, principalId: input.principalId });
+  async add(input: { readonly email: string; readonly principalId: string; readonly proofReference: string }): Promise<string> {
+    const proofGeneration = await this.generationReader.readProofGeneration(
+      hashMagicLinkEmail(input.email, this.recoveryKeyForFixture),
+    );
+    this.proofs.set(input.proofReference, { email: input.email, principalId: input.principalId, proofGeneration });
     return input.proofReference;
   }
 
@@ -88,7 +100,7 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
         tenantB, principalB, timestamp, timestamp],
     );
 
-    const firstProofReference = proofVerifier.add({ email, principalId: principalA, proofReference: `proof-${randomUUID()}` });
+    const firstProofReference = await proofVerifier.add({ email, principalId: principalA, proofReference: `proof-${randomUUID()}` });
     const firstProof = await proofVerifier.verifyProof(firstProofReference);
     assert.ok(firstProof);
     const concurrentAssociation = await Promise.allSettled([
@@ -99,11 +111,11 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
     assert.equal(concurrentAssociation.filter((result) => result.status === 'rejected').length, 1);
     await assert.rejects(associations.associate(firstProof), IdentityDeniedError, 'the same proof cannot be consumed again');
 
-    const conflictingReference = proofVerifier.add({ email, principalId: principalB, proofReference: `proof-${randomUUID()}` });
+    const conflictingReference = await proofVerifier.add({ email, principalId: principalB, proofReference: `proof-${randomUUID()}` });
     const conflictingProof = await proofVerifier.verifyProof(conflictingReference);
     assert.ok(conflictingProof);
     await assert.rejects(associations.associate(conflictingProof), IdentityDeniedError, 'a verified email cannot move to a different principal');
-    const orphanReference = proofVerifier.add({ email: `orphan-${randomUUID()}@example.test`, principalId: orphanPrincipal, proofReference: `proof-${randomUUID()}` });
+    const orphanReference = await proofVerifier.add({ email: `orphan-${randomUUID()}@example.test`, principalId: orphanPrincipal, proofReference: `proof-${randomUUID()}` });
     const orphanProof = await proofVerifier.verifyProof(orphanReference);
     assert.ok(orphanProof);
     await assert.rejects(associations.associate(orphanProof), IdentityDeniedError, 'an email cannot create an identity without active membership');
@@ -133,11 +145,15 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
     const adminAssertion = assertionVerifier.issue();
     const actor = new PlatformIdentityAdminAuthority([{ issuer: adminAssertion.issuer, subject: adminAssertion.subject }])
       .verify(adminAssertion);
-    const proofIssuedBeforeRevocationReference = proofVerifier.add({
+    const proofIssuedBeforeRevocationReference = await proofVerifier.add({
       email, principalId: principalA, proofReference: `proof-${randomUUID()}`,
     });
     const proofIssuedBeforeRevocation = await proofVerifier.verifyProof(proofIssuedBeforeRevocationReference);
     assert.ok(proofIssuedBeforeRevocation);
+    assert.equal(proofIssuedBeforeRevocation.proofGeneration, 0);
+    const proofNotYetConsumedBeforeRevocationReference = await proofVerifier.add({
+      email, principalId: principalA, proofReference: `proof-${randomUUID()}`,
+    });
     await associations.revoke(actor, emailHash, principalA, 'IDENTITY_CORRECTION');
     assert.equal(await store.findEligibleTarget(emailHash), undefined, 'revocation blocks magic-link lookup for every tenant');
     const [revokedLinkRows] = await dataSource.query(
@@ -156,9 +172,14 @@ test('M3.03 MariaDB email identity association consumes proofs once and revokes/
       IdentityDeniedError,
       'a proof capability from the pre-revocation generation cannot restore the identity',
     );
+    await assert.rejects(
+      proofVerifier.verifyProof(proofNotYetConsumedBeforeRevocationReference),
+      IdentityDeniedError,
+      'a provider proof issuance record from the prior generation cannot mint a capability after revocation',
+    );
     await assert.rejects(associations.revoke(actor, emailHash, principalA, 'IDENTITY_CORRECTION'), IdentityDeniedError);
 
-    const reverificationReference = proofVerifier.add({ email, principalId: principalA, proofReference: `proof-${randomUUID()}` });
+    const reverificationReference = await proofVerifier.add({ email, principalId: principalA, proofReference: `proof-${randomUUID()}` });
     const reverificationProof = await proofVerifier.verifyProof(reverificationReference);
     assert.ok(reverificationProof);
     assert.equal(reverificationProof.proofGeneration, 1);
