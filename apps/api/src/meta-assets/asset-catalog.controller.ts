@@ -48,7 +48,7 @@ function parseAssetQuery(query: Record<string, unknown>) {
       (channel !== undefined && (typeof channel !== 'string' || !CHANNELS.has(channel))) ||
       (status !== undefined && (typeof status !== 'string' || !STATUSES.has(status))) ||
       (cursor !== undefined && typeof cursor !== 'string') ||
-      (number !== undefined && (typeof number !== 'string' || !/^\+?[0-9]{1,32}$/.test(number))) {
+      (number !== undefined && (typeof number !== 'string' || !/^\+?[0-9]{1,32}$/.test(number)))) {
     throw new BadRequestException();
   }
   return {

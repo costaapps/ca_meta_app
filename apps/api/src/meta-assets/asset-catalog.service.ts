@@ -4,7 +4,7 @@ import { isVerifiedPortalSession, type VerifiedPortalSession } from '../identity
 import { TenantAuthorizationService, TenantContextService } from '../identity/identity.service.js';
 import type { MembershipRole } from '../identity/identity.types.js';
 import type {
-  AssetCatalogChannel, AssetCatalogPageQuery, AssetCatalogReadModel, ConnectionCatalogPageQuery,
+  AssetCapabilityEvidence, AssetCatalogChannel, AssetCatalogPageQuery, AssetCatalogReadModel, ConnectionCatalogPageQuery,
   ConnectionCatalogReadModel, FlowCatalogVariant, MetaEnvironment,
 } from './meta-assets.types.js';
 import type { MetaAssetsRepository } from './mysql-meta-assets.repository.js';
@@ -38,6 +38,36 @@ const PUBLIC_JOURNEYS: Readonly<Record<FlowCatalogVariant, readonly components['
   WHATSAPP_COEXISTENCE: ['WHATSAPP_COEXISTENCE'],
 };
 
+// Conservative advisory freshness bound, aligned with the M3.08 resolver's 3,600-second test profile.
+// The operation resolver remains authoritative and independently rechecks policy and all evidence.
+const CAPABILITY_EVIDENCE_MAX_AGE_MS = 60 * 60 * 1000;
+
+function observationTime(value: string | null): number | undefined {
+  if (!value || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(value)) return undefined;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : undefined;
+}
+
+function hasFreshObservation(value: string | null, now: number): boolean {
+  const time = observationTime(value);
+  return time !== undefined && time <= now && now - time <= CAPABILITY_EVIDENCE_MAX_AGE_MS;
+}
+
+function hasUsableTokenEvidence(evidence: AssetCapabilityEvidence, now: number): boolean {
+  if (evidence.tokenHealth !== 'HEALTHY' || !evidence.tokenHealthSource ||
+      !hasFreshObservation(evidence.tokenHealthObservedAt, now)) return false;
+  if (!evidence.tokenExpirySource || !hasFreshObservation(evidence.tokenExpiryObservedAt, now)) return false;
+  if (evidence.tokenExpiryState === 'KNOWN') {
+    const expiresAt = observationTime(evidence.tokenExpiresAt);
+    if (expiresAt === undefined || expiresAt <= now) return false;
+  } else if (evidence.tokenExpiryState === 'PROVIDER_NO_EXPIRY') {
+    if (evidence.tokenExpiresAt !== null) return false;
+  } else return false;
+  const dataAccessExpiresAt = observationTime(evidence.dataAccessExpiresAt);
+  return !!evidence.dataAccessExpirySource && hasFreshObservation(evidence.dataAccessExpiryObservedAt, now) &&
+    dataAccessExpiresAt !== undefined && dataAccessExpiresAt > now;
+}
+
 function publicAssetKind(value: string): components['schemas']['AssetListItem']['kind'] {
   switch (value) {
     case 'FACEBOOK_PAGE': return 'PAGE';
@@ -55,17 +85,19 @@ function canOperate(roles: readonly MembershipRole[]): boolean {
 
 function capabilitySnapshot(item: AssetCatalogReadModel, roles: readonly MembershipRole[]): components['schemas']['AssetCapabilities'] {
   // Mappings remain advisory; unsupported variant/operation pairs stay false until confirmed.
+  const now = Date.now();
   const active = item.status === 'ACTIVE' && item.authorizationStatus === 'VERIFIED' && !item.stale;
   const operator = canOperate(roles);
   const verifiedEvidence = item.capabilityEvidence.filter((evidence) =>
     evidence.authorizationState === 'ACTIVE' && evidence.assetAuthorizationState === 'ACTIVE' &&
     evidence.verificationState === 'VERIFIED' && evidence.verifiedAt !== null && evidence.verificationSource !== null &&
-    (evidence.tokenHealth === 'HEALTHY' || evidence.tokenHealth === 'EXPIRING') && item.status === 'ACTIVE' && !item.stale,
+    hasFreshObservation(evidence.verifiedAt, now) && hasUsableTokenEvidence(evidence, now) &&
+    item.status === 'ACTIVE' && !item.stale,
   );
   const hasGrant = (flow: string, auth: string, grantName: string): boolean => verifiedEvidence.some((evidence) =>
     evidence.flowVariant === flow && evidence.authVariant === auth && evidence.grantNames.includes(grantName),
   );
-  const whatsapp = item.kind === 'WHATSAPP_PHONE_NUMBER' || item.kind === 'WHATSAPP_BUSINESS_ACCOUNT';
+  const whatsapp = item.kind === 'WHATSAPP_PHONE_NUMBER';
   const instagram = item.kind === 'INSTAGRAM_BUSINESS_ACCOUNT' || item.kind === 'INSTAGRAM_CREATOR_ACCOUNT';
   return Object.freeze({
     canSend: operator && active && ((whatsapp && hasGrant('WHATSAPP_EXCLUSIVE', 'WHATSAPP_EMBEDDED_SIGNUP', 'whatsapp_business_messaging')) ||

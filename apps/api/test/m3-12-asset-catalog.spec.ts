@@ -9,6 +9,7 @@ import type {
   ConnectionCatalogPageQuery,
   ConnectionCatalogReadModel,
 } from '../src/meta-assets/meta-assets.types.js';
+import { MysqlMetaAssetsRepository } from '../src/meta-assets/mysql-meta-assets.repository.js';
 import type { MetaAssetsRepository } from '../src/meta-assets/mysql-meta-assets.repository.js';
 import { IdentityDeniedError } from '../src/identity/identity.errors.js';
 import { PortalSessionVerifier, type VerifiedPortalSession } from '../src/identity/identity.trust.js';
@@ -28,17 +29,32 @@ function capabilityEvidence(input: {
   authVariant: AssetCapabilityEvidence['authVariant'];
   grant: string;
   tokenHealth?: AssetCapabilityEvidence['tokenHealth'];
+  tokenHealthObservedAt?: string;
+  tokenExpiresAt?: string | null;
+  tokenExpiryState?: AssetCapabilityEvidence['tokenExpiryState'];
+  tokenExpiryObservedAt?: string;
+  dataAccessExpiresAt?: string | null;
+  dataAccessExpiryObservedAt?: string;
 }): AssetCapabilityEvidence {
+  const freshObservedAt = new Date(Date.now() - 1_000).toISOString();
   return {
     flowVariant: input.flowVariant,
     authVariant: input.authVariant,
     authorizationState: 'ACTIVE',
     assetAuthorizationState: 'ACTIVE',
     verificationState: 'VERIFIED',
-    verifiedAt: '2026-11-01T12:00:00.000Z',
+    verifiedAt: freshObservedAt,
     verificationSource: 'META_API',
     tokenHealth: input.tokenHealth ?? 'HEALTHY',
-    tokenHealthObservedAt: '2026-11-01T12:00:00.000Z',
+    tokenHealthSource: 'META_API',
+    tokenHealthObservedAt: input.tokenHealthObservedAt ?? freshObservedAt,
+    tokenExpiryState: input.tokenExpiryState ?? 'KNOWN',
+    tokenExpiresAt: input.tokenExpiresAt === undefined ? new Date(Date.now() + 3_600_000).toISOString() : input.tokenExpiresAt,
+    tokenExpirySource: 'META_API',
+    tokenExpiryObservedAt: input.tokenExpiryObservedAt ?? freshObservedAt,
+    dataAccessExpiresAt: input.dataAccessExpiresAt === undefined ? new Date(Date.now() + 3_600_000).toISOString() : input.dataAccessExpiresAt,
+    dataAccessExpirySource: 'META_API',
+    dataAccessExpiryObservedAt: input.dataAccessExpiryObservedAt ?? freshObservedAt,
     subscriptionState: 'UNKNOWN',
     projectionState: 'UNKNOWN',
     grantNames: [input.grant],
@@ -196,6 +212,53 @@ test('capabilities require a supported auth variant and healthy token evidence',
       flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN', grant: 'instagram_business_manage_messages', tokenHealth: 'EXPIRED',
     })],
   });
+  const staleInstagramLogin = asset({
+    kind: 'INSTAGRAM_BUSINESS_ACCOUNT',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN', grant: 'instagram_business_manage_messages',
+      tokenHealthObservedAt: new Date(Date.now() - 3_600_001).toISOString(),
+    })],
+  });
+  const expiredAccessInstagramLogin = asset({
+    kind: 'INSTAGRAM_BUSINESS_ACCOUNT',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN', grant: 'instagram_business_manage_messages',
+      dataAccessExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+    })],
+  });
+  const staleExpiryInstagramLogin = asset({
+    kind: 'INSTAGRAM_BUSINESS_ACCOUNT',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN', grant: 'instagram_business_manage_messages',
+      tokenExpiryObservedAt: new Date(Date.now() - 3_600_001).toISOString(),
+    })],
+  });
+  const expiredTokenInstagramLogin = asset({
+    kind: 'INSTAGRAM_BUSINESS_ACCOUNT',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN', grant: 'instagram_business_manage_messages',
+      tokenExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+    })],
+  });
+  const phoneNumber = asset({
+    kind: 'WHATSAPP_PHONE_NUMBER',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP', grant: 'whatsapp_business_messaging',
+    })],
+  });
+  const noExpiryInstagramLogin = asset({
+    kind: 'INSTAGRAM_BUSINESS_ACCOUNT',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN', grant: 'instagram_business_manage_messages',
+      tokenExpiryState: 'PROVIDER_NO_EXPIRY', tokenExpiresAt: null,
+    })],
+  });
+  const whatsappBusinessAccount = asset({
+    kind: 'WHATSAPP_BUSINESS_ACCOUNT',
+    capabilityEvidence: [capabilityEvidence({
+      flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP', grant: 'whatsapp_business_messaging',
+    })],
+  });
   const coexistence = asset({
     kind: 'WHATSAPP_BUSINESS_ACCOUNT',
     capabilityEvidence: [capabilityEvidence({
@@ -208,13 +271,69 @@ test('capabilities require a supported auth variant and healthy token evidence',
       flowVariant: 'FACEBOOK', authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS', grant: 'pages_manage_metadata',
     })],
   });
-  const { service } = setup({ assets: [instagramPageLogin, instagramLogin, expiredInstagramLogin, coexistence, page] });
+  const { service } = setup({ assets: [instagramPageLogin, instagramLogin, expiredInstagramLogin, staleInstagramLogin,
+    expiredAccessInstagramLogin, staleExpiryInstagramLogin, expiredTokenInstagramLogin, phoneNumber, noExpiryInstagramLogin,
+    whatsappBusinessAccount, coexistence, page] });
   const result = await service.listAssets(await sessionFor(), contextRef, { limit: 50 }, 'request-synthetic');
   assert.equal(result.items[0]?.capabilities.canSend, false, 'Facebook Login evidence cannot transfer to Instagram Login');
   assert.equal(result.items[1]?.capabilities.canSend, true, 'documented Instagram Login evidence can inform the advisory flag');
   assert.equal(result.items[2]?.capabilities.canSend, false, 'expired credentials cannot produce a positive capability');
-  assert.equal(result.items[3]?.capabilities.canManageTemplates, false, 'Coexistence template mapping remains unconfirmed');
-  assert.equal(result.items[4]?.capabilities.canSubscribe, false, 'Facebook subscription mapping remains unconfirmed');
+  assert.equal(result.items[3]?.capabilities.canSend, false, 'stale health observations cannot produce a positive capability');
+  assert.equal(result.items[4]?.capabilities.canSend, false, 'expired data access cannot produce a positive capability');
+  assert.equal(result.items[5]?.capabilities.canSend, false, 'stale token-expiry observations cannot produce a positive capability');
+  assert.equal(result.items[6]?.capabilities.canSend, false, 'expired tokens cannot produce a positive capability');
+  assert.equal(result.items[7]?.capabilities.canSend, true, 'WhatsApp send maps to a verified phone number');
+  assert.equal(result.items[8]?.capabilities.canSend, true, 'fresh provider-declared no-expiry evidence is accepted');
+  assert.equal(result.items[9]?.capabilities.canSend, false, 'a WABA parent is not a send target');
+  assert.equal(result.items[10]?.capabilities.canManageTemplates, false, 'Coexistence template mapping remains unconfirmed');
+  assert.equal(result.items[11]?.capabilities.canSubscribe, false, 'Facebook subscription mapping remains unconfirmed');
+});
+
+test('reauthorization reflects M3.09 open impacts in exact tenant, environment, authorization and asset scope', async () => {
+  const statements: Array<{ sql: string; params: readonly unknown[] }> = [];
+  const database = {
+    async getDataSource() {
+      return {
+        async query(sql: string, params: readonly unknown[] = []) {
+          statements.push({ sql, params });
+          if (statements.length === 1) return [{
+            id: assetId,
+            app_configuration_id: appConfigurationId,
+            asset_kind: 'WHATSAPP_PHONE_NUMBER',
+            status: 'ACTIVE',
+            authorization_status: 'VERIFIED',
+            observed_at: new Date().toISOString(),
+            last_verified_at: new Date().toISOString(),
+            reauthorization_required: 1,
+          }];
+          return [];
+        },
+      };
+    },
+  } as unknown as DurableWorkDatabase;
+  const repository = new MysqlMetaAssetsRepository(database, {} as never, {} as never);
+  const page = await repository.listAssetCatalog({ tenantId, environment: 'test', limit: 10 });
+  assert.equal(page.items[0]?.reauthorizationRequired, true);
+  assert.equal(statements.length, 2, 'catalog uses one page query and one batched evidence query, with no per-asset reauth query');
+  const query = statements[0]?.sql ?? '';
+  assert.match(query, /ca_meta_credential_reauth_impacts/i);
+  assert.match(query, /intent\.status IN \('PENDING', 'ACKNOWLEDGED'\)/i);
+  assert.match(query, /impact\.tenant_id = a\.tenant_id/i);
+  assert.match(query, /impact\.asset_id = a\.id/i);
+  assert.match(query, /impact\.authorization_id = aa\.authorization_id/i);
+  assert.match(query, /impact\.environment = a\.environment/i);
+  assert.deepEqual(statements[0]?.params.slice(0, 2), [tenantId, 'test']);
+});
+
+test('reauthorization capability is limited to operators with an open M3.09 intent', async () => {
+  const pending = asset({ reauthorizationRequired: true });
+  const operator = setup({ assets: [pending] });
+  const operatorPage = await operator.service.listAssets(await sessionFor(), contextRef, { limit: 10 }, 'request-synthetic');
+  assert.equal(operatorPage.items[0]?.capabilities.canReauthorize, true);
+
+  const viewer = setup({ roles: ['viewer'], assets: [pending] });
+  const viewerPage = await viewer.service.listAssets(await sessionFor(), contextRef, { limit: 10 }, 'request-synthetic');
+  assert.equal(viewerPage.items[0]?.capabilities.canReauthorize, false);
 });
 
 test('connection detail preserves stale evidence and keeps viewer capabilities read-only', async () => {

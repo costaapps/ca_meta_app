@@ -26,6 +26,7 @@ import {
   type FlowCatalogApps,
   type EvidenceSource,
   type TokenHealthState,
+  type TokenExpiryState,
   type AssetRelationType,
   type AssetVerificationState,
   type AuthorizationState,
@@ -39,6 +40,10 @@ import {
 } from './meta-assets.types.js';
 
 export const META_ASSETS_REPOSITORY = Symbol('META_ASSETS_REPOSITORY');
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string): boolean { return UUID.test(value); }
 
 export interface MetaAssetsRepository {
   upsert(command: AuthorizationUpsertCommand): Promise<AuthorizationUpsertResult>;
@@ -126,6 +131,10 @@ function tokenHealth(value: string | null): TokenHealthState {
     value === 'ACTION_REQUIRED' || value === 'STALE' ? value : 'UNKNOWN';
 }
 
+function tokenExpiryState(value: string | null): TokenExpiryState {
+  return value === 'KNOWN' || value === 'PROVIDER_NO_EXPIRY' || value === 'STALE' ? value : 'UNKNOWN';
+}
+
 function subscriptionState(value: string | null): SubscriptionState {
   return value === 'PENDING' || value === 'ACTIVE' || value === 'FAILED' || value === 'REMOVED' ? value : 'UNKNOWN';
 }
@@ -175,6 +184,7 @@ function normalizedMysqlDate(value: string | Date): string {
 function dateString(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : new Date(value.replace(' ', 'T') + (value.includes('Z') ? '' : 'Z')).toISOString();
 }
+function formatDate(value: string | Date): string { return dateString(value); }
 function rowAffected(result: unknown): number {
   const header = Array.isArray(result) ? result[0] : result;
   if (typeof header === 'object' && header !== null && 'affectedRows' in header) return Number((header as { affectedRows?: number }).affectedRows ?? 0);
@@ -441,7 +451,19 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
               ${authorizationStatusExpression} AS authorization_status,
               MAX(auth.observed_at) AS observed_at,
               MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) AS last_verified_at,
-              MAX(CASE WHEN auth.authorization_state = 'REAUTH_REQUIRED' THEN 1 ELSE 0 END) AS reauthorization_required
+              MAX(CASE WHEN auth.authorization_state = 'REAUTH_REQUIRED' OR EXISTS (
+                SELECT 1 FROM ca_meta_credential_reauth_impacts impact
+                INNER JOIN ca_meta_credential_reauth_intents intent
+                  ON intent.tenant_id = impact.tenant_id AND intent.id = impact.reauth_intent_id
+                 AND intent.authorization_id = impact.authorization_id
+                 AND intent.app_configuration_id = impact.app_configuration_id
+                 AND intent.provider = impact.provider AND intent.environment = impact.environment
+                WHERE impact.tenant_id = a.tenant_id AND impact.asset_id = a.id
+                  AND impact.authorization_id = aa.authorization_id
+                  AND impact.app_configuration_id = aa.app_configuration_id
+                  AND impact.provider = 'META' AND impact.environment = a.environment
+                  AND intent.status IN ('PENDING', 'ACKNOWLEDGED')
+              ) THEN 1 ELSE 0 END) AS reauthorization_required
        FROM ca_meta_assets a
        INNER JOIN ca_meta_app_configurations app
          ON app.tenant_id = a.tenant_id AND app.id = a.app_configuration_id
@@ -467,7 +489,13 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
               aa.verification_state, aa.verified_at, aa.verification_source,
               aa.subscription_state, aa.projection_state,
               auth.flow_variant, auth.auth_variant, auth.authorization_state, auth.observed_at AS authorization_observed_at,
-              lifecycle.health_state AS token_health, lifecycle.health_observed_at AS token_health_observed_at,
+              lifecycle.health_state AS token_health, lifecycle.health_source AS token_health_source,
+              lifecycle.health_observed_at AS token_health_observed_at,
+              lifecycle.expiry_state AS token_expiry_state, lifecycle.expires_at AS token_expires_at,
+              lifecycle.expiry_source AS token_expiry_source, lifecycle.expiry_observed_at AS token_expiry_observed_at,
+              lifecycle.data_access_expires_at AS data_access_expires_at,
+              lifecycle.data_access_expiry_source AS data_access_expiry_source,
+              lifecycle.data_access_expiry_observed_at AS data_access_expiry_observed_at,
               g.grant_name
        FROM ca_meta_asset_authorizations aa
        INNER JOIN ca_meta_authorizations auth
@@ -499,6 +527,10 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
       subscription_state: SubscriptionState; projection_state: ProjectionState;
       flow_variant: string | null; auth_variant: string | null; authorization_state: AuthorizationState;
       authorization_observed_at: string | Date; token_health: string | null; token_health_observed_at: string | Date | null;
+      token_health_source: string | null; token_expiry_state: string | null; token_expires_at: string | Date | null;
+      token_expiry_source: string | null; token_expiry_observed_at: string | Date | null;
+      data_access_expires_at: string | Date | null; data_access_expiry_source: string | null;
+      data_access_expiry_observed_at: string | Date | null;
       grant_name: string | null;
     }>;
     const evidenceByAsset = new Map<string, Map<string, { evidence: Omit<AssetCapabilityEvidence, 'grantNames'>; grants: Set<string> }>>();
@@ -517,7 +549,15 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
             verifiedAt: row.verification_state === 'VERIFIED' && row.verified_at ? formatDate(row.verified_at) : null,
             verificationSource: row.verification_state === 'VERIFIED' ? evidenceSource(row.verification_source) : null,
             tokenHealth: tokenHealth(row.token_health),
+            tokenHealthSource: evidenceSource(row.token_health_source),
             tokenHealthObservedAt: row.token_health_observed_at ? formatDate(row.token_health_observed_at) : null,
+            tokenExpiryState: tokenExpiryState(row.token_expiry_state),
+            tokenExpiresAt: row.token_expires_at ? formatDate(row.token_expires_at) : null,
+            tokenExpirySource: evidenceSource(row.token_expiry_source),
+            tokenExpiryObservedAt: row.token_expiry_observed_at ? formatDate(row.token_expiry_observed_at) : null,
+            dataAccessExpiresAt: row.data_access_expires_at ? formatDate(row.data_access_expires_at) : null,
+            dataAccessExpirySource: evidenceSource(row.data_access_expiry_source),
+            dataAccessExpiryObservedAt: row.data_access_expiry_observed_at ? formatDate(row.data_access_expiry_observed_at) : null,
             subscriptionState: subscriptionState(row.subscription_state),
             projectionState: projectionState(row.projection_state),
           },

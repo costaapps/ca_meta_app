@@ -12,6 +12,7 @@ export type SubscriptionState = 'UNKNOWN' | 'PENDING' | 'ACTIVE' | 'FAILED' | 'R
 export type ProjectionState = 'UNKNOWN' | 'PENDING' | 'SYNCED' | 'STALE' | 'FAILED';
 export type EvidenceSource = 'META_API' | 'SIGNED_WEBHOOK';
 export type TokenHealthState = 'HEALTHY' | 'EXPIRING' | 'EXPIRED' | 'REVOKED' | 'ACTION_REQUIRED' | 'STALE' | 'UNKNOWN';
+export type TokenExpiryState = 'KNOWN' | 'PROVIDER_NO_EXPIRY' | 'UNKNOWN' | 'STALE';
 
 const verifiedEvidence = new WeakSet<object>();
 const supportedAssetKinds: ReadonlySet<string> = new Set([
@@ -139,7 +140,15 @@ export interface AssetCapabilityEvidence {
   readonly verifiedAt: string | null;
   readonly verificationSource: EvidenceSource | null;
   readonly tokenHealth: TokenHealthState;
+  readonly tokenHealthSource: EvidenceSource | null;
   readonly tokenHealthObservedAt: string | null;
+  readonly tokenExpiryState: TokenExpiryState;
+  readonly tokenExpiresAt: string | null;
+  readonly tokenExpirySource: EvidenceSource | null;
+  readonly tokenExpiryObservedAt: string | null;
+  readonly dataAccessExpiresAt: string | null;
+  readonly dataAccessExpirySource: EvidenceSource | null;
+  readonly dataAccessExpiryObservedAt: string | null;
   readonly subscriptionState: SubscriptionState;
   readonly projectionState: ProjectionState;
   readonly grantNames: readonly string[];
