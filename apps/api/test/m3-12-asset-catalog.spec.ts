@@ -178,9 +178,9 @@ test('connection list uses the same protected tenant scope and bounded filters',
 });
 
 test('refresh fails closed without a configured adapter and does not open a queue path', async () => {
-  const { service, refreshLookups } = setup();
-  await assert.rejects(service.refreshAsset(await sessionFor(), contextRef, assetId, 'request-synthetic'), AssetRefreshUnavailableError);
-  assert.equal(refreshLookups, 1, 'resource existence is checked within the tenant before returning unavailable');
+  const state = setup();
+  await assert.rejects(state.service.refreshAsset(await sessionFor(), contextRef, assetId, 'request-synthetic'), AssetRefreshUnavailableError);
+  assert.equal(state.refreshLookups, 1, 'resource existence is checked within the tenant before returning unavailable');
 });
 
 test('asset response is an explicit allowlist and does not serialize provider or secret fields', async () => {
