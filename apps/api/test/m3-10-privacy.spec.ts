@@ -86,8 +86,10 @@ test('support diagnostics require a scoped short-lived grant, write actor/reason
 
 test('M3.10 is schema v12, with deny-by-default policy gates and disabled duration defaults', async () => {
   assert.equal(PRIVACY_GOVERNANCE_MIGRATION.schemaVersion, 12);
-  assert.equal(MIGRATIONS.at(-2)?.id, PRIVACY_GOVERNANCE_MIGRATION.id);
-  assert.equal(MIGRATIONS.at(-1)?.id, CREDENTIAL_LIFECYCLE_MIGRATION.id);
+  const privacyIndex = MIGRATIONS.findIndex((migration) => migration.id === PRIVACY_GOVERNANCE_MIGRATION.id);
+  const lifecycleIndex = MIGRATIONS.findIndex((migration) => migration.id === CREDENTIAL_LIFECYCLE_MIGRATION.id);
+  assert.ok(privacyIndex >= 0);
+  assert.equal(lifecycleIndex, privacyIndex + 1, 'the credential lifecycle migration follows privacy governance');
   const policyDdl = PRIVACY_GOVERNANCE_MIGRATION.steps.find((step) => step.id === 'create-retention-policies');
   assert.ok(policyDdl && policyDdl.phase === 'expand');
   assert.match(policyDdl.sql, /DEFAULT 'DRAFT'/);
