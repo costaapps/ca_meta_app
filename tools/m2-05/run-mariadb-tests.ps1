@@ -97,7 +97,7 @@ $managedEnvironment = @(
   'MIGRATION_LOCK_TIMEOUT_SECONDS', 'MIGRATION_STATEMENT_TIMEOUT_SECONDS', 'MIGRATION_MIN_SUPPORTED_API_VERSION',
   'API_DATABASE_HOST', 'API_DATABASE_PORT', 'API_DATABASE_NAME', 'API_DATABASE_USER', 'API_DATABASE_PASSWORD',
   'API_DATABASE_CONNECT_TIMEOUT_MS', 'API_PORTAL_SESSION_RECOVERY_KEY', 'API_PORT', 'API_BIND_ADDRESS', 'API_ALLOWED_HOSTS', 'API_TRUSTED_PROXIES',
-  'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST', 'M3_02_DB_TEST', 'M3_03_TEST', 'M3_09_TEST',
+  'NODE_ENV', 'M2_API_DATABASE_PASSWORD', 'M2_DURABLE_WORK_TEST', 'M2_MIGRATION_TEST', 'M3_02_DB_TEST', 'M3_03_TEST', 'M3_09_TEST', 'M3_11_TEST',
   'M3_09_DIAGNOSTIC_PATH', 'M3_TEST_CREDENTIAL_KEY_V3'
 )
 $previousEnvironment = @{}
@@ -150,6 +150,7 @@ $env:M2_MIGRATION_TEST = '0'
 $env:M3_02_DB_TEST = '1'
 $env:M3_03_TEST = '1'
 $env:M3_09_TEST = '1'
+$env:M3_11_TEST = '1'
 
 try {
   Write-Output "Compose project: $composeProject"
@@ -221,6 +222,16 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-03-magic-link-identity.junit.xml',
       '--test-reporter-destination=artifacts/test-results/m3-03-magic-link-identity.lcov.info',
       'apps/api/dist-test/test/m3-03-magic-link-identity.integration.spec.js'
+    )
+    Write-Output 'M2.05 fixture: M3.11 persistent legacy import ledger.'
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
+      '--test',
+      '--experimental-test-coverage',
+      '--test-reporter=junit',
+      '--test-reporter=lcov',
+      '--test-reporter-destination=artifacts/test-results/m3-11-legacy-import.junit.xml',
+      '--test-reporter-destination=artifacts/test-results/m3-11-legacy-import.lcov.info',
+      'apps/api/dist-test/test/m3-11-legacy-import.integration.spec.js'
     )
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m3-07/check-vault-artifact-redaction.mjs')
   } finally { Pop-Location }
