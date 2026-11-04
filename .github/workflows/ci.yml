@@ -112,7 +112,7 @@ jobs:
           path: artifacts/test-results/api.*
           if-no-files-found: warn
           retention-days: 7
-      - name: Run durable-work and M3.06/M3.07/M3.09 fixtures against disposable MariaDB
+      - name: Run durable-work and M3.03/M3.06/M3.07/M3.09 fixtures against disposable MariaDB
         run: pwsh -NoLogo -NoProfile -File tools/m2-05/run-mariadb-tests.ps1
       - name: Upload M2.05 MariaDB test reports (7 days)
         if: success()
@@ -125,6 +125,7 @@ jobs:
             artifacts/test-results/m3-02-portal-session.*
             artifacts/test-results/m3-07-credential-vault.*
             artifacts/test-results/m3-09-credential-lifecycle.*
+            artifacts/test-results/m3-03-magic-link-identity.*
           if-no-files-found: warn
           retention-days: 7
       - name: Run M3.10 retention fixtures against disposable MariaDB

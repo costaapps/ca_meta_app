@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Injectable, type OnApplicationShutdown } from '@nestjs/common';
 import { createPool, type Pool, type PoolConnection, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import type { ApiEnvironment } from '../config/environment.js';
@@ -8,6 +8,8 @@ import type { MembershipRole } from '../identity/identity.types.js';
 import type {
   InvitedIdentityTarget,
   MagicLinkDeliveryClaim,
+  MagicLinkIdentityRevocationReason,
+  MagicLinkIdentityStore,
   MagicLinkIssuedSession,
   MagicLinkSessionMaterial,
   MagicLinkStore,
@@ -50,6 +52,10 @@ interface MembershipRow extends RowDataPacket {
 
 interface SessionExpiryRow extends RowDataPacket {
   absolute_expires_at: string;
+}
+
+interface ProofGenerationRow extends RowDataPacket {
+  revocation_generation: number | string;
 }
 
 function dateValue(value: string): Date {
@@ -96,7 +102,7 @@ async function rollback(connection: PoolConnection): Promise<void> {
 }
 
 @Injectable()
-export class MysqlMagicLinkStore implements MagicLinkStore, OnApplicationShutdown {
+export class MysqlMagicLinkStore implements MagicLinkStore, MagicLinkIdentityStore, OnApplicationShutdown {
   private readonly pool: Pool;
   private readonly idleTimeoutSeconds: number;
   private readonly absoluteTimeoutSeconds: number;
@@ -187,6 +193,155 @@ export class MysqlMagicLinkStore implements MagicLinkStore, OnApplicationShutdow
       await rollback(connection);
       const mysqlError = error as NodeJS.ErrnoException;
       if (mysqlError.code === 'ER_DUP_ENTRY' || mysqlError.code === 'ER_DUP_KEY') return false;
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async readProofGeneration(emailHash: string): Promise<number> {
+    if (!/^[a-f0-9]{64}$/.test(emailHash)) throw new IdentityDeniedError();
+    const [rows] = await this.pool.execute<ProofGenerationRow[]>(
+      `SELECT revocation_generation FROM ca_meta_magic_link_identities WHERE email_hash = ? LIMIT 1`,
+      [emailHash],
+    );
+    if (!rows[0]) return 0;
+    const generation = Number(rows[0].revocation_generation);
+    if (!Number.isSafeInteger(generation) || generation < 0) throw new IdentityDeniedError();
+    return generation;
+  }
+
+  async associateVerifiedIdentity(input: {
+    readonly emailHash: string;
+    readonly principalId: string;
+    readonly proofReferenceHash: string;
+    readonly proofExpiresAt: string;
+    readonly proofGeneration: number;
+  }): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(input.emailHash) || !/^[a-f0-9]{64}$/.test(input.proofReferenceHash) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.principalId) ||
+      !Number.isSafeInteger(input.proofGeneration) || input.proofGeneration < 0 ||
+      !Number.isFinite(Date.parse(input.proofExpiresAt))) throw new IdentityDeniedError();
+
+    const connection = await this.pool.getConnection();
+    await connection.beginTransaction();
+    try {
+      const proofExpiresAt = new Date(input.proofExpiresAt).toISOString().replace('T', ' ').replace('Z', '');
+      const [expiryRows] = await connection.execute<Array<{ proof_valid: number | string } & RowDataPacket>>(
+        'SELECT (? > UTC_TIMESTAMP(6)) AS proof_valid', [proofExpiresAt],
+      );
+      if (Number(expiryRows[0]?.proof_valid) !== 1) throw new IdentityDeniedError();
+
+      const [membershipRows] = await connection.execute<Array<{ principal_id: string } & RowDataPacket>>(
+        `SELECT p.id AS principal_id
+         FROM ca_meta_principals AS p
+         INNER JOIN ca_meta_memberships AS m ON m.principal_id = p.id AND m.principal_kind = p.kind
+         INNER JOIN ca_meta_tenants AS t ON t.id = m.tenant_id
+         WHERE p.id = ? AND p.kind = 'USER' AND p.status = 'ACTIVE'
+           AND m.status = 'ACTIVE' AND t.status = 'ACTIVE'
+         ORDER BY m.tenant_id ASC LIMIT 1 FOR UPDATE`,
+        [input.principalId],
+      );
+      if (!membershipRows[0]) throw new IdentityDeniedError();
+
+      const [identityRows] = await connection.execute<Array<{
+        principal_id: string; revoked_at: string | null; revocation_generation: number | string;
+      } & RowDataPacket>>(
+        'SELECT principal_id, revoked_at, revocation_generation FROM ca_meta_magic_link_identities WHERE email_hash = ? LIMIT 1 FOR UPDATE',
+        [input.emailHash],
+      );
+      const existing = identityRows[0];
+      if (existing && existing.principal_id !== input.principalId) throw new IdentityDeniedError();
+      const currentGeneration = existing ? Number(existing.revocation_generation) : 0;
+      if (!Number.isSafeInteger(currentGeneration) || currentGeneration !== input.proofGeneration) throw new IdentityDeniedError();
+
+      await connection.execute(
+        `INSERT INTO ca_meta_magic_link_identity_events
+         (id, event_type, proof_ref_hash, email_hash, principal_id, actor_kind, actor_ref_hash, reason_code, created_at)
+         VALUES (?, 'ASSOCIATED', ?, ?, ?, 'EMAIL_PROOF_VERIFIER', NULL, 'VERIFIED_EMAIL', UTC_TIMESTAMP(6))`,
+        [randomUUID(), input.proofReferenceHash, input.emailHash, input.principalId],
+      );
+      if (existing) {
+        await connection.execute(
+          `UPDATE ca_meta_magic_link_identities SET verified_at = UTC_TIMESTAMP(6), revoked_at = NULL
+           WHERE email_hash = ? AND principal_id = ?`, [input.emailHash, input.principalId],
+        );
+      } else {
+        await connection.execute(
+          `INSERT INTO ca_meta_magic_link_identities
+           (email_hash, principal_id, verified_at, revoked_at, revocation_generation, created_at)
+           VALUES (?, ?, UTC_TIMESTAMP(6), NULL, ?, UTC_TIMESTAMP(6))`,
+          [input.emailHash, input.principalId, input.proofGeneration],
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await rollback(connection);
+      const mysqlError = error as NodeJS.ErrnoException;
+      if (mysqlError.code === 'ER_DUP_ENTRY' || mysqlError.code === 'ER_DUP_KEY') throw new IdentityDeniedError();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async revokeIdentity(input: {
+    readonly emailHash: string;
+    readonly principalId: string;
+    readonly actorReferenceHash: string;
+    readonly reasonCode: MagicLinkIdentityRevocationReason;
+  }): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(input.emailHash) || !/^[a-f0-9]{64}$/.test(input.actorReferenceHash) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.principalId) ||
+      (input.reasonCode !== 'IDENTITY_CORRECTION' && input.reasonCode !== 'COMPROMISE_REPORTED')) {
+      throw new IdentityDeniedError();
+    }
+    const connection = await this.pool.getConnection();
+    await connection.beginTransaction();
+    try {
+      const [identityRows] = await connection.execute<Array<{
+        principal_id: string; revoked_at: string | null; revocation_generation: number | string;
+      } & RowDataPacket>>(
+        `SELECT principal_id, revoked_at, revocation_generation FROM ca_meta_magic_link_identities
+         WHERE email_hash = ? LIMIT 1 FOR UPDATE`, [input.emailHash],
+      );
+      const existing = identityRows[0];
+      if (!existing || existing.principal_id !== input.principalId || existing.revoked_at !== null) {
+        throw new IdentityDeniedError();
+      }
+      const [update] = await connection.execute<ResultSetHeader>(
+        `UPDATE ca_meta_magic_link_identities
+         SET revoked_at = UTC_TIMESTAMP(6), revocation_generation = revocation_generation + 1
+         WHERE email_hash = ? AND principal_id = ? AND revoked_at IS NULL`, [input.emailHash, input.principalId],
+      );
+      if (update.affectedRows !== 1) throw new IdentityDeniedError();
+      // Stop queued deliveries before locking link rows, matching claimNextMail's
+      // queue-then-link lock order. The v8 link row has no email hash, so this is
+      // conservatively principal-wide across its email identities.
+      await connection.execute(
+        `UPDATE ca_meta_magic_link_mail_queue AS q
+         INNER JOIN ca_meta_magic_links AS l ON l.id = q.magic_link_id
+         SET q.status = 'DEAD', q.lease_owner = NULL, q.lease_expires_at = NULL
+         WHERE l.principal_id = ? AND q.status = 'QUEUED'`,
+        [input.principalId],
+      );
+      // Revoke every still-usable link for this principal in the same transaction.
+      // A provider call already leased may finish, but its token cannot authenticate.
+      await connection.execute(
+        `UPDATE ca_meta_magic_links
+         SET consumed_at = UTC_TIMESTAMP(6)
+         WHERE principal_id = ? AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP(6)`,
+        [input.principalId],
+      );
+      await connection.execute(
+        `INSERT INTO ca_meta_magic_link_identity_events
+         (id, event_type, proof_ref_hash, email_hash, principal_id, actor_kind, actor_ref_hash, reason_code, created_at)
+         VALUES (?, 'REVOKED', NULL, ?, ?, 'PLATFORM_IDENTITY_ADMIN', ?, ?, UTC_TIMESTAMP(6))`,
+        [randomUUID(), input.emailHash, input.principalId, input.actorReferenceHash, input.reasonCode],
+      );
+      await connection.commit();
+    } catch (error) {
+      await rollback(connection);
       throw error;
     } finally {
       connection.release();

@@ -30,7 +30,7 @@ try {
   New-Item -ItemType Directory -Path $tempRoot | Out-Null
   $env:NODE_PATH = Join-Path $repoRoot 'node_modules'
   Write-Output "Runtime: Node $nodeVersion / npm $npmVersion"
-  Write-Output 'Fixtures: in-memory identities, tenants, memberships and local fake inbox only.'
+  Write-Output 'Fixtures: in-memory identities, tenants, memberships, synthetic verified-email proof and local fake inbox only.'
   Invoke-Checked -FilePath $npmCommand -ArgumentList @('exec', '--workspace=@ca-meta/api', '--', 'tsc', '-p', 'tsconfig.test.json', '--outDir', $tempRoot)
   Invoke-Checked -FilePath $nodeCommand -ArgumentList @('--test', (Join-Path $tempRoot 'test\m3-03-magic-link.spec.js'))
 } finally {

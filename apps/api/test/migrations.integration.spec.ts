@@ -164,7 +164,11 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     assert.ok(String(stepRows[0]?.cursor_value).localeCompare(uuid(9000)) > 0, 'test writer ID is behind the persisted cursor');
 
     await deployMigrations(environment, [additive]);
-    await deployMigrations(environment, MIGRATIONS.slice(0, -1));
+    const lifecycleMigrationIndex = MIGRATIONS.findIndex(
+      (migration) => migration.id === CREDENTIAL_LIFECYCLE_MIGRATION.id,
+    );
+    assert.ok(lifecycleMigrationIndex > 0, 'credential lifecycle migration is registered after the base migrations');
+    await deployMigrations(environment, MIGRATIONS.slice(0, lifecycleMigrationIndex));
     await crashAt(CREDENTIAL_LIFECYCLE_MIGRATION.id, 'M2_CRASH_AFTER_DDL_STEP', 'add-authorization-flow-auth-context', 86);
     const lifecycleFlowContextStep = await queryRows<{ state: string }>(admin,
       `SELECT state FROM ${MIGRATION_STEP_LEDGER} WHERE migration_id = ? AND step_id = ?`,
