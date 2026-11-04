@@ -20,6 +20,7 @@ import {
 } from '../src/jobs/replay-dry-run.js';
 import { DurableWorker } from '../src/worker/durable-worker.js';
 import type { InboxEventEnvelope, OutboxEventEnvelope } from '../src/jobs/event-validation.js';
+import { syntheticJobAuthorization } from './fixtures/authorized-worker.js';
 
 const enabled = process.env.M2_DURABLE_WORK_TEST === '1';
 const uuid = (): string => randomUUID();
@@ -648,7 +649,7 @@ test('MariaDB durable jobs, inbox/outbox, worker recovery, fencing, DLQ replay s
         await wait(420);
         return { kind: 'SUCCEEDED' };
       }],
-    ]));
+    ]), syntheticJobAuthorization);
     const stopping = new AbortController();
     const workerRun = worker.run(stopping.signal);
     await handlerStarted;

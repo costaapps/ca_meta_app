@@ -2,11 +2,16 @@ import 'reflect-metadata';
 import { EnvironmentValidationError, validateEnvironment } from '../config/environment.js';
 import { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import { DurableJobStore } from '../jobs/job-store.js';
+import { FailClosedJobExecutionAuthorizationPort, MysqlJobExecutionAuthorizationPort } from '../jobs/job-execution-authorization.js';
+import type { JobExecutionAuthorizationPort } from '../jobs/job-execution-authorization.js';
 import { CredentialInspectionWorker, CredentialLifecycleScheduler } from '../credentials/credential-lifecycle.service.js';
 import type { CredentialInspectionPort, CredentialLifecyclePolicyPort, CredentialLifecycleSecretPort } from '../credentials/credential-lifecycle.types.js';
 import type { JobType } from '../jobs/event-validation.js';
 import { DurableWorker, type JobFinalizer, type JobHandler } from './durable-worker.js';
 import type { MetaAssetRefreshAdapter } from '../meta-assets/asset-refresh.service.js';
+import { MysqlIdentityRepository } from '../identity/mysql-identity.repository.js';
+import { ServiceTenantAuthorizationService } from '../identity/identity.service.js';
+import { WorkerServiceIdentityVerifier } from '../identity/identity.trust.js';
 
 interface CredentialLifecycleAdapters {
   readonly policies: CredentialLifecyclePolicyPort;
@@ -26,6 +31,7 @@ function configuredMetaAssetRefreshAdapter(): MetaAssetRefreshAdapter | undefine
 
 export async function bootstrapWorker(): Promise<void> {
   let database: DurableWorkDatabase | undefined;
+  let identityRepository: MysqlIdentityRepository | undefined;
   try {
     const environment = validateEnvironment(process.env);
     database = new DurableWorkDatabase(environment);
@@ -54,11 +60,23 @@ export async function bootstrapWorker(): Promise<void> {
         }
       });
     }
+    let authorization: JobExecutionAuthorizationPort = new FailClosedJobExecutionAuthorizationPort();
+    if (handlers.size > 0) {
+      const configuredIdentity = new WorkerServiceIdentityVerifier(environment.identity?.workerServiceCredentials ?? [])
+        .verify(process.env.API_JOB_WORKER_CREDENTIAL);
+      if (!configuredIdentity) throw new Error('Job worker identity is not configured.');
+      identityRepository = new MysqlIdentityRepository(environment.database);
+      authorization = new MysqlJobExecutionAuthorizationPort(
+        database,
+        new ServiceTenantAuthorizationService(identityRepository),
+        configuredIdentity,
+      );
+    }
     // M2.05 provides the durable runner. M3.09 and M3.12 remain without provider adapters here.
     const worker = new DurableWorker(new DurableJobStore(database), {
       workerRef: `api-worker:${process.pid}`,
       leaseMs: 30_000,
-    }, handlers, finalizers);
+    }, handlers, authorization, finalizers);
     const stopping = new AbortController();
     const stop = () => stopping.abort();
     process.once('SIGTERM', stop);
@@ -82,6 +100,7 @@ export async function bootstrapWorker(): Promise<void> {
     process.stderr.write(`${JSON.stringify({ level: 'error', event: fields ? 'configuration.invalid' : 'worker.failed', ...(fields ? { fields } : {}) })}\n`);
     process.exitCode = 1;
   } finally {
+    if (identityRepository) await identityRepository.onApplicationShutdown().catch(() => { process.exitCode = 1; });
     if (database) await database.close().catch(() => { process.exitCode = 1; });
   }
 }

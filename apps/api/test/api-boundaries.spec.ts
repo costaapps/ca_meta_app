@@ -3,7 +3,7 @@ import { Body, Controller, Get, Inject, INestApplication, Post } from '@nestjs/c
 import { Test } from '@nestjs/testing';
 import { IsString, MaxLength } from 'class-validator';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { test } from 'node:test';
 import { createServer, connect as netConnect } from 'node:net';
 import type { AddressInfo } from 'node:net';
@@ -366,6 +366,21 @@ test('configuration validation requires typed fields, reports names only, and re
       ...valid,
       API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON: '[{"issuer":"https://issuer.synthetic.invalid","subject":"operator-1"}]',
     }).identity?.platformIdentityAdmins, [{ issuer: 'https://issuer.synthetic.invalid', subject: 'operator-1' }]);
+    const workerHash = createHash('sha256').update('synthetic-worker-proof-with-more-than-32-bytes').digest('hex');
+    assert.deepEqual(validateEnvironment({
+      ...valid,
+      API_JOB_WORKER_CREDENTIAL_HASHES_JSON: JSON.stringify([
+        { principalId: '00000000-0000-4000-8000-000000000012', credentialSha256: workerHash },
+      ]),
+    }).identity?.workerServiceCredentials, [
+      { principalId: '00000000-0000-4000-8000-000000000012', credentialSha256: workerHash },
+    ]);
+    assert.throws(() => validateEnvironment({
+      ...valid,
+      API_JOB_WORKER_CREDENTIAL_HASHES_JSON: JSON.stringify([
+        { principalId: '00000000-0000-4000-8000-000000000012', credential: 'must-not-be-configured' },
+      ]),
+    }), /API_JOB_WORKER_CREDENTIAL_HASHES_JSON/);
     assert.equal(validateEnvironment({ ...valid, API_DATABASE_PASSWORD: '  preserved password  ' }).database.password, '  preserved password  ');
   });
 

@@ -2,6 +2,7 @@ import { isIP } from 'node:net';
 import { createPublicKey, randomBytes } from 'node:crypto';
 import type { TicketExchangeConfiguration } from '../auth-exchange/ticket-contract.js';
 import type { ConfiguredTicketPublicKey } from '../auth-exchange/configured-ticket-key-set.js';
+import type { WorkerServiceCredentialHash } from '../identity/identity.trust.js';
 
 export type RuntimeEnvironment = 'development' | 'test' | 'staging' | 'production';
 
@@ -60,6 +61,8 @@ export interface ApiEnvironment {
   readonly identity?: {
     /** Exact verified issuer/subject pairs granted platform identity administration. Empty is fail-closed. */
     readonly platformIdentityAdmins: readonly { readonly issuer: string; readonly subject: string }[];
+    /** Hash-only worker credentials mapped to SERVICE principals; raw proof comes from runtime secret storage. */
+    readonly workerServiceCredentials?: readonly WorkerServiceCredentialHash[];
   };
 }
 
@@ -326,6 +329,34 @@ function platformIdentityAdminsField(source: NodeJS.ProcessEnv, invalid: string[
   }
 }
 
+function workerServiceCredentialHashesField(
+  source: NodeJS.ProcessEnv,
+  invalid: string[],
+): readonly WorkerServiceCredentialHash[] | undefined {
+  const field = 'API_JOB_WORKER_CREDENTIAL_HASHES_JSON';
+  const value = source[field];
+  if (value === undefined || value.trim() === '') return undefined;
+  try {
+    if (Buffer.byteLength(value, 'utf8') > 16 * 1024) throw new Error();
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 20) throw new Error();
+    const entries = parsed.map((entry: unknown) => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new Error();
+      const principalId = Reflect.get(entry, 'principalId');
+      const credentialSha256 = Reflect.get(entry, 'credentialSha256');
+      if (Object.keys(entry).some((name) => name !== 'principalId' && name !== 'credentialSha256') ||
+          typeof principalId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(principalId) ||
+          typeof credentialSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(credentialSha256)) throw new Error();
+      return Object.freeze({ principalId, credentialSha256 });
+    });
+    if (new Set(entries.map(({ credentialSha256 }) => credentialSha256)).size !== entries.length) throw new Error();
+    return Object.freeze(entries);
+  } catch {
+    invalid.push(field);
+    return undefined;
+  }
+}
+
 function credentialKeyRingField(source: NodeJS.ProcessEnv, invalid: string[]): CredentialKeyRingConfiguration | undefined {
   const field = 'API_CREDENTIAL_KEYRING_JSON';
   const value = source[field];
@@ -495,6 +526,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   if (Buffer.byteLength(portalSessionRecoveryKey, 'utf8') < 32) invalid.push('API_PORTAL_SESSION_RECOVERY_KEY');
   const onboardingStateSigningKey = optionalBase64urlKey(source.API_ONBOARDING_STATE_KEY, 'API_ONBOARDING_STATE_KEY', invalid);
   const platformIdentityAdmins = platformIdentityAdminsField(source, invalid);
+  const workerServiceCredentials = workerServiceCredentialHashesField(source, invalid);
   const credentialKeyRing = credentialKeyRingField(source, invalid);
 
   if (invalid.length > 0) {
@@ -525,7 +557,10 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
       password: databasePassword,
       connectTimeoutMs,
     },
-    identity: { platformIdentityAdmins },
+    identity: {
+      platformIdentityAdmins,
+      ...(workerServiceCredentials ? { workerServiceCredentials } : {}),
+    },
   };
 }
 

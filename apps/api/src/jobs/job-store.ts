@@ -36,6 +36,8 @@ export interface EnqueuedJob {
 export interface ClaimedJob {
   readonly id: string;
   readonly tenantId: string;
+  /** Persisted scheduling key; authorization separately validates the payload's tenant-owned target. */
+  readonly resourceScopeRef: string;
   readonly type: JobType;
   readonly lane: JobLane;
   readonly effectMode: EffectMode;
@@ -652,6 +654,7 @@ export class DurableJobStore implements JobStore {
     return {
       id: row.id,
       tenantId: row.tenant_id,
+      resourceScopeRef: row.resource_scope_ref,
       type,
       lane: row.lane as JobLane,
       effectMode: row.effect_mode as EffectMode,

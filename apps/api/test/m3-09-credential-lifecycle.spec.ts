@@ -8,6 +8,7 @@ import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { JOB_POLICIES, parseJobPayload } from '../src/jobs/event-validation.js';
 import { decodeStoredJobPayload, type ClaimedJob, type JobStore } from '../src/jobs/job-store.js';
 import { DurableWorker } from '../src/worker/durable-worker.js';
+import { syntheticJobAuthorization } from './fixtures/authorized-worker.js';
 
 const tenantId = '00000000-0000-4000-8000-000000000001';
 const credentialId = '00000000-0000-4000-8000-000000000002';
@@ -173,7 +174,8 @@ async function runSyntheticLifecycle(input: { readonly adapter: boolean; readonl
     ? new CredentialInspectionWorker(fake.database, ports.policies, ports.secrets, ports.inspector, () => 0.5)
     : new CredentialInspectionWorker(fake.database, undefined, undefined, undefined, () => 0.5);
   const worker = new DurableWorker(store, { workerRef: 'synthetic-worker', leaseMs: 1_000, idlePollMs: 1 },
-    new Map([['CREDENTIAL_INSPECTION', processor.handler]]), new Map([['CREDENTIAL_INSPECTION', processor.finalizer]]));
+    new Map([['CREDENTIAL_INSPECTION', processor.handler]]), syntheticJobAuthorization,
+    new Map([['CREDENTIAL_INSPECTION', processor.finalizer]]));
   await worker.run(jobController.signal);
   return { fake, calls };
 }
