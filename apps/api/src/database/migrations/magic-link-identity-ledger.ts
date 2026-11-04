@@ -19,8 +19,12 @@ async function verifyProofGenerationColumn(queryRunner: import('typeorm').QueryR
   ) as Array<{ data_type: string; column_type: string; is_nullable: string; column_default: string | null }>;
   if (rows.length === 0) return false;
   const column = rows[0];
-  if (!column || column.data_type.toLowerCase() !== 'bigint' || column.column_type.toLowerCase() !== 'bigint unsigned' ||
-    column.is_nullable !== 'NO' || column.column_default !== '0') {
+  const columnType = column?.column_type.toLowerCase().replace(/^bigint(?:\(\d+\))?/u, 'bigint');
+  const columnDefault = column?.column_default === null || column?.column_default === undefined
+    ? null
+    : String(column.column_default);
+  if (!column || column.data_type.toLowerCase() !== 'bigint' || columnType !== 'bigint unsigned' ||
+    column.is_nullable !== 'NO' || columnDefault !== '0') {
     throw new Error('Magic-link identity associations have an unexpected proof generation column.');
   }
   return true;

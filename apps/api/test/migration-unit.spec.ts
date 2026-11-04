@@ -214,6 +214,28 @@ test('M3.03 append-only ledger trigger verification rejects a same-name trigger 
   }
 });
 
+test('M3.03 proof generation migration accepts MariaDB BIGINT display width metadata', async () => {
+  const proofGenerationStep = MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.steps.find(
+    (step) => step.id === 'add-magic-link-identity-proof-generation',
+  );
+  assert.ok(proofGenerationStep && 'verify' in proofGenerationStep);
+  const queryRunner = {
+    async query() {
+      return [{
+        data_type: 'bigint',
+        column_type: 'bigint(20) unsigned',
+        is_nullable: 'NO',
+        column_default: '0',
+      }];
+    },
+  } as never;
+  assert.equal(await proofGenerationStep.verify({
+    queryRunner,
+    migrationId: MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.id,
+    stepId: proofGenerationStep.id,
+  }), true);
+});
+
 test('M3.05 entry-mode migration accepts only the additive column shape and preserves legacy default', async () => {
   const step = PORTAL_SESSION_ENTRY_MODE_MIGRATION.steps[0];
   assert.ok(step && 'verify' in step);
