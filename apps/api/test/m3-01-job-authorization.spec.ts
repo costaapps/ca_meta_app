@@ -154,7 +154,12 @@ test('job authorization denies stale claims, tenant substitution, missing resour
   assert.equal(await original.authorization.authorize({ ...original.job, claimToken: 'forged-claim-token' }), undefined);
   assert.equal(await original.authorization.authorize({
     ...original.job,
-    payload: { ...original.job.payload, assetId: '00000000-0000-4000-8000-000000000099' },
+    payload: {
+      kind: 'ASSET_REFRESH',
+      assetId: '00000000-0000-4000-8000-000000000099',
+      appConfigurationId: '00000000-0000-4000-8000-000000000005',
+      environment: 'test',
+    },
   }), undefined);
 
   const substituted = authorizationFor({ tenantId: tenantB });

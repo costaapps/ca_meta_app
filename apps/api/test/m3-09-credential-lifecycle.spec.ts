@@ -142,11 +142,13 @@ async function runSyntheticLifecycle(input: { readonly adapter: boolean; readonl
       assert.equal(job.idempotencyKey, `credential-inspection:${credentialId}:1`);
       claim = {
         id: 'synthetic-job-id', tenantId, type: 'CREDENTIAL_INSPECTION',
+        resourceScopeRef: credentialId,
         lane: JOB_POLICIES.CREDENTIAL_INSPECTION.lane, effectMode: JOB_POLICIES.CREDENTIAL_INSPECTION.effectMode,
         payload, idempotencyKey: job.idempotencyKey, correlationId: job.correlationId, causationId: null,
         attempt: 1, maxAttempts: 1, claimToken: 'synthetic-claim-token', workerRef: 'synthetic-worker',
         budgetStartedAt: observedAt, createdAt: observedAt,
       };
+      assert.ok(claim);
       return { id: claim.id, duplicate: false };
     },
     async claimNext() {
