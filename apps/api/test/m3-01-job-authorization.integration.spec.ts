@@ -25,6 +25,7 @@ test('M3.01 MariaDB authorizes a persisted asset job and denies forged claims, p
   const servicePrincipalId = randomUUID();
   const appConfigurationId = randomUUID();
   const authorizationId = randomUUID();
+  const credentialId = randomUUID();
   const assetId = randomUUID();
   const proof = `synthetic-m3-01-worker-proof-${randomUUID()}`;
   const identity = new WorkerServiceIdentityVerifier([{
@@ -65,6 +66,12 @@ test('M3.01 MariaDB authorizes a persisted asset job and denies forged claims, p
       [authorizationId, tenantId, appConfigurationId, `synthetic-auth-${randomUUID()}`, timestamp, timestamp, timestamp],
     );
     await dataSource.query(
+      `INSERT INTO ca_meta_credentials
+       (id, tenant_id, authorization_id, app_configuration_id, provider, environment, family, status, version, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'META', 'test', 'USER_ACCESS', 'ACTIVE', 1, ?, ?)`,
+      [credentialId, tenantId, authorizationId, appConfigurationId, timestamp, timestamp],
+    );
+    await dataSource.query(
       `INSERT INTO ca_meta_assets
        (id, tenant_id, app_configuration_id, provider, environment, asset_kind, external_id, display_name, created_at, updated_at)
        VALUES (?, ?, ?, 'META', 'test', 'PAGE', ?, 'synthetic asset', ?, ?)`,
@@ -75,9 +82,9 @@ test('M3.01 MariaDB authorizes a persisted asset job and denies forged claims, p
        (tenant_id, authorization_id, asset_id, app_configuration_id, provider, environment, credential_id,
         state, verification_state, verification_source, verification_ref_hash, verified_at,
         subscription_state, projection_state, version, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'META', 'test', NULL, 'ACTIVE', 'VERIFIED', 'META_API', ?, ?,
+       VALUES (?, ?, ?, ?, 'META', 'test', ?, 'ACTIVE', 'VERIFIED', 'META_API', ?, ?,
          'UNKNOWN', 'UNKNOWN', 1, ?, ?)`,
-      [tenantId, authorizationId, assetId, appConfigurationId,
+      [tenantId, authorizationId, assetId, appConfigurationId, credentialId,
         createHash('sha256').update(`synthetic-asset-evidence:${assetId}`).digest('hex'), timestamp, timestamp, timestamp],
     );
 
