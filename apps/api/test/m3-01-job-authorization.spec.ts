@@ -79,9 +79,13 @@ function authorizationFor(options: {
   const database = {
     async getDataSource() {
       return {
-        async query(sql: string) {
+        async query(sql: string, parameters?: unknown[]) {
           statements.push(sql);
-          if (sql.includes('FROM ca_meta_jobs')) return options.activeClaim === false ? [] : [activeRow];
+          if (sql.includes('FROM ca_meta_jobs')) {
+            const claimMatches = !!parameters && parameters.includes(job.id) &&
+              parameters.includes(job.claimToken) && parameters.includes(job.workerRef);
+            return options.activeClaim === false || !claimMatches ? [] : [activeRow];
+          }
           if (sql.includes('FROM ca_meta_assets')) {
             const hasAuthorizationFence = sql.includes('JOIN ca_meta_asset_authorizations AS aa') &&
               sql.includes("aa.state = 'ACTIVE'") && sql.includes("aa.verification_state = 'VERIFIED'") &&
@@ -145,6 +149,13 @@ test('job authorization derives tenant from the live claim, checks the service g
 test('job authorization denies stale claims, tenant substitution, missing resource rows and missing service grants', async () => {
   const stale = authorizationFor({ activeClaim: false });
   assert.equal(await stale.authorization.authorize(stale.job), undefined);
+
+  const original = authorizationFor();
+  assert.equal(await original.authorization.authorize({ ...original.job, claimToken: 'forged-claim-token' }), undefined);
+  assert.equal(await original.authorization.authorize({
+    ...original.job,
+    payload: { ...original.job.payload, assetId: '00000000-0000-4000-8000-000000000099' },
+  }), undefined);
 
   const substituted = authorizationFor({ tenantId: tenantB });
   assert.equal(await substituted.authorization.authorize(substituted.job), undefined);

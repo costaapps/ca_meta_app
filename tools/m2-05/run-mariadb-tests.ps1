@@ -182,6 +182,16 @@ try {
       '--test-reporter-destination=artifacts/test-results/m3-06-meta-assets.lcov.info',
       'apps/api/dist-test/test/m3-06-meta-assets.integration.spec.js'
     )
+    Write-Output 'M2.05 fixture: M3.01 persisted job authorization.'
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
+      '--test',
+      '--experimental-test-coverage',
+      '--test-reporter=junit',
+      '--test-reporter=lcov',
+      '--test-reporter-destination=artifacts/test-results/m3-01-job-authorization.junit.xml',
+      '--test-reporter-destination=artifacts/test-results/m3-01-job-authorization.lcov.info',
+      'apps/api/dist-test/test/m3-01-job-authorization.integration.spec.js'
+    )
     Write-Output 'M2.05 fixture: M3.02 portal session.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
       '--test',

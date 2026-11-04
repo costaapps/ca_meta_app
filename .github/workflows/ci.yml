@@ -112,7 +112,7 @@ jobs:
           path: artifacts/test-results/api.*
           if-no-files-found: warn
           retention-days: 7
-      - name: Run durable-work and M3.03/M3.06/M3.07/M3.09/M3.11 fixtures against disposable MariaDB
+      - name: Run durable-work and M3.01/M3.03/M3.06/M3.07/M3.09/M3.11 fixtures against disposable MariaDB
         run: pwsh -NoLogo -NoProfile -File tools/m2-05/run-mariadb-tests.ps1
       - name: Upload M2.05 MariaDB test reports (7 days)
         if: always()
@@ -121,6 +121,7 @@ jobs:
           name: m2-08-mariadb-durable-work-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             artifacts/test-results/m2-05-durable-work.*
+            artifacts/test-results/m3-01-job-authorization.*
             artifacts/test-results/m3-06-meta-assets.*
             artifacts/test-results/m3-02-portal-session.*
             artifacts/test-results/m3-07-credential-vault.*
