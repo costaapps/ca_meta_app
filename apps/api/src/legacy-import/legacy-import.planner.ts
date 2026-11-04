@@ -244,7 +244,10 @@ function normalizeReasonForNumber(draft: SourceDraft, snapshot: LegacyInventoryS
 export function planLegacyImport(input: unknown, context: LegacyImportContext): LegacyImportPlan {
   const snapshot = parseLegacyInventorySnapshot(input);
   if (!context.allowedCatalogRefs.has(snapshot.catalogRef) || !context.hasher ||
-      (context.projectionVersion !== undefined && !SAFE_REF.test(context.projectionVersion))) throw new LegacyImportInputError();
+      (context.projectionVersion !== undefined &&
+        (!stringValue(context.projectionVersion, 64) || !SAFE_REF.test(context.projectionVersion)))) {
+    throw new LegacyImportInputError();
+  }
   const projectionVersion = context.projectionVersion ?? LEGACY_IMPORT_PROJECTION_VERSION;
   const digest = (value: string): string => {
     const result = context.hasher.digest(value);

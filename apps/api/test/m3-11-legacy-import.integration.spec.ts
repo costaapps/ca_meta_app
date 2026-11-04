@@ -19,7 +19,7 @@ const testContext = {
 const externalIdMarker = 'synthetic-provider-id-never-persist-this';
 const legacyRowIdMarker = 'synthetic-source-row-never-persist-this';
 
-function snapshot(sourceVersion: string, externalId = externalIdMarker): LegacyInventorySnapshot {
+function snapshot(sourceVersion: string, externalId = externalIdMarker, legacyRowId = legacyRowIdMarker): LegacyInventorySnapshot {
   const tenantId = '61111111-1111-4111-8111-111111111111';
   const appConfigurationId = '6aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   return {
@@ -29,7 +29,7 @@ function snapshot(sourceVersion: string, externalId = externalIdMarker): LegacyI
     tenantMappings: [{ tenantId, legacyDatabaseId: 'synthetic-source', legacyCompanyId: 'synthetic-company', environment: 'test' }],
     appBindings: [{ tenantId, appConfigurationId, environment: 'test' }],
     pages: [{
-      legacyRowId: legacyRowIdMarker,
+      legacyRowId,
       legacyDatabaseId: 'synthetic-source',
       legacyCompanyId: 'synthetic-company',
       sourceType: 'FACEBOOK',
@@ -44,8 +44,8 @@ function snapshot(sourceVersion: string, externalId = externalIdMarker): LegacyI
   };
 }
 
-function plan(sourceVersion: string, externalId?: string): LegacyImportPlan {
-  return planLegacyImport(snapshot(sourceVersion, externalId), testContext);
+function plan(sourceVersion: string, externalId?: string, legacyRowId?: string): LegacyImportPlan {
+  return planLegacyImport(snapshot(sourceVersion, externalId, legacyRowId), testContext);
 }
 
 test('M3.11 MariaDB ledger resumes atomically, deduplicates stable claims and quarantines changed payloads', {
@@ -131,6 +131,27 @@ test('M3.11 MariaDB ledger resumes atomically, deduplicates stable claims and qu
     ) as Array<{ source_payload_hash: string; claim_state: string }>;
     assert.equal(claims[0]?.source_payload_hash, originalPlan.items[0]?.sourcePayloadHash);
     assert.equal(claims[0]?.claim_state, 'UNVERIFIED_METADATA_ONLY');
+
+    const otherBatchPlan = plan('synthetic-watermark-v4', 'synthetic-provider-id-other-batch', 'synthetic-row-other-batch');
+    const otherBatchStart = await ledger.beginOrResume(otherBatchPlan);
+    const otherBatchItem = otherBatchPlan.items[0];
+    assert.ok(otherBatchItem);
+    const otherBatchClaim = await ledger.applyMetadataCandidateAndCheckpoint(otherBatchStart, otherBatchItem);
+    assert.equal(otherBatchClaim.disposition, 'APPLIED_METADATA_ONLY');
+    await assert.rejects(
+      ledger.rollbackMetadataCandidateAndCheckpoint(resumed, otherBatchItem, 1),
+      /checkpoint and item belong to different batches/,
+    );
+    const otherBatchItemAfter = await dataSource.query(
+      'SELECT item_state FROM ca_meta_legacy_import_items WHERE batch_id = ? AND sequence = 1',
+      [otherBatchPlan.batchId],
+    ) as Array<{ item_state: string }>;
+    const otherBatchClaimAfter = await dataSource.query(
+      'SELECT COUNT(*) AS count FROM ca_meta_legacy_import_claims WHERE source_record_hash = ?',
+      [otherBatchItem.sourceRecordHash],
+    ) as Array<{ count: number | string }>;
+    assert.equal(otherBatchItemAfter[0]?.item_state, 'CLAIMED');
+    assert.equal(Number(otherBatchClaimAfter[0]?.count), 1);
 
     const persistedLedger = {
       batches: await dataSource.query('SELECT * FROM ca_meta_legacy_import_batches'),

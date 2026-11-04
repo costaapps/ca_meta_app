@@ -162,6 +162,11 @@ test('M3.11 input rejects secret fields and an unapproved catalog alias', () => 
   rows[0] = { ...rows[0], userAccessToken: 'synthetic-marker-never-logged' };
   assert.throws(() => parseLegacyInventorySnapshot({ ...source, pages: rows }), LegacyImportInputError);
   assert.throws(() => planLegacyImport({ ...snapshot(), catalogRef: 'customer-database' }, context), LegacyImportInputError);
+  const maxProjectionVersion = 'v'.repeat(64);
+  assert.equal(planLegacyImport(snapshot(), { ...context, projectionVersion: maxProjectionVersion }).projectionVersion,
+    maxProjectionVersion);
+  assert.throws(() => planLegacyImport(snapshot(), { ...context, projectionVersion: `${maxProjectionVersion}v` }),
+    LegacyImportInputError);
   const invalidExternalId = snapshot() as unknown as Record<string, unknown>;
   const invalidRows = [...(invalidExternalId.pages as Record<string, unknown>[])];
   const first = invalidRows[0];

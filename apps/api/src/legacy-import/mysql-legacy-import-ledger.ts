@@ -325,6 +325,9 @@ export class MysqlLegacyImportLedger implements LegacyImportApplyPort {
     if (item.state !== 'METADATA_ONLY_CANDIDATE' || !Number.isSafeInteger(expectedImportedAssetVersion) || expectedImportedAssetVersion < 1) {
       throw new LegacyImportLedgerConflictError('Legacy metadata claim rollback request is invalid.');
     }
+    if (checkpointValue.batchId !== item.batchId) {
+      throw new LegacyImportLedgerConflictError('Legacy metadata claim rollback checkpoint and item belong to different batches.');
+    }
     const dataSource = await this.database.getDataSource();
     return dataSource.transaction(async (manager) => {
       const batchRows = await manager.query(
@@ -336,22 +339,26 @@ export class MysqlLegacyImportLedger implements LegacyImportApplyPort {
       if (!batch) throw new LegacyImportLedgerConflictError('Legacy import batch was not initialized.');
       assertCheckpointMatches(checkpointValue, batch);
       const itemRows = await manager.query(
-        `SELECT item_state, target_asset_ref FROM ca_meta_legacy_import_items WHERE batch_id = ? AND sequence = ? FOR UPDATE`,
-        [item.batchId, item.sequence],
-      ) as Array<{ item_state: string; target_asset_ref: string | null }>;
-      if (itemRows[0]?.item_state !== 'CLAIMED' || itemRows[0]?.target_asset_ref !== item.deterministicAssetId) {
+        `SELECT source_record_hash, source_payload_hash, source_table, tenant_id, app_configuration_id,
+           environment, asset_kind, target_asset_ref, item_state, reason_code, credential_disposition, expiry_observation
+         FROM ca_meta_legacy_import_items WHERE batch_id = ? AND sequence = ? FOR UPDATE`,
+        [batch.batch_id, item.sequence],
+      ) as ItemRow[];
+      const persistedItem = itemRows[0];
+      if (!persistedItem || persistedItem.item_state !== 'CLAIMED') {
         throw new LegacyImportLedgerConflictError('Only a claim created by this batch can be rolled back.');
       }
+      assertPersistedItem(persistedItem, item);
       const removed = await manager.query(
         `DELETE FROM ca_meta_legacy_import_claims WHERE source_record_hash = ? AND created_batch_id = ?
            AND created_sequence = ? AND version = ? AND claim_state = 'UNVERIFIED_METADATA_ONLY'`,
-        [item.sourceRecordHash, item.batchId, item.sequence, expectedImportedAssetVersion],
+        [item.sourceRecordHash, batch.batch_id, item.sequence, expectedImportedAssetVersion],
       );
       if (affectedRows(removed) !== 1) throw new LegacyImportLedgerConflictError('Legacy metadata claim changed or was replayed by another batch.');
       const changed = await manager.query(
         `UPDATE ca_meta_legacy_import_items SET item_state = 'ROLLED_BACK', updated_at = UTC_TIMESTAMP(6)
          WHERE batch_id = ? AND sequence = ? AND item_state = 'CLAIMED'`,
-        [item.batchId, item.sequence],
+        [batch.batch_id, item.sequence],
       );
       if (affectedRows(changed) !== 1) throw new LegacyImportLedgerConflictError('Legacy metadata claim rollback could not be recorded.');
       return checkpoint(batch);
