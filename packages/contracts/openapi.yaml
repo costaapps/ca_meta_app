@@ -2822,7 +2822,6 @@ components:
         - readiness
         - observedAt
         - stale
-        - assetCount
       properties:
         id:
           type: string
@@ -2933,7 +2932,6 @@ components:
         - readiness
         - observedAt
         - stale
-        - assetCount
         - assets
         - requestId
       properties:

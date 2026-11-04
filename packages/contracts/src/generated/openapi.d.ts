@@ -829,7 +829,7 @@ export interface components {
             /** @enum {string|null} */
             readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
-            readonly assetCount: number;
+            readonly assetCount?: number;
             readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
         };
         readonly ConnectionAsset: {
@@ -864,7 +864,7 @@ export interface components {
             /** @enum {string|null} */
             readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
-            readonly assetCount: number;
+            readonly assetCount?: number;
             readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
             readonly assets: readonly components["schemas"]["ConnectionAsset"][];
             readonly requestId: string;
