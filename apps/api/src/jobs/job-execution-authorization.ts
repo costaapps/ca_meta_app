@@ -62,8 +62,8 @@ const REQUIRED_JOB_SCOPES: Readonly<Partial<Record<JobType, ServiceScope>>> = Ob
 } as const satisfies Readonly<Partial<Record<JobType, ServiceScope>>>);
 
 function resourceReference(type: JobType, payload: JobPayload): string | undefined {
-  if (payload.kind !== type) return undefined;
-  switch (type) {
+  if (type !== payload.kind) return undefined;
+  switch (payload.kind) {
     case 'INBOX_PROCESS': return payload.inboxEventRef;
     case 'OUTBOX_DELIVER': return payload.outboxEventRef;
     case 'ONBOARDING_STEP': return payload.onboardingRef;
@@ -179,8 +179,8 @@ export class MysqlJobExecutionAuthorizationPort implements JobExecutionAuthoriza
     type: JobType,
     payload: JobPayload,
   ): Promise<boolean> {
-    if (payload.kind !== type) return false;
-    switch (type) {
+    if (type !== payload.kind) return false;
+    switch (payload.kind) {
       case 'INBOX_PROCESS': {
         const rows = await database.query(
           `SELECT id FROM ca_meta_inbox_events
