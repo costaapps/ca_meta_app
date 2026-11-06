@@ -76,3 +76,26 @@ O harness em [`tools/m1-03/`](../../tools/m1-03/README.md) contém perfis e iden
 | WhatsApp Coexistence | Eligibility e configuração aprovadas; número Business App e consent/QR; code/assets/grants verificados no servidor; versão/featureType; histórico/echo/state; subscription e offboarding; comprovar que não há fallback de register/deregister convencional. |
 
 Nenhum desses ensaios foi realizado nesta issue. O vídeo histórico D3 de 2024 sobre coexistência do Business App é apenas contexto, não prova de regras atuais. A falta de acesso developers.facebook.com (429) e de conta Sandbox não bloqueia esta pesquisa pública/validação local; bloqueia a certificação externa correspondente.
+
+## Atualização de governança M4.01 — 2026-11-06
+
+Esta atualização não substitui a matriz de hipóteses acima nem transforma exemplos em grants. A
+[Meta anunciou Graph API v27.0 em 2026-11-04](https://developers.facebook.com/blog/post/2026/11/04/introducing-graph-api-v27-and-marketing-api-v27/),
+mas a página de changelog disponível nesta consulta ainda apresentava v26.0 como mais recente
+([Graph API changelog](https://developers.facebook.com/docs/graph-api/changelog/)). Essa discrepância
+deixa **Not confirmed** a compatibilidade por endpoint e a versão Graph que deve ser ativada neste
+produto. Nenhum valor de exemplo ou versão de SDK/Embedded Signup é usado como default.
+
+As coleções oficiais Meta no Postman distinguem Cloud API e Embedded Signup, e distinguem Instagram
+via Facebook Login de Instagram Login. Os nomes de permissões nelas continuam candidatos documentais;
+grant, nível de acesso, App Review e Sandbox pertencem ao app/ambiente e não foram exercitados. A
+documentação pública primária de Coexistence continua indisponível nesta consulta, então elegibilidade,
+formato de evento, histórico e desligamento permanecem **Not confirmed**. O harness M1.03 e seus perfis
+offline são preservados; seus IDs e rótulos `fixture` não são valores Meta.
+
+M4.01 acrescenta um manifest de runtime versionado em
+[`apps/api/src/meta-config/capability-manifest.ts`](../../apps/api/src/meta-config/capability-manifest.ts).
+Ele mantém mapeamentos desconhecidos como `NOT_CONFIRMED`, exige status de permission/review/Sandbox
+por operação e mantém o dono de aprovação como `UNASSIGNED` até existir evidência real. O processo de
+configuração, migração de versão e rollback está em
+[`docs/delivery/M4/m4-01-runbook.md`](../delivery/M4/m4-01-runbook.md).
