@@ -76,7 +76,7 @@ function appendOnlyAuditTrigger(event: 'UPDATE' | 'DELETE'): DdlStep {
 const deliveries = tableStep(
   'create-meta-webhook-deliveries',
   'ca_meta_webhook_deliveries',
-  ['id', 'provider_app_id', 'environment', 'key_reference', 'nonce', 'authentication_tag', 'ciphertext', 'raw_sha256', 'received_at', 'expires_at'],
+  ['id', 'provider_app_id', 'environment', 'key_reference', 'nonce', 'authentication_tag', 'ciphertext', 'raw_sha256', 'signature_verified_at', 'received_at', 'expires_at'],
   [
     { name: 'PRIMARY', columns: ['id'], unique: true },
     { name: 'ix_ca_meta_webhook_delivery_expiry', columns: ['expires_at', 'id'], unique: false },
@@ -91,6 +91,7 @@ const deliveries = tableStep(
     authentication_tag BINARY(16) NOT NULL,
     ciphertext MEDIUMBLOB NOT NULL,
     raw_sha256 BINARY(32) NOT NULL,
+    signature_verified_at DATETIME(6) NOT NULL,
     received_at DATETIME(6) NOT NULL,
     expires_at DATETIME(6) NOT NULL,
     PRIMARY KEY (id),
@@ -103,11 +104,12 @@ const deliveries = tableStep(
 const events = tableStep(
   'create-meta-webhook-events',
   'ca_meta_webhook_events',
-  ['id', 'provider_app_id', 'environment', 'event_ref', 'event_type', 'object_type', 'field_name', 'item_identity_hash', 'payload_hash', 'delivery_id', 'item_locator_json', 'tenant_id', 'app_configuration_id', 'asset_id', 'route_state', 'process_state', 'quarantine_reason', 'attempt', 'lease_owner', 'lease_version', 'lease_until', 'next_attempt_at', 'last_error_code', 'received_at', 'created_at', 'updated_at'],
+  ['id', 'provider_app_id', 'environment', 'event_ref', 'schema_version', 'event_type', 'item_kind', 'provider_timestamp', 'provider_message_id', 'provider_status', 'provider_status_rank', 'object_type', 'field_name', 'item_identity_hash', 'payload_hash', 'delivery_id', 'item_locator_json', 'tenant_id', 'app_configuration_id', 'asset_id', 'route_state', 'process_state', 'quarantine_reason', 'attempt', 'lease_owner', 'lease_version', 'lease_until', 'next_attempt_at', 'last_error_code', 'received_at', 'created_at', 'updated_at'],
   [
     { name: 'PRIMARY', columns: ['id'], unique: true },
     { name: 'uq_ca_meta_webhook_item_identity', columns: ['provider_app_id', 'environment', 'item_identity_hash'], unique: true },
     { name: 'ix_ca_meta_webhook_worker', columns: ['route_state', 'process_state', 'next_attempt_at', 'received_at', 'id'], unique: false },
+    { name: 'ix_ca_meta_webhook_status_order', columns: ['tenant_id', 'app_configuration_id', 'asset_id', 'provider_message_id', 'provider_timestamp', 'provider_status_rank', 'process_state'], unique: false },
     { name: 'ix_ca_meta_webhook_quarantine', columns: ['route_state', 'quarantine_reason', 'received_at', 'id'], unique: false },
     { name: 'ix_ca_meta_webhook_tenant', columns: ['tenant_id', 'route_state', 'received_at', 'id'], unique: false },
   ],
@@ -116,7 +118,13 @@ const events = tableStep(
     provider_app_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     environment VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     event_ref CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    schema_version SMALLINT UNSIGNED NOT NULL,
     event_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    item_kind VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    provider_timestamp DATETIME(6) NULL,
+    provider_message_id VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
+    provider_status VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    provider_status_rank SMALLINT NULL,
     object_type VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     field_name VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
     item_identity_hash BINARY(32) NOT NULL,
@@ -141,6 +149,7 @@ const events = tableStep(
     PRIMARY KEY (id),
     UNIQUE KEY uq_ca_meta_webhook_item_identity (provider_app_id, environment, item_identity_hash),
     KEY ix_ca_meta_webhook_worker (route_state, process_state, next_attempt_at, received_at, id),
+    KEY ix_ca_meta_webhook_status_order (tenant_id, app_configuration_id, asset_id, provider_message_id, provider_timestamp, provider_status_rank, process_state),
     KEY ix_ca_meta_webhook_quarantine (route_state, quarantine_reason, received_at, id),
     KEY ix_ca_meta_webhook_tenant (tenant_id, route_state, received_at, id),
     CONSTRAINT fk_ca_meta_webhook_delivery FOREIGN KEY (delivery_id) REFERENCES ca_meta_webhook_deliveries (id)
@@ -148,6 +157,8 @@ const events = tableStep(
     CONSTRAINT fk_ca_meta_webhook_tenant FOREIGN KEY (tenant_id) REFERENCES ca_meta_tenants (id)
       ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT ck_ca_meta_webhook_environment CHECK (environment IN ('development', 'test', 'staging', 'production')),
+    CONSTRAINT ck_ca_meta_webhook_schema_version CHECK (schema_version = 1),
+    CONSTRAINT ck_ca_meta_webhook_item_kind CHECK (item_kind IN ('change', 'messages', 'statuses', 'messaging')),
     CONSTRAINT ck_ca_meta_webhook_route CHECK (route_state IN ('ROUTED', 'QUARANTINED')),
     CONSTRAINT ck_ca_meta_webhook_process CHECK (process_state IN ('PENDING', 'RUNNING', 'RETRY_PENDING', 'PROCESSED', 'DEAD_LETTER', 'BLOCKED')),
     CONSTRAINT ck_ca_meta_webhook_route_context CHECK (
@@ -156,6 +167,36 @@ const events = tableStep(
     ),
     CONSTRAINT ck_ca_meta_webhook_route_process CHECK (
       (route_state = 'ROUTED' AND process_state <> 'BLOCKED') OR (route_state = 'QUARANTINED' AND process_state = 'BLOCKED')
+    )
+  ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
+);
+
+const statusLocks = tableStep(
+  'create-meta-webhook-status-locks',
+  'ca_meta_webhook_status_locks',
+  ['tenant_id', 'app_configuration_id', 'environment', 'asset_id', 'provider_message_id', 'lease_owner', 'lease_token', 'lease_version', 'lease_until', 'created_at', 'updated_at'],
+  [
+    { name: 'PRIMARY', columns: ['tenant_id', 'app_configuration_id', 'environment', 'asset_id', 'provider_message_id'], unique: true },
+    { name: 'ix_ca_meta_webhook_status_lock_lease', columns: ['lease_until', 'tenant_id', 'app_configuration_id'], unique: false },
+  ],
+  `CREATE TABLE IF NOT EXISTS ca_meta_webhook_status_locks (
+    tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    app_configuration_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    environment VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    asset_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    provider_message_id VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    lease_owner VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    lease_token CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    lease_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    lease_until DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (tenant_id, app_configuration_id, environment, asset_id, provider_message_id),
+    KEY ix_ca_meta_webhook_status_lock_lease (lease_until, tenant_id, app_configuration_id),
+    CONSTRAINT ck_ca_meta_webhook_status_lock_environment CHECK (environment IN ('development', 'test', 'staging', 'production')),
+    CONSTRAINT ck_ca_meta_webhook_status_lock_fields CHECK (
+      (lease_owner IS NULL AND lease_token IS NULL AND lease_until IS NULL)
+      OR (lease_owner IS NOT NULL AND lease_token IS NOT NULL AND lease_until IS NOT NULL)
     )
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
 );
@@ -188,7 +229,7 @@ const definition = {
   id: '202611060010-meta-webhooks',
   schemaVersion: 1,
   minimumSupportedApiVersion: 1,
-  steps: [deliveries, events, replayAudit, appendOnlyAuditTrigger('UPDATE'), appendOnlyAuditTrigger('DELETE')],
+  steps: [deliveries, events, statusLocks, replayAudit, appendOnlyAuditTrigger('UPDATE'), appendOnlyAuditTrigger('DELETE')],
 } as const;
 
 export const META_WEBHOOKS_MIGRATION: VersionedMigration = {
@@ -197,5 +238,5 @@ export const META_WEBHOOKS_MIGRATION: VersionedMigration = {
 };
 
 export const META_WEBHOOKS_TABLES = [
-  'ca_meta_webhook_deliveries', 'ca_meta_webhook_events', 'ca_meta_webhook_replay_audit',
+  'ca_meta_webhook_deliveries', 'ca_meta_webhook_events', 'ca_meta_webhook_status_locks', 'ca_meta_webhook_replay_audit',
 ] as const;

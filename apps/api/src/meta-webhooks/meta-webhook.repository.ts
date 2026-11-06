@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { EntityManager } from 'typeorm';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { MetaWebhookApplication, MetaWebhookResourceRoute, ProtectedMetaWebhookPayload } from './meta-webhook.types.js';
-import type { ParsedMetaWebhookItem } from './meta-webhook-validation.js';
+import { compareMetaWebhookStatusOrder, type ParsedMetaWebhookItem } from './meta-webhook-validation.js';
 
 export interface MetaWebhookPersistResult {
   readonly received: number;
@@ -25,7 +25,13 @@ export interface MetaWebhookEventRow {
   delivery_id: string | null;
   item_locator_json: string;
   event_ref: string;
+  schema_version: number | string;
   event_type: string;
+  item_kind: ParsedMetaWebhookItem['locator']['nestedKind'];
+  provider_timestamp: string | Date | null;
+  provider_message_id: string | null;
+  provider_status: string | null;
+  provider_status_rank: number | null;
   tenant_id: string | null;
   app_configuration_id: string | null;
   asset_id: string | null;
@@ -46,7 +52,15 @@ export interface MetaWebhookEventRow {
 export interface ClaimedMetaWebhookItem {
   readonly id: string;
   readonly eventRef: string;
+  readonly eventKey: string;
+  readonly schemaVersion: number;
   readonly eventType: string;
+  readonly itemKind: ParsedMetaWebhookItem['locator']['nestedKind'];
+  readonly providerTimestamp: string | null;
+  readonly providerMessageId: string | null;
+  readonly providerStatus: string | null;
+  readonly providerStatusRank: number | null;
+  readonly statusLease: MetaWebhookStatusLease | null;
   readonly tenantId: string;
   readonly appConfigurationId: string;
   readonly assetId: string;
@@ -54,6 +68,19 @@ export interface ClaimedMetaWebhookItem {
   readonly leaseVersion: number;
   readonly payload: ProtectedMetaWebhookPayload;
   readonly locator: ParsedMetaWebhookItem['locator'];
+}
+
+export interface MetaWebhookStatusLease {
+  readonly tenantId: string;
+  readonly appConfigurationId: string;
+  readonly environment: string;
+  readonly assetId: string;
+  readonly providerMessageId: string;
+  readonly workerRef: string;
+  readonly leaseToken: string;
+  readonly leaseVersion: number;
+  readonly providerTimestamp: string;
+  readonly eventKey: string;
 }
 
 type AssetRouteResolution =
@@ -96,6 +123,7 @@ export class MetaWebhookRepository {
     readonly rawBody: Buffer;
     readonly payload: ProtectedMetaWebhookPayload;
     readonly receivedAt: Date;
+    readonly signatureVerifiedAt: Date;
   }): Promise<MetaWebhookPersistResult> {
     const uniqueItems = [...new Map(input.items.map((item) => [item.eventRef, item])).values()];
     const before = await this.findExisting(input.application, uniqueItems.map((item) => item.eventRef));
@@ -115,13 +143,13 @@ export class MetaWebhookRepository {
       await manager.query(
         `INSERT INTO ca_meta_webhook_deliveries
          (id, provider_app_id, environment, key_reference, nonce, authentication_tag, ciphertext,
-          raw_sha256, received_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          raw_sha256, signature_verified_at, received_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           input.payload.reference, input.application.providerAppId, input.application.environment,
           input.payload.keyReference, input.payload.nonce, input.payload.authenticationTag,
           input.payload.ciphertext, createHash('sha256').update(input.rawBody).digest(),
-          mysqlDate(input.receivedAt.toISOString()), mysqlDate(input.payload.expiresAt),
+          mysqlDate(input.signatureVerifiedAt.toISOString()), mysqlDate(input.receivedAt.toISOString()), mysqlDate(input.payload.expiresAt),
         ],
       );
 
@@ -135,15 +163,18 @@ export class MetaWebhookRepository {
         const eventId = randomUUID();
         await manager.query(
           `INSERT INTO ca_meta_webhook_events
-           (id, provider_app_id, environment, event_ref, event_type, object_type, field_name,
+            (id, provider_app_id, environment, event_ref, schema_version, event_type, item_kind,
+             provider_timestamp, provider_message_id, provider_status, provider_status_rank, object_type, field_name,
             item_identity_hash, payload_hash, delivery_id, item_locator_json, tenant_id,
             app_configuration_id, asset_id, route_state, process_state, quarantine_reason,
             attempt, lease_version, received_at, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
            ON DUPLICATE KEY UPDATE id = id`,
           [
             eventId, input.application.providerAppId, input.application.environment,
-            item.eventRef, item.eventType, item.object, item.field,
+            item.eventRef, item.schemaVersion, item.eventType, item.locator.nestedKind,
+            item.providerTimestamp ? mysqlDate(item.providerTimestamp) : null, item.providerMessageId, item.providerStatus, item.providerStatusRank,
+            item.object, item.field,
             Buffer.from(item.eventRef, 'hex'), Buffer.from(item.eventRef, 'hex'), input.payload.reference,
             JSON.stringify(item.locator), route?.tenantId ?? null, route?.appConfigurationId ?? null,
             route?.assetId ?? null, routeState, route ? 'PENDING' : 'BLOCKED',
@@ -182,8 +213,15 @@ export class MetaWebhookRepository {
     }
     const dataSource = await this.database.getDataSource();
     return dataSource.transaction(async (manager) => {
+      await manager.query(
+        `UPDATE ca_meta_webhook_events SET process_state = 'DEAD_LETTER', last_error_code = 'STATUS_ORDERING_METADATA_MISSING',
+           updated_at = UTC_TIMESTAMP(6)
+         WHERE route_state = 'ROUTED' AND item_kind = 'statuses' AND process_state IN ('PENDING', 'RETRY_PENDING')
+           AND (provider_timestamp IS NULL OR provider_message_id IS NULL OR provider_status IS NULL)`,
+      );
       const rows = await manager.query(
-        `SELECT event.id, event.event_ref, event.event_type, event.tenant_id,
+        `SELECT event.id, event.provider_app_id, event.environment, event.event_ref, event.schema_version, event.event_type, event.item_kind,
+                event.provider_timestamp, event.provider_message_id, event.provider_status, event.provider_status_rank, event.tenant_id,
                 event.app_configuration_id, event.asset_id, event.attempt,
                 event.lease_version, event.item_locator_json, delivery.id AS payload_reference,
                 delivery.key_reference, delivery.nonce, delivery.authentication_tag,
@@ -194,10 +232,110 @@ export class MetaWebhookRepository {
            AND (event.process_state IN ('PENDING', 'RETRY_PENDING')
              OR (event.process_state = 'RUNNING' AND event.lease_until < UTC_TIMESTAMP(6)))
            AND (event.next_attempt_at IS NULL OR event.next_attempt_at <= UTC_TIMESTAMP(6))
-         ORDER BY event.received_at, event.id LIMIT 1 FOR UPDATE`,
+            AND (event.item_kind <> 'statuses' OR NOT EXISTS (
+              SELECT 1 FROM ca_meta_webhook_events active_status
+              WHERE active_status.tenant_id = event.tenant_id
+                AND active_status.app_configuration_id = event.app_configuration_id
+                AND active_status.environment = event.environment
+                AND active_status.asset_id = event.asset_id
+                AND active_status.provider_message_id = event.provider_message_id
+                AND active_status.item_kind = 'statuses' AND active_status.process_state = 'RUNNING'
+                AND active_status.id <> event.id
+            ))
+           AND (event.item_kind <> 'statuses' OR NOT EXISTS (
+              SELECT 1 FROM ca_meta_webhook_status_locks status_lock
+              WHERE status_lock.tenant_id = event.tenant_id
+                AND status_lock.app_configuration_id = event.app_configuration_id
+                AND status_lock.environment = event.environment
+                AND status_lock.asset_id = event.asset_id
+                AND status_lock.provider_message_id = event.provider_message_id
+                AND status_lock.lease_until > UTC_TIMESTAMP(6)
+            ))
+          ORDER BY CASE WHEN event.item_kind = 'statuses' THEN event.provider_timestamp ELSE event.received_at END,
+                   CASE WHEN event.item_kind = 'statuses' THEN COALESCE(event.provider_status_rank, -32768) ELSE 0 END,
+                   event.received_at, event.id LIMIT 1 FOR UPDATE`,
       ) as MetaWebhookEventRow[];
       const row = rows[0];
       if (!row) return null;
+      let statusLease: MetaWebhookStatusLease | null = null;
+      if (row.item_kind === 'statuses') {
+        if (!row.provider_timestamp || !row.provider_message_id || !row.provider_status) {
+          await manager.query(
+            `UPDATE ca_meta_webhook_events SET process_state = 'DEAD_LETTER', lease_owner = NULL,
+               lease_until = NULL, lease_version = lease_version + 1,
+               last_error_code = 'STATUS_ORDERING_METADATA_MISSING', updated_at = UTC_TIMESTAMP(6)
+             WHERE id = ?`, [row.id],
+          );
+          return null;
+        }
+        const scope = [row.tenant_id, row.app_configuration_id, row.environment, row.asset_id, row.provider_message_id];
+        await manager.query(
+          `INSERT IGNORE INTO ca_meta_webhook_status_locks
+           (tenant_id, app_configuration_id, environment, asset_id, provider_message_id,
+            lease_owner, lease_token, lease_version, lease_until, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, NULL, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, scope,
+        );
+        const locks = await manager.query(
+          `SELECT lease_owner, lease_token, lease_version, lease_until,
+                  (lease_until > UTC_TIMESTAMP(6)) AS lease_active
+           FROM ca_meta_webhook_status_locks
+           WHERE tenant_id = ? AND app_configuration_id = ? AND environment = ?
+             AND asset_id = ? AND provider_message_id = ? FOR UPDATE`, scope,
+        ) as Array<{ lease_owner: string | null; lease_token: string | null; lease_version: number | string; lease_until: string | Date | null; lease_active: number | string }>;
+        const lock = locks[0];
+        if (!lock) throw new Error('Meta webhook status lock could not be established.');
+        if (Number(lock.lease_active) === 1) return null;
+
+        const previousRows = await manager.query(
+          `SELECT provider_timestamp, provider_status, provider_status_rank
+           FROM ca_meta_webhook_events
+           WHERE tenant_id = ? AND app_configuration_id = ? AND environment = ? AND asset_id = ?
+             AND provider_message_id = ? AND item_kind = 'statuses' AND process_state = 'PROCESSED'
+           ORDER BY provider_timestamp DESC, COALESCE(provider_status_rank, -32768) DESC, received_at DESC, id DESC
+           LIMIT 1`, scope,
+        ) as Array<{ provider_timestamp: string | Date; provider_status: string; provider_status_rank: number | null }>;
+        const previous = previousRows[0];
+        if (previous) {
+          const order = compareMetaWebhookStatusOrder(
+            { timestamp: normalizeSqlTimestamp(row.provider_timestamp), status: row.provider_status,
+              rank: row.provider_status_rank === null ? null : Number(row.provider_status_rank) },
+            { timestamp: normalizeSqlTimestamp(previous.provider_timestamp), status: previous.provider_status,
+              rank: previous.provider_status_rank === null ? null : Number(previous.provider_status_rank) },
+          );
+          if (order === 'OLDER' || order === 'SAME' || order === 'AMBIGUOUS') {
+            const terminalState = order === 'AMBIGUOUS' ? 'DEAD_LETTER' : 'PROCESSED';
+            const safeCode = order === 'AMBIGUOUS' ? 'STATUS_ORDER_AMBIGUOUS' :
+              order === 'OLDER' ? 'STALE_PROVIDER_STATUS' : 'DUPLICATE_PROVIDER_STATUS';
+            await manager.query(
+              `UPDATE ca_meta_webhook_events SET process_state = ?, lease_owner = NULL, lease_until = NULL,
+                 lease_version = lease_version + 1, last_error_code = ?, next_attempt_at = NULL,
+                 updated_at = UTC_TIMESTAMP(6) WHERE id = ?`, [terminalState, safeCode, row.id],
+            );
+            return null;
+          }
+        }
+        const leaseToken = randomUUID();
+        const leaseVersion = Number(lock.lease_version) + 1;
+        await manager.query(
+          `UPDATE ca_meta_webhook_status_locks SET lease_owner = ?, lease_token = ?, lease_version = ?,
+             lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? MICROSECOND), updated_at = UTC_TIMESTAMP(6)
+           WHERE tenant_id = ? AND app_configuration_id = ? AND environment = ?
+             AND asset_id = ? AND provider_message_id = ?`,
+          [workerRef, leaseToken, leaseVersion, leaseMs * 1_000, ...scope],
+        );
+        statusLease = {
+          tenantId: row.tenant_id as string,
+          appConfigurationId: row.app_configuration_id as string,
+          environment: row.environment,
+          assetId: row.asset_id as string,
+          providerMessageId: row.provider_message_id,
+          workerRef,
+          leaseToken,
+          leaseVersion,
+          providerTimestamp: normalizeSqlTimestamp(row.provider_timestamp),
+          eventKey: row.event_ref,
+        };
+      }
       const leaseVersion = Number(row.lease_version) + 1;
       const nextAttempt = Number(row.attempt) + 1;
       await manager.query(
@@ -210,7 +348,15 @@ export class MetaWebhookRepository {
       return {
         id: row.id,
         eventRef: row.event_ref,
+        eventKey: row.event_ref,
+        schemaVersion: Number(row.schema_version),
         eventType: row.event_type,
+        itemKind: row.item_kind,
+        providerTimestamp: row.provider_timestamp ? normalizeSqlTimestamp(row.provider_timestamp) : null,
+        providerMessageId: row.provider_message_id,
+        providerStatus: row.provider_status,
+        providerStatusRank: row.provider_status_rank === null ? null : Number(row.provider_status_rank),
+        statusLease,
         tenantId: row.tenant_id as string,
         appConfigurationId: row.app_configuration_id as string,
         assetId: row.asset_id as string,
@@ -235,21 +381,36 @@ export class MetaWebhookRepository {
     readonly leaseVersion: number;
     readonly state: 'PROCESSED' | 'RETRY_PENDING' | 'DEAD_LETTER';
     readonly safeErrorCode?: string;
+    readonly statusLease?: MetaWebhookStatusLease | null;
   }): Promise<void> {
     if (input.safeErrorCode !== undefined && !/^[A-Z][A-Z0-9_]{0,63}$/.test(input.safeErrorCode)) {
       throw new Error('Meta webhook worker error code is not a safe identifier.');
     }
     const dataSource = await this.database.getDataSource();
-    const result = await dataSource.query(
-      `UPDATE ca_meta_webhook_events SET process_state = ?,
-         lease_owner = NULL, lease_until = NULL, last_error_code = ?,
-         next_attempt_at = CASE WHEN ? = 'RETRY_PENDING'
-           THEN DATE_ADD(UTC_TIMESTAMP(6), INTERVAL LEAST(attempt, 8) SECOND) ELSE NULL END,
-         updated_at = UTC_TIMESTAMP(6)
-       WHERE id = ? AND process_state = 'RUNNING' AND lease_owner = ? AND lease_version = ?`,
-      [input.state, input.safeErrorCode ?? null, input.state, input.eventId, input.workerRef, input.leaseVersion],
-    );
-    if (affectedRows(result) !== 1) throw new Error('Meta webhook lease was lost before finalization.');
+    await dataSource.transaction(async (manager) => {
+      const result = await manager.query(
+        `UPDATE ca_meta_webhook_events SET process_state = ?,
+           lease_owner = NULL, lease_until = NULL, last_error_code = ?,
+           next_attempt_at = CASE WHEN ? = 'RETRY_PENDING'
+             THEN DATE_ADD(UTC_TIMESTAMP(6), INTERVAL LEAST(attempt, 8) SECOND) ELSE NULL END,
+           updated_at = UTC_TIMESTAMP(6)
+         WHERE id = ? AND process_state = 'RUNNING' AND lease_owner = ? AND lease_version = ?`,
+        [input.state, input.safeErrorCode ?? null, input.state, input.eventId, input.workerRef, input.leaseVersion],
+      );
+      if (affectedRows(result) !== 1) throw new Error('Meta webhook lease was lost before finalization.');
+      if (input.statusLease) {
+        const lease = input.statusLease;
+        const released = await manager.query(
+          `UPDATE ca_meta_webhook_status_locks SET lease_owner = NULL, lease_token = NULL,
+             lease_until = NULL, updated_at = UTC_TIMESTAMP(6)
+           WHERE tenant_id = ? AND app_configuration_id = ? AND environment = ? AND asset_id = ?
+             AND provider_message_id = ? AND lease_owner = ? AND lease_token = ? AND lease_version = ?`,
+          [lease.tenantId, lease.appConfigurationId, lease.environment, lease.assetId,
+            lease.providerMessageId, lease.workerRef, lease.leaseToken, lease.leaseVersion],
+        );
+        if (affectedRows(released) !== 1) throw new Error('Meta webhook status lock was lost before finalization.');
+      }
+    });
   }
 
   async expireProtectedPayloads(): Promise<number> {
