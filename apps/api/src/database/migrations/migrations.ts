@@ -2,6 +2,18 @@ import type { BackfillStep, MigrationStepContext, VersionedMigration } from './m
 import { assertExpectedColumns, tableColumns, tableExists } from './schema-inspection.js';
 import { migrationChecksum } from './migration-fingerprint.js';
 import { DURABLE_WORK_MIGRATION, DURABLE_WORK_TABLES } from './durable-work.js';
+import { IDENTITY_MIGRATION } from './identity.js';
+import { PORTAL_SESSIONS_MIGRATION, PORTAL_SESSION_TABLES } from './portal-sessions.js';
+import { TICKET_RETRY_MIGRATION } from './ticket-retry.js';
+import { META_ASSETS_MIGRATION, META_ASSETS_TABLES } from './meta-assets.js';
+import { MAGIC_LINKS_MIGRATION, MAGIC_LINK_TABLES } from './magic-links.js';
+import { MAGIC_LINK_IDENTITY_LEDGER_MIGRATION, MAGIC_LINK_IDENTITY_LEDGER_TABLES } from './magic-link-identity-ledger.js';
+import { META_CREDENTIAL_VAULT_MIGRATION, META_CREDENTIAL_VAULT_TABLES } from './credential-vault.js';
+import { PRIVACY_GOVERNANCE_MIGRATION, PRIVACY_GOVERNANCE_TABLES } from './privacy-governance.js';
+import { CREDENTIAL_LIFECYCLE_MIGRATION, CREDENTIAL_LIFECYCLE_TABLES } from './credential-lifecycle.js';
+import { PORTAL_SESSION_ENTRY_MODE_MIGRATION } from './portal-session-entry-mode.js';
+import { ONBOARDING_SESSIONS_MIGRATION, ONBOARDING_SESSION_TABLES } from './onboarding-sessions.js';
+import { LEGACY_IMPORT_MIGRATION, LEGACY_IMPORT_TABLES } from './legacy-import-ledger.js';
 
 function ddl(
   id: string,
@@ -255,6 +267,18 @@ const migrationsWithoutChecksums = [
     steps: [addExternalName, syncExternalNameOnInsert, syncExternalNameOnUpdate, backfillExternalName, validateExternalName],
   },
   DURABLE_WORK_MIGRATION,
+  IDENTITY_MIGRATION,
+  PORTAL_SESSIONS_MIGRATION,
+  TICKET_RETRY_MIGRATION,
+  META_ASSETS_MIGRATION,
+  MAGIC_LINKS_MIGRATION,
+  PORTAL_SESSION_ENTRY_MODE_MIGRATION,
+  ONBOARDING_SESSIONS_MIGRATION,
+  META_CREDENTIAL_VAULT_MIGRATION,
+  PRIVACY_GOVERNANCE_MIGRATION,
+  CREDENTIAL_LIFECYCLE_MIGRATION,
+  MAGIC_LINK_IDENTITY_LEDGER_MIGRATION,
+  LEGACY_IMPORT_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -267,6 +291,19 @@ export const DOMAIN_TABLES = [
   'ca_meta_tenant_legacy_maps',
   'ca_meta_app_configurations',
   'ca_meta_assets',
+  'ca_meta_principals',
+  'ca_meta_memberships',
+  'ca_meta_service_identity_scopes',
+  'ca_meta_identity_admin_audit',
+  ...PORTAL_SESSION_TABLES,
+  ...META_ASSETS_TABLES,
+  ...MAGIC_LINK_TABLES,
+  ...MAGIC_LINK_IDENTITY_LEDGER_TABLES,
+  ...ONBOARDING_SESSION_TABLES,
+  ...META_CREDENTIAL_VAULT_TABLES,
+  ...PRIVACY_GOVERNANCE_TABLES,
+  ...CREDENTIAL_LIFECYCLE_TABLES,
   ...DURABLE_WORK_TABLES,
+  ...LEGACY_IMPORT_TABLES,
 ] as const;
 

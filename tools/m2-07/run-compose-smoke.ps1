@@ -52,6 +52,8 @@ function Write-ComposeEnvironment {
     'API_PORT=3000',
     'API_BIND_ADDRESS=0.0.0.0',
     'API_ALLOWED_HOSTS=127.0.0.1,localhost',
+    'API_ALLOWED_ORIGINS=http://127.0.0.1:8080,http://localhost:8080',
+    'API_PORTAL_SESSION_RECOVERY_KEY=synthetic-test-session-recovery-key-32-bytes-minimum',
     'API_TRUSTED_PROXIES=none',
     "API_DATABASE_HOST=$DatabaseHost",
     'API_DATABASE_PORT=3306',
@@ -81,6 +83,8 @@ function Write-ProductionEnvironment {
     'API_PORT=3000',
     'API_BIND_ADDRESS=0.0.0.0',
     'API_ALLOWED_HOSTS=staging.example.test',
+    'API_ALLOWED_ORIGINS=https://staging.example.test',
+    'API_PORTAL_SESSION_RECOVERY_KEY=synthetic-test-session-recovery-key-32-bytes-minimum',
     'API_TRUSTED_PROXIES=10.0.0.0/8',
     'API_DATABASE_HOST=private-db.example.test',
     'API_DATABASE_PORT=3306',
@@ -401,14 +405,14 @@ VALUES
 SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_jobs WHERE id = '$jobId'), ':',
               (SELECT schema_version FROM ca_meta_schema_migrations ORDER BY schema_version DESC LIMIT 1));
 "@
-    if ((Invoke-DbQuery -Sql $seedSql) -ne '1:3') { throw 'The synthetic queued job or schema-v3 ledger was not present after migration.' }
+    if ((Invoke-DbQuery -Sql $seedSql) -ne '1:11') { throw 'The synthetic queued job or schema-v11 ledger was not present after migration.' }
     $previousWorkerContainerId = (Get-ContainerInfo -Service 'worker').Id
     $null = Invoke-Compose -Arguments @('up', '--detach', '--wait', '--wait-timeout', '90', '--force-recreate', '--no-deps', 'api')
     $null = Invoke-Compose -Arguments @('up', '--detach', '--force-recreate', '--no-deps', 'worker')
     Assert-WorkerRunning -PreviousContainerId $previousWorkerContainerId
     $preserved = Invoke-DbQuery -Sql "SELECT CONCAT(status, ':', (SELECT MAX(schema_version) FROM ca_meta_schema_migrations)) FROM ca_meta_jobs WHERE id = '$jobId';"
-    if ($preserved -ne 'QUEUED:3') { throw 'API/worker recreation did not preserve the synthetic job and schema-v3 data.' }
-    Write-Output 'Persistence smoke: recreating API and worker preserved the queued job and schema v3.'
+    if ($preserved -ne 'QUEUED:11') { throw 'API/worker recreation did not preserve the synthetic job and schema-v11 data.' }
+    Write-Output 'Persistence smoke: recreating API and worker preserved the queued job and schema v11.'
 
     if (-not $SkipDatabaseRestart) {
       $null = Invoke-Compose -Arguments @('stop', 'database')
@@ -418,7 +422,7 @@ SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_jobs WHERE id = '$jobId'), ':',
       Assert-WorkerRunning
       Assert-HttpStatus -Uri "$baseUri/api/health" -ExpectedStatus 200
       Assert-HttpStatus -Uri "$baseUri/api/ready" -ExpectedStatus 200
-      if ((Invoke-DbQuery -Sql "SELECT CONCAT(status, ':', (SELECT MAX(schema_version) FROM ca_meta_schema_migrations)) FROM ca_meta_jobs WHERE id = '$jobId';") -ne 'QUEUED:3') {
+      if ((Invoke-DbQuery -Sql "SELECT CONCAT(status, ':', (SELECT MAX(schema_version) FROM ca_meta_schema_migrations)) FROM ca_meta_jobs WHERE id = '$jobId';") -ne 'QUEUED:11') {
         throw 'The queued job was lost after a temporary database stop/restart.'
       }
       Write-Output 'Database recovery smoke: the stack recovered after a local DB restart and retained the queued job.'

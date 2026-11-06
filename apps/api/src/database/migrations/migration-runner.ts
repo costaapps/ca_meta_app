@@ -200,17 +200,59 @@ async function markStepApplied(queryRunner: QueryRunner, migrationId: string, st
   );
 }
 
+async function verifyCompatiblePriorShape(
+  queryRunner: QueryRunner,
+  migration: VersionedMigration,
+  step: Extract<MigrationStep, { phase: 'expand' | 'switch' | 'contract' }>,
+  context: MigrationStepContext,
+  migrations: readonly VersionedMigration[],
+): Promise<boolean> {
+  const candidates = migrations
+    .filter((candidate) => candidate.schemaVersion > migration.schemaVersion)
+    .flatMap((candidate) => candidate.steps.flatMap((candidateStep) => {
+      if (!('sql' in candidateStep)) return [];
+      return (candidateStep.compatiblePriorSteps ?? [])
+        .filter((compatible) => compatible.migrationId === migration.id && compatible.stepId === step.id)
+        .map((compatible) => ({ migration: candidate, step: candidateStep, verify: compatible.verify }));
+    }))
+    .sort((left, right) => right.migration.schemaVersion - left.migration.schemaVersion);
+
+  for (const candidate of candidates) {
+    const rows = await queryRunner.query(
+      `SELECT state FROM ${MIGRATION_STEP_LEDGER} WHERE migration_id = ? AND step_id = ?`,
+      [candidate.migration.id, candidate.step.id],
+    ) as Array<{ state: string }>;
+    // A STARTED additive DDL step may have committed before the process exited. Accept it
+    // only when its full target-shape verifier proves the new schema is already present.
+    if (rows[0]?.state === 'APPLIED' || rows[0]?.state === 'STARTED') return candidate.verify(context);
+  }
+  return false;
+}
+
 async function runDdlStep(
   queryRunner: QueryRunner,
+  migration: VersionedMigration,
   migrationId: string,
   step: Extract<MigrationStep, { phase: 'expand' | 'switch' | 'contract' }>,
   hooks: MigrationRunHooks,
+  migrations: readonly VersionedMigration[],
 ): Promise<void> {
   const record = await ensureStepRecord(queryRunner, migrationId, step);
   const context: MigrationStepContext = { queryRunner, migrationId, stepId: step.id };
-  const valid = await step.verify(context);
+  let valid: boolean;
+  try {
+    valid = await step.verify(context);
+  } catch (error) {
+    if (record.state === 'APPLIED' && await verifyCompatiblePriorShape(queryRunner, migration, step, context, migrations)) {
+      valid = true;
+    } else {
+      throw error;
+    }
+  }
   if (record.state === 'APPLIED') {
-    if (!valid) throw new Error(`Applied migration step ${migrationId}/${step.id} no longer matches the database.`);
+    if (!valid && !(await verifyCompatiblePriorShape(queryRunner, migration, step, context, migrations))) {
+      throw new Error(`Applied migration step ${migrationId}/${step.id} no longer matches the database.`);
+    }
     return;
   }
   if (!valid) {
@@ -266,11 +308,12 @@ async function runMigration(
   queryRunner: QueryRunner,
   migration: VersionedMigration,
   hooks: MigrationRunHooks,
+  migrations: readonly VersionedMigration[],
 ): Promise<void> {
   await ensureMigrationRecord(queryRunner, migration);
   for (const step of migration.steps) {
     if ('sql' in step) {
-      await runDdlStep(queryRunner, migration.id, step, hooks);
+      await runDdlStep(queryRunner, migration, migration.id, step, hooks, migrations);
     } else if ('runBatch' in step) {
       await runBackfillStep(queryRunner, migration.id, step, hooks);
     } else {
@@ -331,7 +374,7 @@ export async function deployMigrations(
       if (migration.minimumSupportedApiVersion > environment.minimumSupportedApiVersion) {
         throw new Error(`Migration ${migration.id} requires API baseline ${migration.minimumSupportedApiVersion}.`);
       }
-      await runMigration(queryRunner, migration, hooks);
+      await runMigration(queryRunner, migration, hooks, migrations);
     }
   } finally {
     if (queryRunner) {

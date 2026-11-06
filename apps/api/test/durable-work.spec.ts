@@ -10,6 +10,7 @@ import { canonicalJson, JOB_POLICIES, MAX_ACTIVE_JOBS_PER_TENANT, MAX_WAITING_JO
 import type { ClaimedJob, JobFinalization, JobOutcome, JobStore } from '../src/jobs/job-store.js';
 import { DurableWorker, type JobHandler } from '../src/worker/durable-worker.js';
 import type { JobType } from '../src/jobs/event-validation.js';
+import { syntheticJobAuthorization } from './fixtures/authorized-worker.js';
 
 const inboxExample = {
   eventId: 'inbox_synthetic_01',
@@ -47,6 +48,7 @@ const outboxExample = {
 const claimedJob: ClaimedJob = {
   id: '00000000-0000-4000-8000-000000000101',
   tenantId: '00000000-0000-4000-8000-000000000001',
+  resourceScopeRef: 'projection_synthetic_01',
   type: 'PROJECTION_RECONCILE',
   lane: 'HISTORICAL_PROJECTION',
   effectMode: 'SAFE_RETRY',
@@ -92,7 +94,10 @@ test('runtime event validation uses the M1.07 schemas and rejects unallowlisted 
 
 test('Nest application context closes the lazy durable-work DB provider during shutdown', async () => {
   const environment: ApiEnvironment = {
-    nodeEnv: 'test', port: 0, bindAddress: '127.0.0.1', allowedHosts: ['localhost'], trustedProxyCidrs: false,
+    nodeEnv: 'test', port: 0, bindAddress: '127.0.0.1', allowedHosts: ['localhost'], allowedOrigins: ['http://localhost'], suite4EmbedOrigins: [], trustedProxyCidrs: false,
+    portalSessionRecoveryKey: 'synthetic-test-session-recovery-key-32-bytes-minimum',
+    portalSessionIdleTimeoutSeconds: 1800,
+    portalSessionAbsoluteTimeoutSeconds: 28800,
     database: { host: '127.0.0.1', port: 3306, name: 'api_lifecycle_test', user: 'api_test', password: 'synthetic-only', connectTimeoutMs: 500 },
   };
   const app = await NestFactory.createApplicationContext(ApiModule.register(environment), { logger: false });
@@ -118,7 +123,7 @@ test('worker heartbeats beyond lease TTL, drains the current handler on SIGTERM,
     await new Promise((resolve) => setTimeout(resolve, 250));
     return { kind: 'SUCCEEDED' };
   };
-  const worker = new DurableWorker(store, { workerRef: 'worker-unit-1', leaseMs: 120, heartbeatMs: 20, idlePollMs: 5 }, new Map<JobType, JobHandler>([['PROJECTION_RECONCILE', handler]]));
+  const worker = new DurableWorker(store, { workerRef: 'worker-unit-1', leaseMs: 120, heartbeatMs: 20, idlePollMs: 5 }, new Map<JobType, JobHandler>([['PROJECTION_RECONCILE', handler]]), syntheticJobAuthorization);
   const controller = new AbortController();
   const started = Date.now();
   const run = worker.run(controller.signal);
@@ -129,11 +134,35 @@ test('worker heartbeats beyond lease TTL, drains the current handler on SIGTERM,
   assert.deepEqual(store.finishes, [{ kind: 'SUCCEEDED' }]);
 });
 
+test('worker denies execution and skips finalizers when job authorization fails', async () => {
+  const store = new FakeJobStore();
+  let handlerCalls = 0;
+  let finalizerCalls = 0;
+  const worker = new DurableWorker(
+    store,
+    { workerRef: 'worker-denied-authorization', leaseMs: 120, heartbeatMs: 20, idlePollMs: 2 },
+    new Map<JobType, JobHandler>([['PROJECTION_RECONCILE', async () => {
+      handlerCalls += 1;
+      return { kind: 'SUCCEEDED' };
+    }]]),
+    { async authorize() { return undefined; } },
+    new Map([['PROJECTION_RECONCILE', async () => { finalizerCalls += 1; }]]),
+  );
+  const controller = new AbortController();
+  const run = worker.run(controller.signal);
+  setTimeout(() => controller.abort(), 15);
+  await run;
+  assert.equal(handlerCalls, 0);
+  assert.equal(finalizerCalls, 0);
+  assert.deepEqual(store.finishes, [{ kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' }]);
+});
+
 test('worker requires heartbeat interval plus cancellation grace to fit inside the lease', () => {
   assert.throws(() => new DurableWorker(
     new FakeJobStore(),
     { workerRef: 'worker-invalid-timeout-margin', leaseMs: 100, heartbeatMs: 60, handlerCancellationGraceMs: 40 },
     new Map<JobType, JobHandler>([['PROJECTION_RECONCILE', async () => ({ kind: 'SUCCEEDED' })]]),
+    syntheticJobAuthorization,
   ), /heartbeatMs plus handlerCancellationGraceMs must be shorter than the lease/);
 });
 
@@ -145,7 +174,7 @@ test('worker does not ACK after losing its claim fence and maps uncertain provid
       await new Promise((resolve) => setTimeout(resolve, 60));
       return { kind: 'SUCCEEDED' };
     }],
-  ]));
+  ]), syntheticJobAuthorization);
   const staleController = new AbortController();
   const staleRun = staleWorker.run(staleController.signal);
   setTimeout(() => staleController.abort(), 40);
@@ -170,7 +199,7 @@ test('worker does not ACK after losing its claim fence and maps uncertain provid
   const ambiguousStore = new AmbiguousStore();
   const ambiguousWorker = new DurableWorker(ambiguousStore, { workerRef: 'worker-unit-3', leaseMs: 100, heartbeatMs: 20 }, new Map<JobType, JobHandler>([
     ['OUTBOX_DELIVER', async () => { throw new Error('synthetic uncertain provider result'); }],
-  ]));
+  ]), syntheticJobAuthorization);
   const ambiguousController = new AbortController();
   const ambiguousRun = ambiguousWorker.run(ambiguousController.signal);
   setTimeout(() => ambiguousController.abort(), 50);
@@ -201,7 +230,7 @@ test('type timeout aborts cooperatively, waits for handler exit, and never retri
       });
       handlerExitedAt = Date.now();
       return { kind: 'SUCCEEDED' };
-    }]]));
+    }]]), syntheticJobAuthorization);
     const controller = new AbortController();
     const run = worker.run(controller.signal);
     await new Promise((resolve) => setTimeout(resolve, 110));
@@ -249,7 +278,7 @@ test('non-cooperative handler timeout stops heartbeats and fences off late succe
   }, new Map<JobType, JobHandler>([['PROJECTION_RECONCILE', async (_job, signal) => {
     signal.addEventListener('abort', () => { observedAbort = true; }, { once: true });
     return pendingHandler;
-  }]]), new Map([['PROJECTION_RECONCILE', async () => { finalizerCalls += 1; }]]));
+  }]]), syntheticJobAuthorization, new Map([['PROJECTION_RECONCILE', async () => { finalizerCalls += 1; }]]));
   const controller = new AbortController();
   const started = Date.now();
   const run = worker.run(controller.signal);

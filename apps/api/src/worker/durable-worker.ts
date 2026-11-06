@@ -1,8 +1,9 @@
 import type { EntityManager } from 'typeorm';
 import type { ClaimedJob, JobFinalization, JobOutcome, JobStore } from '../jobs/job-store.js';
 import { JOB_POLICIES, type JobType } from '../jobs/event-validation.js';
+import type { JobExecutionAuthorizationPort, VerifiedJobExecutionContext } from '../jobs/job-execution-authorization.js';
 
-export type JobHandler = (job: ClaimedJob, signal: AbortSignal) => Promise<JobOutcome>;
+export type JobHandler = (job: ClaimedJob, signal: AbortSignal, authorization: VerifiedJobExecutionContext) => Promise<JobOutcome>;
 export type JobFinalizer = (manager: EntityManager, job: ClaimedJob, finalization: JobFinalization) => Promise<void>;
 
 export interface WorkerOptions {
@@ -41,6 +42,7 @@ export class DurableWorker {
     private readonly store: JobStore,
     private readonly options: WorkerOptions,
     handlers: ReadonlyMap<JobType, JobHandler>,
+    private readonly authorization: JobExecutionAuthorizationPort,
     finalizers: ReadonlyMap<JobType, JobFinalizer> = new Map(),
   ) {
     if (!/^[A-Za-z0-9:_-]{1,128}$/.test(options.workerRef)) throw new Error('Invalid worker reference.');
@@ -90,6 +92,12 @@ export class DurableWorker {
   private async execute(job: ClaimedJob): Promise<boolean> {
     const handler = this.handlers.get(job.type);
     if (!handler) return true;
+    const authorization = await this.authorization.authorize(job);
+    if (!authorization || authorization.jobId !== job.id || authorization.tenantId !== job.tenantId) {
+      // Do not invoke a handler or finalizer when the active claim, tenant grant, or resource no longer authorizes it.
+      await this.store.finish(job, { kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' });
+      return true;
+    }
     const controller = new AbortController();
     const heartbeatStop = new AbortController();
     let finished = false;
@@ -115,7 +123,7 @@ export class DurableWorker {
 
     type HandlerResult = { readonly kind: 'SETTLED'; readonly outcome: JobOutcome } | { readonly kind: 'TIMEOUT' };
     const handlerResult: Promise<HandlerResult> = Promise.resolve()
-      .then(() => handler(job, controller.signal))
+      .then(() => handler(job, controller.signal, authorization))
       .then(
         (outcome) => ({ kind: 'SETTLED', outcome }) as const,
         () => ({ kind: 'SETTLED', outcome: job.effectMode === 'AMBIGUOUS'

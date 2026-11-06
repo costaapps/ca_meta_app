@@ -11,7 +11,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Start browser-bound pre-authentication
-         * @description Public before a portal session. Requires an exact allowlisted Origin, matching Fetch Metadata, and an HttpOnly pre-auth cookie bound to the server-created challenge. The challenge is for the trusted Suite4 portal-entry handoff, not a Meta provider code.
+         * @description Public before a portal session. Requires an exact allowlisted Origin, matching Fetch Metadata, and an HttpOnly pre-auth cookie bound to the server-created challenge. The challenge is for a trusted portal-entry handoff, not a Meta provider code. PORTAL_TOP_LEVEL uses a SameSite=Lax host-only cookie. SUITE4_EMBED is enabled only when an exact HTTPS Suite4 parent-origin allowlist is configured; its host-only pre-auth cookie is SameSite=None, Secure and Partitioned. The browser still must pass the exact portal/app Origin and same-origin Fetch Metadata checks. Empty embed-origin configuration rejects SUITE4_EMBED with 400.
          */
         readonly post: operations["startPreauth"];
         readonly delete?: never;
@@ -31,7 +31,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Exchange a portal-entry ticket for a portal session
-         * @description Public in the sense that no session exists yet; protected by a pre-auth cookie and one-time signed ticket. This exchange is distinct from Meta OAuth/Embedded Signup callback handling and MUST NOT accept an authorization code. Ticket, browser challenge, cookie, current server membership, issuer and audience must match atomically. The `tenant` claim is revalidated; `company_uuid` is ignored. Set-Cookie returns the opaque portal session; the JSON DTO contains no session cookie, Meta credential, or ticket.
+         * @description Public in the sense that no session exists yet; protected by a pre-auth cookie and one-time signed ticket. This exchange is distinct from Meta OAuth/Embedded Signup callback handling and MUST NOT accept an authorization code. Ticket, browser challenge, pre-auth cookie/browser binding, current server membership, issuer and audience must match atomically. The `tenant` claim is revalidated; `company_uuid` is ignored. Set-Cookie returns the opaque portal session; the JSON DTO contains no session cookie, Meta credential, or ticket. An exact retry after a lost response (same ticket/JTI, challenge, and pre-auth browser binding) may recover only the same still-active session; it creates or renews no session and fails after session, membership, or tenant revocation/expiry. A different cookie or challenge is denied. When the trusted issuer or server-configured public key set is unavailable, the endpoint returns a safe 503 and issues no session.
          */
         readonly post: operations["exchangePortalEntryTicket"];
         readonly delete?: never;
@@ -57,6 +57,27 @@ export interface paths {
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/auth/magic-links/confirm": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Show an explicit sign-in confirmation page
+         * @description Safe for email scanners. GET only renders a no-referrer, no-store page with a deliberate POST action; it does not look up or consume the link and never creates a session.
+         */
+        readonly get: operations["showMagicLinkConfirmation"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        /** Probe the confirmation page without consuming a link */
+        readonly head: operations["probeMagicLinkConfirmation"];
         readonly patch?: never;
         readonly trace?: never;
     };
@@ -89,7 +110,7 @@ export interface paths {
         };
         /**
          * Read the current session context
-         * @description Returns public identity, current tenant context and role names only. Membership is revalidated server-side. No token, cookie value, authorization code, ciphertext or provider credential is returned. CSRF material, if bootstrapped, is delivered as a separate cookie/header protocol and is not a DTO field.
+         * @description Returns public identity, current tenant context and role names only. Membership is revalidated server-side. No token, cookie value, authorization code, ciphertext or provider credential is returned. CSRF material, if bootstrapped, is delivered as a separate cookie/header protocol and is not a DTO field. `sessionRef` is a public opaque selector for revocation and authorizes nothing without the current server session, principal and tenant.
          */
         readonly get: operations["getSession"];
         readonly put?: never;
@@ -140,6 +161,26 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/sessions/{id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /**
+         * Revoke an authorized portal session
+         * @description Requires a current verified portal session, exact Origin, CSRF, and same-origin Fetch Metadata. The target must belong to the same server-resolved principal and tenant as the actor. The request cannot select a tenant; a session UUID alone is not authorization. Missing and unowned sessions receive the same safe denial.
+         */
+        readonly delete: operations["revokeAuthorizedPortalSession"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/integrations/flows": {
         readonly parameters: {
             readonly query?: never;
@@ -149,7 +190,7 @@ export interface paths {
         };
         /**
          * List configured flow choices
-         * @description Returns only server-enabled flow configurations for the current tenant. Product variant names distinguish Facebook, Instagram variants, WhatsApp Cloud API and WhatsApp Coexistence; their actual availability, grants and eligibility are Not confirmed.
+         * @description Returns the five existing authorization journeys for each app configuration in the current tenant and environment. `variant` remains the journey identifier; optional `flowVariant` groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled.
          */
         readonly get: operations["listIntegrationFlows"];
         readonly put?: never;
@@ -171,7 +212,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Create an onboarding session and provider launch request
-         * @description Tenant/principal/config are resolved from the current server session. Body cannot select a tenant, CompanyUUID, app or secret. The server generates provider state and its correlation to this onboarding; launch URL is server-generated from allowlisted configuration. A 201 or provider redirect means only that a flow was created, never that a connection is READY.
+         * @description Tenant/principal/config are resolved from the current server session. Body cannot select a tenant, CompanyUUID, app or secret. The server generates provider state and its correlation to this onboarding; launch URL is server-generated from allowlisted configuration. Persisted state is represented by a digest and is valid for ten minutes for one use. Requests fail closed with a safe 503 when the required server-side signing key or trusted provider-launch configuration is unavailable. The signing key is runtime-configurable; its presence in any deployment is Not confirmed. A 201 or provider redirect means only that a flow was created, never that a connection is READY.
          */
         readonly post: operations["createOnboardingSession"];
         readonly delete?: never;
@@ -192,7 +233,7 @@ export interface paths {
         };
         /**
          * Read authoritative onboarding status
-         * @description The server derives READY/PARTIAL from current versioned policy and verified evidence. A code exchange, HTTP 200, popup finish event, or redirect alone never sets READY. UNKNOWN/STALE evidence stays visible and blocks READY when required.
+         * @description The server derives READY/PARTIAL from current versioned policy and verified evidence. A code exchange, HTTP 200, popup finish event, or redirect alone never sets READY. The read is scoped to the verified portal session and principal, then checks current membership in the onboarding's original tenant even after a tenant-context switch. Only a trusted server-side completion port can update status; a front-end return signal cannot do so. Provider completion remains unavailable until a verified server adapter is configured. UNKNOWN/STALE evidence stays visible and blocks READY when required.
          */
         readonly get: operations["getOnboardingSession"];
         readonly put?: never;
@@ -670,6 +711,11 @@ export interface components {
             readonly linkToken: string;
         };
         readonly SessionContext: {
+            /**
+             * Format: uuid
+             * @description Public opaque selector only; never a credential and insufficient to authorize revocation.
+             */
+            readonly sessionRef?: string;
             readonly principalRef: string;
             readonly tenantRef: string;
             readonly roles: readonly ("owner" | "admin" | "operator" | "viewer")[];
@@ -677,6 +723,11 @@ export interface components {
             readonly tenantContextRef: string;
             readonly contextVersion: number;
             readonly requestId: string;
+            /** @description Current ACTIVE memberships offered after magic-link sign-in. Each selection is revalidated server-side. */
+            readonly availableTenants?: readonly {
+                readonly tenantRef: string;
+                readonly roles: readonly ("owner" | "admin" | "operator" | "viewer")[];
+            }[];
         };
         readonly TenantSwitchRequest: {
             /** @description Requested membership reference; always revalidated server-side. */
@@ -687,13 +738,30 @@ export interface components {
          * @enum {string}
          */
         readonly FlowVariant: "FACEBOOK_LOGIN" | "INSTAGRAM_VIA_FACEBOOK_LOGIN" | "INSTAGRAM_LOGIN" | "WHATSAPP_CLOUD_API" | "WHATSAPP_COEXISTENCE";
+        /** @enum {string} */
+        readonly MetaFlowVariant: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP_EXCLUSIVE" | "WHATSAPP_COEXISTENCE";
         readonly FlowDefinition: {
             readonly variant: components["schemas"]["FlowVariant"];
+            readonly flowVariant?: components["schemas"]["MetaFlowVariant"];
+            readonly journeys?: readonly components["schemas"]["FlowVariant"][];
+            /** Format: uuid */
+            readonly appConfigurationRef?: string | null;
+            /** @enum {string} */
+            readonly environment?: "development" | "test" | "staging" | "production";
             readonly enabled: boolean;
+            /** @enum {string} */
+            readonly availability?: "CONFIGURATION_MISSING" | "ADAPTER_UNAVAILABLE" | "UNKNOWN" | "AVAILABLE";
+            readonly prerequisites?: {
+                readonly metaAppConfigured: boolean;
+                readonly serverAdapterRegistered: boolean;
+                /** @enum {string} */
+                readonly tenantFeatureFlag: "ENABLED" | "DISABLED" | "UNKNOWN";
+            };
             readonly requestedCapabilities: readonly string[];
         };
         readonly FlowList: {
             readonly items: readonly components["schemas"]["FlowDefinition"][];
+            readonly truncated?: boolean;
             readonly requestId: string;
         };
         readonly OnboardingCreateRequest: {
@@ -756,8 +824,13 @@ export interface components {
             readonly readiness: "READY" | "PARTIAL" | "UNKNOWN";
             /** Format: date-time */
             readonly observedAt: string;
+            /** Format: date-time */
+            readonly lastVerifiedAt?: string | null;
+            /** @enum {string|null} */
+            readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
             readonly assetCount: number;
+            readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
         };
         readonly ConnectionAsset: {
             readonly id: string;
@@ -769,6 +842,13 @@ export interface components {
             readonly authorizationStatus: "VERIFIED" | "REVOKED" | "UNKNOWN";
             /** Format: date-time */
             readonly observedAt: string;
+            /** Format: date-time */
+            readonly lastVerifiedAt?: string | null;
+            /** @enum {string|null} */
+            readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
+            readonly stale?: boolean;
+            readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
+            readonly capabilities?: components["schemas"]["AssetCapabilities"];
         };
         readonly ConnectionDetail: {
             readonly id: string;
@@ -779,7 +859,13 @@ export interface components {
             readonly readiness: "READY" | "PARTIAL" | "UNKNOWN";
             /** Format: date-time */
             readonly observedAt: string;
+            /** Format: date-time */
+            readonly lastVerifiedAt?: string | null;
+            /** @enum {string|null} */
+            readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
+            readonly assetCount?: number;
+            readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
             readonly assets: readonly components["schemas"]["ConnectionAsset"][];
             readonly requestId: string;
         };
@@ -798,7 +884,13 @@ export interface components {
             readonly authorizationStatus: "VERIFIED" | "REVOKED" | "UNKNOWN";
             /** Format: date-time */
             readonly observedAt: string;
+            /** Format: date-time */
+            readonly lastVerifiedAt?: string | null;
+            /** @enum {string|null} */
+            readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
+            readonly capabilities?: components["schemas"]["AssetCapabilities"];
+            readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
             readonly requestId: string;
         };
         readonly AssetListItem: {
@@ -811,7 +903,42 @@ export interface components {
             readonly authorizationStatus: "VERIFIED" | "REVOKED" | "UNKNOWN";
             /** Format: date-time */
             readonly observedAt: string;
+            /** Format: date-time */
+            readonly lastVerifiedAt?: string | null;
+            /** @enum {string|null} */
+            readonly verificationSource?: "META_API" | "SIGNED_WEBHOOK" | null;
             readonly stale: boolean;
+            readonly capabilities?: components["schemas"]["AssetCapabilities"];
+            readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
+        };
+        /** @description Safe summaries from tenant-scoped read models. Onboarding is UNKNOWN because no persisted asset or authorization binding exists; raw provider diagnostics are never returned. */
+        readonly AssetDiagnostics: {
+            /** @enum {string} */
+            readonly onboardingStatus: "CREATED" | "AWAITING_PROVIDER" | "CODE_RECEIVED" | "EXCHANGING" | "ASSETS_VERIFIED" | "PROVISIONING" | "READY" | "PARTIAL" | "CANCELLED" | "EXPIRED" | "FAILED" | "UNKNOWN";
+            /** @enum {string} */
+            readonly onboardingReadiness: "READY" | "PARTIAL" | "UNKNOWN";
+            /** @enum {string} */
+            readonly onboardingNextAction: "WAIT" | "CHECK_STATUS" | "REAUTHORIZE" | "RECONCILE" | "RESOLVE_CONFLICT" | "NONE" | "UNKNOWN";
+            /** @enum {string} */
+            readonly tokenHealth: "HEALTHY" | "EXPIRING" | "EXPIRED" | "REVOKED" | "ACTION_REQUIRED" | "STALE" | "UNKNOWN";
+            /** Format: date-time */
+            readonly tokenHealthObservedAt: string | null;
+            /** @enum {string} */
+            readonly metaState: "ACTIVE" | "PARTIAL" | "REAUTH_REQUIRED" | "UNKNOWN" | "REVOKED" | "DISCONNECTED";
+            /** Format: date-time */
+            readonly metaObservedAt: string | null;
+            /** @enum {string} */
+            readonly subscriptionState: "UNKNOWN" | "PENDING" | "ACTIVE" | "FAILED" | "REMOVED";
+            /** @enum {string} */
+            readonly projectionState: "UNKNOWN" | "PENDING" | "SYNCED" | "STALE" | "FAILED";
+        };
+        /** @description Advisory snapshot derived from verified evidence and current membership. Exact Meta operation-to-grant eligibility is Not confirmed; these flags do not authorize server operations. */
+        readonly AssetCapabilities: {
+            readonly canSend: boolean;
+            readonly canManageTemplates: boolean;
+            readonly canSubscribe: boolean;
+            readonly canReauthorize: boolean;
+            readonly canDisconnect: boolean;
         };
         readonly AssetListPage: {
             readonly items: readonly components["schemas"]["AssetListItem"][];
@@ -939,7 +1066,7 @@ export interface components {
                 readonly "application/json": components["schemas"]["ErrorEnvelope"];
             };
         };
-        /** @description Authentication or one-time proof is required. */
+        /** @description Authentication or one-time proof is required. For ticket exchange this includes a mismatched pre-auth cookie/challenge or an expired/revoked session, membership, or tenant; a response-loss retry is accepted only for the same still-active session and browser binding. */
         readonly Unauthorized: {
             headers: {
                 readonly [name: string]: unknown;
@@ -1063,6 +1190,11 @@ export interface components {
         readonly IfMatch: string;
         /** @description Opaque tenant-bound continuation cursor; do not parse or edit. */
         readonly Cursor: string;
+        readonly AssetCatalogChannel: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP";
+        /** @description Exact opaque WhatsApp phone number filter. */
+        readonly AssetCatalogNumber: string;
+        readonly AssetCatalogStatus: "ACTIVE" | "INACTIVE" | "UNKNOWN" | "STALE";
+        readonly ConnectionCatalogStatus: "ACTIVE" | "PARTIAL" | "REAUTH_REQUIRED" | "UNKNOWN" | "DISCONNECTED";
         /** @description Page size, default 50, maximum 100. */
         readonly Limit: number;
         /** @description Provider signature over exact raw request bytes. Supported algorithm/header configuration must be ratified for the actual app. */
@@ -1099,7 +1231,7 @@ export interface operations {
             /** @description Sanitized success example */
             readonly 201: {
                 headers: {
-                    /** @description Host-only Secure HttpOnly pre-auth cookie; no Domain attribute. Cookie value is not in the response body. */
+                    /** @description Host-only Secure HttpOnly `__Host-meta_preauth` cookie with no Domain attribute. PORTAL_TOP_LEVEL uses SameSite=Lax; configured SUITE4_EMBED uses SameSite=None; Partitioned. Cookie value is not in the response body. */
                     readonly "Set-Cookie"?: string;
                     readonly [name: string]: unknown;
                 };
@@ -1143,7 +1275,7 @@ export interface operations {
             /** @description Sanitized success example */
             readonly 201: {
                 headers: {
-                    /** @description Opaque host-only Secure HttpOnly portal session cookie. */
+                    /** @description Opaque host-only Secure HttpOnly `__Host-meta_portal` portal session cookie. */
                     readonly "Set-Cookie"?: string;
                     readonly "Cache-Control"?: "no-store";
                     readonly [name: string]: unknown;
@@ -1200,6 +1332,53 @@ export interface operations {
             readonly 422: components["responses"]["Unprocessable"];
             readonly 429: components["responses"]["TooManyRequests"];
             readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly showMagicLinkConfirmation: {
+        readonly parameters: {
+            readonly query: {
+                /** @description Temporary opaque link token. It is never logged or sent to analytics. */
+                readonly token: string;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Confirmation form only; no session or link state changes. */
+            readonly 200: {
+                headers: {
+                    readonly "Referrer-Policy"?: "no-referrer";
+                    readonly "Cache-Control"?: "no-store";
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "text/html": string;
+                };
+            };
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly probeMagicLinkConfirmation: {
+        readonly parameters: {
+            readonly query: {
+                readonly token: string;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Headers only; no session or link state changes. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
             readonly default: components["responses"]["UnexpectedError"];
         };
     };
@@ -1358,6 +1537,44 @@ export interface operations {
             readonly 412: components["responses"]["PreconditionFailed"];
             readonly 413: components["responses"]["PayloadTooLarge"];
             readonly 422: components["responses"]["Unprocessable"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly revokeAuthorizedPortalSession: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /**
+                 * @description Exact configured browser Origin; wildcard matching is forbidden.
+                 * @example https://portal.example.invalid
+                 */
+                readonly Origin: components["parameters"]["Origin"];
+                /** @description Must match the configured exact-origin topology; cross-site, missing or invalid values fail. */
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                /** @description Session-bound anti-CSRF value; not a DTO property and not sufficient without the session cookie. */
+                readonly "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            readonly path: {
+                /** @description Session identifier; authorization is resolved from the current server session. */
+                readonly id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Completed without a response body */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 409: components["responses"]["Conflict"];
             readonly 429: components["responses"]["TooManyRequests"];
             readonly 503: components["responses"]["Unavailable"];
             readonly default: components["responses"]["UnexpectedError"];
@@ -1589,6 +1806,10 @@ export interface operations {
                 readonly cursor?: components["parameters"]["Cursor"];
                 /** @description Page size, default 50, maximum 100. */
                 readonly limit?: components["parameters"]["Limit"];
+                readonly channel?: components["parameters"]["AssetCatalogChannel"];
+                /** @description Exact opaque WhatsApp phone number filter. */
+                readonly number?: components["parameters"]["AssetCatalogNumber"];
+                readonly status?: components["parameters"]["ConnectionCatalogStatus"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -1773,6 +1994,10 @@ export interface operations {
                 readonly cursor?: components["parameters"]["Cursor"];
                 /** @description Page size, default 50, maximum 100. */
                 readonly limit?: components["parameters"]["Limit"];
+                readonly channel?: components["parameters"]["AssetCatalogChannel"];
+                /** @description Exact opaque WhatsApp phone number filter. */
+                readonly number?: components["parameters"]["AssetCatalogNumber"];
+                readonly status?: components["parameters"]["AssetCatalogStatus"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -2130,6 +2355,10 @@ export interface operations {
                 readonly cursor?: components["parameters"]["Cursor"];
                 /** @description Page size, default 50, maximum 100. */
                 readonly limit?: components["parameters"]["Limit"];
+                readonly channel?: components["parameters"]["AssetCatalogChannel"];
+                /** @description Exact opaque WhatsApp phone number filter. */
+                readonly number?: components["parameters"]["AssetCatalogNumber"];
+                readonly status?: components["parameters"]["ConnectionCatalogStatus"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -2230,6 +2459,10 @@ export interface operations {
                 readonly cursor?: components["parameters"]["Cursor"];
                 /** @description Page size, default 50, maximum 100. */
                 readonly limit?: components["parameters"]["Limit"];
+                readonly channel?: components["parameters"]["AssetCatalogChannel"];
+                /** @description Exact opaque WhatsApp phone number filter. */
+                readonly number?: components["parameters"]["AssetCatalogNumber"];
+                readonly status?: components["parameters"]["ConnectionCatalogStatus"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */

@@ -138,12 +138,15 @@ check('ENTRY-01', () => {
 check('ENTRY-03', () => {
   const entry = fixture.suite4Entry;
   assert.equal(entry.preauthResponseLostRecovery, 'fresh_challenge_may_be_started');
-  assert.equal(entry.exchangeResponseLostRecovery, 'fresh_preauth_same_browser');
-  assert.equal(entry.replayOneUseTicket, false);
-  assert.equal(entry.replayOneUseChallenge, false);
-  assert.equal(entry.additionalRetrySemantics, 'not_defined');
-  assert.ok(openapi.includes('A consumed ticket is never replayed'));
-  assert.ok(spec.includes('If the exchange response is lost, do not replay the one-use ticket'));
+  assert.equal(entry.exchangeResponseLostRecovery, 'exact_ticket_challenge_browser_binding_only');
+  assert.equal(entry.exactRetryReturnsSameActiveSession, true);
+  assert.equal(entry.exactRetryCreatesOrRenewsSession, false);
+  assert.equal(entry.differentSignedTicketSameJtiDenied, true);
+  assert.equal(entry.differentBrowserReplayDenied, true);
+  assert.equal(entry.differentChallengeReplayDenied, true);
+  assert.ok(openapi.includes('Exact idempotent retry only with the same ticket/JTI, challenge and pre-auth browser'));
+  assert.ok(spec.includes('retry only the exact same ticket/JTI, challenge and pre-auth browser binding'));
+  assert.ok(spec.includes('this can return only the same still-active session and cannot create or renew one'));
   assert.ok(mappedTraceIds.has('ENTRY-03'));
 });
 

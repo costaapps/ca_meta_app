@@ -9,6 +9,8 @@ import { SafeExceptionFilter } from './common/http/safe-exception.filter.js';
 import { requestContextMiddleware, STRUCTURED_LOGGER, type StructuredLogger } from './common/http/request-context.js';
 import { REQUEST_DRAIN, type RequestDrain } from './common/http/request-drain.js';
 import { CLOCK, type MonotonicClock } from './common/time/clock.port.js';
+import { portalRequestSecurityMiddleware } from './common/security/portal-request-security.js';
+import { PortalSessionVerifier } from './identity/identity.trust.js';
 
 export const API_BODY_LIMIT_BYTES = 65_536;
 
@@ -25,10 +27,18 @@ export function configureHttpBoundaries(app: INestApplication, environment: ApiE
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('X-Frame-Options', 'DENY');
     response.setHeader('Referrer-Policy', 'no-referrer');
+    response.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
     response.setHeader('Cache-Control', 'no-store');
     next();
   });
   app.use(allowedHostMiddleware(environment.allowedHosts));
+  let sessionVerifier: PortalSessionVerifier | undefined;
+  try {
+    sessionVerifier = app.get(PortalSessionVerifier, { strict: false });
+  } catch {
+    sessionVerifier = undefined;
+  }
+  app.use(portalRequestSecurityMiddleware(environment, sessionVerifier));
   app.use(requestDrain.middleware());
   app.use(json({ limit: API_BODY_LIMIT_BYTES, strict: true }));
   app.use(urlencoded({ limit: API_BODY_LIMIT_BYTES, extended: false, parameterLimit: 100 }));

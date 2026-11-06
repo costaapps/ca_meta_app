@@ -11,6 +11,12 @@ export interface DdlStep {
   readonly definitionVersion: string;
   readonly definition: string;
   readonly verify: (context: MigrationStepContext) => Promise<boolean>;
+  /** A later applied DDL step may verify this step's schema after an additive migration supersedes its exact shape. */
+  readonly compatiblePriorSteps?: readonly {
+    readonly migrationId: string;
+    readonly stepId: string;
+    readonly verify: (context: MigrationStepContext) => Promise<boolean>;
+  }[];
   /** DDL steps must be safe to retry when verify returns false after a crash. */
   readonly retryWhenAbsent: true;
 }

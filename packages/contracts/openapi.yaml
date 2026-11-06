@@ -33,6 +33,14 @@ x-public-routes:
     path: /api/v1/auth/magic-links
     purpose: Uniform, rate-limited request for an already-invited identity; never
       creates membership.
+  - method: GET
+    path: /api/v1/auth/magic-links/confirm
+    purpose: Public scanner-safe confirmation page; its short-lived link token is
+      the capability, and GET never consumes or creates a session.
+  - method: HEAD
+    path: /api/v1/auth/magic-links/confirm
+    purpose: Public scanner probe; HEAD never looks up or consumes a link and never
+      creates a session.
   - method: POST
     path: /api/v1/auth/magic-links/consume
     purpose: Explicit one-use magic-link confirmation; GET/HEAD never consume it.
@@ -87,8 +95,14 @@ paths:
       summary: Start browser-bound pre-authentication
       description: Public before a portal session. Requires an exact allowlisted
         Origin, matching Fetch Metadata, and an HttpOnly pre-auth cookie bound
-        to the server-created challenge. The challenge is for the trusted Suite4
-        portal-entry handoff, not a Meta provider code.
+        to the server-created challenge. The challenge is for a trusted
+        portal-entry handoff, not a Meta provider code. PORTAL_TOP_LEVEL uses a
+        SameSite=Lax host-only cookie. SUITE4_EMBED is enabled only when an
+        exact HTTPS Suite4 parent-origin allowlist is configured; its host-only
+        pre-auth cookie is SameSite=None, Secure and Partitioned. The browser
+        still must pass the exact portal/app Origin and same-origin Fetch
+        Metadata checks. Empty embed-origin configuration rejects SUITE4_EMBED
+        with 400.
       security: []
       parameters:
         - $ref: "#/components/parameters/Origin"
@@ -104,15 +118,17 @@ paths:
               sanitized:
                 summary: Sanitized request example
                 value:
-                  entryMode: SUITE4_EMBED
+                  entryMode: PORTAL_TOP_LEVEL
                   returnRoute: connections
       responses:
         "201":
           description: Sanitized success example
           headers:
             Set-Cookie:
-              description: Host-only Secure HttpOnly pre-auth cookie; no Domain attribute.
-                Cookie value is not in the response body.
+              description: Host-only Secure HttpOnly `__Host-meta_preauth` cookie with no
+                Domain attribute. PORTAL_TOP_LEVEL uses SameSite=Lax; configured
+                SUITE4_EMBED uses SameSite=None; Partitioned. Cookie value is
+                not in the response body.
               schema:
                 type: string
           content:
@@ -154,11 +170,17 @@ paths:
       description: Public in the sense that no session exists yet; protected by a
         pre-auth cookie and one-time signed ticket. This exchange is distinct
         from Meta OAuth/Embedded Signup callback handling and MUST NOT accept an
-        authorization code. Ticket, browser challenge, cookie, current server
-        membership, issuer and audience must match atomically. The `tenant`
-        claim is revalidated; `company_uuid` is ignored. Set-Cookie returns the
-        opaque portal session; the JSON DTO contains no session cookie, Meta
-        credential, or ticket.
+        authorization code. Ticket, browser challenge, pre-auth cookie/browser
+        binding, current server membership, issuer and audience must match
+        atomically. The `tenant` claim is revalidated; `company_uuid` is
+        ignored. Set-Cookie returns the opaque portal session; the JSON DTO
+        contains no session cookie, Meta credential, or ticket. An exact retry
+        after a lost response (same ticket/JTI, challenge, and pre-auth browser
+        binding) may recover only the same still-active session; it creates or
+        renews no session and fails after session, membership, or tenant
+        revocation/expiry. A different cookie or challenge is denied. When the
+        trusted issuer or server-configured public key set is unavailable, the
+        endpoint returns a safe 503 and issues no session.
       security:
         - preAuthCookie: []
       parameters:
@@ -182,7 +204,8 @@ paths:
           description: Sanitized success example
           headers:
             Set-Cookie:
-              description: Opaque host-only Secure HttpOnly portal session cookie.
+              description: Opaque host-only Secure HttpOnly `__Host-meta_portal` portal
+                session cookie.
               schema:
                 type: string
             Cache-Control:
@@ -197,6 +220,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
+                    sessionRef: 91b2ef8b-2763-4dca-b3d4-845f7223949d
                     principalRef: principal_example_01
                     tenantRef: tenant_example_01
                     roles:
@@ -214,10 +238,12 @@ paths:
         "503": *a8
         default: *a9
       x-external-effect: Consumes the one-time entry ticket/challenge and creates a
-        portal session atomically.
-      x-retry-policy: A consumed ticket is never replayed. If its response is lost,
-        start a fresh pre-auth challenge in the same browser; do not resubmit it
-        as a bearer credential.
+        portal session atomically; an exact retry may return that same
+        still-active session.
+      x-retry-policy: Exact idempotent retry only with the same ticket/JTI, challenge
+        and pre-auth browser binding. It returns the same active session without
+        creating or renewing a session; revoked or expired
+        session/membership/tenant and any changed cookie/challenge are denied.
   /api/v1/auth/magic-links:
     post:
       operationId: requestMagicLink
@@ -274,6 +300,62 @@ paths:
         retries or resends. A new explicit user request is rate-limited and
         receives the same uniform response; delivery outcome is not disclosed.
         Provider delivery receipts/idempotency are Not confirmed.
+  /api/v1/auth/magic-links/confirm:
+    get:
+      operationId: showMagicLinkConfirmation
+      tags:
+        - Authentication
+      summary: Show an explicit sign-in confirmation page
+      description: Safe for email scanners. GET only renders a no-referrer, no-store
+        page with a deliberate POST action; it does not look up or consume the
+        link and never creates a session.
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          description: Temporary opaque link token. It is never logged or sent to analytics.
+          schema:
+            type: string
+            minLength: 43
+            maxLength: 128
+      responses:
+        "200":
+          description: Confirmation form only; no session or link state changes.
+          headers:
+            Referrer-Policy:
+              schema:
+                type: string
+                const: no-referrer
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            text/html:
+              schema:
+                type: string
+        default: *a9
+      x-external-effect: None. The matching POST performs the one-use operation.
+    head:
+      operationId: probeMagicLinkConfirmation
+      tags:
+        - Authentication
+      summary: Probe the confirmation page without consuming a link
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 43
+            maxLength: 128
+      responses:
+        "200":
+          description: Headers only; no session or link state changes.
+        default: *a9
+      x-external-effect: None.
   /api/v1/auth/magic-links/consume:
     post:
       operationId: consumeMagicLink
@@ -315,6 +397,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
+                    sessionRef: 91b2ef8b-2763-4dca-b3d4-845f7223949d
                     principalRef: principal_example_01
                     tenantRef: tenant_example_01
                     roles:
@@ -322,6 +405,13 @@ paths:
                     tenantContextRef: ctx_example_ref_02
                     contextVersion: 1
                     requestId: req_example_16
+                    availableTenants:
+                      - tenantRef: tenant_example_01
+                        roles:
+                          - viewer
+                      - tenantRef: tenant_example_02
+                        roles:
+                          - admin
         "400": *a1
         "401": *a2
         "404": *a3
@@ -343,7 +433,9 @@ paths:
         only. Membership is revalidated server-side. No token, cookie value,
         authorization code, ciphertext or provider credential is returned. CSRF
         material, if bootstrapped, is delivered as a separate cookie/header
-        protocol and is not a DTO field.
+        protocol and is not a DTO field. `sessionRef` is a public opaque
+        selector for revocation and authorizes nothing without the current
+        server session, principal and tenant.
       security: *a10
       responses:
         "200":
@@ -356,6 +448,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
+                    sessionRef: 91b2ef8b-2763-4dca-b3d4-845f7223949d
                     principalRef: principal_example_01
                     tenantRef: tenant_example_01
                     roles:
@@ -385,6 +478,7 @@ paths:
           $ref: "#/components/responses/Unavailable"
         default: &a21
           $ref: "#/components/responses/UnexpectedError"
+      x-abuse-limit-policy: SESSION_STATUS
   /api/v1/session/tenant-switch:
     post:
       operationId: switchTenantContext
@@ -425,6 +519,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
+                    sessionRef: 91b2ef8b-2763-4dca-b3d4-845f7223949d
                     principalRef: principal_example_01
                     tenantRef: tenant_example_02
                     roles:
@@ -474,16 +569,53 @@ paths:
         "503": *a20
         default: *a21
       x-external-effect: Revokes the current server-side portal session.
+  /api/v1/sessions/{id}:
+    delete:
+      operationId: revokeAuthorizedPortalSession
+      tags:
+        - Session
+      summary: Revoke an authorized portal session
+      description: Requires a current verified portal session, exact Origin, CSRF, and
+        same-origin Fetch Metadata. The target must belong to the same
+        server-resolved principal and tenant as the actor. The request cannot
+        select a tenant; a session UUID alone is not authorization. Missing and
+        unowned sessions receive the same safe denial.
+      security: *a10
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Session identifier; authorization is resolved from the current
+            server session.
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Completed without a response body
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "409": *a15
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: Revokes a session belonging to the current verified principal and tenant.
   /api/v1/integrations/flows:
     get:
       operationId: listIntegrationFlows
       tags:
         - Integrations
       summary: List configured flow choices
-      description: Returns only server-enabled flow configurations for the current
-        tenant. Product variant names distinguish Facebook, Instagram variants,
-        WhatsApp Cloud API and WhatsApp Coexistence; their actual availability,
-        grants and eligibility are Not confirmed.
+      description: Returns the five existing authorization journeys for each app
+        configuration in the current tenant and environment. `variant` remains
+        the journey identifier; optional `flowVariant` groups journeys into the
+        four Meta flow families. A journey is enabled only when its tenant
+        feature flag and a registered server adapter are confirmed; either
+        unknown or unavailable prerequisite keeps it disabled.
       security: *a10
       parameters: &a22
         - $ref: "#/components/parameters/TenantContext"
@@ -499,10 +631,74 @@ paths:
                   summary: Sanitized success example
                   value:
                     items:
-                      - variant: WHATSAPP_COEXISTENCE
+                      - variant: FACEBOOK_LOGIN
+                        flowVariant: FACEBOOK
+                        journeys:
+                          - FACEBOOK_LOGIN
+                        appConfigurationRef: 00000000-0000-4000-8000-000000000003
+                        environment: test
                         enabled: false
-                        requestedCapabilities:
-                          - READ_STATUS
+                        availability: ADAPTER_UNAVAILABLE
+                        prerequisites:
+                          metaAppConfigured: true
+                          serverAdapterRegistered: false
+                          tenantFeatureFlag: UNKNOWN
+                        requestedCapabilities: []
+                      - variant: INSTAGRAM_VIA_FACEBOOK_LOGIN
+                        flowVariant: INSTAGRAM
+                        journeys:
+                          - INSTAGRAM_VIA_FACEBOOK_LOGIN
+                          - INSTAGRAM_LOGIN
+                        appConfigurationRef: 00000000-0000-4000-8000-000000000003
+                        environment: test
+                        enabled: false
+                        availability: ADAPTER_UNAVAILABLE
+                        prerequisites:
+                          metaAppConfigured: true
+                          serverAdapterRegistered: false
+                          tenantFeatureFlag: UNKNOWN
+                        requestedCapabilities: []
+                      - variant: INSTAGRAM_LOGIN
+                        flowVariant: INSTAGRAM
+                        journeys:
+                          - INSTAGRAM_VIA_FACEBOOK_LOGIN
+                          - INSTAGRAM_LOGIN
+                        appConfigurationRef: 00000000-0000-4000-8000-000000000003
+                        environment: test
+                        enabled: false
+                        availability: ADAPTER_UNAVAILABLE
+                        prerequisites:
+                          metaAppConfigured: true
+                          serverAdapterRegistered: false
+                          tenantFeatureFlag: UNKNOWN
+                        requestedCapabilities: []
+                      - variant: WHATSAPP_CLOUD_API
+                        flowVariant: WHATSAPP_EXCLUSIVE
+                        journeys:
+                          - WHATSAPP_CLOUD_API
+                        appConfigurationRef: 00000000-0000-4000-8000-000000000003
+                        environment: test
+                        enabled: false
+                        availability: ADAPTER_UNAVAILABLE
+                        prerequisites:
+                          metaAppConfigured: true
+                          serverAdapterRegistered: false
+                          tenantFeatureFlag: UNKNOWN
+                        requestedCapabilities: []
+                      - variant: WHATSAPP_COEXISTENCE
+                        flowVariant: WHATSAPP_COEXISTENCE
+                        journeys:
+                          - WHATSAPP_COEXISTENCE
+                        appConfigurationRef: 00000000-0000-4000-8000-000000000003
+                        environment: test
+                        enabled: false
+                        availability: ADAPTER_UNAVAILABLE
+                        prerequisites:
+                          metaAppConfigured: true
+                          serverAdapterRegistered: false
+                          tenantFeatureFlag: UNKNOWN
+                        requestedCapabilities: []
+                    truncated: false
                     requestId: req_example_19
         "400": *a11
         "401": *a12
@@ -524,18 +720,22 @@ paths:
       description: Tenant/principal/config are resolved from the current server
         session. Body cannot select a tenant, CompanyUUID, app or secret. The
         server generates provider state and its correlation to this onboarding;
-        launch URL is server-generated from allowlisted configuration. A 201 or
-        provider redirect means only that a flow was created, never that a
-        connection is READY.
+        launch URL is server-generated from allowlisted configuration. Persisted
+        state is represented by a digest and is valid for ten minutes for one
+        use. Requests fail closed with a safe 503 when the required server-side
+        signing key or trusted provider-launch configuration is unavailable. The
+        signing key is runtime-configurable; its presence in any deployment is
+        Not confirmed. A 201 or provider redirect means only that a flow was
+        created, never that a connection is READY.
       security: *a10
       parameters: &a23
-        - &a26
+        - &a25
           $ref: "#/components/parameters/Origin"
-        - &a27
+        - &a26
           $ref: "#/components/parameters/FetchSite"
-        - &a28
+        - &a27
           $ref: "#/components/parameters/CsrfToken"
-        - &a29
+        - &a28
           $ref: "#/components/parameters/TenantContext"
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -608,8 +808,13 @@ paths:
       summary: Read authoritative onboarding status
       description: The server derives READY/PARTIAL from current versioned policy and
         verified evidence. A code exchange, HTTP 200, popup finish event, or
-        redirect alone never sets READY. UNKNOWN/STALE evidence stays visible
-        and blocks READY when required.
+        redirect alone never sets READY. The read is scoped to the verified
+        portal session and principal, then checks current membership in the
+        onboarding's original tenant even after a tenant-context switch. Only a
+        trusted server-side completion port can update status; a front-end
+        return signal cannot do so. Provider completion remains unavailable
+        until a verified server adapter is configured. UNKNOWN/STALE evidence
+        stays visible and blocks READY when required.
       security: *a10
       parameters: *a22
       responses:
@@ -784,7 +989,7 @@ paths:
               description: Validated same-origin portal route; never arbitrary caller URL.
               schema:
                 type: string
-                example: /setup/callback?onboardingRef=onb_example_01
+                example: /oauth/return?onboardingRef=onb_example_01
             Cache-Control:
               schema:
                 type: string
@@ -818,10 +1023,13 @@ paths:
         context only. List items identify status, freshness and last confirmed
         evidence but contain no raw provider payload or credential.
       security: *a10
-      parameters: &a25
+      parameters: &a29
         - $ref: "#/components/parameters/TenantContext"
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/AssetCatalogChannel"
+        - $ref: "#/components/parameters/AssetCatalogNumber"
+        - $ref: "#/components/parameters/ConnectionCatalogStatus"
       responses:
         "200":
           description: Sanitized success example
@@ -839,8 +1047,20 @@ paths:
                         status: PARTIAL
                         readiness: PARTIAL
                         observedAt: 2026-10-29T11:59:00Z
+                        lastVerifiedAt: 2026-10-29T11:59:00Z
+                        verificationSource: META_API
                         stale: false
                         assetCount: 1
+                        diagnostics:
+                          onboardingStatus: UNKNOWN
+                          onboardingReadiness: UNKNOWN
+                          onboardingNextAction: UNKNOWN
+                          tokenHealth: UNKNOWN
+                          tokenHealthObservedAt: null
+                          metaState: PARTIAL
+                          metaObservedAt: 2026-10-29T11:59:00Z
+                          subscriptionState: UNKNOWN
+                          projectionState: UNKNOWN
                     nextCursor: null
                     requestId: req_example_23
         "400": *a11
@@ -898,13 +1118,45 @@ paths:
                     status: PARTIAL
                     readiness: PARTIAL
                     observedAt: 2026-10-29T11:59:00Z
+                    lastVerifiedAt: 2026-10-29T11:59:00Z
+                    verificationSource: META_API
                     stale: false
+                    assetCount: 1
+                    diagnostics:
+                      onboardingStatus: UNKNOWN
+                      onboardingReadiness: UNKNOWN
+                      onboardingNextAction: UNKNOWN
+                      tokenHealth: UNKNOWN
+                      tokenHealthObservedAt: null
+                      metaState: PARTIAL
+                      metaObservedAt: 2026-10-29T11:59:00Z
+                      subscriptionState: UNKNOWN
+                      projectionState: UNKNOWN
                     assets:
                       - id: asset_example_01
                         kind: PHONE_NUMBER
                         status: ACTIVE
                         authorizationStatus: VERIFIED
                         observedAt: 2026-10-29T11:59:00Z
+                        lastVerifiedAt: 2026-10-29T11:59:00Z
+                        verificationSource: META_API
+                        stale: false
+                        diagnostics:
+                          onboardingStatus: UNKNOWN
+                          onboardingReadiness: UNKNOWN
+                          onboardingNextAction: UNKNOWN
+                          tokenHealth: UNKNOWN
+                          tokenHealthObservedAt: null
+                          metaState: PARTIAL
+                          metaObservedAt: 2026-10-29T11:59:00Z
+                          subscriptionState: UNKNOWN
+                          projectionState: UNKNOWN
+                        capabilities:
+                          canSend: false
+                          canManageTemplates: false
+                          canSubscribe: false
+                          canReauthorize: false
+                          canDisconnect: false
                     requestId: req_example_24
         "400": *a11
         "401": *a12
@@ -1030,7 +1282,13 @@ paths:
         strings and are never resolved across tenants. Status includes
         observation freshness.
       security: *a10
-      parameters: *a25
+      parameters:
+        - $ref: "#/components/parameters/TenantContext"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/AssetCatalogChannel"
+        - $ref: "#/components/parameters/AssetCatalogNumber"
+        - $ref: "#/components/parameters/AssetCatalogStatus"
       responses:
         "200":
           description: Sanitized success example
@@ -1048,7 +1306,25 @@ paths:
                         status: ACTIVE
                         authorizationStatus: VERIFIED
                         observedAt: 2026-10-29T11:59:00Z
+                        lastVerifiedAt: 2026-10-29T11:59:00Z
+                        verificationSource: META_API
                         stale: false
+                        diagnostics:
+                          onboardingStatus: UNKNOWN
+                          onboardingReadiness: UNKNOWN
+                          onboardingNextAction: UNKNOWN
+                          tokenHealth: UNKNOWN
+                          tokenHealthObservedAt: null
+                          metaState: ACTIVE
+                          metaObservedAt: 2026-10-29T11:59:00Z
+                          subscriptionState: UNKNOWN
+                          projectionState: UNKNOWN
+                        capabilities:
+                          canSend: false
+                          canManageTemplates: false
+                          canSubscribe: false
+                          canReauthorize: false
+                          canDisconnect: false
                     nextCursor: null
                     requestId: req_example_27
         "400": *a11
@@ -1105,6 +1381,12 @@ paths:
                     authorizationStatus: VERIFIED
                     observedAt: 2026-10-29T11:59:00Z
                     stale: false
+                    capabilities:
+                      canSend: false
+                      canManageTemplates: false
+                      canSubscribe: false
+                      canReauthorize: false
+                      canDisconnect: false
                     requestId: req_example_28
         "400": *a11
         "401": *a12
@@ -1235,10 +1517,10 @@ paths:
         effect.
       security: *a10
       parameters:
+        - *a25
         - *a26
         - *a27
         - *a28
-        - *a29
         - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
@@ -1487,7 +1769,7 @@ paths:
         selected eligible grant. Provider eligibility and actual grant semantics
         are Not confirmed; no global credential is selected.
       security: *a10
-      parameters: *a25
+      parameters: *a29
       responses:
         "200":
           description: Sanitized success example
@@ -1586,7 +1868,7 @@ paths:
       description: Returns safe metadata, references and freshness; no message body or
         raw provider payload is included. Cursor and limit are bounded.
       security: *a10
-      parameters: *a25
+      parameters: *a29
       responses:
         "200":
           description: Sanitized success example
@@ -1928,6 +2210,49 @@ components:
       schema:
         type: string
         maxLength: 512
+    AssetCatalogChannel:
+      name: channel
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+          - FACEBOOK
+          - INSTAGRAM
+          - WHATSAPP
+    AssetCatalogNumber:
+      name: number
+      in: query
+      required: false
+      description: Exact opaque WhatsApp phone number filter.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 33
+        pattern: ^\+?[0-9]{1,32}$
+    AssetCatalogStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+          - ACTIVE
+          - INACTIVE
+          - UNKNOWN
+          - STALE
+    ConnectionCatalogStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+          - ACTIVE
+          - PARTIAL
+          - REAUTH_REQUIRED
+          - UNKNOWN
+          - DISCONNECTED
     Limit:
       name: limit
       in: query
@@ -2136,6 +2461,11 @@ components:
         - contextVersion
         - requestId
       properties:
+        sessionRef:
+          type: string
+          format: uuid
+          description: Public opaque selector only; never a credential and insufficient to
+            authorize revocation.
         principalRef:
           type: string
           minLength: 1
@@ -2168,6 +2498,34 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        availableTenants:
+          type: array
+          description: Current ACTIVE memberships offered after magic-link sign-in. Each
+            selection is revalidated server-side.
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - tenantRef
+              - roles
+            properties:
+              tenantRef:
+                type: string
+                minLength: 1
+                maxLength: 128
+              roles:
+                type: array
+                minItems: 1
+                maxItems: 8
+                uniqueItems: true
+                items:
+                  type: string
+                  enum:
+                    - owner
+                    - admin
+                    - operator
+                    - viewer
     TenantSwitchRequest:
       type: object
       additionalProperties: false
@@ -2189,6 +2547,13 @@ components:
         - WHATSAPP_COEXISTENCE
       description: Distinct configured journeys. Availability, permissions and
         eligibility are Not confirmed.
+    MetaFlowVariant:
+      type: string
+      enum:
+        - FACEBOOK
+        - INSTAGRAM
+        - WHATSAPP_EXCLUSIVE
+        - WHATSAPP_COEXISTENCE
     FlowDefinition:
       type: object
       additionalProperties: false
@@ -2199,8 +2564,53 @@ components:
       properties:
         variant:
           $ref: "#/components/schemas/FlowVariant"
+        flowVariant:
+          $ref: "#/components/schemas/MetaFlowVariant"
+        journeys:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/FlowVariant"
+        appConfigurationRef:
+          type:
+            - string
+            - "null"
+          format: uuid
+        environment:
+          type: string
+          enum:
+            - development
+            - test
+            - staging
+            - production
         enabled:
           type: boolean
+        availability:
+          type: string
+          enum:
+            - CONFIGURATION_MISSING
+            - ADAPTER_UNAVAILABLE
+            - UNKNOWN
+            - AVAILABLE
+        prerequisites:
+          type: object
+          additionalProperties: false
+          required:
+            - metaAppConfigured
+            - serverAdapterRegistered
+            - tenantFeatureFlag
+          properties:
+            metaAppConfigured:
+              type: boolean
+            serverAdapterRegistered:
+              type: boolean
+            tenantFeatureFlag:
+              type: string
+              enum:
+                - ENABLED
+                - DISABLED
+                - UNKNOWN
         requestedCapabilities:
           type: array
           maxItems: 32
@@ -2220,6 +2630,8 @@ components:
           maxItems: 32
           items:
             $ref: "#/components/schemas/FlowDefinition"
+        truncated:
+          type: boolean
         requestId:
           type: string
           minLength: 1
@@ -2435,11 +2847,26 @@ components:
         observedAt:
           type: string
           format: date-time
+        lastVerifiedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        verificationSource:
+          type:
+            - string
+            - "null"
+          enum:
+            - META_API
+            - SIGNED_WEBHOOK
+            - null
         stale:
           type: boolean
         assetCount:
           type: integer
           minimum: 0
+        diagnostics:
+          $ref: "#/components/schemas/AssetDiagnostics"
     ConnectionAsset:
       type: object
       additionalProperties: false
@@ -2477,6 +2904,25 @@ components:
         observedAt:
           type: string
           format: date-time
+        lastVerifiedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        verificationSource:
+          type:
+            - string
+            - "null"
+          enum:
+            - META_API
+            - SIGNED_WEBHOOK
+            - null
+        stale:
+          type: boolean
+        diagnostics:
+          $ref: "#/components/schemas/AssetDiagnostics"
+        capabilities:
+          $ref: "#/components/schemas/AssetCapabilities"
     ConnectionDetail:
       type: object
       additionalProperties: false
@@ -2513,8 +2959,26 @@ components:
         observedAt:
           type: string
           format: date-time
+        lastVerifiedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        verificationSource:
+          type:
+            - string
+            - "null"
+          enum:
+            - META_API
+            - SIGNED_WEBHOOK
+            - null
         stale:
           type: boolean
+        assetCount:
+          type: integer
+          minimum: 0
+        diagnostics:
+          $ref: "#/components/schemas/AssetDiagnostics"
         assets:
           type: array
           maxItems: 500
@@ -2585,8 +3049,25 @@ components:
         observedAt:
           type: string
           format: date-time
+        lastVerifiedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        verificationSource:
+          type:
+            - string
+            - "null"
+          enum:
+            - META_API
+            - SIGNED_WEBHOOK
+            - null
         stale:
           type: boolean
+        capabilities:
+          $ref: "#/components/schemas/AssetCapabilities"
+        diagnostics:
+          $ref: "#/components/schemas/AssetDiagnostics"
         requestId:
           type: string
           minLength: 1
@@ -2629,7 +3110,140 @@ components:
         observedAt:
           type: string
           format: date-time
+        lastVerifiedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        verificationSource:
+          type:
+            - string
+            - "null"
+          enum:
+            - META_API
+            - SIGNED_WEBHOOK
+            - null
         stale:
+          type: boolean
+        capabilities:
+          $ref: "#/components/schemas/AssetCapabilities"
+        diagnostics:
+          $ref: "#/components/schemas/AssetDiagnostics"
+    AssetDiagnostics:
+      type: object
+      additionalProperties: false
+      description: Safe summaries from tenant-scoped read models. Onboarding is
+        UNKNOWN because no persisted asset or authorization binding exists; raw
+        provider diagnostics are never returned.
+      required:
+        - onboardingStatus
+        - onboardingReadiness
+        - onboardingNextAction
+        - tokenHealth
+        - tokenHealthObservedAt
+        - metaState
+        - metaObservedAt
+        - subscriptionState
+        - projectionState
+      properties:
+        onboardingStatus:
+          type: string
+          enum:
+            - CREATED
+            - AWAITING_PROVIDER
+            - CODE_RECEIVED
+            - EXCHANGING
+            - ASSETS_VERIFIED
+            - PROVISIONING
+            - READY
+            - PARTIAL
+            - CANCELLED
+            - EXPIRED
+            - FAILED
+            - UNKNOWN
+        onboardingReadiness:
+          type: string
+          enum:
+            - READY
+            - PARTIAL
+            - UNKNOWN
+        onboardingNextAction:
+          type: string
+          enum:
+            - WAIT
+            - CHECK_STATUS
+            - REAUTHORIZE
+            - RECONCILE
+            - RESOLVE_CONFLICT
+            - NONE
+            - UNKNOWN
+        tokenHealth:
+          type: string
+          enum:
+            - HEALTHY
+            - EXPIRING
+            - EXPIRED
+            - REVOKED
+            - ACTION_REQUIRED
+            - STALE
+            - UNKNOWN
+        tokenHealthObservedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        metaState:
+          type: string
+          enum:
+            - ACTIVE
+            - PARTIAL
+            - REAUTH_REQUIRED
+            - UNKNOWN
+            - REVOKED
+            - DISCONNECTED
+        metaObservedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        subscriptionState:
+          type: string
+          enum:
+            - UNKNOWN
+            - PENDING
+            - ACTIVE
+            - FAILED
+            - REMOVED
+        projectionState:
+          type: string
+          enum:
+            - UNKNOWN
+            - PENDING
+            - SYNCED
+            - STALE
+            - FAILED
+    AssetCapabilities:
+      type: object
+      additionalProperties: false
+      description: Advisory snapshot derived from verified evidence and current
+        membership. Exact Meta operation-to-grant eligibility is Not confirmed;
+        these flags do not authorize server operations.
+      required:
+        - canSend
+        - canManageTemplates
+        - canSubscribe
+        - canReauthorize
+        - canDisconnect
+      properties:
+        canSend:
+          type: boolean
+        canManageTemplates:
+          type: boolean
+        canSubscribe:
+          type: boolean
+        canReauthorize:
+          type: boolean
+        canDisconnect:
           type: boolean
     AssetListPage:
       type: object
@@ -3072,7 +3686,10 @@ components:
                 retryable: false
                 action: FIX_REQUEST
     Unauthorized:
-      description: Authentication or one-time proof is required.
+      description: Authentication or one-time proof is required. For ticket exchange
+        this includes a mismatched pre-auth cookie/challenge or an
+        expired/revoked session, membership, or tenant; a response-loss retry is
+        accepted only for the same still-active session and browser binding.
       content:
         application/json:
           schema:

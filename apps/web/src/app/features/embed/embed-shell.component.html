@@ -1,0 +1,13 @@
+<main #shell class="embed-shell" [attr.data-theme]="snapshot.theme" aria-live="polite">
+  <section class="embed-shell__card" aria-labelledby="embed-title">
+    <h1 id="embed-title">Portal de conexões</h1>
+    <p>{{ snapshot.message }}</p>
+    <p *ngIf="snapshot.state === 'confirmed'" role="status">Conexão confirmada pelo servidor.</p>
+    <button
+      *ngIf="snapshot.state === 'top_level_required' || snapshot.state === 'popup_blocked' || snapshot.state === 'awaiting_server_confirmation'"
+      type="button"
+      (click)="requestTopLevel()">
+      Continuar pelo Suite4
+    </button>
+  </section>
+</main>

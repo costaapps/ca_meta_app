@@ -3,8 +3,9 @@ import { Body, Controller, Get, Inject, INestApplication, Post } from '@nestjs/c
 import { Test } from '@nestjs/testing';
 import { IsString, MaxLength } from 'class-validator';
 import assert from 'node:assert/strict';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { test } from 'node:test';
-import { connect as netConnect } from 'node:net';
+import { createServer, connect as netConnect } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { request as httpRequest } from 'node:http';
 import { fork } from 'node:child_process';
@@ -150,7 +151,12 @@ const TEST_ENVIRONMENT: ApiEnvironment = {
   port: 0,
   bindAddress: '127.0.0.1',
   allowedHosts: ['127.0.0.1', 'localhost'],
+  allowedOrigins: ['http://127.0.0.1', 'http://localhost'],
+  suite4EmbedOrigins: [],
   trustedProxyCidrs: false,
+  portalSessionRecoveryKey: 'synthetic-test-session-recovery-key-32-bytes-minimum',
+  portalSessionIdleTimeoutSeconds: 1800,
+  portalSessionAbsoluteTimeoutSeconds: 28800,
   database: {
     host: '127.0.0.1',
     port: 3306,
@@ -275,7 +281,18 @@ function waitForChildMessage(
     child.once('exit', onExit);
   });
 }
-async function startBoundaryApp(): Promise<{
+async function findLoopbackPort(): Promise<number> {
+  const reservation = createServer();
+  await new Promise<void>((resolve, reject) => {
+    reservation.once('error', reject);
+    reservation.listen(0, '127.0.0.1', resolve);
+  });
+  const address = reservation.address() as AddressInfo;
+  await new Promise<void>((resolve, reject) => reservation.close((error) => error ? reject(error) : resolve()));
+  return address.port;
+}
+
+async function startBoundaryApp(exactOrigin = false): Promise<{
   readonly baseUrl: string;
   readonly app: INestApplication;
   readonly database: FakeDatabaseReadiness;
@@ -283,12 +300,16 @@ async function startBoundaryApp(): Promise<{
   readonly state: ProbeStateValue;
   readonly clock: FakeMonotonicClock;
 }> {
+  const port = exactOrigin ? await findLoopbackPort() : 0;
+  const environment: ApiEnvironment = exactOrigin
+    ? { ...TEST_ENVIRONMENT, port, allowedOrigins: [`http://127.0.0.1:${port}`] }
+    : TEST_ENVIRONMENT;
   const database = new FakeDatabaseReadiness();
   const logger = new CapturingLogger();
   const state = new ProbeStateValue();
   const clock = new FakeMonotonicClock();
   const module = await Test.createTestingModule({
-    imports: [ApiModule.register(TEST_ENVIRONMENT)],
+    imports: [ApiModule.register(environment)],
     controllers: [BoundaryProbeController],
     providers: [{ provide: PROBE_STATE, useValue: state }],
   })
@@ -301,9 +322,9 @@ async function startBoundaryApp(): Promise<{
     .compile();
 
   const app = module.createNestApplication(new GracefulExpressAdapter(), { bodyParser: false });
-  configureHttpBoundaries(app, TEST_ENVIRONMENT);
+  configureHttpBoundaries(app, environment);
   await app.init();
-  await app.listen(0, TEST_ENVIRONMENT.bindAddress);
+  await app.listen(environment.port, environment.bindAddress);
   const address = app.getHttpServer().address() as AddressInfo;
   return { baseUrl: `http://127.0.0.1:${address.port}`, app, database, logger, state, clock };
 }
@@ -315,6 +336,7 @@ test('configuration validation requires typed fields, reports names only, and re
     API_PORT: '0',
     API_BIND_ADDRESS: '127.0.0.1',
     API_ALLOWED_HOSTS: '127.0.0.1,localhost',
+    API_ALLOWED_ORIGINS: 'http://127.0.0.1,http://localhost',
     API_TRUSTED_PROXIES: 'none',
     API_DATABASE_HOST: '127.0.0.1',
     API_DATABASE_PORT: '3306',
@@ -322,6 +344,7 @@ test('configuration validation requires typed fields, reports names only, and re
     API_DATABASE_USER: 'synthetic_user',
     API_DATABASE_PASSWORD: 'synthetic-marker-value',
     API_DATABASE_CONNECT_TIMEOUT_MS: '250',
+    API_PORTAL_SESSION_RECOVERY_KEY: 'synthetic-test-session-recovery-key-32-bytes-minimum',
   };
 
   await t.test('accepts a complete explicit configuration', () => {
@@ -331,7 +354,52 @@ test('configuration validation requires typed fields, reports names only, and re
     assert.equal(parsed.trustedProxyCidrs, false);
     assert.deepEqual(parsed.allowedHosts, ['127.0.0.1', 'localhost']);
     assert.equal(parsed.database.password, 'synthetic-marker-value');
+    assert.equal(parsed.portalEntryTicket, undefined);
+    assert.equal(parsed.credentialLifecycleSchedulerEnabled, false);
+    assert.equal(validateEnvironment({ ...valid, API_CREDENTIAL_LIFECYCLE_SCHEDULER_ENABLED: 'true' })
+      .credentialLifecycleSchedulerEnabled, true);
+    assert.throws(() => validateEnvironment({ ...valid, API_CREDENTIAL_LIFECYCLE_SCHEDULER_ENABLED: 'yes' }),
+      /API_CREDENTIAL_LIFECYCLE_SCHEDULER_ENABLED/);
+    assert.deepEqual(parsed.suite4EmbedOrigins, []);
+    assert.deepEqual(parsed.identity?.platformIdentityAdmins, []);
+    assert.deepEqual(validateEnvironment({
+      ...valid,
+      API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON: '[{"issuer":"https://issuer.synthetic.invalid","subject":"operator-1"}]',
+    }).identity?.platformIdentityAdmins, [{ issuer: 'https://issuer.synthetic.invalid', subject: 'operator-1' }]);
+    const workerHash = createHash('sha256').update('synthetic-worker-proof-with-more-than-32-bytes').digest('hex');
+    assert.deepEqual(validateEnvironment({
+      ...valid,
+      API_JOB_WORKER_CREDENTIAL_HASHES_JSON: JSON.stringify([
+        { principalId: '00000000-0000-4000-8000-000000000012', credentialSha256: workerHash },
+      ]),
+    }).identity?.workerServiceCredentials, [
+      { principalId: '00000000-0000-4000-8000-000000000012', credentialSha256: workerHash },
+    ]);
+    assert.throws(() => validateEnvironment({
+      ...valid,
+      API_JOB_WORKER_CREDENTIAL_HASHES_JSON: JSON.stringify([
+        { principalId: '00000000-0000-4000-8000-000000000012', credential: 'must-not-be-configured' },
+      ]),
+    }), /API_JOB_WORKER_CREDENTIAL_HASHES_JSON/);
     assert.equal(validateEnvironment({ ...valid, API_DATABASE_PASSWORD: '  preserved password  ' }).database.password, '  preserved password  ');
+  });
+
+  await t.test('portal ticket clock skew accepts five seconds and rejects six', () => {
+    const publicKeyPem = generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey
+      .export({ format: 'pem', type: 'spki' }).toString();
+    const ticketEnv = {
+      ...valid,
+      API_PORTAL_ENTRY_TICKET_ISSUER: 'https://suite4.synthetic.invalid/portal',
+      API_PORTAL_ENTRY_TICKET_AUDIENCE: 'https://portal.synthetic.invalid',
+      API_PORTAL_ENTRY_TICKET_PUBLIC_KEYS_JSON: JSON.stringify([{ kid: 'synthetic', publicKeyPem }]),
+    };
+    assert.equal(validateEnvironment({ ...ticketEnv, API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS: '5' })
+      .portalEntryTicket?.configuration.clockSkewSeconds, 5);
+    assert.throws(
+      () => validateEnvironment({ ...ticketEnv, API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS: '6' }),
+      (error: unknown) => error instanceof EnvironmentValidationError &&
+        error.fieldNames.includes('API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS'),
+    );
   });
 
   await t.test('reports absent and malformed field names without values', () => {
@@ -359,6 +427,26 @@ test('configuration validation requires typed fields, reports names only, and re
     assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_HOSTS: '' }), /API_ALLOWED_HOSTS/);
     assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_HOSTS: '*.example.test' }), /API_ALLOWED_HOSTS/);
     assert.throws(() => validateEnvironment({ ...valid, API_DATABASE_PASSWORD: '   ' }), /API_DATABASE_PASSWORD/);
+    assert.throws(() => validateEnvironment({ ...valid, API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON: '[{"issuer":"x"}]' }), /API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON/);
+    assert.throws(
+      () => validateEnvironment({ ...valid, API_PORTAL_ENTRY_TICKET_ISSUER: 'https://suite4.synthetic.invalid/portal' }),
+      (error: unknown) => {
+        assert.ok(error instanceof EnvironmentValidationError);
+        assert.ok(error.fieldNames.includes('API_PORTAL_ENTRY_TICKET_AUDIENCE'));
+        assert.ok(error.fieldNames.includes('API_PORTAL_ENTRY_TICKET_PUBLIC_KEYS_JSON'));
+        return true;
+      },
+    );
+    assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_ORIGINS: 'https://*.example.test' }), /API_ALLOWED_ORIGINS/);
+    assert.throws(() => validateEnvironment({ ...valid, API_ALLOWED_ORIGINS: 'http://portal.example.test' }), /API_ALLOWED_ORIGINS/);
+    assert.deepEqual(validateEnvironment({ ...valid, API_ALLOWED_ORIGINS: '', API_PORTAL_SESSION_RECOVERY_KEY: '' }).allowedOrigins, []);
+    const production = { ...valid, NODE_ENV: 'production', API_PORT: '3000', API_BIND_ADDRESS: '0.0.0.0',
+      API_ALLOWED_HOSTS: 'portal.example.test', API_ALLOWED_ORIGINS: '', API_PORTAL_SESSION_RECOVERY_KEY: '' };
+    assert.throws(
+      () => validateEnvironment(production),
+      (error: unknown) => error instanceof EnvironmentValidationError &&
+        error.fieldNames.includes('API_ALLOWED_ORIGINS') && error.fieldNames.includes('API_PORTAL_SESSION_RECOVERY_KEY'),
+    );
   });
 });
 
@@ -430,12 +518,17 @@ test('the private route is denied and request IDs are returned in headers and er
 });
 
 test('strict DTO validation rejects extra fields, malformed JSON, and oversized bodies safely', async (t) => {
-  const context = await startBoundaryApp();
+  const context = await startBoundaryApp(true);
   t.after(() => context.app.close());
+  const browserWriteHeaders = {
+    'Content-Type': 'application/json',
+    Origin: context.baseUrl,
+    'Sec-Fetch-Site': 'same-origin',
+  };
 
   const valid = await fetch(`${context.baseUrl}/api/v1/probe/validation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: browserWriteHeaders,
     body: JSON.stringify({ value: 'okay' }),
   });
   assert.equal(valid.status, 201);
@@ -444,7 +537,7 @@ test('strict DTO validation rejects extra fields, malformed JSON, and oversized 
 
   const extra = await fetch(`${context.baseUrl}/api/v1/probe/validation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: browserWriteHeaders,
     body: JSON.stringify({ value: 'okay', unexpected: 'private-field' }),
   });
   assert.equal(extra.status, 400);
@@ -454,7 +547,7 @@ test('strict DTO validation rejects extra fields, malformed JSON, and oversized 
 
   const malformed = await fetch(`${context.baseUrl}/api/v1/probe/validation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Request-Id': 'also-not-valid' },
+    headers: { ...browserWriteHeaders, 'X-Request-Id': 'also-not-valid' },
     body: '{"value":',
   });
   assert.equal(malformed.status, 400);
@@ -463,7 +556,7 @@ test('strict DTO validation rejects extra fields, malformed JSON, and oversized 
 
   const oversized = await fetch(`${context.baseUrl}/api/v1/probe/validation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: browserWriteHeaders,
     body: JSON.stringify({ value: 'x'.repeat(70_000) }),
   });
   assert.equal(oversized.status, 413);

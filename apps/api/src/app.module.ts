@@ -8,14 +8,49 @@ import { RequestDrainInterceptor } from './common/http/request-drain.interceptor
 import { DenyByDefaultGuard } from './common/security/deny-by-default.guard.js';
 import { CLOCK, SystemMonotonicClock } from './common/time/clock.port.js';
 import { HealthModule } from './health/health.module.js';
-import { JobsModule } from './jobs/jobs.module.js';
+import { IdentityModule } from './identity/identity.module.js';
+import { AuthExchangeModule } from './auth-exchange/auth-exchange.module.js';
+import { ConfiguredTicketKeySet } from './auth-exchange/configured-ticket-key-set.js';
+import type { AuthExchangeCookieWriter } from './auth-exchange/ticket-contract.js';
+import { PortalSessionIssuer, setPortalSessionCookies } from './identity/portal-session.service.js';
+import { PortalPreAuthService } from './identity/portal-session.service.js';
+import { PortalSessionVerifier } from './identity/identity.trust.js';
+import { AbuseLimitService } from './common/security/abuse-limits.js';
+import { MetaAssetsModule } from './meta-assets/meta-assets.module.js';
+import { MagicLinkModule } from './auth/magic-link.module.js';
+import { PrivacyModule } from './privacy/privacy.module.js';
+import { OnboardingStatusModule } from './onboarding/onboarding-status.module.js';
 
 @Module({})
 export class ApiModule {
   static register(environment: ApiEnvironment): DynamicModule {
+    const identityModule = IdentityModule.register(environment);
+    const ticket = environment.portalEntryTicket;
+    const authExchangeModule = ticket
+      ? AuthExchangeModule.register({
+        imports: [identityModule],
+        configuration: ticket.configuration,
+        trustedKeySet: new ConfiguredTicketKeySet(ticket.publicKeys),
+        allowedOrigins: environment.allowedOrigins,
+        allowInsecureLoopbackOrigins: ticket.allowInsecureLoopbackOrigins,
+        preAuthServiceToken: PortalPreAuthService,
+        sessionIssuerToken: PortalSessionIssuer,
+        sessionVerifierToken: PortalSessionVerifier,
+        abuseLimitServiceToken: AbuseLimitService,
+        cookieWriter: { set: setPortalSessionCookies } satisfies AuthExchangeCookieWriter,
+      })
+      : AuthExchangeModule.register();
     return {
       module: ApiModule,
-      imports: [HealthModule.register(environment), JobsModule.register(environment)],
+      imports: [
+        HealthModule.register(environment),
+        MetaAssetsModule.register(identityModule, environment),
+        identityModule,
+        authExchangeModule,
+        MagicLinkModule.register(environment),
+        PrivacyModule.register(environment),
+        OnboardingStatusModule.register(identityModule, environment),
+      ],
       providers: [
         { provide: STRUCTURED_LOGGER, useClass: ConsoleStructuredLogger },
         { provide: CLOCK, useClass: SystemMonotonicClock },

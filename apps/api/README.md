@@ -1,11 +1,15 @@
 # Nest API workspace
 
-The API is an independent NestJS 12 application. It has no Meta integration, identity/session
-flow, business module, migration, or startup database side effect. /health is process liveness;
-/ready checks only the essential MariaDB connection. Success returns { "status": "ok" }.
+The API is an independent NestJS 12 application. It has no Meta provider integration or provider
+credential handling. It contains the portal session, identity, and optional Suite4 ticket-entry
+boundaries. `/health` is process liveness; `/ready` checks only the essential MariaDB connection.
+Success returns { "status": "ok" }.
 Dependency failure returns HTTP 503 with the canonical OpenAPI Unavailable ErrorEnvelope.
 Business routes use /api/v1 and are denied by the global guard unless a route is explicitly
-marked public. The only production public routes in this package are the two OpenAPI health routes.
+marked public. Session routes also have an explicit portal-session guard; they are not anonymous.
+The health routes are public. `POST /api/v1/auth/preauth` creates only a rate-limited browser
+binding; it does not authenticate or establish membership. `POST /api/v1/auth/exchanges` returns
+a safe 503 when its optional trusted ticket issuer/key configuration is absent.
 
 ## Toolchain and commands
 
@@ -35,7 +39,10 @@ only invalid or missing field names.
 | API_PORT | Explicit TCP port 1–65535; 0 only for development/test ephemeral binding |
 | API_BIND_ADDRESS | Explicit IPv4 or IPv6 address; tests must bind loopback |
 | API_ALLOWED_HOSTS | Required comma-separated exact DNS host/IP allowlist; no wildcard or port |
+| API_ALLOWED_ORIGINS | Exact browser origins with scheme/host/port; required in staging/production, empty denies browser origins in development/test; no wildcard |
+| API_PORTAL_SESSION_RECOVERY_KEY | Protected random value of at least 32 bytes; required and stable across replicas in staging/production, ephemeral in development/test |
 | API_TRUSTED_PROXIES | none or a comma-separated list of specific IP/CIDR values |
+| API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON | Optional JSON array of exact `{ "issuer", "subject" }` pairs; empty/unset denies platform identity administration |
 | API_DATABASE_HOST | Explicit host/IP; tests accept only 127.0.0.1 or ::1 |
 | API_DATABASE_PORT | Explicit TCP port 1–65535 |
 | API_DATABASE_NAME | 1–64 letters, digits, or underscores |
@@ -43,14 +50,51 @@ only invalid or missing field names.
 | API_DATABASE_PASSWORD | Non-blank; valid leading/trailing whitespace is preserved and never logged |
 | API_DATABASE_CONNECT_TIMEOUT_MS | 100–5000 milliseconds |
 
+### Optional Suite4 ticket-entry configuration
+
+The API starts without these fields; ticket exchange then fails closed with a safe 503 while
+unrelated API routes and top-level pre-auth remain available. Configure all three core values
+together to enable exchange. The issuer/audience and public-key set are server-side trust inputs,
+not values supplied by a ticket. The key set contains public SPKI PEM keys indexed by `kid` and can
+hold overlapping keys during rotation. The service never follows a URL from a token and rejects
+private-key PEM. No Suite4 issuer, audience, signing key, or production configuration is confirmed.
+
+| Variable | Validation |
+|---|---|
+| API_PORTAL_ENTRY_TICKET_ISSUER | Exact HTTPS issuer URL, no credentials/query/fragment; required with audience and key set |
+| API_PORTAL_ENTRY_TICKET_AUDIENCE | Exact nonblank audience string up to 255 characters; required with issuer and key set |
+| API_PORTAL_ENTRY_TICKET_PUBLIC_KEYS_JSON | JSON array of 1–20 `{ "kid", "publicKeyPem" }` entries; unique bounded kid and RSA public key 2048–8192 bits; public keys only |
+| API_PORTAL_ENTRY_TICKET_CLOCK_SKEW_SECONDS | Optional integer 0–5; default 5 |
+| API_PORTAL_ENTRY_TICKET_MAX_LIFETIME_SECONDS | Optional integer 1–60; default 60 |
+
 API_ALLOWED_HOSTS is fail-closed in every environment: list only exact hosts assigned to that
 environment. An incoming Host may include its request port; the middleware compares the parsed
 host against the explicit allowlist. Configure no placeholder production domain. Example used by
 local tests and harnesses only: 127.0.0.1,localhost.
 
+Portal session cookies are host-only `__Host-` cookies with `Secure`, `Path=/`, and `SameSite=Lax`;
+the session cookie is `HttpOnly`. CSRF and tenant-context references use separate host-only cookies
+and are sent in `X-CSRF-Token` and `X-Tenant-Context` headers. Only exact configured origins receive
+credentialed CORS headers. Mutations require exact same-origin `Origin` and
+`Sec-Fetch-Site: same-origin`; requests with a portal session also require the matching session-bound
+CSRF cookie/header. The initial idle/absolute expiry values are 30 minutes/eight hours; product
+and operational policy are **Not confirmed**.
+The real Suite4 iframe/browser cookie topology is **Not confirmed**. `SUITE4_EMBED` pre-auth requires
+an exact HTTPS `API_SUITE4_EMBED_ORIGINS` allowlist and uses `SameSite=None; Secure; Partitioned`
+cookies; the portal/app request still must pass the exact `API_ALLOWED_ORIGINS` and same-origin
+Fetch Metadata checks. This local policy does not certify Suite4 or cross-browser behavior. Only
+`NODE_ENV=test` accepts exact loopback HTTP origins for the exchange service; production requires
+HTTPS and the same exact-origin boundary as the API middleware.
+
 API_TRUSTED_PROXIES=none disables Express proxy trust. Wildcard ranges such as 0.0.0.0/0,
 ::/0, expanded unspecified IPv6, and IPv4-mapped IPv6 ranges covering all IPv4 are rejected.
 Configure only specific ingress addresses controlled by the deployment operator.
+
+M3.01 exposes identity provisioning only as an internal service, with no public controller. Creating
+the first tenant requires a session assertion verified by a trusted server adapter and an exact pair
+in `API_PLATFORM_IDENTITY_ADMIN_IDENTITIES_JSON`; an empty setting fails closed. Tenant membership
+changes require a current verified portal session and live owner/admin membership. The initial
+operator identity, trusted issuer, and production configuration procedure are **Not confirmed**. Bootstrap writes the opaque legacy `IdDatabase + IdCompany + environment` mapping with the tenant and owner membership in one transaction; production ownership/authorization for that mapping is **Not confirmed**.
 
 Requests accept X-Request-Id only when it is a UUID v4; otherwise the server generates one.
 Every response returns X-Request-Id; error responses also return the canonical OpenAPI error
