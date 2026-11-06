@@ -51,15 +51,36 @@ export class MetaSubscriptionService {
   async disconnect(input: Omit<MetaSubscriptionRequest, 'desiredFields'>, actor: MetaSubscriptionActor): Promise<MetaSubscriptionReconcileResult> {
     this.validate({ ...input, desiredFields: [] }, actor);
     let context: MetaSubscriptionTargetContext | undefined;
-    try { context = await this.catalog.resolveByAsset(input); } catch { return this.blocked('CATALOG_UNAVAILABLE'); }
-    if (!context || context.sourceAssetId !== input.assetId) return this.blocked('ASSET_NOT_ELIGIBLE');
-    if (!this.isWhatsAppContext(context)) return this.blocked('SUBSCRIPTION_VARIANT_NOT_CONFIRMED');
+    try { context = await this.catalog.resolveByAsset(input); } catch { context = undefined; }
+    if (context && context.sourceAssetId === input.assetId) {
+      if (!this.isWhatsAppContext(context)) return this.blocked('SUBSCRIPTION_VARIANT_NOT_CONFIRMED');
+      try {
+        const snapshot = await this.store.removeBinding({ ...context, actorRef: actor.serviceScope.principalId, correlationId: input.correlationId });
+        if (snapshot.desiredState === 'UNSUBSCRIBED') return Object.freeze({ state: 'MANUAL_ACTION_REQUIRED', desiredState: snapshot.desiredState,
+          observedState: snapshot.observedState, version: snapshot.version, reasonCode: 'REMOTE_UNSUBSCRIBE_NOT_CONFIRMED' });
+        return Object.freeze({ state: snapshot.observedState === 'SUBSCRIBED' ? 'ACTIVE' : 'PENDING', desiredState: snapshot.desiredState,
+          observedState: snapshot.observedState, version: snapshot.version, reasonCode: 'SHARED_CONSUMER_REMAINS' });
+      } catch { return this.blocked('SUBSCRIPTION_STATE_UNAVAILABLE'); }
+    }
+
+    // Revoked/inactive grants can no longer resolve to an executable catalog context. Retire only
+    // bindings whose current grant and credential metadata prove that Graph use is unavailable.
+    // This cleanup is local and deliberately never invokes the Meta provider.
     try {
-      const snapshot = await this.store.removeBinding({ ...context, actorRef: actor.serviceScope.principalId, correlationId: input.correlationId });
-      if (snapshot.desiredState === 'UNSUBSCRIBED') return Object.freeze({ state: 'MANUAL_ACTION_REQUIRED', desiredState: snapshot.desiredState,
-        observedState: snapshot.observedState, version: snapshot.version, reasonCode: 'REMOTE_UNSUBSCRIBE_NOT_CONFIRMED' });
-      return Object.freeze({ state: snapshot.observedState === 'SUBSCRIBED' ? 'ACTIVE' : 'PENDING', desiredState: snapshot.desiredState,
-        observedState: snapshot.observedState, version: snapshot.version, reasonCode: 'SHARED_CONSUMER_REMAINS' });
+      const cleanup = await this.store.removeInactiveBindings({ ...input, actorRef: actor.serviceScope.principalId });
+      if (cleanup.removedBindingCount === 0 || cleanup.targets.length === 0) return this.blocked('ASSET_NOT_ELIGIBLE');
+      const hasConsumers = cleanup.targets.some((target) => target.remainingBindingCount > 0);
+      const hasUnownedTarget = cleanup.targets.some((target) => target.remainingBindingCount === 0);
+      const hasUnownedObservedSubscription = cleanup.targets.some((target) => target.remainingBindingCount === 0 && target.observedState === 'SUBSCRIBED');
+      const desiredState = hasConsumers ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
+      const observedState = cleanup.targets.some((target) => target.observedState === 'SUBSCRIBED') ? 'SUBSCRIBED' : 'UNKNOWN';
+      const state = hasUnownedTarget
+        ? hasConsumers ? 'PARTIAL' : 'MANUAL_ACTION_REQUIRED'
+        : hasConsumers ? observedState === 'SUBSCRIBED' ? 'ACTIVE' : 'PENDING' : 'MANUAL_ACTION_REQUIRED';
+      return Object.freeze({ state, desiredState, observedState, version: Math.max(...cleanup.targets.map((target) => target.version)),
+        reasonCode: hasUnownedTarget ? hasUnownedObservedSubscription ? 'INACTIVE_GRANT_REMOVED_REMOTE_SUBSCRIPTION_REQUIRES_REVIEW' :
+          'INACTIVE_GRANT_REMOVED_UNOWNED_TARGET_REQUIRES_REVIEW' :
+          hasConsumers ? 'INACTIVE_GRANT_REMOVED_SHARED_CONSUMER_REMAINS' : 'INACTIVE_GRANT_REMOVED_REMOTE_UNSUBSCRIBE_NOT_CONFIRMED' });
     } catch { return this.blocked('SUBSCRIPTION_STATE_UNAVAILABLE'); }
   }
 

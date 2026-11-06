@@ -78,6 +78,20 @@ export interface MetaSubscriptionReconcileResult {
   readonly retryAt?: string;
 }
 
+export interface MetaSubscriptionInactiveCleanupTarget {
+  readonly targetId: string;
+  readonly desiredState: MetaSubscriptionState;
+  readonly observedState: MetaSubscriptionState;
+  readonly state: MetaSubscriptionReconcileState;
+  readonly version: number;
+  readonly remainingBindingCount: number;
+}
+
+export interface MetaSubscriptionInactiveCleanupResult {
+  readonly removedBindingCount: number;
+  readonly targets: readonly MetaSubscriptionInactiveCleanupTarget[];
+}
+
 export type MetaSubscriptionProviderResult =
   | { readonly state: 'SUBSCRIBED'; readonly observedFields: readonly string[] }
   | { readonly state: 'UNKNOWN' | 'PARTIAL'; readonly reasonCode: string; readonly retryable: boolean };
@@ -97,6 +111,15 @@ export interface MetaSubscriptionStore {
     readonly actorRef: string;
     readonly correlationId: string;
   }): Promise<MetaSubscriptionTargetSnapshot>;
+  /** Removes only stored bindings whose server-side grant is inactive and credential is no longer resolver-eligible. */
+  removeInactiveBindings(input: {
+    readonly tenantId: string;
+    readonly appConfigurationId: string;
+    readonly environment: MetaEnvironment;
+    readonly assetId: string;
+    readonly actorRef: string;
+    readonly correlationId: string;
+  }): Promise<MetaSubscriptionInactiveCleanupResult>;
   claim(input: MetaSubscriptionTargetContext, leaseMilliseconds: number): Promise<MetaSubscriptionClaim | undefined>;
   complete(claim: MetaSubscriptionClaim, input: {
     readonly state: MetaSubscriptionReconcileState;

@@ -52,10 +52,11 @@ function request(assetId: string, desiredFields: readonly string[] = []): MetaSu
 
 class FakeCatalog implements MetaSubscriptionCatalog {
   calls = 0;
+  allowActive = true;
   readonly authorizationByAsset = new Map<string, string>();
   async resolveByAsset(input: Pick<MetaSubscriptionRequest, 'tenantId' | 'appConfigurationId' | 'environment' | 'assetId'>) {
     this.calls += 1;
-    return input.tenantId === TENANT && input.appConfigurationId === APP
+    return this.allowActive && input.tenantId === TENANT && input.appConfigurationId === APP
       ? context(input.assetId, this.authorizationByAsset.get(input.assetId) ?? id(5)) : undefined;
   }
   async resolveTarget() { return undefined; }
@@ -76,6 +77,8 @@ class FakeStore implements MetaSubscriptionStore {
   lockToken?: string;
   lockContext?: MetaSubscriptionTargetContext;
   claimAttempts = 0;
+  inactiveCleanupCalls = 0;
+  readonly inactiveAuthorizationIds = new Set<string>();
   private resolveFour!: () => void;
   readonly fourBindings = new Promise<void>((resolve) => { this.resolveFour = resolve; });
 
@@ -102,6 +105,20 @@ class FakeStore implements MetaSubscriptionStore {
     this.state = active.length ? this.observedState === 'SUBSCRIBED' ? 'ACTIVE' : 'PENDING' : 'MANUAL_ACTION_REQUIRED';
     if (beforeDesired !== this.desiredState || beforeFields !== this.currentDesiredFields().join('\0')) this.targetVersion += 1;
     return this.snapshot(input);
+  }
+  async removeInactiveBindings(input: { readonly assetId: string }) {
+    this.inactiveCleanupCalls += 1;
+    const stale = [...this.bindings.entries()].filter(([, binding]) => binding.assetId === input.assetId &&
+      binding.state === 'ACTIVE' && this.inactiveAuthorizationIds.has(binding.authorizationId));
+    if (stale.length === 0) return Object.freeze({ removedBindingCount: 0, targets: Object.freeze([]) });
+    for (const [key, binding] of stale) this.bindings.set(key, { ...binding, state: 'REMOVED', version: binding.version + 1 });
+    const active = [...this.bindings.values()].filter((binding) => binding.state === 'ACTIVE');
+    this.desiredState = active.length > 0 ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
+    this.state = active.length > 0 ? this.observedState === 'SUBSCRIBED' ? 'ACTIVE' : 'PENDING' : 'MANUAL_ACTION_REQUIRED';
+    this.targetVersion += 1;
+    return Object.freeze({ removedBindingCount: stale.length, targets: Object.freeze([Object.freeze({ targetId: `subscription-${TARGET}`,
+      desiredState: this.desiredState, observedState: this.observedState, state: this.state,
+      version: this.targetVersion, remainingBindingCount: active.length })]) });
   }
   async claim(input: MetaSubscriptionTargetContext, _leaseMilliseconds: number): Promise<MetaSubscriptionClaim | undefined> {
     this.claimAttempts += 1;
@@ -216,6 +233,31 @@ test('bindings retain independent authorization grants for the same asset and di
   assert.equal([...store.bindings.values()].filter((binding) => binding.state === 'ACTIVE').length, 1);
   assert.equal([...store.bindings.values()].find((binding) => binding.authorizationId === secondGrant)?.state, 'ACTIVE');
   assert.equal(provider.remoteSubscribed, true);
+});
+
+test('disconnect retires inactive grant binding locally and preserves the still eligible grant without Meta calls', async () => {
+  const store = new FakeStore(); const catalog = new FakeCatalog(); const provider = new FakeProvider();
+  const service = new MetaSubscriptionService(store, catalog, provider);
+  const trustedActor = await actor();
+  const sharedAsset = id(16); const inactiveGrant = id(27); const activeGrant = id(28);
+  catalog.authorizationByAsset.set(sharedAsset, inactiveGrant);
+  await service.connect(request(sharedAsset), trustedActor);
+  catalog.authorizationByAsset.set(sharedAsset, activeGrant);
+  await service.connect(request(sharedAsset), trustedActor);
+  store.observedState = 'SUBSCRIBED';
+  store.state = 'ACTIVE';
+  store.inactiveAuthorizationIds.add(inactiveGrant);
+  catalog.allowActive = false;
+  const providerCallsBeforeDisconnect = provider.calls;
+
+  const { desiredFields: _desiredFields, ...disconnectRequest } = request(sharedAsset);
+  const disconnected = await service.disconnect(disconnectRequest, trustedActor);
+  assert.equal(store.inactiveCleanupCalls, 1);
+  assert.equal(store.bindings.get(`${sharedAsset}:${inactiveGrant}`)?.state, 'REMOVED');
+  assert.equal(store.bindings.get(`${sharedAsset}:${activeGrant}`)?.state, 'ACTIVE');
+  assert.equal(disconnected.state, 'ACTIVE');
+  assert.equal(disconnected.reasonCode, 'INACTIVE_GRANT_REMOVED_SHARED_CONSUMER_REMAINS');
+  assert.equal(provider.calls, providerCallsBeforeDisconnect, 'grant cleanup is local and does not use an inactive credential');
 });
 
 test('a browser supplied provider object ID is rejected before catalog or provider use', async () => {
