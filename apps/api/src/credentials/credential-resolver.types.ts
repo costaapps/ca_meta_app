@@ -8,10 +8,12 @@ export type CredentialResolverOperation =
   | 'SUBSCRIBE_WEBHOOKS'
   | 'SEND_MESSAGE'
   | 'MANAGE_TEMPLATES'
+  | 'MANAGE_COMMENTS'
+  | 'SYNC_HISTORY'
   | 'PHONE_REGISTRATION_CONVENTIONAL';
 
 export type MetaFlowVariant = 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP_EXCLUSIVE' | 'WHATSAPP_COEXISTENCE';
-export type MetaAuthVariant = 'FACEBOOK_LOGIN_FOR_BUSINESS' | 'INSTAGRAM_LOGIN' |
+export type MetaAuthVariant = 'FACEBOOK_LOGIN_FOR_BUSINESS' | 'INSTAGRAM_VIA_FACEBOOK_LOGIN' | 'INSTAGRAM_LOGIN' |
   'WHATSAPP_EMBEDDED_SIGNUP' | 'WHATSAPP_BUSINESS_APP_ONBOARDING';
 export type CredentialPurpose = 'APP_INSPECTION' | 'CUSTOMER_OPERATION';
 export type CredentialHealth = 'HEALTHY' | 'EXPIRING' | 'EXPIRED' | 'REVOKED' | 'ACTION_REQUIRED' | 'UNKNOWN' | 'STALE';
@@ -33,6 +35,12 @@ export interface CredentialResolutionContext {
 }
 
 export interface CredentialOperationPolicyContext extends CredentialResolutionContext {}
+
+/** Server-owned expected binding used when a downstream adapter consumes a one-use handle. */
+export interface CredentialExecutionContext extends CredentialResolutionContext {
+  readonly flowVariant: MetaFlowVariant;
+  readonly authVariant: MetaAuthVariant;
+}
 
 export interface CredentialAncestryRule {
   readonly relationType: AssetRelationType;
