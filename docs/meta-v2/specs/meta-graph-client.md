@@ -16,7 +16,7 @@ The internal route allowlist covers object status reads, flow-checked asset edge
 
 Every result reports a safe outcome (`SUCCEEDED`, `FAILED`, `PARTIAL` or `UNKNOWN`), HTTP status where received, attempts/retries, and safe error category/code/type/trace data where validated. Code 190/HTTP 401 maps to `CREDENTIAL_REJECTED` and a reauthorization action; it does not assert that a token is revoked. Known permission-shaped responses map to `PERMISSION_REQUIRED`. This classification is conservative adapter behavior, not a confirmed complete Meta error taxonomy.
 
-An HTTP response whose body contains a top-level `error` is never a success, including HTTP 200. HTTP 429 is `RATE_LIMITED`. Provider 5xx/network errors are transient for reads. A POST timeout, transport failure, or 5xx response is `UNKNOWN`/ambiguous and is never automatically resent; a caller must reconcile provider state before deciding what to do next. Explicit retryable/ambiguous booleans are included without exposing credentials.
+An HTTP response whose body contains a top-level `error` is never a success, including HTTP 200. HTTP 429 is `RATE_LIMITED`. Provider 5xx/network errors are transient for reads. A POST timeout, transport failure, 5xx response or oversized response is `UNKNOWN`/ambiguous and is never automatically resent; a caller must reconcile provider state before deciding what to do next. Explicit retryable/ambiguous booleans are included without exposing credentials.
 
 ## Paging, retries and local budgets
 

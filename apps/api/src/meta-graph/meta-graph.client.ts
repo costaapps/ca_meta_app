@@ -370,6 +370,12 @@ export class MetaGraphClient {
           configurationRef: input.context.configurationRef, operation: input.operation, graphApiVersion: path.split('/')[1]!, correlationId: input.correlationId,
           ...(body !== undefined ? { body } : {}), connectTimeoutMs: this.limits.connectTimeoutMs, headersTimeoutMs: this.limits.headersTimeoutMs,
           readTimeoutMs: this.limits.readTimeoutMs, overallTimeoutMs: this.limits.overallTimeoutMs, maxResponseBytes: this.limits.maxResponseBytes } satisfies MetaGraphTransportRequest));
+        if (Buffer.byteLength(response.body, 'utf8') > this.limits.maxResponseBytes) {
+          if (method !== 'GET') return { error: err('AMBIGUOUS_POST', {
+            httpStatus: response.statusCode, recommendedAction: 'RECONCILE',
+          }, false, true), attempts, retries };
+          return { error: err('RESPONSE_TOO_LARGE', { httpStatus: response.statusCode }), attempts, retries };
+        }
         this.quota.observe(key, response.headers);
         if (method === 'GET' && (response.statusCode === 429 || response.statusCode >= 500) && attempts < max) {
           retries += 1; await this.sleep(this.retryDelay(response.headers['retry-after'], attempts)); continue;

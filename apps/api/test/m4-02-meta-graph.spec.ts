@@ -32,8 +32,14 @@ function fixtureProfile(status: 'VERIFIED' | 'NOT_CONFIRMED' = 'VERIFIED'): Meta
     redirectAllowlist: Object.freeze(['https://test.example.invalid/meta/callback']),
     appSecretRef: 'vault://meta-app/test/synthetic/app-secret', tokenConfigurationRef: 'vault://meta-app/test/synthetic/token-config',
     capabilityManifestVersion: META_CAPABILITY_MANIFEST_VERSION, enabled: true,
-    versions: Object.freeze({ graphApi: Object.freeze({ value: 'v27.0', status,
-      ...(status === 'VERIFIED' ? { evidenceUrl: 'https://developers.facebook.com/docs/graph-api/overview/', verifiedAt: '2026-11-06' } : {}) }) }),
+    versions: Object.freeze({
+      graphApi: Object.freeze({ value: 'v27.0', status,
+        ...(status === 'VERIFIED' ? { evidenceUrl: 'https://developers.facebook.com/docs/graph-api/overview/', verifiedAt: '2026-11-06' } : {}) }),
+      javascriptSdk: Object.freeze({ value: 'v24.0', status: 'VERIFIED' as const,
+        evidenceUrl: 'https://developers.facebook.com/docs/javascript/quickstart/', verifiedAt: '2026-11-06' }),
+      embeddedSignup: Object.freeze({ value: 'v1.0', status: 'VERIFIED' as const,
+        evidenceUrl: 'https://developers.facebook.com/docs/whatsapp/embedded-signup/', verifiedAt: '2026-11-06' }),
+    }),
     capabilityEvidence: Object.freeze(capabilityEvidence),
   });
 }
@@ -76,6 +82,24 @@ function client(transport: MetaGraphTransport, credentials = new FakeCredentials
   const instance = new MetaGraphClient(new MetaAppConfigRegistry([fixtureProfile()]), credentials, transport, metrics, options);
   return { instance, credentials, metrics };
 }
+
+test('synthetic fixture mirrors a fully verified M4.01 profile while pending graph evidence stays blocked', () => {
+  const flow = 'WHATSAPP_COEXISTENCE';
+  const auth = 'WHATSAPP_BUSINESS_APP_ONBOARDING';
+  const verified = new MetaAppConfigRegistry([fixtureProfile()]);
+  const profile = verified.bootstrap().profiles.find((row) => row.flowVariant === flow && row.authVariant === auth);
+  assert.equal(profile?.enabled, true);
+  assert.equal(profile?.capabilities.find((row) => row.operation === 'ASSET_DISCOVERY')?.enabled, true);
+  const statusCapability = profile?.capabilities.find((row) => row.operation === 'READ_STATUS');
+  assert.equal(statusCapability?.enabled, false);
+  assert.equal(statusCapability?.reasonCode, 'PERMISSION_MAPPING_NOT_CONFIRMED');
+  assert.ok(verified.resolve(flow, auth, 'test'));
+
+  const pending = new MetaAppConfigRegistry([fixtureProfile('NOT_CONFIRMED')]);
+  assert.equal(pending.resolve(flow, auth, 'test'), undefined);
+  assert.equal(pending.bootstrap().profiles.find((row) => row.flowVariant === flow && row.authVariant === auth)?.reasonCode,
+    'VERSION_EVIDENCE_REQUIRED');
+});
 
 test('HTTP 200 Graph error normalizes safe type/code/subcode/trace and omits secrets and nested error details', async () => {
   const transport = new SequenceTransport([response(200, {
@@ -168,6 +192,18 @@ test('429 uses bounded Retry-After and a finite GET retry budget', async () => {
 });
 
 test('classifies permission, invalid request and exhausted transient GET responses', async () => {
+  const unauthorized = client(new SequenceTransport([response(401, {
+    error: { type: 'OAuthException', code: 190, message: 'synthetic-auth-secret-marker', nested: { message: 'nested-auth-marker' } },
+    headers: { authorization: TOKEN },
+  })]));
+  const unauthorizedResult = await unauthorized.instance.execute(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers' }));
+  assert.equal(unauthorizedResult.httpStatus, 401);
+  assert.equal(unauthorizedResult.error?.category, 'CREDENTIAL_REJECTED');
+  assert.equal(unauthorizedResult.error?.recommendedAction, 'REAUTHENTICATE');
+  assert.equal(JSON.stringify(unauthorizedResult).includes('synthetic-auth-secret-marker'), false);
+  assert.equal(JSON.stringify(unauthorizedResult).includes('nested-auth-marker'), false);
+  assert.equal(JSON.stringify(unauthorizedResult).includes(TOKEN), false);
+
   const permission = client(new SequenceTransport([response(403, { error: { type: 'OAuthException', code: 10 } })]));
   const permissionResult = await permission.instance.execute(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers' }));
   assert.equal(permissionResult.error?.category, 'PERMISSION_REQUIRED');
@@ -198,6 +234,27 @@ test('POST HTTP 5xx is ambiguous and never automatically retried', async () => {
   assert.equal(result.ambiguous, true);
   assert.equal(result.attempts, 1);
   assert.equal(transport.calls.length, 1);
+});
+
+test('oversized response fails reads and leaves POST outcome ambiguous without retry', async () => {
+  const oversized = response(200, { id: 'x'.repeat(1_200) });
+  const getTransport = new SequenceTransport([oversized]);
+  const getRuntime = client(getTransport, new FakeCredentials(), { maxResponseBytes: 1_024 });
+  const getResult = await getRuntime.instance.execute(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers' }));
+  assert.equal(getResult.outcome, 'FAILED');
+  assert.equal(getResult.error?.category, 'RESPONSE_TOO_LARGE');
+  assert.equal(getResult.retryable, false);
+  assert.equal(getResult.attempts, 1);
+  assert.equal(getTransport.calls.length, 1);
+
+  const postTransport = new SequenceTransport([oversized]);
+  const postRuntime = client(postTransport, new FakeCredentials(), { maxResponseBytes: 1_024 });
+  const postResult = await postRuntime.instance.execute(request('SEND_MESSAGE', 'SEND_MESSAGE', { body: { fixture: true } }));
+  assert.equal(postResult.outcome, 'UNKNOWN');
+  assert.equal(postResult.error?.category, 'AMBIGUOUS_POST');
+  assert.equal(postResult.ambiguous, true);
+  assert.equal(postResult.attempts, 1);
+  assert.equal(postTransport.calls.length, 1);
 });
 
 test('ambiguous POST timeout is UNKNOWN and never resent', async () => {
@@ -256,6 +313,17 @@ test('passes separate connection, header, read and overall timeouts; a POST read
   assert.equal(transport.calls[0]?.readTimeoutMs, 1_100);
   assert.equal(transport.calls[0]?.overallTimeoutMs, 2_500);
   assert.equal(transport.calls.length, 1);
+
+  for (const [phase, kind] of [['CONNECT', 'CONNECT_TIMEOUT'], ['READ', 'READ_TIMEOUT']] as const) {
+    const timeoutTransport = new SequenceTransport(Array.from({ length: 3 }, () => new MetaGraphTransportFailure(kind)));
+    const timeoutRuntime = client(timeoutTransport, new FakeCredentials(), { sleep: async () => {}, random: () => 0 });
+    const timeoutResult = await timeoutRuntime.instance.execute(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers' }));
+    assert.equal(timeoutResult.error?.category, 'NETWORK_ERROR');
+    assert.equal(timeoutResult.error?.timeoutPhase, phase);
+    assert.equal(timeoutResult.retryable, true);
+    assert.equal(timeoutResult.attempts, 3);
+    assert.equal(timeoutResult.retries, 2);
+  }
 });
 
 test('circular cursors stop and maximum page count returns a resumable checkpoint', async () => {

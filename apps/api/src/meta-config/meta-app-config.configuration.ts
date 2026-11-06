@@ -459,7 +459,7 @@ export function buildMetaBootstrap(
     if (configuration && configuration.enabled && versionReason) reasonCode = versionReason;
     if (configuration && configuration.enabled && !versionReason) {
       const discovery = capabilities.find((item) => item.operation === 'ASSET_DISCOVERY');
-      reasonCode = discovery?.reasonCode ?? 'CAPABILITY_EVIDENCE_MISSING';
+      reasonCode = discovery ? discovery.reasonCode : 'CAPABILITY_EVIDENCE_MISSING';
     }
     const enabled = configuration !== undefined && reasonCode === null;
     return Object.freeze({
