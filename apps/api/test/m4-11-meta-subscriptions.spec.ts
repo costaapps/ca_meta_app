@@ -260,6 +260,39 @@ test('disconnect retires inactive grant binding locally and preserves the still 
   assert.equal(provider.calls, providerCallsBeforeDisconnect, 'grant cleanup is local and does not use an inactive credential');
 });
 
+test('disconnect cleans a stale grant alongside the selected active grant and preserves another WABA consumer', async () => {
+  const store = new FakeStore(); const catalog = new FakeCatalog(); const provider = new FakeProvider();
+  const service = new MetaSubscriptionService(store, catalog, provider);
+  const trustedActor = await actor();
+  const sharedAsset = id(17); const staleGrant = id(29); const selectedGrant = id(30); const remainingGrant = id(31);
+
+  catalog.authorizationByAsset.set(sharedAsset, staleGrant);
+  await service.connect(request(sharedAsset), trustedActor);
+  catalog.authorizationByAsset.set(sharedAsset, selectedGrant);
+  await service.connect(request(sharedAsset), trustedActor);
+  catalog.authorizationByAsset.set(sharedAsset, remainingGrant);
+  await service.connect(request(sharedAsset), trustedActor);
+  store.observedState = 'SUBSCRIBED';
+  store.state = 'ACTIVE';
+  store.inactiveAuthorizationIds.add(staleGrant);
+  catalog.authorizationByAsset.set(sharedAsset, selectedGrant);
+  const providerCallsBeforeDisconnect = provider.calls;
+
+  const { desiredFields: _desiredFields, ...disconnectRequest } = request(sharedAsset);
+  const disconnected = await service.disconnect(disconnectRequest, trustedActor);
+
+  assert.equal(store.inactiveCleanupCalls, 1, 'stale grant cleanup runs even when another grant resolves for the asset');
+  assert.equal(store.bindings.get(`${sharedAsset}:${staleGrant}`)?.state, 'REMOVED');
+  assert.equal(store.bindings.get(`${sharedAsset}:${selectedGrant}`)?.state, 'REMOVED');
+  assert.equal(store.bindings.get(`${sharedAsset}:${remainingGrant}`)?.state, 'ACTIVE');
+  assert.equal([...store.bindings.values()].filter((binding) => binding.state === 'ACTIVE').length, 1);
+  assert.equal(disconnected.state, 'ACTIVE');
+  assert.equal(disconnected.reasonCode, 'SHARED_CONSUMER_REMAINS');
+  assert.equal(disconnected.desiredState, 'SUBSCRIBED');
+  assert.equal(provider.calls, providerCallsBeforeDisconnect, 'both disconnect removals are local and never call Meta');
+  assert.equal(provider.remoteSubscribed, true, 'the remaining consumer keeps the shared WABA subscription desired');
+});
+
 test('a browser supplied provider object ID is rejected before catalog or provider use', async () => {
   const store = new FakeStore(); const catalog = new FakeCatalog(); const provider = new FakeProvider();
   const service = new MetaSubscriptionService(store, catalog, provider);

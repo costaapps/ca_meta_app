@@ -55,6 +55,11 @@ export class MetaSubscriptionService {
     if (context && context.sourceAssetId === input.assetId) {
       if (!this.isWhatsAppContext(context)) return this.blocked('SUBSCRIPTION_VARIANT_NOT_CONFIRMED');
       try {
+        // A currently usable grant can coexist with stale bindings from older grants on the
+        // same internal asset. Retire those locally before removing only the caller-selected
+        // grant, so the shared target refcount reflects both operations. This cleanup is
+        // server-side and never calls Meta.
+        await this.store.removeInactiveBindings({ ...input, actorRef: actor.serviceScope.principalId });
         const snapshot = await this.store.removeBinding({ ...context, actorRef: actor.serviceScope.principalId, correlationId: input.correlationId });
         if (snapshot.desiredState === 'UNSUBSCRIBED') return Object.freeze({ state: 'MANUAL_ACTION_REQUIRED', desiredState: snapshot.desiredState,
           observedState: snapshot.observedState, version: snapshot.version, reasonCode: 'REMOTE_UNSUBSCRIBE_NOT_CONFIRMED' });
