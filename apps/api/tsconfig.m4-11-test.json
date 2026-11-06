@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-test",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/meta-subscriptions/**/*.ts",
+    "src/meta-graph/**/*.ts",
+    "src/meta-config/**/*.ts",
+    "src/credentials/credential-resolver.types.ts",
+    "src/meta-assets/meta-assets.types.ts",
+    "src/identity/**/*.ts",
+    "src/jobs/durable-work-database.ts",
+    "src/config/environment.ts",
+    "test/m4-11-meta-subscriptions.spec.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}
