@@ -1,6 +1,17 @@
 import { itemFromProtectedDelivery } from './meta-webhook-validation.js';
-import type { MetaWebhookRepository } from './meta-webhook.repository.js';
-import type { MetaWebhookItemProcessor, MetaWebhookPayloadProtector } from './meta-webhook.types.js';
+import type { ClaimedMetaWebhookItem, MetaWebhookRepository, MetaWebhookStatusLease } from './meta-webhook.repository.js';
+import type { MetaWebhookItemProcessor, MetaWebhookItemProcessorInput, MetaWebhookPayloadProtector } from './meta-webhook.types.js';
+
+function hasStatusFence(item: ClaimedMetaWebhookItem): item is ClaimedMetaWebhookItem & {
+  readonly itemKind: 'statuses';
+  readonly providerTimestamp: string;
+  readonly providerMessageId: string;
+  readonly providerStatus: string;
+  readonly statusLease: MetaWebhookStatusLease;
+} {
+  return item.itemKind === 'statuses' && item.providerTimestamp !== null && item.providerMessageId !== null &&
+    item.providerStatus !== null && item.statusLease !== null;
+}
 
 export class MetaWebhookWorker {
   private lastPayloadExpirySweep = 0;
@@ -25,7 +36,7 @@ export class MetaWebhookWorker {
           statusLease: item.statusLease });
         return true;
       }
-      const result = await this.processor.process({
+      const commonInput = {
         eventRef: item.eventRef,
         eventKey: item.eventKey,
         schemaVersion: item.schemaVersion,
@@ -33,17 +44,42 @@ export class MetaWebhookWorker {
         appConfigurationId: item.appConfigurationId,
         assetId: item.assetId,
         eventType: item.eventType,
-        providerTimestamp: item.providerTimestamp,
-        providerMessageId: item.providerMessageId,
-        providerStatus: item.providerStatus,
-        providerStatusRank: item.providerStatusRank,
-        statusFence: item.statusLease ? {
-          leaseVersion: item.statusLease.leaseVersion,
-          eventKey: item.statusLease.eventKey,
-          providerTimestamp: item.statusLease.providerTimestamp,
-        } : undefined,
         item: providerItem,
-      }, signal);
+      };
+      let processorInput: MetaWebhookItemProcessorInput;
+      if (item.itemKind === 'statuses') {
+        if (!hasStatusFence(item)) {
+          await this.repository.finalize({ eventId: item.id, workerRef: this.workerRef,
+            leaseVersion: item.leaseVersion, state: 'DEAD_LETTER', safeErrorCode: 'STATUS_FENCE_UNAVAILABLE',
+            statusLease: item.statusLease });
+          return true;
+        }
+        processorInput = {
+          ...commonInput,
+          itemKind: 'statuses',
+          providerTimestamp: item.providerTimestamp,
+          providerMessageId: item.providerMessageId,
+          providerStatus: item.providerStatus,
+          providerStatusRank: item.providerStatusRank,
+          statusFence: {
+            leaseVersion: item.statusLease.leaseVersion,
+            leaseToken: item.statusLease.leaseToken,
+            eventKey: item.statusLease.eventKey,
+            providerTimestamp: item.statusLease.providerTimestamp,
+          },
+        };
+      } else {
+        processorInput = {
+          ...commonInput,
+          itemKind: item.itemKind,
+          providerTimestamp: item.providerTimestamp,
+          providerMessageId: item.providerMessageId,
+          providerStatus: null,
+          providerStatusRank: null,
+          statusFence: null,
+        };
+      }
+      const result = await this.processor.process(processorInput, signal);
       if (result.kind === 'SUCCEEDED') {
         await this.repository.finalize({ eventId: item.id, workerRef: this.workerRef,
           leaseVersion: item.leaseVersion, state: 'PROCESSED', statusLease: item.statusLease });
