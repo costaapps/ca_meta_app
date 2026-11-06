@@ -1,5 +1,5 @@
 import type { MetaEnvironment } from '../meta-assets/meta-assets.types.js';
-import type { MetaAuthenticationVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
+import type { MetaAuthVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
 import type { VerifiedServiceTenantScope } from '../identity/identity.types.js';
 
 export type MetaSubscriptionState = 'SUBSCRIBED' | 'UNSUBSCRIBED' | 'UNKNOWN';
@@ -31,7 +31,7 @@ export interface MetaSubscriptionTargetContext {
   readonly sourceAssetId: string;
   readonly providerObjectId: string;
   readonly flowVariant: MetaFlowVariant;
-  readonly authVariant: MetaAuthenticationVariant;
+  readonly authVariant: MetaAuthVariant;
   readonly kind: MetaSubscriptionTargetKind;
   readonly authorizationVersion: number;
   readonly targetAssetVersion: number;
@@ -40,6 +40,8 @@ export interface MetaSubscriptionTargetContext {
 
 export interface MetaSubscriptionBindingSnapshot {
   readonly assetId: string;
+  /** The authorization/grant that owns this connection's need for the physical target. */
+  readonly authorizationId: string;
   readonly desiredFields: readonly string[];
   readonly state: MetaSubscriptionBindingState;
   readonly version: number;
@@ -54,6 +56,10 @@ export interface MetaSubscriptionTargetSnapshot extends MetaSubscriptionTargetCo
   readonly state: MetaSubscriptionReconcileState;
   readonly version: number;
   readonly attemptCount: number;
+  readonly lastAttemptAt: string | null;
+  readonly lastVerifiedAt: string | null;
+  readonly lastErrorCode: string | null;
+  readonly nextAttemptAt: string | null;
   readonly bindings: readonly MetaSubscriptionBindingSnapshot[];
 }
 

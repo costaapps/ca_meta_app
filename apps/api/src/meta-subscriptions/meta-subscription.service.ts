@@ -92,7 +92,7 @@ export class MetaSubscriptionService {
         return Object.freeze({ state: 'ACTIVE', desiredState: saved.desiredState, observedState: saved.observedState, version: saved.version });
       } catch { return this.blocked('SUBSCRIPTION_OUTCOME_PERSISTENCE_FAILED', claim.claimedVersion); }
     }
-    return await this.persistFailure(claim, actor, result.reasonCode, result.retryable, result.state === 'UNKNOWN' ? 'UNKNOWN' : 'PARTIAL');
+    return await this.persistFailure(claim, actor, result.reasonCode, result.retryable);
   }
 
   private async persistFailure(claim: NonNullable<Awaited<ReturnType<MetaSubscriptionStore['claim']>>>, actor: MetaSubscriptionActor,
