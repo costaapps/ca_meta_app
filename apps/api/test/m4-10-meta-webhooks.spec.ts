@@ -1,0 +1,302 @@
+import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+import test from 'node:test';
+import type { ApiEnvironment } from '../src/config/environment.js';
+import type { MetaAppConfiguration } from '../src/meta-config/meta-app-config.configuration.js';
+import {
+  MetaWebhookConfigurationResolver,
+  MetaWebhookIngressService,
+  MetaWebhookSignatureError,
+} from '../src/meta-webhooks/meta-webhook-ingress.service.js';
+import { itemFromProtectedDelivery, MetaWebhookPayloadValidationError, parseMetaWebhookDelivery } from '../src/meta-webhooks/meta-webhook-validation.js';
+import { verifyChallengeToken, verifyMetaWebhookSignature } from '../src/meta-webhooks/meta-webhook-signature.js';
+import { MetaWebhookRepository } from '../src/meta-webhooks/meta-webhook.repository.js';
+import { MetaWebhookWorker } from '../src/meta-webhooks/meta-webhook-worker.js';
+import type {
+  MetaWebhookPayloadProtector,
+  MetaWebhookSecretProvider,
+  ProtectedMetaWebhookPayload,
+} from '../src/meta-webhooks/meta-webhook.types.js';
+
+const appSecret = Buffer.from('synthetic-app-secret-for-tests-only', 'utf8');
+const rotatedSecret = Buffer.from('synthetic-next-app-secret-for-tests-only', 'utf8');
+const verificationToken = 'synthetic-independent-verify-token';
+
+function signature(body: Buffer, key = appSecret): string {
+  return `sha256=${createHmac('sha256', key).update(body).digest('hex')}`;
+}
+
+function envelope(): Buffer {
+  return Buffer.from(`{
+  "object":"whatsapp_business_account",
+  "entry":[{"id":"synthetic-waba-9","changes":[{"field":"messages","value":{
+    "metadata":{"phone_number_id":"synthetic-phone-id-7"},
+    "messages":[{"id":"wamid.synthetic.1","from":"+15550000001","timestamp":"1793980800","type":"text","text":{"body":"synthetic body"}}],
+    "statuses":[
+      {"id":"wamid.synthetic.1","recipient_id":"+15550000001","status":"sent","timestamp":"1793980801"},
+      {"id":"wamid.synthetic.1","recipient_id":"+15550000001","status":"delivered","timestamp":"1793980802"},
+      {"id":"wamid.synthetic.1","recipient_id":"+15550000001","status":"read","timestamp":"1793980803"}
+    ]
+  }}]}]
+}
+`, 'utf8');
+}
+
+function fakeProfile(overrides: Partial<MetaAppConfiguration> = {}): MetaAppConfiguration {
+  return {
+    configurationRef: 'synthetic-config', environment: 'test', flowVariant: 'WHATSAPP_EXCLUSIVE',
+    authVariant: 'WHATSAPP_EMBEDDED_SIGNUP', providerAppIdRef: 'synthetic-meta-app',
+    providerAppId: '1234567890', appMode: 'DEVELOPMENT', appDomain: 'example.test',
+    callbackUri: 'https://example.test/callback', redirectAllowlist: ['https://example.test'],
+    appSecretRef: 'vault://meta-app/test/synthetic/app-secret', tokenConfigurationRef: 'vault://meta-app/test/synthetic/token',
+    capabilityManifestVersion: 'v1', enabled: true,
+    versions: { graphApi: { value: 'v25.0', status: 'NOT_CONFIRMED' } },
+    capabilityEvidence: [], ...overrides,
+  } as MetaAppConfiguration;
+}
+
+function apiEnvironment(): ApiEnvironment {
+  return { nodeEnv: 'test' } as ApiEnvironment;
+}
+
+function protectedPayload(reference: string, raw: Buffer): ProtectedMetaWebhookPayload {
+  return {
+    reference,
+    keyReference: 'synthetic-test-key-v1',
+    nonce: Buffer.alloc(12, 1),
+    authenticationTag: Buffer.alloc(16, 2),
+    ciphertext: Buffer.from(raw),
+    expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+  };
+}
+
+test('signature covers exact raw bytes and checks current and previous App Secret versions', () => {
+  const raw = Buffer.from('{ "x" : 1 }\n', 'utf8');
+  assert.equal(verifyMetaWebhookSignature(raw, signature(raw, rotatedSecret), [appSecret, rotatedSecret]), true);
+  assert.equal(verifyMetaWebhookSignature(raw, signature(Buffer.from('{"x":1}\n')), [appSecret, rotatedSecret]), false);
+  assert.equal(verifyMetaWebhookSignature(raw, 'sha256=bad', [appSecret]), false);
+  assert.equal(verifyMetaWebhookSignature(raw, signature(raw), []), false);
+});
+
+test('challenge verification uses a separate token and fixed-size timing-safe comparison', () => {
+  assert.equal(verifyChallengeToken(verificationToken, verificationToken), true);
+  assert.equal(verifyChallengeToken('different-token', verificationToken), false);
+  assert.equal(verifyChallengeToken(undefined, verificationToken), false);
+});
+
+test('per-item parsing preserves message and status changes and routes only by opaque asset ID', () => {
+  const raw = envelope();
+  const parsed = parseMetaWebhookDelivery(raw);
+  assert.equal(parsed.items.length, 4);
+  assert.equal(new Set(parsed.items.map((item) => item.eventRef)).size, 4);
+  assert.ok(parsed.items.some((item) => item.eventType === 'meta.webhook.whatsapp_business_account.messages.messages'));
+  assert.ok(parsed.items.some((item) => item.eventType === 'meta.webhook.whatsapp_business_account.messages.statuses'));
+  assert.ok(parsed.items.every((item) => item.resourceExternalId === 'synthetic-phone-id-7'));
+  const delivered = parsed.items.find((item) => item.locator.nestedKind === 'statuses' && item.locator.nestedIndex === 1);
+  assert.ok(delivered);
+  assert.equal(itemFromProtectedDelivery(raw, delivered.locator).status, 'delivered');
+  assert.equal(parsed.items.some((item) => item.resourceExternalId === '+15550000001'), false);
+});
+
+test('envelope bounds reject malformed and oversized bodies', () => {
+  assert.throws(() => parseMetaWebhookDelivery(Buffer.from('{', 'utf8')), MetaWebhookPayloadValidationError);
+  assert.throws(() => parseMetaWebhookDelivery(Buffer.alloc(256 * 1024 + 1)), MetaWebhookPayloadValidationError);
+  assert.throws(() => parseMetaWebhookDelivery(Buffer.from('{"object":"page","entry":[]}')), MetaWebhookPayloadValidationError);
+});
+
+test('app ID configuration is exact to the runtime environment and rejects secret conflicts', () => {
+  const resolver = new MetaWebhookConfigurationResolver([fakeProfile()], apiEnvironment().nodeEnv);
+  assert.equal(resolver.resolve('1234567890')?.appSecretRef, 'vault://meta-app/test/synthetic/app-secret');
+  assert.equal(resolver.resolve('9999999999'), undefined);
+  const conflict = new MetaWebhookConfigurationResolver([
+    fakeProfile(), fakeProfile({ flowVariant: 'WHATSAPP_COEXISTENCE', appSecretRef: 'vault://meta-app/test/other/app-secret' }),
+  ], 'test');
+  assert.equal(conflict.resolve('1234567890'), undefined);
+  const otherEnvironment = new MetaWebhookConfigurationResolver([fakeProfile({ environment: 'staging' })], 'test');
+  assert.equal(otherEnvironment.resolve('1234567890'), undefined);
+});
+
+test('signature is checked before parsing, and challenge never requests an App Secret', async () => {
+  const calls = { verification: 0, appSecret: 0, protect: 0, persist: 0 };
+  const secrets: MetaWebhookSecretProvider = {
+    async verificationToken() { calls.verification += 1; return verificationToken; },
+    async appSecretVersions() { calls.appSecret += 1; return [appSecret, rotatedSecret]; },
+  };
+  const protector: MetaWebhookPayloadProtector = {
+    async protect(input) { calls.protect += 1; return protectedPayload(input.reference, input.rawBody); },
+    async unprotect(value) { return Buffer.from(value.ciphertext); },
+  };
+  const repository = {
+    async persist(input: { readonly items: readonly unknown[] }) {
+      calls.persist += 1;
+      return { received: input.items.length, inserted: input.items.length, duplicate: 0, quarantined: 0 };
+    },
+  } as unknown as MetaWebhookRepository;
+  const service = new MetaWebhookIngressService(
+    new MetaWebhookConfigurationResolver([fakeProfile()], 'test'), secrets, protector, repository,
+  );
+
+  assert.equal(await service.challenge({ providerAppId: '1234567890', mode: 'subscribe',
+    verifyToken: verificationToken, challenge: 'synthetic-challenge' }), 'synthetic-challenge');
+  assert.equal(calls.verification, 1);
+  assert.equal(calls.appSecret, 0);
+  await assert.rejects(service.ingest({ providerAppId: '1234567890', rawBody: Buffer.from('{', 'utf8'), signature: 'sha256=bad' }), MetaWebhookSignatureError);
+  assert.equal(calls.protect, 0);
+  assert.equal(calls.persist, 0);
+});
+
+test('ingress waits for durable persistence before it reports successful receipt', async () => {
+  const raw = envelope();
+  const profile = fakeProfile();
+  const secrets: MetaWebhookSecretProvider = {
+    async verificationToken() { return verificationToken; },
+    async appSecretVersions() { return [appSecret]; },
+  };
+  const protector: MetaWebhookPayloadProtector = {
+    async protect(input) { return protectedPayload(input.reference, input.rawBody); },
+    async unprotect(value) { return Buffer.from(value.ciphertext); },
+  };
+  let commit!: () => void;
+  const committed = new Promise<void>((resolve) => { commit = resolve; });
+  const repository = {
+    async persist() {
+      await committed;
+      return { received: 4, inserted: 4, duplicate: 0, quarantined: 0 };
+    },
+  } as unknown as MetaWebhookRepository;
+  const service = new MetaWebhookIngressService(new MetaWebhookConfigurationResolver([profile], 'test'), secrets, protector, repository);
+  let settled = false;
+  const pending = service.ingest({ providerAppId: '1234567890', rawBody: raw, signature: signature(raw) })
+    .then((value) => { settled = true; return value; });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  commit();
+  assert.equal((await pending).inserted, 4);
+  assert.equal(settled, true);
+});
+
+test('unknown and conflicting catalog owners persist tenantless quarantine items', async () => {
+  const scenarios = [
+    { routes: [], reason: 'UNKNOWN_ASSET' },
+    { routes: [
+      { tenant_id: 'tenant-synthetic-a', app_configuration_id: 'config-synthetic-a', asset_id: 'asset-synthetic-a' },
+      { tenant_id: 'tenant-synthetic-b', app_configuration_id: 'config-synthetic-b', asset_id: 'asset-synthetic-b' },
+    ], reason: 'CONFLICTING_ASSET_OWNER' },
+  ];
+  for (const { routes, reason } of scenarios) {
+    const inserted: unknown[][] = [];
+    const manager = {
+      async query(sql: string, parameters: unknown[] = []) {
+        if (sql.includes('SELECT event_ref FROM ca_meta_webhook_events')) return [];
+        if (sql.includes('SELECT asset.tenant_id')) return routes;
+        if (sql.includes('INSERT INTO ca_meta_webhook_events')) { inserted.push(parameters); return []; }
+        if (sql.includes('SELECT id, event_ref') && sql.includes('FOR UPDATE')) {
+          const row = inserted[inserted.length - 1];
+          return [{ id: row?.[0], event_ref: row?.[3] }];
+        }
+        return [];
+      },
+    };
+    const dataSource = {
+      manager,
+      async transaction<T>(callback: (value: typeof manager) => Promise<T>) { return callback(manager); },
+    };
+    const repository = new MetaWebhookRepository({ async getDataSource() { return dataSource; } } as never);
+    const raw = envelope();
+    const item = parseMetaWebhookDelivery(envelope()).items[0];
+    assert.ok(item);
+    const result = await repository.persist({
+      application: { providerAppId: '1234567890', environment: 'test', appSecretRef: 'secret-ref', providerAppIdRef: 'app-ref' },
+      items: [item], rawBody: raw, payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw), receivedAt: new Date(),
+    });
+    assert.equal(result.quarantined, 1);
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0]?.[11], null);
+    assert.equal(inserted[0]?.[12], null);
+    assert.equal(inserted[0]?.[13], null);
+    assert.equal(inserted[0]?.[14], 'QUARANTINED');
+    assert.equal(inserted[0]?.[15], 'BLOCKED');
+    assert.equal(inserted[0]?.[16], reason);
+  }
+});
+
+test('concurrent redelivery acknowledges only after the unique-key winner is visible', async () => {
+  const raw = envelope();
+  const item = parseMetaWebhookDelivery(raw).items[0];
+  assert.ok(item);
+  let eventInsertCount = 0;
+  let deliveryDeleteCount = 0;
+  const manager = {
+    async query(sql: string) {
+      if (sql.includes('SELECT event_ref FROM ca_meta_webhook_events') && !sql.includes('FOR UPDATE')) return [];
+      if (sql.includes('SELECT asset.tenant_id')) return [
+        { tenant_id: 'tenant-synthetic-a', app_configuration_id: 'config-synthetic-a', asset_id: 'asset-synthetic-a' },
+      ];
+      if (sql.includes('INSERT INTO ca_meta_webhook_events')) { eventInsertCount += 1; return []; }
+      if (sql.includes('SELECT id, event_ref') && sql.includes('FOR UPDATE')) return [{ id: 'winner-event-row', event_ref: item.eventRef }];
+      if (sql.includes('DELETE FROM ca_meta_webhook_deliveries')) { deliveryDeleteCount += 1; return { affectedRows: 1 }; }
+      return [];
+    },
+  };
+  const dataSource = { manager, async transaction<T>(callback: (value: typeof manager) => Promise<T>) { return callback(manager); } };
+  const repository = new MetaWebhookRepository({ async getDataSource() { return dataSource; } } as never);
+  const result = await repository.persist({
+    application: { providerAppId: '1234567890', environment: 'test', appSecretRef: 'secret-ref', providerAppIdRef: 'app-ref' },
+    items: [item], rawBody: raw, payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw), receivedAt: new Date(),
+  });
+  assert.equal(eventInsertCount, 1);
+  assert.equal(deliveryDeleteCount, 1);
+  assert.deepEqual(result, { received: 1, inserted: 0, duplicate: 1, quarantined: 0 });
+});
+
+test('database commit failure rejects ingress so the controller cannot acknowledge success', async () => {
+  const secrets: MetaWebhookSecretProvider = {
+    async verificationToken() { return verificationToken; },
+    async appSecretVersions() { return [appSecret]; },
+  };
+  const protector: MetaWebhookPayloadProtector = {
+    async protect(input) { return protectedPayload(input.reference, input.rawBody); },
+    async unprotect(value) { return Buffer.from(value.ciphertext); },
+  };
+  const manager = { async query() { return []; } };
+  const database = {
+    manager,
+    async transaction() { throw new Error('synthetic commit failure'); },
+  };
+  const repository = new MetaWebhookRepository({ async getDataSource() { return database; } } as never);
+  const service = new MetaWebhookIngressService(
+    new MetaWebhookConfigurationResolver([fakeProfile()], 'test'), secrets, protector, repository,
+  );
+  const raw = envelope();
+  await assert.rejects(service.ingest({ providerAppId: '1234567890', rawBody: raw, signature: signature(raw) }), /commit failure/);
+});
+
+test('worker retries a local handler failure with a fenced lease and a safe error code', async () => {
+  const raw = envelope();
+  const parsed = parseMetaWebhookDelivery(raw);
+  const locator = parsed.items[0]?.locator;
+  assert.ok(locator);
+  let finalized: unknown;
+  const repository = {
+    async claimNext() {
+      return {
+        id: 'item-synthetic-1', eventRef: 'a'.repeat(64), eventType: 'meta.webhook.message',
+        tenantId: 'tenant-synthetic-1', appConfigurationId: 'config-synthetic-1', assetId: 'asset-synthetic-1',
+        attempt: 1, leaseVersion: 4, payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw), locator,
+      };
+    },
+    async finalize(input: unknown) { finalized = input; },
+  } as unknown as MetaWebhookRepository;
+  const protector: MetaWebhookPayloadProtector = {
+    async protect(input) { return protectedPayload(input.reference, input.rawBody); },
+    async unprotect(value) { return Buffer.from(value.ciphertext); },
+  };
+  const worker = new MetaWebhookWorker(repository, protector, {
+    async process() { throw new Error('synthetic provider body must not enter an error code'); },
+  }, 'synthetic-worker-1');
+  assert.equal(await worker.runOne(), true);
+  assert.deepEqual(finalized, {
+    eventId: 'item-synthetic-1', workerRef: 'synthetic-worker-1', leaseVersion: 4,
+    state: 'RETRY_PENDING', safeErrorCode: 'DEPENDENCY_UNAVAILABLE',
+  });
+});
