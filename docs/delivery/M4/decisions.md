@@ -3,8 +3,8 @@
 ## M4.01 — server-owned Meta profile registry
 
 **Issue / criteria:** #42, configuration by flow and environment; secure public bootstrap; fail-closed app/review/version readiness.
-**Decision:** Store platform Meta app profiles as validated server process configuration (`API_META_APP_CONFIGS_JSON`) and keep tenant-scoped `ca_meta_app_configurations` as the separate asset/auth foreign-key boundary. Do not repurpose that tenant table for platform secrets or app review data.
-**Reason:** Profile ownership, app mode, redirect allowlists, provider versions and secret-manager references are platform deployment inputs. M3 tenant/app/asset rows do not prove provider permission. Adding tenant identity to a globally controlled app profile would blur the trust boundary.
+**Decision:** Store platform Meta app profiles as validated server process configuration (`API_META_APP_CONFIGS_JSON`), resolve numeric provider IDs only through the separate environment-bound `API_META_TRUSTED_APP_IDS_JSON` allowlist, and keep tenant-scoped `ca_meta_app_configurations` as the separate asset/auth foreign-key boundary. Secret refs must carry the runtime environment namespace.
+**Reason:** Profile ownership, app mode, redirect allowlists, provider IDs/versions and secret-manager references are platform deployment inputs. M3 tenant/app/asset rows do not prove provider permission. Adding tenant identity to a globally controlled app profile would blur the trust boundary.
 **Consequence:** Missing config keeps the API available while all Meta profiles are disabled. A later storage-backed configuration service may replace the runtime source only with a reviewed migration and audit contract.
 **Gate:** A verified portal session can read the safe bootstrap DTO; onboarding still revalidates the session, tenant membership and exact flow/config server-side.
 
@@ -29,5 +29,5 @@
 **Issue / criteria:** #42 operation/permission/access/review/Sandbox matrix.
 **Decision:** Extend and reference the M1.03 capability matrix and preserve its synthetic offline harness. The runtime manifest contains candidate permission mappings, evidence status and owners; unknown mappings stay `NOT_CONFIRMED`.
 **Reason:** The M1.03 package already provides flow-specific documentation and offline mismatch cases, including a negative Coexistence conventional-registration case.
-**Consequence:** Candidate scopes from official collections are not treated as grants; app review, access level, Sandbox status and owner remain separately gated.
+**Consequence:** Candidate scopes from official collections are not treated as grants; each permission has independent mapping, access, App Review, Sandbox and owner evidence. An operation remains disabled until every required permission passes each gate.
 **Gate:** No flow is represented as externally certified until an authorized provider scenario supplies the missing evidence.

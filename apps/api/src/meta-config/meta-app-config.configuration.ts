@@ -16,10 +16,17 @@ export interface MetaVersionEvidence {
   readonly verifiedAt?: string;
 }
 
-export interface MetaCapabilityEvidence {
-  readonly operation: MetaOperation;
+export interface TrustedMetaProviderAppId {
+  readonly environment: RuntimeEnvironment;
+  readonly flowVariant: MetaProductFlow;
+  readonly authVariant: MetaAuthenticationVariant;
+  readonly providerAppIdRef: string;
+  readonly providerAppId: string;
+}
+
+export interface MetaPermissionEvidence {
+  readonly permission: string;
   readonly permissionStatus: 'CONFIRMED' | 'NOT_CONFIRMED';
-  readonly confirmedPermissions: readonly string[];
   readonly accessLevel: 'STANDARD' | 'ADVANCED' | 'NOT_CONFIRMED';
   readonly appReviewStatus: 'APPROVED' | 'NOT_REQUIRED' | 'SUBMITTED' | 'REJECTED' | 'NOT_CONFIRMED';
   readonly sandboxStatus: 'PASSED' | 'FAILED' | 'NOT_TESTED';
@@ -27,11 +34,17 @@ export interface MetaCapabilityEvidence {
   readonly evidenceUrl?: string;
 }
 
+export interface MetaCapabilityEvidence {
+  readonly operation: MetaOperation;
+  readonly permissions: readonly MetaPermissionEvidence[];
+}
+
 export interface MetaAppConfiguration {
   readonly configurationRef: string;
   readonly environment: RuntimeEnvironment;
   readonly flowVariant: MetaProductFlow;
   readonly authVariant: MetaAuthenticationVariant;
+  readonly providerAppIdRef: string;
   readonly providerAppId: string;
   readonly publicConfigId?: string;
   readonly appMode: 'DEVELOPMENT' | 'LIVE';
@@ -95,7 +108,7 @@ const AUTH_VARIANTS: readonly MetaAuthenticationVariant[] = [
 ];
 const ENVIRONMENTS: readonly RuntimeEnvironment[] = ['development', 'test', 'staging', 'production'];
 const VERSION_PATTERN = /^v[0-9]{1,2}\.[0-9]{1,3}$/;
-const REFERENCE_PATTERN = /^(?:secret|vault|aws-secretsmanager|gcp-secretmanager):\/\/[A-Za-z0-9._/-]{1,250}$/;
+const REFERENCE_PATTERN = /^(?:secret|vault|aws-secretsmanager|gcp-secretmanager):\/\/meta-app\/(development|test|staging|production)\/[A-Za-z0-9._/-]{1,250}$/;
 const SAFE_REF_PATTERN = /^[A-Za-z0-9._-]{1,96}$/;
 const PERMISSION_PATTERN = /^[a-z][a-z0-9_]{1,63}$/;
 const OFFICIAL_EVIDENCE_HOSTS = new Set(['developers.facebook.com', 'www.postman.com']);
@@ -106,6 +119,44 @@ const AUTH_BY_FLOW: Readonly<Record<MetaProductFlow, readonly MetaAuthentication
   WHATSAPP_EXCLUSIVE: ['WHATSAPP_EMBEDDED_SIGNUP'],
   WHATSAPP_COEXISTENCE: ['WHATSAPP_BUSINESS_APP_ONBOARDING'],
 });
+
+export function parseTrustedMetaProviderAppIds(
+  source: string | undefined,
+  runtimeEnvironment: RuntimeEnvironment,
+  invalid: string[],
+): readonly TrustedMetaProviderAppId[] | undefined {
+  if (source === undefined || source.trim() === '') return undefined;
+  try {
+    if (Buffer.byteLength(source, 'utf8') > 16 * 1024) throw new Error();
+    const parsed: unknown = JSON.parse(source);
+    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 20) throw new Error();
+    const entries = parsed.map((value): TrustedMetaProviderAppId | undefined => {
+      if (!isRecord(value) || !exactKeys(value, [
+        'environment', 'flowVariant', 'authVariant', 'providerAppIdRef', 'providerAppId',
+      ]) || value.environment !== runtimeEnvironment ||
+          typeof value.flowVariant !== 'string' || !FLOW_VARIANTS.includes(value.flowVariant as MetaProductFlow) ||
+          typeof value.authVariant !== 'string' || !AUTH_VARIANTS.includes(value.authVariant as MetaAuthenticationVariant) ||
+          !AUTH_BY_FLOW[value.flowVariant as MetaProductFlow].includes(value.authVariant as MetaAuthenticationVariant) ||
+          !text(value.providerAppIdRef, 96) || !SAFE_REF_PATTERN.test(value.providerAppIdRef) ||
+          typeof value.providerAppId !== 'string' || !/^\d{1,32}$/.test(value.providerAppId)) return undefined;
+      return Object.freeze({
+        environment: runtimeEnvironment,
+        flowVariant: value.flowVariant as MetaProductFlow,
+        authVariant: value.authVariant as MetaAuthenticationVariant,
+        providerAppIdRef: value.providerAppIdRef,
+        providerAppId: value.providerAppId,
+      });
+    });
+    if (entries.some((entry) => !entry)) throw new Error();
+    const typedEntries = entries as TrustedMetaProviderAppId[];
+    const keys = typedEntries.map((entry) => `${entry.flowVariant}\0${entry.authVariant}\0${entry.providerAppIdRef}`);
+    if (new Set(keys).size !== keys.length) throw new Error();
+    return Object.freeze(typedEntries);
+  } catch {
+    invalid.push('API_META_TRUSTED_APP_IDS_JSON');
+    return undefined;
+  }
+}
 
 const PROFILES: readonly Pick<MetaAppConfiguration, 'flowVariant' | 'authVariant'>[] = Object.freeze([
   { flowVariant: 'FACEBOOK', authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS' },
@@ -151,6 +202,15 @@ function normalizedHostname(value: string): string | undefined {
   }
 }
 
+function isEnvironmentBoundSecretReference(value: unknown, environment: RuntimeEnvironment): value is string {
+  if (typeof value !== 'string') return false;
+  const match = REFERENCE_PATTERN.exec(value);
+  if (!match || match[1] !== environment) return false;
+  const namespacePrefix = value.slice(0, value.indexOf(`/${environment}/`) + environment.length + 2);
+  const secretPath = value.slice(namespacePrefix.length);
+  return secretPath.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+}
+
 function validEvidenceUrl(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > 2048) return false;
   try {
@@ -177,39 +237,46 @@ function parseVersionEvidence(value: unknown, required: boolean): MetaVersionEvi
   return Object.freeze({ value: value.value, status: 'NOT_CONFIRMED' });
 }
 
-function parseCapabilityEvidence(value: unknown): MetaCapabilityEvidence | undefined {
+function parsePermissionEvidence(value: unknown): MetaPermissionEvidence | undefined {
   if (!isRecord(value) || !exactKeys(value, [
-    'operation', 'permissionStatus', 'confirmedPermissions', 'accessLevel', 'appReviewStatus', 'sandboxStatus', 'approvalOwner', 'evidenceUrl',
-  ])) return undefined;
-  if (typeof value.operation !== 'string' || !META_CAPABILITY_MANIFEST.some((entry) => entry.operation === value.operation) ||
+    'permission', 'permissionStatus', 'accessLevel', 'appReviewStatus', 'sandboxStatus', 'approvalOwner', 'evidenceUrl',
+  ]) || typeof value.permission !== 'string' || !PERMISSION_PATTERN.test(value.permission) ||
       (value.permissionStatus !== 'CONFIRMED' && value.permissionStatus !== 'NOT_CONFIRMED') ||
-      !Array.isArray(value.confirmedPermissions) || value.confirmedPermissions.length > 32 ||
-      !value.confirmedPermissions.every((permission) => typeof permission === 'string' && PERMISSION_PATTERN.test(permission)) ||
-      new Set(value.confirmedPermissions).size !== value.confirmedPermissions.length ||
       !['STANDARD', 'ADVANCED', 'NOT_CONFIRMED'].includes(String(value.accessLevel)) ||
       !['APPROVED', 'NOT_REQUIRED', 'SUBMITTED', 'REJECTED', 'NOT_CONFIRMED'].includes(String(value.appReviewStatus)) ||
       !['PASSED', 'FAILED', 'NOT_TESTED'].includes(String(value.sandboxStatus))) return undefined;
   if (value.approvalOwner !== undefined && (!text(value.approvalOwner, 128) || value.approvalOwner === 'UNASSIGNED')) return undefined;
   if (value.evidenceUrl !== undefined && !validEvidenceUrl(value.evidenceUrl)) return undefined;
   return Object.freeze({
-    operation: value.operation as MetaOperation,
+    permission: value.permission,
     permissionStatus: value.permissionStatus,
-    confirmedPermissions: Object.freeze([...(value.confirmedPermissions as string[])]),
-    accessLevel: value.accessLevel as MetaCapabilityEvidence['accessLevel'],
-    appReviewStatus: value.appReviewStatus as MetaCapabilityEvidence['appReviewStatus'],
-    sandboxStatus: value.sandboxStatus as MetaCapabilityEvidence['sandboxStatus'],
+    accessLevel: value.accessLevel as MetaPermissionEvidence['accessLevel'],
+    appReviewStatus: value.appReviewStatus as MetaPermissionEvidence['appReviewStatus'],
+    sandboxStatus: value.sandboxStatus as MetaPermissionEvidence['sandboxStatus'],
     ...(typeof value.approvalOwner === 'string' ? { approvalOwner: value.approvalOwner } : {}),
     ...(typeof value.evidenceUrl === 'string' ? { evidenceUrl: value.evidenceUrl } : {}),
   });
+}
+
+function parseCapabilityEvidence(value: unknown): MetaCapabilityEvidence | undefined {
+  if (!isRecord(value) || !exactKeys(value, ['operation', 'permissions']) ||
+      typeof value.operation !== 'string' || !META_CAPABILITY_MANIFEST.some((entry) => entry.operation === value.operation) ||
+      !Array.isArray(value.permissions) || value.permissions.length > 32) return undefined;
+  const permissions = value.permissions.map(parsePermissionEvidence);
+  if (permissions.some((entry) => !entry)) return undefined;
+  const typedPermissions = permissions as MetaPermissionEvidence[];
+  if (new Set(typedPermissions.map((entry) => entry.permission)).size !== typedPermissions.length) return undefined;
+  return Object.freeze({ operation: value.operation as MetaOperation, permissions: Object.freeze(typedPermissions) });
 }
 
 function parseProfile(
   value: unknown,
   runtimeEnvironment: RuntimeEnvironment,
   allowedOrigins: readonly string[],
+  trustedProviderAppIds: readonly TrustedMetaProviderAppId[],
 ): MetaAppConfiguration | undefined {
   if (!isRecord(value) || !exactKeys(value, [
-    'configurationRef', 'environment', 'flowVariant', 'authVariant', 'providerAppId', 'publicConfigId', 'appMode',
+    'configurationRef', 'environment', 'flowVariant', 'authVariant', 'providerAppIdRef', 'publicConfigId', 'appMode',
     'appDomain', 'callbackUri', 'redirectAllowlist', 'appSecretRef', 'tokenConfigurationRef',
     'capabilityManifestVersion', 'enabled', 'rollbackConfigurationRef', 'versions', 'capabilityEvidence',
   ])) return undefined;
@@ -220,7 +287,7 @@ function parseProfile(
       typeof value.flowVariant !== 'string' || !FLOW_VARIANTS.includes(value.flowVariant as MetaProductFlow) ||
       typeof value.authVariant !== 'string' || !AUTH_VARIANTS.includes(value.authVariant as MetaAuthenticationVariant) ||
       !AUTH_BY_FLOW[value.flowVariant as MetaProductFlow].includes(value.authVariant as MetaAuthenticationVariant) ||
-      typeof value.providerAppId !== 'string' || !/^\d{1,32}$/.test(value.providerAppId) ||
+      !text(value.providerAppIdRef, 96) || !SAFE_REF_PATTERN.test(value.providerAppIdRef) ||
       (value.publicConfigId !== undefined && (!text(value.publicConfigId, 128) || !SAFE_REF_PATTERN.test(value.publicConfigId))) ||
       (value.appMode !== 'DEVELOPMENT' && value.appMode !== 'LIVE') ||
       value.appMode !== (runtimeEnvironment === 'production' ? 'LIVE' : 'DEVELOPMENT') ||
@@ -229,7 +296,8 @@ function parseProfile(
       !Array.isArray(value.redirectAllowlist) || value.redirectAllowlist.length === 0 || value.redirectAllowlist.length > 16 ||
       !value.redirectAllowlist.every((uri) => exactHttpsUri(uri, allowedOrigins)) ||
       !value.redirectAllowlist.includes(value.callbackUri) ||
-      !REFERENCE_PATTERN.test(String(value.appSecretRef)) || !REFERENCE_PATTERN.test(String(value.tokenConfigurationRef)) ||
+      !isEnvironmentBoundSecretReference(value.appSecretRef, runtimeEnvironment) ||
+      !isEnvironmentBoundSecretReference(value.tokenConfigurationRef, runtimeEnvironment) ||
       value.capabilityManifestVersion !== META_CAPABILITY_MANIFEST_VERSION || typeof value.enabled !== 'boolean' ||
       (value.rollbackConfigurationRef !== undefined && (!text(value.rollbackConfigurationRef, 96) || !SAFE_REF_PATTERN.test(value.rollbackConfigurationRef))) ||
       !isRecord(value.versions) || !exactKeys(value.versions, ['graphApi', 'javascriptSdk', 'embeddedSignup']) ||
@@ -240,6 +308,10 @@ function parseProfile(
   const callbackHostname = normalizedHostname(callback.hostname);
   const appHostname = normalizedHostname(value.appDomain);
   if (!callbackHostname || !appHostname || callbackHostname !== appHostname) return undefined;
+  const trustedProviderAppId = trustedProviderAppIds.find((entry) =>
+    entry.environment === runtimeEnvironment && entry.flowVariant === value.flowVariant &&
+    entry.authVariant === value.authVariant && entry.providerAppIdRef === value.providerAppIdRef);
+  if (!trustedProviderAppId) return undefined;
 
   const isEmbeddedSignup = value.authVariant === 'WHATSAPP_EMBEDDED_SIGNUP' ||
     value.authVariant === 'WHATSAPP_BUSINESS_APP_ONBOARDING';
@@ -254,15 +326,19 @@ function parseProfile(
   const typedEvidence = evidence as MetaCapabilityEvidence[];
   const evidenceKeys = typedEvidence.map((item) => `${item.operation}`);
   if (new Set(evidenceKeys).size !== evidenceKeys.length) return undefined;
-  if (typedEvidence.some((item) => !capabilityManifestFor(value.flowVariant as MetaProductFlow, value.authVariant as MetaAuthenticationVariant)
-    .some((manifest) => manifest.operation === item.operation))) return undefined;
+  const profileManifest = capabilityManifestFor(value.flowVariant as MetaProductFlow, value.authVariant as MetaAuthenticationVariant);
+  if (typedEvidence.some((item) => {
+    const manifest = profileManifest.find((entry) => entry.operation === item.operation);
+    return !manifest || item.permissions.some((permission) => !manifest.candidatePermissions.includes(permission.permission));
+  })) return undefined;
 
   return Object.freeze({
     configurationRef: value.configurationRef,
     environment: value.environment as RuntimeEnvironment,
     flowVariant: value.flowVariant as MetaProductFlow,
     authVariant: value.authVariant as MetaAuthenticationVariant,
-    providerAppId: value.providerAppId,
+    providerAppIdRef: value.providerAppIdRef,
+    providerAppId: trustedProviderAppId.providerAppId,
     ...(typeof value.publicConfigId === 'string' ? { publicConfigId: value.publicConfigId } : {}),
     appMode: value.appMode,
     appDomain: value.appDomain,
@@ -287,13 +363,18 @@ export function parseMetaAppConfigurations(
   runtimeEnvironment: RuntimeEnvironment,
   allowedOrigins: readonly string[],
   invalid: string[],
+  trustedProviderAppIds?: readonly TrustedMetaProviderAppId[],
 ): readonly MetaAppConfiguration[] | undefined {
   if (source === undefined || source.trim() === '') return undefined;
+  if (!trustedProviderAppIds || trustedProviderAppIds.length === 0) {
+    invalid.push('API_META_TRUSTED_APP_IDS_JSON');
+    return undefined;
+  }
   try {
     if (Buffer.byteLength(source, 'utf8') > 64 * 1024) throw new Error();
     const parsed: unknown = JSON.parse(source);
     if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 20) throw new Error();
-    const profiles = parsed.map((item) => parseProfile(item, runtimeEnvironment, allowedOrigins));
+    const profiles = parsed.map((item) => parseProfile(item, runtimeEnvironment, allowedOrigins, trustedProviderAppIds));
     if (profiles.some((item) => !item)) throw new Error();
     const typedProfiles = profiles as MetaAppConfiguration[];
     const profileKeys = typedProfiles.map((item) => `${item.flowVariant}\0${item.authVariant}`);
@@ -326,24 +407,29 @@ function evaluateCapability(
     return 'PERMISSION_MAPPING_NOT_CONFIRMED';
   }
   const evidence = evidenceFor(configuration, manifest.operation);
-  const permissionSetMatches = evidence !== undefined &&
-    evidence.confirmedPermissions.length === manifest.candidatePermissions.length &&
-    manifest.candidatePermissions.every((permission) => evidence.confirmedPermissions.includes(permission));
-  if (!evidence || evidence.permissionStatus !== 'CONFIRMED' ||
-      !permissionSetMatches) {
+  if (!evidence || evidence.permissions.length !== manifest.candidatePermissions.length) {
     return 'CAPABILITY_EVIDENCE_MISSING';
   }
-  if (manifest.requiredAccessLevel === 'NOT_CONFIRMED' || evidence.accessLevel === 'NOT_CONFIRMED' ||
-      (manifest.requiredAccessLevel === 'ADVANCED' && evidence.accessLevel !== 'ADVANCED')) {
+  const evidenceByPermission = new Map(evidence.permissions.map((permission) => [permission.permission, permission]));
+  const requiredEvidence = manifest.candidatePermissions.map((permission) => evidenceByPermission.get(permission));
+  if (requiredEvidence.some((permission) => !permission || permission.permissionStatus !== 'CONFIRMED')) {
+    return 'CAPABILITY_EVIDENCE_MISSING';
+  }
+  const permissionEvidence = requiredEvidence as MetaPermissionEvidence[];
+  if (manifest.requiredAccessLevel === 'NOT_CONFIRMED' ||
+      permissionEvidence.some((permission) => permission.accessLevel === 'NOT_CONFIRMED' ||
+        (manifest.requiredAccessLevel === 'ADVANCED' && permission.accessLevel !== 'ADVANCED'))) {
     return 'ACCESS_LEVEL_NOT_CONFIRMED';
   }
   if (manifest.appReviewRequirement === 'NOT_CONFIRMED' ||
-      (manifest.appReviewRequirement === 'REQUIRED' && evidence.appReviewStatus !== 'APPROVED') ||
-      (evidence.appReviewStatus !== 'APPROVED' && evidence.appReviewStatus !== 'NOT_REQUIRED')) {
+      (manifest.appReviewRequirement === 'REQUIRED' && permissionEvidence.some((permission) => permission.appReviewStatus !== 'APPROVED')) ||
+      permissionEvidence.some((permission) => permission.appReviewStatus !== 'APPROVED' && permission.appReviewStatus !== 'NOT_REQUIRED')) {
     return 'APP_REVIEW_NOT_CONFIRMED';
   }
-  if (manifest.sandboxStatus !== 'NOT_TESTED' || evidence.sandboxStatus !== 'PASSED' ||
-      !evidence.approvalOwner || !evidence.evidenceUrl) return 'SANDBOX_NOT_CONFIRMED';
+  if (manifest.sandboxStatus !== 'NOT_TESTED' || permissionEvidence.some((permission) =>
+    permission.sandboxStatus !== 'PASSED' || !permission.approvalOwner || !permission.evidenceUrl)) {
+    return 'SANDBOX_NOT_CONFIRMED';
+  }
   return null;
 }
 

@@ -96,6 +96,7 @@ offline são preservados; seus IDs e rótulos `fixture` não são valores Meta.
 M4.01 acrescenta um manifest de runtime versionado em
 [`apps/api/src/meta-config/capability-manifest.ts`](../../apps/api/src/meta-config/capability-manifest.ts).
 Ele mantém mapeamentos desconhecidos como `NOT_CONFIRMED`, exige status de permission/review/Sandbox
-por operação e mantém o dono de aprovação como `UNASSIGNED` até existir evidência real. O processo de
+por permissão requerida dentro de cada operação; uma linha aprovada não substitui outra pendente. O
+dono de aprovação fica `UNASSIGNED` até existir evidência real. O processo de
 configuração, migração de versão e rollback está em
 [`docs/delivery/M4/m4-01-runbook.md`](../delivery/M4/m4-01-runbook.md).

@@ -5,6 +5,7 @@ import type { ConfiguredTicketPublicKey } from '../auth-exchange/configured-tick
 import type { WorkerServiceCredentialHash } from '../identity/identity.trust.js';
 import {
   parseMetaAppConfigurations,
+  parseTrustedMetaProviderAppIds,
   type MetaAppConfiguration,
 } from '../meta-config/meta-app-config.configuration.js';
 
@@ -534,11 +535,17 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   const platformIdentityAdmins = platformIdentityAdminsField(source, invalid);
   const workerServiceCredentials = workerServiceCredentialHashesField(source, invalid);
   const credentialKeyRing = credentialKeyRingField(source, invalid);
+  const trustedMetaProviderAppIds = parseTrustedMetaProviderAppIds(
+    source.API_META_TRUSTED_APP_IDS_JSON,
+    nodeEnv as RuntimeEnvironment,
+    invalid,
+  );
   const metaAppConfigurations = parseMetaAppConfigurations(
     source.API_META_APP_CONFIGS_JSON,
     nodeEnv as RuntimeEnvironment,
     allowedOrigins,
     invalid,
+    trustedMetaProviderAppIds,
   );
 
   if (invalid.length > 0) {

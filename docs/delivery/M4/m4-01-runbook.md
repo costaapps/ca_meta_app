@@ -11,17 +11,27 @@
 startup succeeds and every flow reports `CONFIGURATION_MISSING`. When present, it must be a JSON
 array with one profile per exact `(environment, flowVariant, authVariant)` pair. The registry keeps
 the four product journeys distinct and the Instagram Facebook Login and Instagram Login variants
-separate.
+separate. A profile carries `providerAppIdRef`, never the numeric app ID.
+
+The numeric provider ID is resolved only from `API_META_TRUSTED_APP_IDS_JSON`, a separate protected
+allowlist mounted for the current environment. Each row binds `environment`, `flowVariant`,
+`authVariant`, `providerAppIdRef` and `providerAppId`; the parser rejects rows whose environment is
+not exactly `NODE_ENV` and rejects profiles whose reference has no exact allowlist match. Keep this
+source environment-specific in the deployment system. Code cannot infer the real Meta environment
+from a numeric app ID, so staging allowlist values must come from the independently managed staging
+Meta app record; do not copy production IDs into it.
 
 The API validates the profile environment against `NODE_ENV` and requires `appMode=LIVE` only in
 production. Development, test and staging require `appMode=DEVELOPMENT`; a staging profile therefore
-cannot select a production/live app. The callback URI and redirect allowlist must use exact HTTPS
+cannot select a production/live app mode. App IDs are separately allowlisted per runtime environment,
+and app-secret/token refs must have the exact `NODE_ENV` namespace segment. The callback URI and redirect allowlist must use exact HTTPS
 origins already configured in `API_ALLOWED_ORIGINS`, and normalized `appDomain` must equal the callback host.
 The Graph host is derived from the allowlisted auth variant. User-supplied URLs, wildcard hosts and
 redirect URIs are not forwarded to Meta.
 
-The profile contains references such as `vault://meta-app/wa-coexistence/app-secret`, never app
-secret or access-token values. The public `GET /api/v1/meta/bootstrap` route requires a verified
+The profile contains references such as `vault://meta-app/staging/wa-coexistence/app-secret`, never app
+secret or access-token values. Staging rejects a `production` ref namespace even when the profile
+declares `appMode=DEVELOPMENT`. The public `GET /api/v1/meta/bootstrap` route requires a verified
 portal session and projects only allowlisted fields. It omits secret references, Graph endpoint,
 callback and redirect URIs. Public app/config IDs are hints for the UI and confer no tenant authority.
 The onboarding session and tenant membership checks remain the authority boundary.
@@ -49,14 +59,17 @@ The manifest records, by flow/auth variant and operation:
 | Permission names | Candidate examples from official Meta collections, otherwise `NOT_CONFIRMED` |
 | Permission-to-operation mapping | `EXAMPLE_ONLY` or `NOT_CONFIRMED`; app-specific minimum is not proven |
 | Required access level | `NOT_CONFIRMED`, except documented Embedded Signup entries marked `ADVANCED` |
-| App Review | `NOT_CONFIRMED`, or required where Advanced Access is documented |
-| Sandbox test | `NOT_TESTED` |
-| Approval owner | `UNASSIGNED` |
+| App Review requirement | `NOT_CONFIRMED`, or required where Advanced Access is documented |
+| Per-permission review status | `NOT_CONFIRMED` |
+| Per-permission Sandbox status | `NOT_TESTED` |
+| Per-permission approval owner | `UNASSIGNED` |
+| Per-permission evidence shape | Each required permission has its own mapping, access, App Review, Sandbox, evidence URL and owner fields; incomplete or pending rows block the operation |
 
 This is why code-level profile presence and `enabled=true` do not by themselves enable a product
-action. The flow stays unavailable until its exact version evidence and `ASSET_DISCOVERY` permission,
-access-level, App Review and Sandbox gates pass. Other operations remain independently unavailable
-until their own evidence is present. A successful bootstrap check is not proof of OAuth completion,
+action. The flow stays unavailable until its exact version evidence and every required
+`ASSET_DISCOVERY` permission's mapping, access-level, App Review and Sandbox gates pass. Other
+operations remain independently unavailable until all evidence rows for their own permissions pass.
+A successful bootstrap check is not proof of OAuth completion,
 asset ownership, provider grant or connection readiness.
 
 ## Local-only configuration example
@@ -72,7 +85,7 @@ reference with a secret value.
     "environment": "staging",
     "flowVariant": "WHATSAPP_COEXISTENCE",
     "authVariant": "WHATSAPP_BUSINESS_APP_ONBOARDING",
-    "providerAppId": "1234567890",
+    "providerAppIdRef": "wa-coexistence-stage-app",
     "publicConfigId": "synthetic-public-config",
     "appMode": "DEVELOPMENT",
     "appDomain": "meta-stage.example.invalid",
@@ -80,8 +93,8 @@ reference with a secret value.
     "redirectAllowlist": [
       "https://meta-stage.example.invalid/api/v1/meta/callback/whatsapp-coexistence"
     ],
-    "appSecretRef": "vault://meta-app/wa-coexistence/stage/app-secret",
-    "tokenConfigurationRef": "vault://meta-app/wa-coexistence/stage/token-config",
+    "appSecretRef": "vault://meta-app/staging/wa-coexistence/app-secret",
+    "tokenConfigurationRef": "vault://meta-app/staging/wa-coexistence/token-config",
     "capabilityManifestVersion": "m4.01-2026-11-06.1",
     "enabled": false,
     "versions": {
@@ -95,13 +108,17 @@ reference with a secret value.
 ```
 
 Set `API_ALLOWED_ORIGINS=https://meta-stage.example.invalid` only in the matching staging profile.
-The example deliberately uses `v0.0` sentinels, not Meta versions.
+Separately mount the staging `API_META_TRUSTED_APP_IDS_JSON` row for
+`wa-coexistence-stage-app`; source its numeric ID from the staging app record. The example deliberately
+uses `v0.0` sentinels, not Meta versions, and has no provider ID or secret value.
 
 ## App Review and test evidence checklist
 
-Before a permission or operation is marked available, record evidence against the exact app ID,
-environment, flow/auth variant and operation. Do not reuse approval across Instagram variants or
-WhatsApp exclusive/Coexistence.
+Before a permission or operation is marked available, record a separate evidence row for each required
+permission against the exact app ID, environment, flow/auth variant and operation. Do not reuse
+approval across permissions, Instagram variants or WhatsApp exclusive/Coexistence. The operation
+remains disabled until every required permission row has confirmed mapping, required access, approved
+review, passed Sandbox evidence, a named owner and a sanitized evidence URL.
 
 1. Confirm the operation's permission mapping and access level against the current official Meta
    documentation for the relevant endpoint/version. Link the source and date in the versioned
@@ -109,14 +126,15 @@ WhatsApp exclusive/Coexistence.
 2. Confirm app mode, business portfolio ownership, test-user/asset eligibility, redirect URI and
    required privacy, deauthorization and data-deletion URLs. Do not move an app or portfolio to bypass
    a review restriction.
-3. Submit the exact permission for App Review when required. Store its result and review evidence
-   link; `SUBMITTED`, rejected, absent or inferred approval keeps the operation disabled.
-4. Run only the corresponding authorized Meta Sandbox scenario, identify the synthetic/test asset
-   safely, record the version, operation and result, and verify the server-selected credential
-   context. A fixture or local adapter is not a Sandbox result.
-5. Assign a named approval owner, add sanitized evidence references to the profile, and update the
-   manifest version only after independent review. Never store tokens, app secrets or customer data
-   in the manifest or report.
+3. Submit each exact permission for App Review when required. Store its result and review evidence
+   link in that permission's evidence row; `SUBMITTED`, rejected, absent or inferred approval keeps the
+   operation disabled.
+4. Run only the corresponding authorized Meta Sandbox scenario for each required permission, identify
+   the synthetic/test asset safely, record the version, operation, permission and result, and verify the
+   server-selected credential context. A fixture or local adapter is not a Sandbox result.
+5. Assign a named approval owner and sanitized evidence reference to each permission row. Update the
+   manifest version only after independent review. Never store tokens, app secrets or customer data in
+   the manifest or report.
 
 The privacy/deauthorization/data-deletion endpoints and account-level review state for this product
 are **Not confirmed**. The existing privacy page in the web workspace is a source artifact, not proof
@@ -144,8 +162,9 @@ evidence remain compatible and independently reviewed. A profile must not point 
    profile must retain its own evidence. Re-run only the version/configuration checks affected by the
    change.
 
-Malformed runtime configuration fails startup with only `API_META_APP_CONFIGS_JSON` named in the
-diagnostic. Missing configuration is a safe disabled state, not an API-wide startup failure.
+Malformed runtime configuration fails startup with only the relevant variable name
+(`API_META_APP_CONFIGS_JSON` or `API_META_TRUSTED_APP_IDS_JSON`) in the diagnostic. Missing profiles
+are a safe disabled state; profiles without their trusted app-ID allowlist fail startup closed.
 
 ## Reproducible local checks
 

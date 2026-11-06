@@ -9,6 +9,7 @@ import { validateEnvironment, EnvironmentValidationError } from '../src/config/e
 import {
   buildMetaBootstrap,
   parseMetaAppConfigurations,
+  parseTrustedMetaProviderAppIds,
   type MetaAppConfiguration,
 } from '../src/meta-config/meta-app-config.configuration.js';
 import { META_CAPABILITY_MANIFEST, META_CAPABILITY_MANIFEST_VERSION } from '../src/meta-config/capability-manifest.js';
@@ -21,6 +22,10 @@ import { PORTAL_SESSION_COOKIE } from '../src/identity/portal-session.service.js
 const testOrigin = 'https://meta-test.example.invalid';
 const testCallback = `${testOrigin}/api/v1/meta/callback/whatsapp-coexistence`;
 const activePortalSessionCookie = 'synthetic-active-portal-session-cookie-value-1234567890';
+// Numeric IDs below are isolated parser fixtures only, never real Meta app IDs.
+const testProviderAppId = '1234567890';
+const testProviderAppIdRef = 'wa-coexistence-test-app';
+const syntheticProductionProviderAppId = '9999999999';
 
 function rawProfile(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -28,14 +33,14 @@ function rawProfile(overrides: Record<string, unknown> = {}): Record<string, unk
     environment: 'test',
     flowVariant: 'WHATSAPP_COEXISTENCE',
     authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING',
-    providerAppId: '1234567890',
+    providerAppIdRef: testProviderAppIdRef,
     publicConfigId: 'synthetic-public-config',
     appMode: 'DEVELOPMENT',
     appDomain: 'meta-test.example.invalid',
     callbackUri: testCallback,
     redirectAllowlist: [testCallback],
-    appSecretRef: 'vault://meta-app/wa-coexistence/test/app-secret',
-    tokenConfigurationRef: 'vault://meta-app/wa-coexistence/test/token-config',
+    appSecretRef: 'vault://meta-app/test/wa-coexistence/app-secret',
+    tokenConfigurationRef: 'vault://meta-app/test/wa-coexistence/token-config',
     capabilityManifestVersion: META_CAPABILITY_MANIFEST_VERSION,
     enabled: true,
     versions: {
@@ -52,9 +57,17 @@ function parseProfiles(
   values: readonly Record<string, unknown>[],
   environment: 'development' | 'test' | 'staging' | 'production' = 'test',
   allowedOrigins: readonly string[] = [testOrigin],
+  trustedProviderAppId = testProviderAppId,
 ) {
   const invalid: string[] = [];
-  const profiles = parseMetaAppConfigurations(JSON.stringify(values), environment, allowedOrigins, invalid);
+  const trustedAppIds = parseTrustedMetaProviderAppIds(JSON.stringify([{
+    environment,
+    flowVariant: 'WHATSAPP_COEXISTENCE',
+    authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING',
+    providerAppIdRef: testProviderAppIdRef,
+    providerAppId: trustedProviderAppId,
+  }]), environment, invalid);
+  const profiles = parseMetaAppConfigurations(JSON.stringify(values), environment, allowedOrigins, invalid, trustedAppIds);
   return { profiles, invalid };
 }
 
@@ -65,6 +78,13 @@ function validEnvironment(values: Record<string, string | undefined> = {}): Node
     API_BIND_ADDRESS: '127.0.0.1',
     API_ALLOWED_HOSTS: 'localhost',
     API_ALLOWED_ORIGINS: testOrigin,
+    API_META_TRUSTED_APP_IDS_JSON: JSON.stringify([{
+      environment: 'test',
+      flowVariant: 'WHATSAPP_COEXISTENCE',
+      authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING',
+      providerAppIdRef: testProviderAppIdRef,
+      providerAppId: testProviderAppId,
+    }]),
     API_TRUSTED_PROXIES: 'none',
     API_DATABASE_HOST: '127.0.0.1',
     API_DATABASE_PORT: '3306',
@@ -142,14 +162,53 @@ test('a profile parses only when environment, auth variant, redirect origin and 
   assert.equal(normalizedDomain.profiles?.[0]?.appDomain, 'META-TEST.EXAMPLE.INVALID');
 });
 
-test('staging cannot select production/live config and duplicate profile selection is rejected', () => {
+test('staging cannot select production/live config', () => {
   const productionProfile = rawProfile({
     environment: 'production', appMode: 'LIVE', appDomain: 'meta-test.example.invalid',
   });
   const mixed = parseProfiles([productionProfile], 'staging');
   assert.equal(mixed.profiles, undefined);
   assert.deepEqual(mixed.invalid, ['API_META_APP_CONFIGS_JSON']);
+});
 
+test('staging resolves app IDs only from its trusted namespace and rejects production refs', () => {
+  const stagingProfile = rawProfile({
+    environment: 'staging',
+    appSecretRef: 'vault://meta-app/staging/wa-coexistence/app-secret',
+    tokenConfigurationRef: 'vault://meta-app/staging/wa-coexistence/token-config',
+  });
+  const trustedStaging = parseProfiles([stagingProfile], 'staging', [testOrigin], '2222222222');
+  assert.deepEqual(trustedStaging.invalid, []);
+  assert.equal(trustedStaging.profiles?.[0]?.providerAppId, '2222222222');
+
+  const productionIdInStagingProfile = parseProfiles([{
+    ...stagingProfile,
+    providerAppId: syntheticProductionProviderAppId,
+  }], 'staging', [testOrigin], '2222222222');
+  assert.equal(productionIdInStagingProfile.profiles, undefined);
+  assert.deepEqual(productionIdInStagingProfile.invalid, ['API_META_APP_CONFIGS_JSON']);
+
+  const productionRefsInStaging = parseProfiles([rawProfile({
+    environment: 'staging',
+    appSecretRef: 'vault://meta-app/production/wa-coexistence/app-secret',
+    tokenConfigurationRef: 'vault://meta-app/production/wa-coexistence/token-config',
+  })], 'staging', [testOrigin], '2222222222');
+  assert.equal(productionRefsInStaging.profiles, undefined);
+  assert.deepEqual(productionRefsInStaging.invalid, ['API_META_APP_CONFIGS_JSON']);
+
+  const invalidStagingAllowlist: string[] = [];
+  const productionAllowlistForStaging = parseTrustedMetaProviderAppIds(JSON.stringify([{
+    environment: 'production',
+    flowVariant: 'WHATSAPP_COEXISTENCE',
+    authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING',
+    providerAppIdRef: testProviderAppIdRef,
+    providerAppId: syntheticProductionProviderAppId,
+  }]), 'staging', invalidStagingAllowlist);
+  assert.equal(productionAllowlistForStaging, undefined);
+  assert.deepEqual(invalidStagingAllowlist, ['API_META_TRUSTED_APP_IDS_JSON']);
+});
+
+test('duplicate profile selection is rejected', () => {
   const duplicate = parseProfiles([rawProfile(), rawProfile({ configurationRef: 'wa-coexistence-test-v2' })]);
   assert.equal(duplicate.profiles, undefined);
   assert.deepEqual(duplicate.invalid, ['API_META_APP_CONFIGS_JSON']);
@@ -194,17 +253,40 @@ test('unverified version and unconfirmed permission mapping keep a profile unava
 
   const facebook = buildMetaBootstrap([]).profiles.find((item) => item.flowVariant === 'FACEBOOK');
   assert.equal(facebook?.capabilities.find((item) => item.operation === 'ASSET_DISCOVERY')?.reasonCode, 'CONFIGURATION_MISSING');
+
+  const mixedPermissionEvidence = versionedProfile();
+  mixedPermissionEvidence.capabilityEvidence = [{
+    operation: 'ASSET_DISCOVERY',
+    permissions: [
+      {
+        permission: 'business_management', permissionStatus: 'CONFIRMED', accessLevel: 'ADVANCED',
+        appReviewStatus: 'APPROVED', sandboxStatus: 'PASSED', approvalOwner: 'synthetic-reviewer',
+        evidenceUrl: 'https://developers.facebook.com/docs/whatsapp/embedded-signup/',
+      },
+      {
+        permission: 'whatsapp_business_management', permissionStatus: 'CONFIRMED', accessLevel: 'NOT_CONFIRMED',
+        appReviewStatus: 'SUBMITTED', sandboxStatus: 'NOT_TESTED',
+      },
+    ],
+  }];
+  const mixed = parseProfiles([mixedPermissionEvidence]);
+  assert.ok(mixed.profiles);
+  const mixedCapability = buildMetaBootstrap(mixed.profiles).profiles
+    .find((item) => item.flowVariant === 'WHATSAPP_COEXISTENCE')?.capabilities
+    .find((item) => item.operation === 'ASSET_DISCOVERY');
+  assert.equal(mixedCapability?.enabled, false);
+  assert.equal(mixedCapability?.reasonCode, 'ACCESS_LEVEL_NOT_CONFIRMED');
 });
 
 test('public bootstrap is an allowlist projection and never serializes private profile fields', () => {
-  const secretRef = 'vault://meta-app/private/app-secret';
-  const tokenRef = 'vault://meta-app/private/token-config';
+  const secretRef = 'vault://meta-app/test/private/app-secret';
+  const tokenRef = 'vault://meta-app/test/private/token-config';
   const values = parseProfiles([rawProfile({ appSecretRef: secretRef, tokenConfigurationRef: tokenRef })]);
   assert.ok(values.profiles);
   const registry = new MetaAppConfigRegistry(values.profiles as readonly MetaAppConfiguration[]);
   const serialized = JSON.stringify(registry.bootstrap());
   assert.doesNotMatch(serialized, /appSecretRef|tokenConfigurationRef|callbackUri|redirectAllowlist/);
-  assert.doesNotMatch(serialized, /vault:\/\/meta-app\/private/);
+  assert.doesNotMatch(serialized, /vault:\/\/meta-app\/test\/private/);
   assert.doesNotMatch(serialized, /v27\.0/);
   assert.equal(registry.resolve('WHATSAPP_COEXISTENCE', 'WHATSAPP_BUSINESS_APP_ONBOARDING', 'test'), undefined);
 });

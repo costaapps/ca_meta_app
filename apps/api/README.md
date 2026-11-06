@@ -64,13 +64,23 @@ origins already listed in `API_ALLOWED_ORIGINS`; normalized `appDomain` must mat
 Graph host selection is derived from the fixed flow/auth allowlist; the registry never accepts an
 arbitrary API host.
 
+`API_META_TRUSTED_APP_IDS_JSON` is a separate, protected deployment allowlist for the current
+`NODE_ENV`; each entry binds a numeric provider app ID and reference to an exact flow/auth variant.
+Profiles carry only the reference. The runtime requires the allowlist's environment to match `NODE_ENV`
+and never accepts a raw app ID from the profile JSON. Secret-manager references must use the same
+environment namespace (`vault://meta-app/<NODE_ENV>/...`); staging rejects production namespaces.
+The deployment owner must source staging IDs from the staging Meta app configuration. Numeric IDs
+cannot prove their own Meta environment.
+
 The profile stores secret-manager references, not secret/token material. `graphApi`,
 `javascriptSdk` and `embeddedSignup` carry distinct version evidence. The server rejects malformed
-profiles or untrusted/extra fields and logs only `API_META_APP_CONFIGS_JSON`. If the setting is absent,
-all five profile variants remain unavailable with `CONFIGURATION_MISSING`. `enabled=true` alone never
-enables a flow; the code-versioned capability manifest, access level, app review, and Sandbox gates
-must also pass. Use [`docs/delivery/M4/m4-01-runbook.md`](../../docs/delivery/M4/m4-01-runbook.md)
-for the schema, change process and rollback.
+profiles or untrusted/extra fields and logs only the names of invalid configuration fields. If either
+setting needed by configured profiles is absent or does not match, startup fails closed. If no profiles
+are configured, all five variants remain unavailable with `CONFIGURATION_MISSING`. `enabled=true`
+alone never enables a flow; the code-versioned capability manifest and evidence for every required
+permission, including access, review, Sandbox and owner, must also pass. Use
+[`docs/delivery/M4/m4-01-runbook.md`](../../docs/delivery/M4/m4-01-runbook.md) for the schema, change
+process and rollback.
 
 ### Optional Suite4 ticket-entry configuration
 
