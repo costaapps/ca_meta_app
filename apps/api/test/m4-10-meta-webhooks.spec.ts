@@ -8,7 +8,8 @@ import {
   MetaWebhookIngressService,
   MetaWebhookSignatureError,
 } from '../src/meta-webhooks/meta-webhook-ingress.service.js';
-import { itemFromProtectedDelivery, MetaWebhookPayloadValidationError, parseMetaWebhookDelivery } from '../src/meta-webhooks/meta-webhook-validation.js';
+import { compareMetaWebhookStatusOrder, itemFromProtectedDelivery, MetaWebhookPayloadValidationError,
+  parseMetaWebhookDelivery } from '../src/meta-webhooks/meta-webhook-validation.js';
 import { verifyChallengeToken, verifyMetaWebhookSignature } from '../src/meta-webhooks/meta-webhook-signature.js';
 import { MetaWebhookRepository } from '../src/meta-webhooks/meta-webhook.repository.js';
 import { MetaWebhookWorker } from '../src/meta-webhooks/meta-webhook-worker.js';
@@ -95,7 +96,59 @@ test('per-item parsing preserves message and status changes and routes only by o
   const delivered = parsed.items.find((item) => item.locator.nestedKind === 'statuses' && item.locator.nestedIndex === 1);
   assert.ok(delivered);
   assert.equal(itemFromProtectedDelivery(raw, delivered.locator).status, 'delivered');
+  assert.equal(delivered.schemaVersion, 1);
+  assert.equal(delivered.eventKey, delivered.eventRef);
+  assert.equal(delivered.providerMessageId, 'wamid.synthetic.1');
+  assert.equal(delivered.providerStatus, 'delivered');
+  assert.equal(delivered.providerTimestamp, new Date(1_793_980_802_000).toISOString());
   assert.equal(parsed.items.some((item) => item.resourceExternalId === '+15550000001'), false);
+});
+
+test('provider status ordering rejects older statuses and fails closed on ambiguous timestamp ties', () => {
+  const sent = { timestamp: '2026-11-06T00:00:01.000Z', status: 'sent', rank: 10 };
+  const delivered = { timestamp: '2026-11-06T00:00:02.000Z', status: 'delivered', rank: 20 };
+  const readAtSameSecond = { timestamp: '2026-11-06T00:00:02.000Z', status: 'read', rank: 30 };
+  const failedAtSameSecond = { timestamp: '2026-11-06T00:00:02.000Z', status: 'failed', rank: null };
+  assert.equal(compareMetaWebhookStatusOrder(delivered, sent), 'NEWER');
+  assert.equal(compareMetaWebhookStatusOrder(sent, delivered), 'OLDER');
+  assert.equal(compareMetaWebhookStatusOrder(readAtSameSecond, delivered), 'NEWER');
+  assert.equal(compareMetaWebhookStatusOrder(failedAtSameSecond, delivered), 'AMBIGUOUS');
+});
+
+test('status claim suppresses provider timestamps older than the latest processed item', async () => {
+  const updates: unknown[][] = [];
+  const row = {
+    id: 'event-synthetic-old', provider_app_id: '1234567890', environment: 'test', event_ref: 'a'.repeat(64),
+    schema_version: 1, event_type: 'meta.webhook.statuses', item_kind: 'statuses',
+    provider_timestamp: '2026-11-06 10:00:00.000000', provider_message_id: 'wamid.synthetic.1',
+    provider_status: 'sent', provider_status_rank: 10, tenant_id: 'tenant-synthetic-1',
+    app_configuration_id: 'config-synthetic-1', asset_id: 'asset-synthetic-1', attempt: 0,
+    lease_version: 0, item_locator_json: JSON.stringify({ entryIndex: 0, changeIndex: 0, nestedKind: 'statuses', nestedIndex: 0 }),
+    payload_reference: '12345678-1234-4123-8123-123456789abc', key_reference: 'key-ref',
+    nonce: Buffer.alloc(12), authentication_tag: Buffer.alloc(16), ciphertext: Buffer.from('protected'),
+    expires_at: '2026-11-07 10:00:00.000000',
+  };
+  const manager = {
+    async query(sql: string, parameters: unknown[] = []) {
+      if (sql.includes('FROM ca_meta_webhook_events event') && sql.includes('LIMIT 1 FOR UPDATE')) return [row];
+      if (sql.includes('SELECT lease_owner, lease_token, lease_version')) {
+        return [{ lease_owner: null, lease_token: null, lease_version: 4, lease_until: null, lease_active: 0 }];
+      }
+      if (sql.includes('SELECT provider_timestamp, provider_status, provider_status_rank')) return [
+        { provider_timestamp: '2026-11-06 10:00:01.000000', provider_status: 'delivered', provider_status_rank: 20 },
+      ];
+      if (sql.includes("SET process_state = ?, lease_owner = NULL, lease_until = NULL")) {
+        updates.push(parameters);
+        return { affectedRows: 1 };
+      }
+      return [];
+    },
+  };
+  const dataSource = { manager, async transaction<T>(callback: (value: typeof manager) => Promise<T>) { return callback(manager); } };
+  const repository = new MetaWebhookRepository({ async getDataSource() { return dataSource; } } as never);
+  assert.equal(await repository.claimNext('synthetic-worker-1'), null);
+  assert.equal(updates[0]?.[0], 'PROCESSED');
+  assert.equal(updates[0]?.[1], 'STALE_PROVIDER_STATUS');
 });
 
 test('envelope bounds reject malformed and oversized bodies', () => {
@@ -145,7 +198,7 @@ test('signature is checked before parsing, and challenge never requests an App S
   assert.equal(calls.persist, 0);
 });
 
-test('ingress waits for durable persistence before it reports successful receipt', async () => {
+test('ingress persists signature-verification evidence before it reports successful receipt', async () => {
   const raw = envelope();
   const profile = fakeProfile();
   const secrets: MetaWebhookSecretProvider = {
@@ -158,18 +211,26 @@ test('ingress waits for durable persistence before it reports successful receipt
   };
   let commit!: () => void;
   const committed = new Promise<void>((resolve) => { commit = resolve; });
+  let beginPersist!: () => void;
+  const persistenceStarted = new Promise<void>((resolve) => { beginPersist = resolve; });
+  let verifiedAt: Date | undefined;
   const repository = {
-    async persist() {
+    async persist(input: { readonly signatureVerifiedAt: Date }) {
+      verifiedAt = input.signatureVerifiedAt;
+      beginPersist();
       await committed;
       return { received: 4, inserted: 4, duplicate: 0, quarantined: 0 };
     },
   } as unknown as MetaWebhookRepository;
   const service = new MetaWebhookIngressService(new MetaWebhookConfigurationResolver([profile], 'test'), secrets, protector, repository);
   let settled = false;
-  const pending = service.ingest({ providerAppId: '1234567890', rawBody: raw, signature: signature(raw) })
+  const receivedAt = new Date('2000-01-01T00:00:00.000Z');
+  const pending = service.ingest({ providerAppId: '1234567890', rawBody: raw, signature: signature(raw), receivedAt })
     .then((value) => { settled = true; return value; });
-  await Promise.resolve();
+  await persistenceStarted;
   assert.equal(settled, false);
+  assert.ok(verifiedAt instanceof Date);
+  assert.ok(verifiedAt.getTime() > receivedAt.getTime());
   commit();
   assert.equal((await pending).inserted, 4);
   assert.equal(settled, true);
@@ -207,16 +268,17 @@ test('unknown and conflicting catalog owners persist tenantless quarantine items
     assert.ok(item);
     const result = await repository.persist({
       application: { providerAppId: '1234567890', environment: 'test', appSecretRef: 'secret-ref', providerAppIdRef: 'app-ref' },
-      items: [item], rawBody: raw, payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw), receivedAt: new Date(),
+      items: [item], rawBody: raw, payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw),
+      receivedAt: new Date(), signatureVerifiedAt: new Date(),
     });
     assert.equal(result.quarantined, 1);
     assert.equal(inserted.length, 1);
-    assert.equal(inserted[0]?.[11], null);
-    assert.equal(inserted[0]?.[12], null);
-    assert.equal(inserted[0]?.[13], null);
-    assert.equal(inserted[0]?.[14], 'QUARANTINED');
-    assert.equal(inserted[0]?.[15], 'BLOCKED');
-    assert.equal(inserted[0]?.[16], reason);
+    assert.equal(inserted[0]?.[17], null);
+    assert.equal(inserted[0]?.[18], null);
+    assert.equal(inserted[0]?.[19], null);
+    assert.equal(inserted[0]?.[20], 'QUARANTINED');
+    assert.equal(inserted[0]?.[21], 'BLOCKED');
+    assert.equal(inserted[0]?.[22], reason);
   }
 });
 
@@ -242,7 +304,8 @@ test('concurrent redelivery acknowledges only after the unique-key winner is vis
   const repository = new MetaWebhookRepository({ async getDataSource() { return dataSource; } } as never);
   const result = await repository.persist({
     application: { providerAppId: '1234567890', environment: 'test', appSecretRef: 'secret-ref', providerAppIdRef: 'app-ref' },
-    items: [item], rawBody: raw, payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw), receivedAt: new Date(),
+    items: [item], rawBody: raw, payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw),
+    receivedAt: new Date(), signatureVerifiedAt: new Date(),
   });
   assert.equal(eventInsertCount, 1);
   assert.equal(deliveryDeleteCount, 1);
@@ -281,6 +344,9 @@ test('worker retries a local handler failure with a fenced lease and a safe erro
     async claimNext() {
       return {
         id: 'item-synthetic-1', eventRef: 'a'.repeat(64), eventType: 'meta.webhook.message',
+        eventKey: 'a'.repeat(64), schemaVersion: 1, itemKind: 'messages', providerTimestamp: null,
+        providerMessageId: 'wamid.synthetic.1', providerStatus: null, providerStatusRank: null,
+        statusLease: null,
         tenantId: 'tenant-synthetic-1', appConfigurationId: 'config-synthetic-1', assetId: 'asset-synthetic-1',
         attempt: 1, leaseVersion: 4, payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw), locator,
       };
@@ -298,5 +364,49 @@ test('worker retries a local handler failure with a fenced lease and a safe erro
   assert.deepEqual(finalized, {
     eventId: 'item-synthetic-1', workerRef: 'synthetic-worker-1', leaseVersion: 4,
     state: 'RETRY_PENDING', safeErrorCode: 'DEPENDENCY_UNAVAILABLE',
+    statusLease: null,
+  });
+});
+
+test('worker passes the status fence to the local processor and releases its claim on finalize', async () => {
+  const raw = envelope();
+  const locator = parseMetaWebhookDelivery(raw).items[0]?.locator;
+  assert.ok(locator);
+  const statusLease = {
+    tenantId: 'tenant-synthetic-1', appConfigurationId: 'config-synthetic-1', environment: 'test',
+    assetId: 'asset-synthetic-1', providerMessageId: 'wamid.synthetic.1', workerRef: 'synthetic-worker-1',
+    leaseToken: '12345678-1234-4123-8123-123456789abc', leaseVersion: 8,
+    providerTimestamp: '2026-11-06T10:00:00.000Z', eventKey: 'b'.repeat(64),
+  };
+  let processorInput: unknown;
+  let finalized: unknown;
+  const repository = {
+    async claimNext() {
+      return {
+        id: 'item-synthetic-status', eventRef: statusLease.eventKey, eventKey: statusLease.eventKey,
+        schemaVersion: 1, eventType: 'meta.webhook.statuses', itemKind: 'statuses',
+        providerTimestamp: statusLease.providerTimestamp, providerMessageId: statusLease.providerMessageId,
+        providerStatus: 'delivered', providerStatusRank: 20,
+        statusLease, tenantId: statusLease.tenantId, appConfigurationId: statusLease.appConfigurationId,
+        assetId: statusLease.assetId, attempt: 1, leaseVersion: 3,
+        payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw), locator,
+      };
+    },
+    async finalize(input: unknown) { finalized = input; },
+  } as unknown as MetaWebhookRepository;
+  const protector: MetaWebhookPayloadProtector = {
+    async protect(input) { return protectedPayload(input.reference, input.rawBody); },
+    async unprotect(value) { return Buffer.from(value.ciphertext); },
+  };
+  const worker = new MetaWebhookWorker(repository, protector, {
+    async process(input) { processorInput = input; return { kind: 'SUCCEEDED' }; },
+  }, 'synthetic-worker-1');
+  assert.equal(await worker.runOne(), true);
+  assert.deepEqual((processorInput as { statusFence: unknown }).statusFence, {
+    leaseVersion: 8, eventKey: 'b'.repeat(64), providerTimestamp: statusLease.providerTimestamp,
+  });
+  assert.deepEqual(finalized, {
+    eventId: 'item-synthetic-status', workerRef: 'synthetic-worker-1', leaseVersion: 3,
+    state: 'PROCESSED', statusLease,
   });
 });

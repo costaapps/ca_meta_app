@@ -90,6 +90,7 @@ export class MetaWebhookIngressService {
     if (!verifyMetaWebhookSignature(input.rawBody, input.signature, secretVersions)) {
       throw new MetaWebhookSignatureError();
     }
+    const signatureVerifiedAt = new Date();
     let parsed: ReturnType<typeof parseMetaWebhookDelivery>;
     try {
       parsed = parseMetaWebhookDelivery(input.rawBody);
@@ -101,7 +102,8 @@ export class MetaWebhookIngressService {
       reference: randomUUID(), providerAppId: application.providerAppId,
       environment: application.environment, rawBody: input.rawBody,
     });
-    return this.repository.persist({ application, items: parsed.items, rawBody: input.rawBody, payload: protectedPayload, receivedAt });
+    return this.repository.persist({ application, items: parsed.items, rawBody: input.rawBody, payload: protectedPayload,
+      receivedAt, signatureVerifiedAt });
   }
 }
 

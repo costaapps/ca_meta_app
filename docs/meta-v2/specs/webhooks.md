@@ -12,6 +12,7 @@ Accept provider callbacks safely, retain enough evidence to recover processing, 
 - Persist each envelope/item to a durable inbox before acknowledging success. Dedupe by provider/app/event and per-item identity as specified by the contract.
 - Unknown, malformed or ambiguous events stay tenantless and quarantined; no fanout, last-login routing, client-selected tenant or provider text in UI/error messages.
 - Worker redelivery is at least once, fenced by lease/version and idempotency key. Unknown effects are reconciled; no blind repeat of message send/subscription changes.
+- For provider status updates, serialize processing by tenant, app, environment, asset, and provider message. Persist and compare the provider timestamp, use a bounded known progression only for equal-time WhatsApp delivery states, suppress older/exact duplicate states, and dead-letter conflicting ties. The local processor must atomically honor the lease fence before changing the projection. Provider ordering semantics beyond this local policy remain **Not confirmed**.
 - Outbox is committed with local intent and has explicit schema version, tenant scope, correlation, causation and safe payload boundaries.
 
 ## Contract and data

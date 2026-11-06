@@ -21,31 +21,45 @@ export class MetaWebhookWorker {
       const providerItem = itemFromProtectedDelivery(rawBody, item.locator);
       if (signal?.aborted) {
         await this.repository.finalize({ eventId: item.id, workerRef: this.workerRef,
-          leaseVersion: item.leaseVersion, state: 'RETRY_PENDING', safeErrorCode: 'WORKER_STOPPING' });
+          leaseVersion: item.leaseVersion, state: 'RETRY_PENDING', safeErrorCode: 'WORKER_STOPPING',
+          statusLease: item.statusLease });
         return true;
       }
       const result = await this.processor.process({
         eventRef: item.eventRef,
+        eventKey: item.eventKey,
+        schemaVersion: item.schemaVersion,
         tenantId: item.tenantId,
         appConfigurationId: item.appConfigurationId,
         assetId: item.assetId,
         eventType: item.eventType,
+        providerTimestamp: item.providerTimestamp,
+        providerMessageId: item.providerMessageId,
+        providerStatus: item.providerStatus,
+        providerStatusRank: item.providerStatusRank,
+        statusFence: item.statusLease ? {
+          leaseVersion: item.statusLease.leaseVersion,
+          eventKey: item.statusLease.eventKey,
+          providerTimestamp: item.statusLease.providerTimestamp,
+        } : undefined,
         item: providerItem,
       }, signal);
       if (result.kind === 'SUCCEEDED') {
         await this.repository.finalize({ eventId: item.id, workerRef: this.workerRef,
-          leaseVersion: item.leaseVersion, state: 'PROCESSED' });
+          leaseVersion: item.leaseVersion, state: 'PROCESSED', statusLease: item.statusLease });
       } else if (result.kind === 'PERMANENT_FAILURE' || item.attempt >= 8) {
         await this.repository.finalize({ eventId: item.id, workerRef: this.workerRef,
-          leaseVersion: item.leaseVersion, state: 'DEAD_LETTER', safeErrorCode: result.safeErrorCode });
+          leaseVersion: item.leaseVersion, state: 'DEAD_LETTER', safeErrorCode: result.safeErrorCode,
+          statusLease: item.statusLease });
       } else {
         await this.repository.finalize({ eventId: item.id, workerRef: this.workerRef,
-          leaseVersion: item.leaseVersion, state: 'RETRY_PENDING', safeErrorCode: result.safeErrorCode });
+          leaseVersion: item.leaseVersion, state: 'RETRY_PENDING', safeErrorCode: result.safeErrorCode,
+          statusLease: item.statusLease });
       }
     } catch {
       await this.repository.finalize({ eventId: item.id, workerRef: this.workerRef,
         leaseVersion: item.leaseVersion, state: item.attempt >= 8 ? 'DEAD_LETTER' : 'RETRY_PENDING',
-        safeErrorCode: 'DEPENDENCY_UNAVAILABLE' });
+        safeErrorCode: 'DEPENDENCY_UNAVAILABLE', statusLease: item.statusLease });
     }
     return true;
   }

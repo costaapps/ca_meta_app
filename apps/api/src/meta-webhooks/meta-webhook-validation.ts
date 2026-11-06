@@ -5,6 +5,7 @@ export const META_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 export const META_WEBHOOK_MAX_ENTRIES = 100;
 export const META_WEBHOOK_MAX_CHANGES_PER_ENTRY = 100;
 export const META_WEBHOOK_MAX_ITEMS = 500;
+export const META_WEBHOOK_SCHEMA_VERSION = 1 as const;
 
 export class MetaWebhookPayloadValidationError extends Error {
   constructor() { super('Meta webhook payload failed validation.'); }
@@ -25,16 +26,23 @@ export interface MetaWebhookItemLocator {
 }
 
 export interface ParsedMetaWebhookItem {
+  readonly schemaVersion: typeof META_WEBHOOK_SCHEMA_VERSION;
   readonly eventRef: string;
+  readonly eventKey: string;
   readonly eventType: string;
   readonly object: string;
   readonly field: string;
+  readonly providerTimestamp: string | null;
+  readonly providerMessageId: string | null;
+  readonly providerStatus: string | null;
+  readonly providerStatusRank: number | null;
   readonly resourceKinds: readonly MetaWebhookResourceKind[];
   readonly resourceExternalId: string | null;
   readonly locator: MetaWebhookItemLocator;
 }
 
 export interface ParsedMetaWebhookDelivery {
+  readonly schemaVersion: typeof META_WEBHOOK_SCHEMA_VERSION;
   readonly object: 'whatsapp_business_account' | 'page' | 'instagram';
   readonly items: readonly ParsedMetaWebhookItem[];
 }
@@ -52,6 +60,46 @@ function boundedText(value: unknown, maximum: number): value is string {
 
 function objectId(value: unknown): string | null {
   return boundedText(value, 512) && /^[A-Za-z0-9._:-]+$/.test(value) ? value : null;
+}
+
+/** Meta item timestamps are Unix seconds or milliseconds; unknown representations stay absent. */
+function providerTimestamp(item: JsonRecord): string | null {
+  const raw = item.timestamp;
+  if (typeof raw !== 'string' || !/^\d{1,16}(?:\.\d{1,6})?$/.test(raw)) return null;
+  const numeric = Number(raw);
+  const milliseconds = numeric < 100_000_000_000 ? numeric * 1_000 : numeric;
+  const date = new Date(milliseconds);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+/** Tie-breaking for known WhatsApp delivery progress; unknown terminal states are deliberately ambiguous. */
+export function metaWebhookStatusRank(value: string): number | null {
+  switch (value.toLowerCase()) {
+    case 'sent': return 10;
+    case 'delivered': return 20;
+    case 'read': return 30;
+    case 'played': return 40;
+    default: return null;
+  }
+}
+
+export type MetaWebhookStatusOrder = 'OLDER' | 'SAME' | 'NEWER' | 'AMBIGUOUS';
+
+export function compareMetaWebhookStatusOrder(input: {
+  readonly timestamp: string; readonly status: string; readonly rank: number | null;
+}, current: {
+  readonly timestamp: string; readonly status: string; readonly rank: number | null;
+}): MetaWebhookStatusOrder {
+  const incomingTime = Date.parse(input.timestamp);
+  const currentTime = Date.parse(current.timestamp);
+  if (!Number.isFinite(incomingTime) || !Number.isFinite(currentTime)) return 'AMBIGUOUS';
+  if (incomingTime < currentTime) return 'OLDER';
+  if (incomingTime > currentTime) return 'NEWER';
+  if (input.status === current.status) return 'SAME';
+  if (input.rank === null || current.rank === null) return 'AMBIGUOUS';
+  if (input.rank < current.rank) return 'OLDER';
+  if (input.rank > current.rank) return 'NEWER';
+  return 'AMBIGUOUS';
 }
 
 function safeEventType(object: string, field: string): string {
@@ -150,10 +198,18 @@ export function parseMetaWebhookDelivery(rawBody: Buffer): ParsedMetaWebhookDeli
         .update(`${object}\0${entry.id}\0${input.field}\0${itemHash}`, 'utf8')
         .digest('hex');
       items.push({
+        schemaVersion: META_WEBHOOK_SCHEMA_VERSION,
         eventRef,
+        eventKey: eventRef,
         eventType: safeEventType(object, input.locator.nestedKind === 'change' ? input.field : `${input.field}.${input.locator.nestedKind}`),
         object,
         field: input.field,
+        providerTimestamp: providerTimestamp(input.item),
+        providerMessageId: ['messages', 'statuses'].includes(input.locator.nestedKind) ? objectId(input.item.id) : null,
+        providerStatus: input.locator.nestedKind === 'statuses' && boundedText(input.item.status, 32)
+          ? input.item.status.toLowerCase() : null,
+        providerStatusRank: input.locator.nestedKind === 'statuses' && boundedText(input.item.status, 32)
+          ? metaWebhookStatusRank(input.item.status) : null,
         resourceKinds: resource.kinds,
         resourceExternalId: resource.externalId,
         locator: input.locator,
@@ -192,7 +248,7 @@ export function parseMetaWebhookDelivery(rawBody: Buffer): ParsedMetaWebhookDeli
     }
   }
   if (items.length === 0) throw new MetaWebhookPayloadValidationError();
-  return { object, items };
+  return { schemaVersion: META_WEBHOOK_SCHEMA_VERSION, object, items };
 }
 
 export function itemFromProtectedDelivery(
