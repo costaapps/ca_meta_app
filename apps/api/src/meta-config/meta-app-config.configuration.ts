@@ -1,5 +1,6 @@
 import {
   capabilityManifestFor,
+  META_CAPABILITY_MANIFEST,
   META_CAPABILITY_MANIFEST_VERSION,
   type MetaAuthenticationVariant,
   type MetaCapabilityManifestEntry,
@@ -338,7 +339,6 @@ function evaluateCapability(
   }
   if (manifest.appReviewRequirement === 'NOT_CONFIRMED' ||
       (manifest.appReviewRequirement === 'REQUIRED' && evidence.appReviewStatus !== 'APPROVED') ||
-      (manifest.appReviewRequirement === 'NOT_CONFIRMED' && evidence.appReviewStatus === 'NOT_REQUIRED') ||
       (evidence.appReviewStatus !== 'APPROVED' && evidence.appReviewStatus !== 'NOT_REQUIRED')) {
     return 'APP_REVIEW_NOT_CONFIRMED';
   }
