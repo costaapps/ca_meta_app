@@ -143,7 +143,7 @@ test('collect processes cursor pages with bounds and strips a token query from p
   const runtime = client(transport);
   const result = await runtime.instance.collect(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers', query: { limit: 10 } }));
   assert.equal(result.outcome, 'SUCCEEDED');
-  assert.deepEqual(result.data, [{ id: 'phone-1' }, { id: 'phone-2' }]);
+  assert.equal(JSON.stringify(result.data), JSON.stringify([{ id: 'phone-1' }, { id: 'phone-2' }]));
   assert.equal(transport.calls.length, 2);
   assert.ok(transport.calls[1]?.path.includes('after=cursor-2'));
   assert.ok(transport.calls[1]?.path.includes('fields=id%2Cdisplay_phone_number'));
