@@ -108,7 +108,6 @@ export class MetaWebhookRepository {
     return dataSource.transaction(async (manager) => {
       const current = await this.findExistingWithin(manager, input.application, pending.map((item) => item.eventRef));
       const newItems = pending.filter((item) => !current.has(item.eventRef));
-      const duplicates = input.items.length - newItems.length;
       if (newItems.length === 0) {
         return { received: input.items.length, inserted: 0, duplicate: input.items.length, quarantined: 0 };
       }
