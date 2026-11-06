@@ -674,6 +674,26 @@ paths:
                     requestId: req_example_42
                     manifestVersion: m4.01-2026-11-06.1
                     profiles:
+                      - flowVariant: FACEBOOK
+                        authVariant: FACEBOOK_LOGIN_FOR_BUSINESS
+                        enabled: false
+                        reasonCode: CONFIGURATION_MISSING
+                        capabilities: []
+                      - flowVariant: INSTAGRAM
+                        authVariant: INSTAGRAM_VIA_FACEBOOK_LOGIN
+                        enabled: false
+                        reasonCode: CONFIGURATION_MISSING
+                        capabilities: []
+                      - flowVariant: INSTAGRAM
+                        authVariant: INSTAGRAM_LOGIN
+                        enabled: false
+                        reasonCode: CONFIGURATION_MISSING
+                        capabilities: []
+                      - flowVariant: WHATSAPP_EXCLUSIVE
+                        authVariant: WHATSAPP_EMBEDDED_SIGNUP
+                        enabled: false
+                        reasonCode: CONFIGURATION_MISSING
+                        capabilities: []
                       - flowVariant: WHATSAPP_COEXISTENCE
                         authVariant: WHATSAPP_BUSINESS_APP_ONBOARDING
                         enabled: false
