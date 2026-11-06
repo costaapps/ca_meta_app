@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { QueryRunner } from 'typeorm';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { MetaSubscriptionClaim, MetaSubscriptionReconcileState,
-  MetaSubscriptionState, MetaSubscriptionStore, MetaSubscriptionTargetContext, MetaSubscriptionTargetSnapshot } from './meta-subscriptions.types.js';
+  MetaSubscriptionInactiveCleanupResult, MetaSubscriptionState, MetaSubscriptionStore, MetaSubscriptionTargetContext,
+  MetaSubscriptionTargetSnapshot } from './meta-subscriptions.types.js';
 
 interface TargetRow {
   readonly id: string;
@@ -21,6 +22,32 @@ interface TargetRow {
   readonly locked?: number | string;
 }
 interface BindingRow { readonly asset_id: string; readonly authorization_id: string; readonly desired_fields: string; readonly binding_state: 'ACTIVE' | 'REMOVED'; readonly version: string | number }
+interface InactiveBindingCandidate {
+  readonly target_id: string;
+  readonly asset_id: string;
+  readonly authorization_id: string;
+  readonly desired_fields: string;
+  readonly target_version: string | number;
+  readonly target_desired_state: MetaSubscriptionState;
+  readonly target_desired_fields: string;
+  readonly target_observed_state: MetaSubscriptionState;
+  readonly authorization_state: string;
+  readonly asset_state: string;
+  readonly verification_state: string;
+  readonly credential_id: string | null;
+  readonly credential_status: string | null;
+  readonly secret_credential_id: string | null;
+  readonly health_state: string | null;
+  readonly health_source: string | null;
+  readonly health_observed_at: string | Date | null;
+  readonly expiry_state: string | null;
+  readonly expiry_source: string | null;
+  readonly expires_at: string | Date | null;
+  readonly expiry_observed_at: string | Date | null;
+  readonly data_access_expiry_source: string | null;
+  readonly data_access_expires_at: string | Date | null;
+  readonly data_access_expiry_observed_at: string | Date | null;
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_REASON = /^[A-Z][A-Z0-9_]{1,63}$/;
@@ -49,6 +76,28 @@ function isoDate(value: string | Date | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   const date = value instanceof Date ? value : new Date(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`);
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+function fresh(value: string | Date | null, now: number): boolean {
+  if (value === null) return false;
+  const parsed = value instanceof Date ? value.getTime() : Date.parse(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`);
+  return Number.isFinite(parsed) && parsed <= now && now - parsed <= 86_400_000;
+}
+function future(value: string | Date | null, now: number): boolean {
+  if (value === null) return false;
+  const parsed = value instanceof Date ? value.getTime() : Date.parse(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`);
+  return Number.isFinite(parsed) && parsed > now;
+}
+function resolverCredentialUsable(row: InactiveBindingCandidate, now: number): boolean {
+  if (!['ACTIVE', 'PARTIAL'].includes(row.authorization_state) || row.asset_state !== 'ACTIVE' || row.verification_state !== 'VERIFIED' ||
+      !row.credential_id || row.credential_status !== 'ACTIVE' || row.secret_credential_id !== row.credential_id ||
+      !row.health_state || !['HEALTHY', 'EXPIRING'].includes(row.health_state) || !['META_API', 'SIGNED_WEBHOOK'].includes(row.health_source ?? '') ||
+      !fresh(row.health_observed_at, now)) return false;
+  const expiryUsable = row.expiry_state === 'PROVIDER_NO_EXPIRY'
+    ? ['META_API', 'SIGNED_WEBHOOK'].includes(row.expiry_source ?? '') && fresh(row.expiry_observed_at, now)
+    : row.expiry_state === 'KNOWN' && ['META_API', 'SIGNED_WEBHOOK'].includes(row.expiry_source ?? '') &&
+      future(row.expires_at, now) && fresh(row.expiry_observed_at, now);
+  return expiryUsable && ['META_API', 'SIGNED_WEBHOOK'].includes(row.data_access_expiry_source ?? '') &&
+    future(row.data_access_expires_at, now) && fresh(row.data_access_expiry_observed_at, now);
 }
 
 /** Durable per-WABA state. A single target row is the cross-process lock for every phone under a WABA. */
@@ -146,6 +195,101 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
       const snapshot = await this.readSnapshot(runner, input, target.id);
       await runner.commitTransaction();
       return snapshot;
+    } catch (error) { await runner.rollbackTransaction(); throw error; }
+    finally { await runner.release(); }
+  }
+
+  /** Retire stale grant-owned bindings from server state only. This path never calls Meta. */
+  async removeInactiveBindings(input: { readonly tenantId: string; readonly appConfigurationId: string;
+    readonly environment: MetaSubscriptionTargetContext['environment']; readonly assetId: string;
+    readonly actorRef: string; readonly correlationId: string }): Promise<MetaSubscriptionInactiveCleanupResult> {
+    this.validate(input.tenantId, input.appConfigurationId, input.assetId, input.correlationId);
+    this.validateEnvironment(input.environment);
+    const runner = await this.database.getDataSource().then((source) => source.createQueryRunner());
+    await runner.connect(); await runner.startTransaction();
+    try {
+      const candidates = await runner.query(
+        `SELECT b.target_id, b.asset_id, b.authorization_id, b.desired_fields,
+                t.version AS target_version, t.desired_state AS target_desired_state,
+                t.desired_fields AS target_desired_fields, t.observed_state AS target_observed_state,
+                auth.authorization_state, aa.state AS asset_state, aa.verification_state, aa.credential_id,
+                c.status AS credential_status, secret.credential_id AS secret_credential_id,
+                life.health_state, life.health_source, life.health_observed_at, life.expiry_state, life.expiry_source,
+                life.expires_at, life.expiry_observed_at, life.data_access_expiry_source,
+                life.data_access_expires_at, life.data_access_expiry_observed_at
+         FROM ca_meta_subscription_bindings b
+         INNER JOIN ca_meta_subscription_targets t ON t.tenant_id = b.tenant_id AND t.id = b.target_id
+           AND t.app_configuration_id = b.app_configuration_id AND t.provider = b.provider AND t.environment = b.environment
+         INNER JOIN ca_meta_asset_authorizations aa ON aa.tenant_id = b.tenant_id AND aa.authorization_id = b.authorization_id
+           AND aa.asset_id = b.asset_id AND aa.app_configuration_id = b.app_configuration_id
+           AND aa.provider = b.provider AND aa.environment = b.environment
+         INNER JOIN ca_meta_authorizations auth ON auth.tenant_id = aa.tenant_id AND auth.id = aa.authorization_id
+           AND auth.app_configuration_id = aa.app_configuration_id AND auth.provider = aa.provider AND auth.environment = aa.environment
+         LEFT JOIN ca_meta_credentials c ON c.tenant_id = aa.tenant_id AND c.id = aa.credential_id
+           AND c.authorization_id = aa.authorization_id AND c.app_configuration_id = aa.app_configuration_id
+           AND c.provider = aa.provider AND c.environment = aa.environment
+         LEFT JOIN ca_meta_credential_secrets secret ON secret.tenant_id = c.tenant_id AND secret.credential_id = c.id
+           AND secret.authorization_id = c.authorization_id AND secret.app_configuration_id = c.app_configuration_id
+           AND secret.provider = c.provider AND secret.environment = c.environment
+         LEFT JOIN ca_meta_credential_lifecycle life ON life.tenant_id = c.tenant_id AND life.credential_id = c.id
+           AND life.authorization_id = c.authorization_id AND life.app_configuration_id = c.app_configuration_id
+           AND life.provider = c.provider AND life.environment = c.environment
+         WHERE b.tenant_id = ? AND b.app_configuration_id = ? AND b.provider = 'META' AND b.environment = ?
+           AND b.asset_id = ? AND b.binding_state = 'ACTIVE'
+         ORDER BY b.target_id, b.authorization_id FOR UPDATE`,
+        [input.tenantId, input.appConfigurationId, input.environment, input.assetId],
+      ) as InactiveBindingCandidate[];
+      const nowEpoch = this.now().getTime();
+      const stale = candidates.filter((row) => {
+        const grantInactive = row.authorization_state !== 'ACTIVE' || row.asset_state !== 'ACTIVE' || row.verification_state !== 'VERIFIED';
+        return grantInactive && !resolverCredentialUsable(row, nowEpoch);
+      });
+      if (stale.length === 0) {
+        await runner.commitTransaction();
+        return Object.freeze({ removedBindingCount: 0, targets: Object.freeze([]) });
+      }
+
+      const now = this.sqlNow();
+      const targetGroups = new Map<string, InactiveBindingCandidate[]>();
+      for (const row of stale) targetGroups.set(row.target_id, [...(targetGroups.get(row.target_id) ?? []), row]);
+      const outcomes: MetaSubscriptionInactiveCleanupResult['targets'][number][] = [];
+      for (const [targetId, removed] of [...targetGroups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+        const before = removed[0]!;
+        for (const row of removed) {
+          await runner.query(
+            `UPDATE ca_meta_subscription_bindings SET binding_state = 'REMOVED', version = version + 1, updated_at = ?
+             WHERE tenant_id = ? AND target_id = ? AND asset_id = ? AND authorization_id = ? AND binding_state = 'ACTIVE'`,
+            [now, input.tenantId, targetId, row.asset_id, row.authorization_id],
+          );
+        }
+        const bindings = await this.readBindings(runner, input.tenantId, targetId);
+        const active = bindings.filter((binding) => binding.state === 'ACTIVE');
+        const desiredState: MetaSubscriptionState = active.length > 0 ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
+        const desiredFields = fieldsJson(active.flatMap((binding) => binding.desiredFields));
+        const desiredChanged = before.target_desired_state !== desiredState ||
+          fieldsJson(parseFields(before.target_desired_fields)) !== desiredFields;
+        const state: MetaSubscriptionReconcileState = active.length > 0
+          ? before.target_observed_state === 'SUBSCRIBED' ? 'ACTIVE' : 'PENDING'
+          : 'MANUAL_ACTION_REQUIRED';
+        await runner.query(
+          `UPDATE ca_meta_subscription_targets SET desired_state = ?, desired_fields = ?, reconcile_state = ?,
+           last_safe_reason_code = ?, version = version + ?, next_attempt_at = IF(? = 1, NULL, next_attempt_at), updated_at = ?
+           WHERE tenant_id = ? AND id = ?`,
+          [desiredState, desiredFields, state, active.length > 0 ? null : 'REMOTE_UNSUBSCRIBE_NOT_CONFIRMED',
+            Number(desiredChanged), Number(desiredChanged), now, input.tenantId, targetId],
+        );
+        const version = Number(before.target_version) + Number(desiredChanged);
+        for (const row of removed) {
+          await this.audit(runner, { tenantId: input.tenantId, appConfigurationId: input.appConfigurationId,
+            environment: input.environment, targetId, assetId: row.asset_id, action: 'BINDING_REMOVED',
+            reasonCode: 'INACTIVE_GRANT_CREDENTIAL_UNUSABLE', beforeVersion: Number(before.target_version), afterVersion: version,
+            correlationId: input.correlationId, actorRef: input.actorRef });
+        }
+        outcomes.push(Object.freeze({ targetId, desiredState, observedState: before.target_observed_state, state,
+          version, remainingBindingCount: active.length }));
+      }
+      await runner.commitTransaction();
+      return Object.freeze({ removedBindingCount: stale.length, targets: Object.freeze(outcomes) });
     } catch (error) { await runner.rollbackTransaction(); throw error; }
     finally { await runner.release(); }
   }
