@@ -3,7 +3,8 @@ import test from 'node:test';
 import type { IdentityRepository } from '../src/identity/identity.repository.js';
 import { ServiceTenantAuthorizationService } from '../src/identity/identity.service.js';
 import { ServiceCredentialVerifier } from '../src/identity/identity.trust.js';
-import type { ServiceTenantGrant, VerifiedServiceCredential } from '../src/identity/identity.types.js';
+import type { ServiceTenantGrant } from '../src/identity/identity.types.js';
+import type { VerifiedServiceCredential } from '../src/identity/identity.trust.js';
 import type { CredentialResolutionContext, CredentialResolutionHandle } from '../src/credentials/credential-resolver.types.js';
 import type { MetaGraphCallResult, MetaGraphCollectionResult, MetaGraphInput } from '../src/meta-graph/meta-graph.types.js';
 import type { MetaSubscriptionActor, MetaSubscriptionClaim, MetaSubscriptionCatalog, MetaSubscriptionProvider,
@@ -38,8 +39,8 @@ async function actor(): Promise<MetaSubscriptionActor> {
   return Object.freeze({ serviceScope, correlationId: CORRELATION });
 }
 
-function context(assetId: string): MetaSubscriptionTargetContext {
-  return Object.freeze({ tenantId: TENANT, appConfigurationId: APP, environment: 'test', authorizationId: id(5),
+function context(assetId: string, authorizationId = id(5)): MetaSubscriptionTargetContext {
+  return Object.freeze({ tenantId: TENANT, appConfigurationId: APP, environment: 'test', authorizationId,
     targetAssetId: TARGET, sourceAssetId: assetId, providerObjectId: PROVIDER_OBJECT_ID,
     flowVariant: 'WHATSAPP_COEXISTENCE', authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING',
     kind: 'WHATSAPP_BUSINESS_ACCOUNT', authorizationVersion: 2, targetAssetVersion: 4, sourceAssetVersion: 3 });
@@ -51,32 +52,39 @@ function request(assetId: string, desiredFields: readonly string[] = []): MetaSu
 
 class FakeCatalog implements MetaSubscriptionCatalog {
   calls = 0;
+  readonly authorizationByAsset = new Map<string, string>();
   async resolveByAsset(input: Pick<MetaSubscriptionRequest, 'tenantId' | 'appConfigurationId' | 'environment' | 'assetId'>) {
     this.calls += 1;
-    return input.tenantId === TENANT && input.appConfigurationId === APP ? context(input.assetId) : undefined;
+    return input.tenantId === TENANT && input.appConfigurationId === APP
+      ? context(input.assetId, this.authorizationByAsset.get(input.assetId) ?? id(5)) : undefined;
   }
   async resolveTarget() { return undefined; }
 }
 
 class FakeStore implements MetaSubscriptionStore {
-  readonly bindings = new Map<string, { fields: readonly string[]; state: 'ACTIVE' | 'REMOVED'; version: number }>();
+  readonly bindings = new Map<string, { assetId: string; authorizationId: string; fields: readonly string[]; state: 'ACTIVE' | 'REMOVED'; version: number }>();
   targetVersion = 1;
   desiredState: 'SUBSCRIBED' | 'UNSUBSCRIBED' = 'UNSUBSCRIBED';
   observedState: 'SUBSCRIBED' | 'UNSUBSCRIBED' | 'UNKNOWN' = 'UNKNOWN';
   state: 'PENDING' | 'ACTIVE' | 'PARTIAL' | 'UNKNOWN' | 'MANUAL_ACTION_REQUIRED' = 'PENDING';
   attemptCount = 0;
+  lastAttemptAt: string | null = null;
+  lastVerifiedAt: string | null = null;
+  lastErrorCode: string | null = null;
   nextAttemptAt?: string;
   locked = false;
   lockToken?: string;
   lockContext?: MetaSubscriptionTargetContext;
   claimAttempts = 0;
-  readonly fourBindings = new Promise<void>((resolve) => { this.resolveFour = resolve; });
   private resolveFour!: () => void;
+  readonly fourBindings = new Promise<void>((resolve) => { this.resolveFour = resolve; });
 
   async ensureBinding(input: MetaSubscriptionTargetContext & { readonly desiredFields: readonly string[] }): Promise<MetaSubscriptionTargetSnapshot> {
     const beforeFields = this.currentDesiredFields().join('\0');
-    const existing = this.bindings.get(input.sourceAssetId);
-    this.bindings.set(input.sourceAssetId, { fields: input.desiredFields, state: 'ACTIVE', version: (existing?.version ?? 0) + 1 });
+    const key = this.bindingKey(input.sourceAssetId, input.authorizationId);
+    const existing = this.bindings.get(key);
+    this.bindings.set(key, { assetId: input.sourceAssetId, authorizationId: input.authorizationId, fields: input.desiredFields,
+      state: 'ACTIVE', version: (existing?.version ?? 0) + 1 });
     const desiredChanged = this.desiredState !== 'SUBSCRIBED' || beforeFields !== this.currentDesiredFields().join('\0');
     this.desiredState = 'SUBSCRIBED';
     if (desiredChanged) this.targetVersion += 1;
@@ -85,8 +93,9 @@ class FakeStore implements MetaSubscriptionStore {
   }
   async removeBinding(input: MetaSubscriptionTargetContext): Promise<MetaSubscriptionTargetSnapshot> {
     const beforeFields = this.currentDesiredFields().join('\0');
-    const existing = this.bindings.get(input.sourceAssetId);
-    if (existing) this.bindings.set(input.sourceAssetId, { ...existing, state: 'REMOVED', version: existing.version + 1 });
+    const key = this.bindingKey(input.sourceAssetId, input.authorizationId);
+    const existing = this.bindings.get(key);
+    if (existing) this.bindings.set(key, { ...existing, state: 'REMOVED', version: existing.version + 1 });
     const active = [...this.bindings.values()].filter((binding) => binding.state === 'ACTIVE');
     const beforeDesired = this.desiredState;
     this.desiredState = active.length ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
@@ -98,6 +107,7 @@ class FakeStore implements MetaSubscriptionStore {
     this.claimAttempts += 1;
     if (this.locked || this.desiredState !== 'SUBSCRIBED' || (this.nextAttemptAt && Date.parse(this.nextAttemptAt) > Date.now())) return undefined;
     this.locked = true; this.lockToken = `lease-${this.claimAttempts}`; this.lockContext = input; this.attemptCount += 1; this.targetVersion += 1;
+    this.lastAttemptAt = new Date().toISOString();
     const target = this.snapshot(input);
     return Object.freeze({ target, leaseToken: this.lockToken, claimedVersion: this.targetVersion });
   }
@@ -106,7 +116,10 @@ class FakeStore implements MetaSubscriptionStore {
     readonly reasonCode?: string; readonly retryAt?: string }): Promise<MetaSubscriptionTargetSnapshot> {
     assert.equal(claim.leaseToken, this.lockToken);
     assert.equal(claim.claimedVersion, this.targetVersion);
-    this.observedState = input.observedState; this.state = input.state; this.nextAttemptAt = input.retryAt; this.targetVersion += 1;
+    this.observedState = input.observedState; this.state = input.state; this.nextAttemptAt = input.retryAt;
+    if (input.observedState !== 'UNKNOWN') this.lastVerifiedAt = new Date().toISOString();
+    this.lastErrorCode = input.state === 'ACTIVE' ? null : input.reasonCode ?? null;
+    this.targetVersion += 1;
     if (input.state === 'ACTIVE') this.attemptCount = 0;
     this.locked = false; this.lockToken = undefined;
     return this.snapshot(claim.target);
@@ -117,14 +130,17 @@ class FakeStore implements MetaSubscriptionStore {
   private currentDesiredFields(): string[] {
     return [...new Set([...this.bindings.values()].filter((binding) => binding.state === 'ACTIVE').flatMap((binding) => binding.fields))].sort();
   }
+  private bindingKey(assetId: string, authorizationId: string): string { return `${assetId}:${authorizationId}`; }
   private snapshot(input: MetaSubscriptionTargetContext): MetaSubscriptionTargetSnapshot {
     const active = [...this.bindings.entries()].filter(([, value]) => value.state === 'ACTIVE');
     const desiredFields = [...new Set(active.flatMap(([, value]) => value.fields))].sort();
     return Object.freeze({ ...input, targetId: `subscription-${TARGET}`, desiredState: this.desiredState,
       desiredFields: Object.freeze(desiredFields), observedState: this.observedState, observedFields: Object.freeze([]),
       state: this.state, version: this.targetVersion, attemptCount: this.attemptCount,
-      bindings: Object.freeze([...this.bindings.entries()].map(([assetId, value]) => Object.freeze({ assetId,
-        desiredFields: value.fields, state: value.state, version: value.version }))) });
+      lastAttemptAt: this.lastAttemptAt, lastVerifiedAt: this.lastVerifiedAt, lastErrorCode: this.lastErrorCode,
+      nextAttemptAt: this.nextAttemptAt ?? null,
+      bindings: Object.freeze([...this.bindings.values()].map((value) => Object.freeze({ assetId: value.assetId,
+        authorizationId: value.authorizationId, desiredFields: value.fields, state: value.state, version: value.version }))) });
   }
 }
 
@@ -166,6 +182,9 @@ test('four phone assets sharing one WABA serialize to one idempotent subscribe a
   assert.equal(provider.writeCount, 1, 'a single WABA target row serializes concurrent number onboarding');
   assert.equal(provider.remoteSubscribed, true);
   assert.ok(outcomes.some((outcome) => outcome.state === 'ACTIVE'));
+  assert.ok(store.lastAttemptAt);
+  assert.ok(store.lastVerifiedAt);
+  assert.equal(store.lastErrorCode, null);
 
   await service.reconcile(request(phones[1]!), trustedActor);
   assert.equal(provider.writeCount, 1, 'read-before-write reconciliation does not repeat an already observed subscription');
@@ -175,6 +194,28 @@ test('four phone assets sharing one WABA serialize to one idempotent subscribe a
   assert.equal(disconnected.reasonCode, 'SHARED_CONSUMER_REMAINS');
   assert.equal([...store.bindings.values()].filter((binding) => binding.state === 'ACTIVE').length, 3);
   assert.equal(provider.remoteSubscribed, true, 'disconnect never removes a WABA subscription while another number remains');
+});
+
+test('bindings retain independent authorization grants for the same asset and disconnect only removes the selected grant', async () => {
+  const store = new FakeStore(); const catalog = new FakeCatalog(); const provider = new FakeProvider();
+  const service = new MetaSubscriptionService(store, catalog, provider);
+  const trustedActor = await actor();
+  const sharedAsset = id(15);
+  const firstGrant = id(25); const secondGrant = id(26);
+  catalog.authorizationByAsset.set(sharedAsset, firstGrant);
+  await service.connect(request(sharedAsset), trustedActor);
+  catalog.authorizationByAsset.set(sharedAsset, secondGrant);
+  await service.connect(request(sharedAsset), trustedActor);
+  assert.equal(store.bindings.size, 2);
+  assert.deepEqual(new Set([...store.bindings.values()].map((binding) => binding.authorizationId)), new Set([firstGrant, secondGrant]));
+
+  catalog.authorizationByAsset.set(sharedAsset, firstGrant);
+  const { desiredFields: _desiredFields, ...disconnectRequest } = request(sharedAsset);
+  const disconnected = await service.disconnect(disconnectRequest, trustedActor);
+  assert.equal(disconnected.state, 'ACTIVE');
+  assert.equal([...store.bindings.values()].filter((binding) => binding.state === 'ACTIVE').length, 1);
+  assert.equal([...store.bindings.values()].find((binding) => binding.authorizationId === secondGrant)?.state, 'ACTIVE');
+  assert.equal(provider.remoteSubscribed, true);
 });
 
 test('a browser supplied provider object ID is rejected before catalog or provider use', async () => {
@@ -209,7 +250,7 @@ test('app-level webhook desired fields stay separate from asset WABA state', asy
   const saved = await service.setAppWebhookDesired({ tenantId: TENANT, appConfigurationId: APP, environment: 'test',
     desiredFields: ['messages', 'message_template_status_update'], correlationId: CORRELATION }, await actor());
   assert.equal(saved.state, 'NOT_CONFIRMED');
-  assert.deepEqual(saved.desiredFields, ['messages', 'message_template_status_update']);
+  assert.deepEqual(saved.desiredFields, ['message_template_status_update', 'messages']);
   assert.deepEqual(saved.observedFields, []);
   assert.equal(provider.calls, 0, 'app-level Webhooks configuration has no confirmed adapter and is never inferred from WABA state');
 });

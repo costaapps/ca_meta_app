@@ -1,6 +1,6 @@
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { MetaEnvironment } from '../meta-assets/meta-assets.types.js';
-import type { MetaAuthenticationVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
+import type { MetaAuthVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
 import type { MetaSubscriptionCatalog, MetaSubscriptionTargetContext } from './meta-subscriptions.types.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -25,7 +25,7 @@ function isFlow(value: string | null): value is MetaFlowVariant {
   return value === 'WHATSAPP_EXCLUSIVE' || value === 'WHATSAPP_COEXISTENCE';
 }
 
-function isAuth(value: string | null, flow: MetaFlowVariant): value is MetaAuthenticationVariant {
+function isAuth(value: string | null, flow: MetaFlowVariant): value is MetaAuthVariant {
   return flow === 'WHATSAPP_EXCLUSIVE' ? value === 'WHATSAPP_EMBEDDED_SIGNUP' : value === 'WHATSAPP_BUSINESS_APP_ONBOARDING';
 }
 
@@ -104,7 +104,7 @@ export class MysqlMetaSubscriptionCatalog implements MetaSubscriptionCatalog {
     const flowVariant = source.flow_variant as MetaFlowVariant;
     return Object.freeze({ tenantId: input.tenantId, appConfigurationId: input.appConfigurationId, environment: input.environment,
       authorizationId: source.authorization_id, targetAssetId: target.asset_id, sourceAssetId: source.asset_id,
-      providerObjectId: target.external_id, flowVariant, authVariant: source.auth_variant as MetaAuthenticationVariant,
+      providerObjectId: target.external_id, flowVariant, authVariant: source.auth_variant as MetaAuthVariant,
       kind: 'WHATSAPP_BUSINESS_ACCOUNT', authorizationVersion: Number(source.authorization_version),
       targetAssetVersion: Number(target.asset_version), sourceAssetVersion: Number(source.asset_version) });
   }

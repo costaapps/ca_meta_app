@@ -73,7 +73,7 @@ function appendOnlyTrigger(event: 'UPDATE' | 'DELETE'): DdlStep {
 
 const target = tableStep('create-meta-subscription-targets', 'ca_meta_subscription_targets',
   ['id', 'tenant_id', 'app_configuration_id', 'provider', 'environment', 'target_asset_id', 'desired_state', 'desired_fields',
-    'observed_state', 'observed_fields', 'reconcile_state', 'version', 'attempt_count', 'next_attempt_at', 'last_safe_reason_code',
+    'observed_state', 'observed_fields', 'reconcile_state', 'version', 'attempt_count', 'last_attempt_at', 'last_verified_at', 'next_attempt_at', 'last_safe_reason_code',
     'lock_token', 'lock_expires_at', 'created_at', 'updated_at'],
   [
     { name: 'PRIMARY', columns: ['id'], unique: true },
@@ -102,6 +102,8 @@ const target = tableStep('create-meta-subscription-targets', 'ca_meta_subscripti
     reconcile_state VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     version BIGINT UNSIGNED NOT NULL DEFAULT 1,
     attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+    last_attempt_at DATETIME(6) NULL,
+    last_verified_at DATETIME(6) NULL,
     next_attempt_at DATETIME(6) NULL,
     last_safe_reason_code VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
     lock_token CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
@@ -124,21 +126,24 @@ const target = tableStep('create-meta-subscription-targets', 'ca_meta_subscripti
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`);
 
 const binding = tableStep('create-meta-subscription-bindings', 'ca_meta_subscription_bindings',
-  ['tenant_id', 'target_id', 'asset_id', 'app_configuration_id', 'provider', 'environment', 'desired_fields', 'binding_state', 'version', 'created_at', 'updated_at'],
+  ['tenant_id', 'target_id', 'asset_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment', 'desired_fields', 'binding_state', 'version', 'created_at', 'updated_at'],
   [
-    { name: 'PRIMARY', columns: ['tenant_id', 'target_id', 'asset_id'], unique: true },
+    { name: 'PRIMARY', columns: ['tenant_id', 'target_id', 'asset_id', 'authorization_id'], unique: true },
     { name: 'ix_ca_meta_subscription_binding_target_context', columns: ['tenant_id', 'target_id', 'app_configuration_id', 'provider', 'environment'], unique: false },
     { name: 'ix_ca_meta_subscription_binding_asset', columns: ['tenant_id', 'asset_id', 'binding_state'], unique: false },
     { name: 'ix_ca_meta_subscription_binding_asset_context', columns: ['tenant_id', 'asset_id', 'app_configuration_id', 'provider', 'environment'], unique: false },
+    { name: 'ix_ca_meta_subscription_binding_grant', columns: ['tenant_id', 'authorization_id', 'binding_state'], unique: false },
   ],
   [
     { name: 'fk_ca_meta_subscription_binding_target', columns: ['tenant_id', 'target_id', 'app_configuration_id', 'provider', 'environment'], table: 'ca_meta_subscription_targets', referencedColumns: ['tenant_id', 'id', 'app_configuration_id', 'provider', 'environment'] },
     { name: 'fk_ca_meta_subscription_binding_asset', columns: ['tenant_id', 'asset_id', 'app_configuration_id', 'provider', 'environment'], table: 'ca_meta_assets', referencedColumns: ['tenant_id', 'id', 'app_configuration_id', 'provider', 'environment'] },
+    { name: 'fk_ca_meta_subscription_binding_authorization', columns: ['tenant_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'], table: 'ca_meta_authorizations', referencedColumns: ['tenant_id', 'id', 'app_configuration_id', 'provider', 'environment'] },
   ],
   `CREATE TABLE IF NOT EXISTS ca_meta_subscription_bindings (
     tenant_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     target_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     asset_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    authorization_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     app_configuration_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     provider VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     environment VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -147,17 +152,20 @@ const binding = tableStep('create-meta-subscription-bindings', 'ca_meta_subscrip
     version BIGINT UNSIGNED NOT NULL DEFAULT 1,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
-    PRIMARY KEY (tenant_id, target_id, asset_id),
+    PRIMARY KEY (tenant_id, target_id, asset_id, authorization_id),
     KEY ix_ca_meta_subscription_binding_target_context (tenant_id, target_id, app_configuration_id, provider, environment),
     KEY ix_ca_meta_subscription_binding_asset (tenant_id, asset_id, binding_state),
     KEY ix_ca_meta_subscription_binding_asset_context (tenant_id, asset_id, app_configuration_id, provider, environment),
+    KEY ix_ca_meta_subscription_binding_grant (tenant_id, authorization_id, binding_state),
     CONSTRAINT ck_ca_meta_subscription_binding_provider CHECK (provider = 'META'),
     CONSTRAINT ck_ca_meta_subscription_binding_state CHECK (binding_state IN ('ACTIVE','REMOVED')),
     CONSTRAINT ck_ca_meta_subscription_binding_json CHECK (JSON_VALID(desired_fields)),
     CONSTRAINT fk_ca_meta_subscription_binding_target FOREIGN KEY (tenant_id, target_id, app_configuration_id, provider, environment)
       REFERENCES ca_meta_subscription_targets (tenant_id, id, app_configuration_id, provider, environment) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT fk_ca_meta_subscription_binding_asset FOREIGN KEY (tenant_id, asset_id, app_configuration_id, provider, environment)
-      REFERENCES ca_meta_assets (tenant_id, id, app_configuration_id, provider, environment) ON UPDATE RESTRICT ON DELETE RESTRICT
+      REFERENCES ca_meta_assets (tenant_id, id, app_configuration_id, provider, environment) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_ca_meta_subscription_binding_authorization FOREIGN KEY (tenant_id, authorization_id, app_configuration_id, provider, environment)
+      REFERENCES ca_meta_authorizations (tenant_id, id, app_configuration_id, provider, environment) ON UPDATE RESTRICT ON DELETE RESTRICT
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`);
 
 const appWebhook = tableStep('create-meta-app-webhook-configs', 'ca_meta_app_webhook_configs',

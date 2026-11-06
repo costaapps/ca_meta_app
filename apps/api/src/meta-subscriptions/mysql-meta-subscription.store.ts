@@ -13,10 +13,14 @@ interface TargetRow {
   readonly reconcile_state: MetaSubscriptionReconcileState;
   readonly version: string | number;
   readonly attempt_count: string | number;
+  readonly last_attempt_at?: string | Date | null;
+  readonly last_verified_at?: string | Date | null;
+  readonly next_attempt_at?: string | Date | null;
+  readonly last_safe_reason_code?: string | null;
   readonly lock_token?: string | null;
   readonly locked?: number | string;
 }
-interface BindingRow { readonly asset_id: string; readonly desired_fields: string; readonly binding_state: 'ACTIVE' | 'REMOVED'; readonly version: string | number }
+interface BindingRow { readonly asset_id: string; readonly authorization_id: string; readonly desired_fields: string; readonly binding_state: 'ACTIVE' | 'REMOVED'; readonly version: string | number }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_REASON = /^[A-Z][A-Z0-9_]{1,63}$/;
@@ -41,6 +45,11 @@ function mysqlDate(value: string | undefined): string | null {
   if (!Number.isFinite(date.getTime())) throw new Error('Retry time is invalid.');
   return date.toISOString().replace('T', ' ').replace('Z', '').slice(0, 23);
 }
+function isoDate(value: string | Date | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const date = value instanceof Date ? value : new Date(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
 
 /** Durable per-WABA state. A single target row is the cross-process lock for every phone under a WABA. */
 export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
@@ -48,7 +57,7 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
 
   async ensureBinding(input: MetaSubscriptionTargetContext & { readonly desiredFields: readonly string[];
     readonly actorRef: string; readonly correlationId: string }): Promise<MetaSubscriptionTargetSnapshot> {
-    this.validate(input.tenantId, input.appConfigurationId, input.targetAssetId, input.sourceAssetId, input.correlationId);
+    this.validate(input.tenantId, input.appConfigurationId, input.authorizationId, input.targetAssetId, input.sourceAssetId, input.correlationId);
     this.validateEnvironment(input.environment);
     const runner = await this.database.getDataSource().then((source) => source.createQueryRunner());
     await runner.connect(); await runner.startTransaction();
@@ -57,9 +66,9 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
       await runner.query(
         `INSERT IGNORE INTO ca_meta_subscription_targets
          (id, tenant_id, app_configuration_id, provider, environment, target_asset_id, desired_state, desired_fields,
-          observed_state, observed_fields, reconcile_state, version, attempt_count, next_attempt_at, last_safe_reason_code,
+          observed_state, observed_fields, reconcile_state, version, attempt_count, last_attempt_at, last_verified_at, next_attempt_at, last_safe_reason_code,
           lock_token, lock_expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, 'META', ?, ?, 'UNSUBSCRIBED', '[]', 'UNKNOWN', '[]', 'PENDING', 1, 0, NULL, NULL, NULL, NULL, ?, ?)`,
+         VALUES (?, ?, ?, 'META', ?, ?, 'UNSUBSCRIBED', '[]', 'UNKNOWN', '[]', 'PENDING', 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
         [randomUUID(), input.tenantId, input.appConfigurationId, input.environment, input.targetAssetId, now, now],
       );
       const targets = await runner.query(
@@ -72,10 +81,10 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
       if (!target) throw new Error('Subscription target row was not created.');
       await runner.query(
         `INSERT INTO ca_meta_subscription_bindings
-         (tenant_id, target_id, asset_id, app_configuration_id, provider, environment, desired_fields, binding_state, version, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'META', ?, ?, 'ACTIVE', 1, ?, ?)
+         (tenant_id, target_id, asset_id, authorization_id, app_configuration_id, provider, environment, desired_fields, binding_state, version, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'META', ?, ?, 'ACTIVE', 1, ?, ?)
          ON DUPLICATE KEY UPDATE desired_fields = VALUES(desired_fields), binding_state = 'ACTIVE', version = version + 1, updated_at = VALUES(updated_at)`,
-        [input.tenantId, target.id, input.sourceAssetId, input.appConfigurationId, input.environment, fieldsJson(input.desiredFields), now, now],
+        [input.tenantId, target.id, input.sourceAssetId, input.authorizationId, input.appConfigurationId, input.environment, fieldsJson(input.desiredFields), now, now],
       );
       const bindings = await this.readBindings(runner, input.tenantId, target.id);
       const active = bindings.filter((binding) => binding.state === 'ACTIVE');
@@ -99,7 +108,7 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
   }
 
   async removeBinding(input: MetaSubscriptionTargetContext & { readonly actorRef: string; readonly correlationId: string }): Promise<MetaSubscriptionTargetSnapshot> {
-    this.validate(input.tenantId, input.appConfigurationId, input.targetAssetId, input.sourceAssetId, input.correlationId);
+    this.validate(input.tenantId, input.appConfigurationId, input.authorizationId, input.targetAssetId, input.sourceAssetId, input.correlationId);
     this.validateEnvironment(input.environment);
     const runner = await this.database.getDataSource().then((source) => source.createQueryRunner());
     await runner.connect(); await runner.startTransaction();
@@ -108,14 +117,14 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
         `SELECT id, version, desired_state, observed_state, desired_fields FROM ca_meta_subscription_targets
          WHERE tenant_id = ? AND app_configuration_id = ? AND provider = 'META' AND environment = ? AND target_asset_id = ? FOR UPDATE`,
         [input.tenantId, input.appConfigurationId, input.environment, input.targetAssetId],
-      ) as Array<{ id: string; version: string | number; desired_state: MetaSubscriptionState; observed_state: MetaSubscriptionState }>;
+       ) as Array<{ id: string; version: string | number; desired_state: MetaSubscriptionState; observed_state: MetaSubscriptionState; desired_fields: string }>;
       const target = rows[0];
       if (!target) throw new Error('Subscription target does not exist.');
       const now = this.sqlNow();
       await runner.query(
         `UPDATE ca_meta_subscription_bindings SET binding_state = 'REMOVED', version = version + 1, updated_at = ?
-         WHERE tenant_id = ? AND target_id = ? AND asset_id = ? AND binding_state = 'ACTIVE'`,
-        [now, input.tenantId, target.id, input.sourceAssetId],
+         WHERE tenant_id = ? AND target_id = ? AND asset_id = ? AND authorization_id = ? AND binding_state = 'ACTIVE'`,
+        [now, input.tenantId, target.id, input.sourceAssetId, input.authorizationId],
       );
       const bindings = await this.readBindings(runner, input.tenantId, target.id);
       const active = bindings.filter((binding) => binding.state === 'ACTIVE');
@@ -150,6 +159,7 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
     try {
       const rows = await runner.query(
         `SELECT id, desired_state, desired_fields, observed_state, observed_fields, reconcile_state, version, attempt_count,
+                last_attempt_at, last_verified_at, next_attempt_at, last_safe_reason_code,
                 lock_token, (lock_expires_at > UTC_TIMESTAMP(6)) AS locked
          FROM ca_meta_subscription_targets WHERE tenant_id = ? AND app_configuration_id = ? AND provider = 'META'
            AND environment = ? AND target_asset_id = ?
@@ -165,8 +175,9 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
       const expiry = new Date(this.now().getTime() + leaseMilliseconds).toISOString().replace('T', ' ').replace('Z', '').slice(0, 23);
       await runner.query(
         `UPDATE ca_meta_subscription_targets SET lock_token = ?, lock_expires_at = ?, attempt_count = attempt_count + 1,
+          last_attempt_at = ?,
           version = version + 1, reconcile_state = 'PENDING', updated_at = ? WHERE tenant_id = ? AND id = ?`,
-        [token, expiry, now, input.tenantId, row.id],
+        [token, expiry, now, now, input.tenantId, row.id],
       );
       const claimedVersion = Number(row.version) + 1;
       const snapshot = await this.readSnapshot(runner, input, row.id);
@@ -187,10 +198,11 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
       const updateResult = await runner.query(
         `UPDATE ca_meta_subscription_targets SET observed_state = ?, observed_fields = ?, reconcile_state = ?,
           last_safe_reason_code = ?, next_attempt_at = ?, attempt_count = IF(? = 'ACTIVE', 0, attempt_count),
+          last_verified_at = IF(? <> 'UNKNOWN', ?, last_verified_at),
           lock_token = NULL, lock_expires_at = NULL, version = version + 1, updated_at = ?
          WHERE tenant_id = ? AND id = ? AND lock_token = ? AND version = ?`,
         [input.observedState, fieldsJson(input.observedFields), input.state, input.reasonCode ?? null, mysqlDate(input.retryAt),
-          input.state, now, claim.target.tenantId, claim.target.targetId, claim.leaseToken, claim.claimedVersion],
+          input.state, input.observedState, now, now, claim.target.tenantId, claim.target.targetId, claim.leaseToken, claim.claimedVersion],
       ) as { readonly affectedRows?: number };
       if (Number(updateResult.affectedRows) !== 1) throw new Error('Subscription lease was lost before outcome persistence.');
       const rows = await runner.query(
@@ -253,22 +265,25 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
 
   private async readSnapshot(runner: QueryRunner, context: MetaSubscriptionTargetContext, targetId: string): Promise<MetaSubscriptionTargetSnapshot> {
     const rows = await runner.query(
-      `SELECT id, desired_state, desired_fields, observed_state, observed_fields, reconcile_state, version, attempt_count
+      `SELECT id, desired_state, desired_fields, observed_state, observed_fields, reconcile_state, version, attempt_count,
+              last_attempt_at, last_verified_at, next_attempt_at, last_safe_reason_code
        FROM ca_meta_subscription_targets WHERE tenant_id = ? AND id = ?`, [context.tenantId, targetId],
     ) as TargetRow[];
     const row = rows[0]; if (!row) throw new Error('Subscription target disappeared during transaction.');
     const bindings = await this.readBindings(runner, context.tenantId, targetId);
     return Object.freeze({ ...context, targetId: row.id, desiredState: row.desired_state, desiredFields: parseFields(row.desired_fields),
       observedState: row.observed_state, observedFields: parseFields(row.observed_fields), state: row.reconcile_state,
-      version: Number(row.version), attemptCount: Number(row.attempt_count), bindings: Object.freeze(bindings) });
+      version: Number(row.version), attemptCount: Number(row.attempt_count),
+      lastAttemptAt: isoDate(row.last_attempt_at), lastVerifiedAt: isoDate(row.last_verified_at),
+      lastErrorCode: row.last_safe_reason_code ?? null, nextAttemptAt: isoDate(row.next_attempt_at), bindings: Object.freeze(bindings) });
   }
 
   private async readBindings(runner: QueryRunner, tenantId: string, targetId: string): Promise<MetaSubscriptionTargetSnapshot['bindings']> {
     const rows = await runner.query(
-      `SELECT asset_id, desired_fields, binding_state, version FROM ca_meta_subscription_bindings
-       WHERE tenant_id = ? AND target_id = ? ORDER BY asset_id`, [tenantId, targetId],
+      `SELECT asset_id, authorization_id, desired_fields, binding_state, version FROM ca_meta_subscription_bindings
+       WHERE tenant_id = ? AND target_id = ? ORDER BY asset_id, authorization_id`, [tenantId, targetId],
     ) as BindingRow[];
-    return Object.freeze(rows.map((row) => Object.freeze({ assetId: row.asset_id, desiredFields: parseFields(row.desired_fields),
+    return Object.freeze(rows.map((row) => Object.freeze({ assetId: row.asset_id, authorizationId: row.authorization_id, desiredFields: parseFields(row.desired_fields),
       state: row.binding_state, version: Number(row.version) })));
   }
 
