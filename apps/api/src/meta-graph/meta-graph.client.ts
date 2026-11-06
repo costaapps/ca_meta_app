@@ -135,9 +135,18 @@ function normalizeError(status: number, body: Record<string, unknown> | undefine
   return err('PROVIDER_ERROR', common);
 }
 function parse(response: MetaGraphTransportResponse, maxRetry: number): { body?: Record<string, unknown>; error?: MetaGraphSafeError } {
-  let body: unknown; try { body = JSON.parse(response.body); } catch { return { error: err('RESPONSE_INVALID', { httpStatus: response.statusCode }) }; }
-  if (!record(body)) return { error: err('RESPONSE_INVALID', { httpStatus: response.statusCode }) };
-  if (Object.prototype.hasOwnProperty.call(body, 'error') || response.statusCode < 200 || response.statusCode >= 300) {
+  let value: unknown;
+  try { value = JSON.parse(response.body); } catch {
+    return response.statusCode < 200 || response.statusCode >= 300
+      ? { error: normalizeError(response.statusCode, undefined, response.headers, maxRetry) }
+      : { error: err('RESPONSE_INVALID', { httpStatus: response.statusCode }) };
+  }
+  const body = record(value) ? value : undefined;
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    return { error: normalizeError(response.statusCode, body, response.headers, maxRetry) };
+  }
+  if (!body) return { error: err('RESPONSE_INVALID', { httpStatus: response.statusCode }) };
+  if (Object.prototype.hasOwnProperty.call(body, 'error')) {
     return { error: normalizeError(response.statusCode, body, response.headers, maxRetry) };
   }
   return { body };

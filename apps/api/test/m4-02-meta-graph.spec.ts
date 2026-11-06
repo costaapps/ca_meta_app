@@ -179,7 +179,7 @@ test('hostile next URL is rejected before any follow-up credential transmission'
 test('429 uses bounded Retry-After and a finite GET retry budget', async () => {
   const delays: number[] = [];
   const transport = new SequenceTransport([
-    response(429, { error: { type: 'OAuthException', code: 4, message: 'not surfaced' } }, { 'retry-after': '999' }),
+    { statusCode: 429, headers: { 'retry-after': '999', 'content-type': 'text/html' }, body: '<html>synthetic throttled body</html>' },
     response(200, { data: [{ id: 'phone-1' }] }),
   ]);
   const runtime = client(transport, new FakeCredentials(), { sleep: async (ms) => { delays.push(ms); }, random: () => 0 });
@@ -189,13 +189,22 @@ test('429 uses bounded Retry-After and a finite GET retry budget', async () => {
   assert.equal(result.retries, 1);
   assert.deepEqual(delays, [30_000]);
   assert.equal(transport.calls.length, 2);
+
+  const exhaustedTransport = new SequenceTransport(Array.from({ length: 3 }, () => ({
+    statusCode: 429, headers: { 'content-type': 'text/html' }, body: '<html>synthetic throttled body</html>',
+  })));
+  const exhausted = client(exhaustedTransport, new FakeCredentials(), { sleep: async () => {}, random: () => 0 });
+  const exhaustedResult = await exhausted.instance.execute(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers' }));
+  assert.equal(exhaustedResult.error?.category, 'RATE_LIMITED');
+  assert.equal(exhaustedResult.retryable, true);
+  assert.equal(exhaustedResult.attempts, 3);
+  assert.equal(exhaustedResult.retries, 2);
 });
 
 test('classifies permission, invalid request and exhausted transient GET responses', async () => {
-  const unauthorized = client(new SequenceTransport([response(401, {
-    error: { type: 'OAuthException', code: 190, message: 'synthetic-auth-secret-marker', nested: { message: 'nested-auth-marker' } },
-    headers: { authorization: TOKEN },
-  })]));
+  const unauthorized = client(new SequenceTransport([{
+    statusCode: 401, headers: { 'content-type': 'text/html' }, body: '<html>synthetic-auth-secret-marker nested-auth-marker</html>',
+  }]));
   const unauthorizedResult = await unauthorized.instance.execute(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers' }));
   assert.equal(unauthorizedResult.httpStatus, 401);
   assert.equal(unauthorizedResult.error?.category, 'CREDENTIAL_REJECTED');
@@ -204,14 +213,20 @@ test('classifies permission, invalid request and exhausted transient GET respons
   assert.equal(JSON.stringify(unauthorizedResult).includes('nested-auth-marker'), false);
   assert.equal(JSON.stringify(unauthorizedResult).includes(TOKEN), false);
 
-  const permission = client(new SequenceTransport([response(403, { error: { type: 'OAuthException', code: 10 } })]));
+  const permission = client(new SequenceTransport([{
+    statusCode: 403, headers: { 'content-type': 'text/html' }, body: '<html>synthetic permission response</html>',
+  }]));
   const permissionResult = await permission.instance.execute(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers' }));
   assert.equal(permissionResult.error?.category, 'PERMISSION_REQUIRED');
   assert.equal(permissionResult.retryable, false);
+  assert.equal(JSON.stringify(permissionResult).includes('synthetic permission response'), false);
 
-  const invalid = client(new SequenceTransport([response(400, { error: { type: 'GraphMethodException', code: 100 } })]));
+  const invalid = client(new SequenceTransport([{
+    statusCode: 400, headers: { 'content-type': 'text/html' }, body: '<html>synthetic invalid request</html>',
+  }]));
   const invalidResult = await invalid.instance.execute(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers' }));
   assert.equal(invalidResult.error?.category, 'INVALID_REQUEST');
+  assert.equal(JSON.stringify(invalidResult).includes('synthetic invalid request'), false);
 
   const transient = client(new SequenceTransport([
     response(503, { error: { type: 'Exception', code: 1 } }),
@@ -234,6 +249,31 @@ test('POST HTTP 5xx is ambiguous and never automatically retried', async () => {
   assert.equal(result.ambiguous, true);
   assert.equal(result.attempts, 1);
   assert.equal(transport.calls.length, 1);
+});
+
+test('non-JSON HTTP 500 is transient for exhausted GET retries and ambiguous for POST', async () => {
+  const htmlFailure: MetaGraphTransportResponse = {
+    statusCode: 500, headers: { 'content-type': 'text/html' }, body: '<html>synthetic upstream error</html>',
+  };
+  const getTransport = new SequenceTransport([htmlFailure, htmlFailure, htmlFailure]);
+  const getRuntime = client(getTransport, new FakeCredentials(), { sleep: async () => {}, random: () => 0 });
+  const getResult = await getRuntime.instance.execute(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers' }));
+  assert.equal(getResult.outcome, 'FAILED');
+  assert.equal(getResult.error?.category, 'TRANSIENT_PROVIDER_FAILURE');
+  assert.equal(getResult.retryable, true);
+  assert.equal(getResult.attempts, 3);
+  assert.equal(getResult.retries, 2);
+  assert.equal(JSON.stringify(getResult).includes('synthetic upstream error'), false);
+
+  const postTransport = new SequenceTransport([htmlFailure]);
+  const postRuntime = client(postTransport);
+  const postResult = await postRuntime.instance.execute(request('SEND_MESSAGE', 'SEND_MESSAGE', { body: { fixture: true } }));
+  assert.equal(postResult.outcome, 'UNKNOWN');
+  assert.equal(postResult.error?.category, 'AMBIGUOUS_POST');
+  assert.equal(postResult.retryable, false);
+  assert.equal(postResult.ambiguous, true);
+  assert.equal(postResult.attempts, 1);
+  assert.equal(postTransport.calls.length, 1);
 });
 
 test('oversized response fails reads and leaves POST outcome ambiguous without retry', async () => {
