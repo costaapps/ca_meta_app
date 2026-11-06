@@ -126,8 +126,9 @@ export class NodeMetaGraphTransport implements MetaGraphTransport {
           clearTimeout(connectTimer);
           headersTimer = setTimeout(() => fail('HEADERS_TIMEOUT'), input.headersTimeoutMs);
         };
-        if (tls.secureConnecting === false && tls.authorized !== undefined) connected();
-        else tls.once('secureConnect', connected);
+        // `agent: false` creates a fresh socket for each request, so secureConnect
+        // cannot have fired before this socket listener is attached.
+        tls.once('secureConnect', connected);
       });
       req.on('error', () => fail('NETWORK'));
       req.end(input.body);
