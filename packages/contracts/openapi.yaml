@@ -744,27 +744,102 @@ paths:
                         authVariant: FACEBOOK_LOGIN_FOR_BUSINESS
                         enabled: false
                         reasonCode: CONFIGURATION_MISSING
-                        capabilities: []
+                        capabilities:
+                          - operation: ASSET_DISCOVERY
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SEND_MESSAGE
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: MANAGE_COMMENTS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: READ_STATUS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SUBSCRIBE_WEBHOOKS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
                       - flowVariant: INSTAGRAM
                         authVariant: INSTAGRAM_VIA_FACEBOOK_LOGIN
                         enabled: false
                         reasonCode: CONFIGURATION_MISSING
-                        capabilities: []
+                        capabilities:
+                          - operation: ASSET_DISCOVERY
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SEND_MESSAGE
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: MANAGE_COMMENTS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: READ_STATUS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SUBSCRIBE_WEBHOOKS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
                       - flowVariant: INSTAGRAM
                         authVariant: INSTAGRAM_LOGIN
                         enabled: false
                         reasonCode: CONFIGURATION_MISSING
-                        capabilities: []
+                        capabilities:
+                          - operation: ASSET_DISCOVERY
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SEND_MESSAGE
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: MANAGE_COMMENTS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: READ_STATUS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SUBSCRIBE_WEBHOOKS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
                       - flowVariant: WHATSAPP_EXCLUSIVE
                         authVariant: WHATSAPP_EMBEDDED_SIGNUP
                         enabled: false
                         reasonCode: CONFIGURATION_MISSING
-                        capabilities: []
+                        capabilities:
+                          - operation: ASSET_DISCOVERY
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SEND_MESSAGE
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: MANAGE_TEMPLATES
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: READ_STATUS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SUBSCRIBE_WEBHOOKS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
                       - flowVariant: WHATSAPP_COEXISTENCE
                         authVariant: WHATSAPP_BUSINESS_APP_ONBOARDING
                         enabled: false
                         reasonCode: CONFIGURATION_MISSING
-                        capabilities: []
+                        capabilities:
+                          - operation: ASSET_DISCOVERY
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SEND_MESSAGE
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: READ_STATUS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SUBSCRIBE_WEBHOOKS
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
+                          - operation: SYNC_HISTORY
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
         "401": *a12
         default: *a21
   /api/v1/onboarding-sessions:
