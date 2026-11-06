@@ -54,7 +54,7 @@ export class ApiModule {
         authExchangeModule,
         MagicLinkModule.register(environment),
         PrivacyModule.register(environment),
-        OnboardingStatusModule.register(identityModule, environment),
+        OnboardingStatusModule.register(identityModule, environment, metaAppConfigModule),
         metaAppConfigModule,
         metaGraphModule,
       ],

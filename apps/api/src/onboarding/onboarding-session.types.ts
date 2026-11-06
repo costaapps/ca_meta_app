@@ -18,6 +18,11 @@ export interface OnboardingCreateCommand {
   readonly tenantContextHash: string;
   readonly createdAt: Date;
   readonly flowVariant: OnboardingFlowVariant;
+  readonly configurationRef: string;
+  readonly authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS' | 'INSTAGRAM_VIA_FACEBOOK_LOGIN' | 'INSTAGRAM_LOGIN' |
+    'WHATSAPP_EMBEDDED_SIGNUP' | 'WHATSAPP_BUSINESS_APP_ONBOARDING';
+  readonly capabilityManifestVersion: string;
+  readonly graphApiVersion: string;
   readonly requestedCapabilities: readonly string[];
   readonly returnRoute: 'connections' | 'setup';
   readonly idempotencyHash: string;
@@ -33,6 +38,10 @@ export interface OnboardingStoredRecord {
   readonly portalSessionId: string;
   readonly tenantContextHash: string;
   readonly flowVariant: OnboardingFlowVariant;
+  readonly configurationRef: string;
+  readonly authVariant: OnboardingCreateCommand['authVariant'];
+  readonly capabilityManifestVersion: string;
+  readonly graphApiVersion: string;
   readonly requestedCapabilities: readonly string[];
   readonly returnRoute: 'connections' | 'setup';
   readonly idempotencyHash: string;
@@ -51,6 +60,8 @@ export interface OnboardingSessionStore {
   findByIdempotency(tenantId: string, idempotencyHash: string): Promise<OnboardingStoredRecord | undefined>;
   createOrReplay(command: OnboardingCreateCommand): Promise<OnboardingStoredRecord>;
   findForSession(id: string, sessionId: string, principalId: string): Promise<OnboardingStoredRecord | undefined>;
+  findByProviderStateHash(providerStateHash: string): Promise<OnboardingStoredRecord | undefined>;
+  cancelByProviderState(providerStateHash: string): Promise<boolean>;
   completeByProviderState(
     providerStateHash: string,
     outcome: OnboardingProviderOutcome,
@@ -69,6 +80,18 @@ export interface OnboardingProviderLaunchPort {
     readonly returnRoute: 'connections' | 'setup';
     readonly expiresAt: string;
   }): Promise<string>;
+}
+
+/** Server-selected exact flow configuration; callers never supply this context. */
+export interface OnboardingFlowConfiguration {
+  readonly configurationRef: string;
+  readonly authVariant: OnboardingCreateCommand['authVariant'];
+  readonly capabilityManifestVersion: string;
+  readonly graphApiVersion: string;
+}
+
+export interface OnboardingFlowConfigurationResolver {
+  resolve(flowVariant: OnboardingFlowVariant): OnboardingFlowConfiguration | undefined;
 }
 
 export class OnboardingConfigurationUnavailableError extends Error {
@@ -96,6 +119,10 @@ export interface OnboardingProviderOutcome {
   readonly readiness: OnboardingReadiness;
   readonly steps: readonly OnboardingStep[];
   readonly nextAction: OnboardingNextAction;
+  /** Internal evidence only; never projected to a browser status response. */
+  readonly verifiedAssetRefs?: readonly string[];
+  readonly subscriptionVerified?: boolean;
+  readonly projectionVerified?: boolean;
 }
 
 export function isTrustedOnboardingProviderOutcome(value: unknown): value is OnboardingProviderOutcome {
@@ -115,6 +142,9 @@ export abstract class TrustedOnboardingCompletionIssuer {
       readiness: input.readiness,
       steps: safeSteps,
       nextAction: input.nextAction,
+      ...(input.verifiedAssetRefs ? { verifiedAssetRefs: Object.freeze([...input.verifiedAssetRefs]) } : {}),
+      ...(input.subscriptionVerified !== undefined ? { subscriptionVerified: input.subscriptionVerified } : {}),
+      ...(input.projectionVerified !== undefined ? { projectionVerified: input.projectionVerified } : {}),
     }) as OnboardingProviderOutcome;
     verifiedProviderOutcomes.add(outcome);
     return outcome;

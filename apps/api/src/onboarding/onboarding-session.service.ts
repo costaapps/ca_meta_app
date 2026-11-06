@@ -1,6 +1,7 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { ForbiddenException } from '@nestjs/common';
 import type { components } from '@ca-meta/contracts';
+import type { MetaAuthenticationVariant, MetaProductFlow } from '../meta-config/capability-manifest.js';
 import { IdentityDeniedError } from '../identity/identity.errors.js';
 import { isVerifiedPortalSession, type VerifiedPortalSession } from '../identity/identity.trust.js';
 import { TenantAuthorizationService, TenantContextService } from '../identity/identity.service.js';
@@ -12,6 +13,7 @@ import {
   type OnboardingCompletionPort,
   type OnboardingCreateInput,
   type OnboardingCreated,
+  type OnboardingFlowConfigurationResolver,
   type OnboardingProviderLaunchPort,
   type OnboardingProviderOutcome,
   type OnboardingSessionStore,
@@ -47,6 +49,7 @@ export class OnboardingStateSigner {
     readonly idempotencyHash: string;
     readonly requestHash: string;
     readonly onboardingId: string;
+    readonly configurationRef: string;
   }): string {
     if (!this.key) throw new OnboardingConfigurationUnavailableError();
     return createHmac('sha256', this.key)
@@ -57,7 +60,8 @@ export class OnboardingStateSigner {
       .update(input.sessionId, 'utf8').update('\0')
       .update(input.idempotencyHash, 'utf8').update('\0')
       .update(input.requestHash, 'utf8').update('\0')
-      .update(input.onboardingId, 'utf8')
+      .update(input.onboardingId, 'utf8').update('\0')
+      .update(input.configurationRef, 'utf8')
       .digest('base64url');
   }
 }
@@ -76,6 +80,7 @@ export class OnboardingSessionService {
     private readonly stateSigner: OnboardingStateSigner,
     private readonly providerLaunch: OnboardingProviderLaunchPort,
     private readonly now: () => Date = () => new Date(),
+    private readonly configurations?: OnboardingFlowConfigurationResolver,
   ) {}
 
   async create(
@@ -89,12 +94,16 @@ export class OnboardingSessionService {
     await this.authorization.authorize(scope, 'CONNECT', scope.tenantId);
 
     const normalized = normalizeCreateInput(input);
+    const configuration = this.configurations?.resolve(normalized.flowVariant);
+    if (!configuration) throw new OnboardingConfigurationUnavailableError();
     const idempotencyHash = hashOnboardingValue(idempotencyKey);
     const requestHash = hashOnboardingValue(JSON.stringify(normalized));
     let record = await this.store.findByIdempotency(scope.tenantId, idempotencyHash);
     if (record) {
       if (record.requestHash !== requestHash || record.principalId !== session.principalId ||
-        record.portalSessionId !== session.sessionId) throw new OnboardingConflictError();
+        record.portalSessionId !== session.sessionId || record.configurationRef !== configuration.configurationRef ||
+        record.authVariant !== configuration.authVariant || record.capabilityManifestVersion !== configuration.capabilityManifestVersion ||
+        record.graphApiVersion !== configuration.graphApiVersion) throw new OnboardingConflictError();
       if (record.stateConsumed || record.status !== 'AWAITING_PROVIDER') throw new OnboardingConflictError();
     } else {
       const createdAt = this.now();
@@ -108,6 +117,7 @@ export class OnboardingSessionService {
         idempotencyHash,
         requestHash,
         onboardingId: id,
+        configurationRef: configuration.configurationRef,
       });
       const command = {
         id,
@@ -117,6 +127,10 @@ export class OnboardingSessionService {
         tenantContextHash: session.contextRefHash,
         createdAt,
         flowVariant: normalized.flowVariant,
+        configurationRef: configuration.configurationRef,
+        authVariant: configuration.authVariant,
+        capabilityManifestVersion: configuration.capabilityManifestVersion,
+        graphApiVersion: configuration.graphApiVersion,
         requestedCapabilities: normalized.requestedCapabilities,
         returnRoute: normalized.returnRoute,
         idempotencyHash,
@@ -126,7 +140,9 @@ export class OnboardingSessionService {
       } as const;
       record = await this.store.createOrReplay(command);
       if (record.requestHash !== requestHash || record.principalId !== session.principalId ||
-        record.portalSessionId !== session.sessionId) throw new OnboardingConflictError();
+        record.portalSessionId !== session.sessionId || record.configurationRef !== configuration.configurationRef ||
+        record.authVariant !== configuration.authVariant || record.capabilityManifestVersion !== configuration.capabilityManifestVersion ||
+        record.graphApiVersion !== configuration.graphApiVersion) throw new OnboardingConflictError();
     }
 
     // Do not re-issue an expired deterministic state if a client retries after the
@@ -141,6 +157,7 @@ export class OnboardingSessionService {
       idempotencyHash: record.idempotencyHash,
       requestHash: record.requestHash,
       onboardingId: record.id,
+      configurationRef: record.configurationRef,
     });
     if (hashOnboardingValue(stateRef) !== record.providerStateHash) throw new OnboardingConfigurationUnavailableError();
 
@@ -196,6 +213,19 @@ export class OnboardingSessionService {
   }
 }
 
+export function metaProfileForOnboardingFlow(flowVariant: OnboardingFlowVariant): {
+  readonly flowVariant: MetaProductFlow;
+  readonly authVariant: MetaAuthenticationVariant;
+} {
+  switch (flowVariant) {
+    case 'FACEBOOK_LOGIN': return { flowVariant: 'FACEBOOK', authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS' };
+    case 'INSTAGRAM_VIA_FACEBOOK_LOGIN': return { flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_VIA_FACEBOOK_LOGIN' };
+    case 'INSTAGRAM_LOGIN': return { flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN' };
+    case 'WHATSAPP_CLOUD_API': return { flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP' };
+    case 'WHATSAPP_COEXISTENCE': return { flowVariant: 'WHATSAPP_COEXISTENCE', authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING' };
+  }
+}
+
 export class OnboardingCompletionService implements OnboardingCompletionPort {
   constructor(private readonly store: OnboardingSessionStore) {}
 
@@ -243,12 +273,16 @@ function validProviderOutcome(outcome: OnboardingProviderOutcome): boolean {
     !Array.isArray(outcome.steps) || outcome.steps.length > 32 ||
     !['CREATED', 'AWAITING_PROVIDER', 'CODE_RECEIVED', 'EXCHANGING', 'ASSETS_VERIFIED', 'PROVISIONING', 'READY', 'PARTIAL', 'CANCELLED', 'EXPIRED', 'FAILED'].includes(outcome.status) ||
     !['READY', 'PARTIAL', 'UNKNOWN'].includes(outcome.readiness) ||
-    !['WAIT', 'CHECK_STATUS', 'REAUTHORIZE', 'RECONCILE', 'RESOLVE_CONFLICT', 'NONE'].includes(outcome.nextAction) ||
+    !['WAIT', 'CHECK_STATUS', 'REAUTHORIZE', 'RECONCILE', 'RESUME', 'RESOLVE_CONFLICT', 'NONE'].includes(outcome.nextAction) ||
     !outcome.steps.every((step) => typeof step?.name === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(step.name) &&
       stepStatuses.has(step.status) && Object.keys(step).every((key) => key === 'name' || key === 'status'))) return false;
   const hasSuccessfulStep = (name: string) => outcome.steps.some((step) => step.name === name && step.status === 'SUCCEEDED');
-  if (outcome.status === 'READY') return outcome.readiness === 'READY' && hasSuccessfulStep('authorization') && hasSuccessfulStep('asset-verification') && outcome.nextAction === 'NONE';
-  if (outcome.status === 'PARTIAL') return outcome.readiness === 'PARTIAL' && outcome.nextAction === 'REAUTHORIZE';
+  if (outcome.status === 'READY') return outcome.readiness === 'READY' && hasSuccessfulStep('authorization') &&
+    hasSuccessfulStep('asset-verification') && hasSuccessfulStep('subscription') && hasSuccessfulStep('projection') &&
+    Array.isArray(outcome.verifiedAssetRefs) && outcome.verifiedAssetRefs.length > 0 &&
+    outcome.subscriptionVerified === true && outcome.projectionVerified === true && outcome.nextAction === 'NONE';
+  if (outcome.status === 'PARTIAL') return outcome.readiness === 'PARTIAL' &&
+    ['REAUTHORIZE', 'RECONCILE', 'RESUME', 'CHECK_STATUS'].includes(outcome.nextAction);
   if (outcome.status === 'PROVISIONING') return outcome.readiness === 'UNKNOWN' && outcome.nextAction === 'CHECK_STATUS';
   if (outcome.status === 'FAILED' || outcome.status === 'EXPIRED' || outcome.status === 'CANCELLED') {
     return outcome.readiness === 'UNKNOWN' && outcome.nextAction === 'NONE';

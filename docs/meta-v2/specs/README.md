@@ -13,6 +13,7 @@ These specs turn accepted M1 contracts into bounded implementation slices. They 
 | [Meta asset catalog](asset-catalog.md) | #40 | M1.03 capability matrix; tenant-scoped OpenAPI catalog; M3.06–M3.09 read models | `apps/api/test/m3-12-asset-catalog.spec.ts` |
 | [Credential resolver](credential-resolver.md) | #34 | M3.06 grants; M3.07 vault; M1.03 operation matrix | `apps/api/test/m3-08-credential-resolver.spec.ts`, `tools/m3-08/` |
 | [Internal Meta Graph client](meta-graph-client.md) | #44 | M3.08 one-use resolver; M4.01 verified config/capability; ADR-011 | `apps/api/test/m4-02-meta-graph.spec.ts`, `tools/m4-02/` |
+| [Meta onboarding saga](onboarding-saga.md) | #45 | M3.05 sessions; M3.06 asset catalog; M3.07 vault; M4.01 flow config; M4.02 Graph transport; ADR-012 | `apps/api/test/m4-03-onboarding-saga.spec.ts`, `tools/m4-03/` |
 | [Meta onboarding](meta-onboarding.md) | #12, #15, #17 | capability matrix; OpenAPI onboarding operations; event schemas | `tools/m1-03/`, `tools/m1-07/` |
 | [Webhooks](webhooks.md) | #14, #17 | inbox/outbox event schemas; OpenAPI webhook ingress | `tools/m1-05/`, `tools/m1-07/` |
 | [Portal](portal.md) | #18 | M1.08 journey, status-copy, screen/API map | `tools/m1-08/walkthrough.mjs` |
