@@ -26,6 +26,7 @@ const activePortalSessionCookie = 'synthetic-active-portal-session-cookie-value-
 const testProviderAppId = '1234567890';
 const testProviderAppIdRef = 'wa-coexistence-test-app';
 const syntheticProductionProviderAppId = '9999999999';
+const syntheticProductionProviderAppIdRef = 'wa-coexistence-production-app';
 
 function rawProfile(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -181,12 +182,12 @@ test('staging resolves app IDs only from its trusted namespace and rejects produ
   assert.deepEqual(trustedStaging.invalid, []);
   assert.equal(trustedStaging.profiles?.[0]?.providerAppId, '2222222222');
 
-  const productionIdInStagingProfile = parseProfiles([{
+  const productionIdRefInStagingProfile = parseProfiles([{
     ...stagingProfile,
-    providerAppId: syntheticProductionProviderAppId,
+    providerAppIdRef: syntheticProductionProviderAppIdRef,
   }], 'staging', [testOrigin], '2222222222');
-  assert.equal(productionIdInStagingProfile.profiles, undefined);
-  assert.deepEqual(productionIdInStagingProfile.invalid, ['API_META_APP_CONFIGS_JSON']);
+  assert.equal(productionIdRefInStagingProfile.profiles, undefined);
+  assert.deepEqual(productionIdRefInStagingProfile.invalid, ['API_META_APP_CONFIGS_JSON']);
 
   const productionRefsInStaging = parseProfiles([rawProfile({
     environment: 'staging',
