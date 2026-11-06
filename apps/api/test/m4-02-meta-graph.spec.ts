@@ -132,6 +132,17 @@ test('HTTP 200 Graph error normalizes safe type/code/subcode/trace and omits sec
   assert.equal(runtime.credentials.callbacks, 1);
 });
 
+test('resource ID mismatch against the server-resolved provider object is rejected before credentials', async () => {
+  const transport = new SequenceTransport([]);
+  const runtime = client(transport);
+  const input = request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'phone_numbers' });
+  const mismatched = { ...input, resourceId: '998877665544' } as MetaGraphInput;
+  const result = await runtime.instance.execute(mismatched);
+  assert.equal(result.error?.category, 'REQUEST_INVALID');
+  assert.equal(runtime.credentials.callbacks, 0);
+  assert.equal(transport.calls.length, 0);
+});
+
 test('collect processes cursor pages with bounds and strips a token query from provider next URLs', async () => {
   const transport = new SequenceTransport([
     response(200, { data: [{ id: 'phone-1', access_token: 'secret-in-row', client_secret: 'synthetic-client-secret',
@@ -274,6 +285,27 @@ test('non-JSON HTTP 500 is transient for exhausted GET retries and ambiguous for
   assert.equal(postResult.ambiguous, true);
   assert.equal(postResult.attempts, 1);
   assert.equal(postTransport.calls.length, 1);
+});
+
+test('POST 2xx with empty, HTML or non-object JSON body is UNKNOWN and never leaks body markers', async () => {
+  const responses: MetaGraphTransportResponse[] = [
+    { statusCode: 200, headers: {}, body: '' },
+    { statusCode: 200, headers: { 'content-type': 'text/html' }, body: '<html>synthetic-post-body-secret-marker</html>' },
+    { statusCode: 200, headers: { 'content-type': 'application/json' }, body: '[]' },
+  ];
+  for (const response of responses) {
+    const transport = new SequenceTransport([response]);
+    const runtime = client(transport);
+    const result = await runtime.instance.execute(request('SEND_MESSAGE', 'SEND_MESSAGE', { body: { fixture: true } }));
+    assert.equal(result.outcome, 'UNKNOWN');
+    assert.equal(result.error?.category, 'AMBIGUOUS_POST');
+    assert.equal(result.retryable, false);
+    assert.equal(result.ambiguous, true);
+    assert.equal(result.attempts, 1);
+    assert.equal(result.retries, 0);
+    assert.equal(JSON.stringify(result).includes('synthetic-post-body-secret-marker'), false);
+    assert.equal(transport.calls.length, 1);
+  }
 });
 
 test('oversized response fails reads and leaves POST outcome ambiguous without retry', async () => {

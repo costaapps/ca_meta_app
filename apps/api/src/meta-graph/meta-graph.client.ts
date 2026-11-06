@@ -350,7 +350,8 @@ export class MetaGraphClient {
     if (!sent.response) return callFailure('NETWORK_ERROR', undefined, true, false, sent.attempts, sent.retries);
     const parsed = parse(sent.response, RETRY_AFTER_MAX);
     if (parsed.error) {
-      const ambiguous = desc.method === 'POST' && parsed.error.category === 'TRANSIENT_PROVIDER_FAILURE';
+      const ambiguous = desc.method === 'POST' && (parsed.error.category === 'TRANSIENT_PROVIDER_FAILURE' ||
+        (parsed.error.category === 'RESPONSE_INVALID' && sent.response.statusCode >= 200 && sent.response.statusCode < 300));
       const error = ambiguous ? err('AMBIGUOUS_POST', { httpStatus: parsed.error.httpStatus, recommendedAction: 'RECONCILE' }, false, true) : parsed.error;
       return Object.freeze({ outcome: ambiguous ? 'UNKNOWN' : 'FAILED', error, httpStatus: sent.response.statusCode,
         attempts: sent.attempts, retries: sent.retries, retryable: error.retryable, ambiguous: error.ambiguous });
