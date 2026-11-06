@@ -4,9 +4,9 @@
 
 - Objective: deliver M3 package work to the milestone branch, prepare a consolidated PR to develop, and await human acceptance.
 - Develop baseline: 89f44ced872226afecc71b195b8c0e0cd6311179.
-- Milestone branch: desktop/milestone-m3; the last package squash before the documentation update is 43307aaddeb9647ac0e963e1baf8bc131104b240. Verify the final docs+source HEAD in the consolidated PR and its checks.
+- Milestone branch: desktop/milestone-m3; the last package squash is 43307aaddeb9647ac0e963e1baf8bc131104b240. Consolidated acceptance PR: [#127](https://github.com/costaapps/ca_meta_app/pull/127) to develop. Verify the current PR head and its check conclusions directly in GitHub before making claims.
 - All 12 planned packages are squash-integrated. There are 14 package PRs total, including the M3.03 and M3.01 follow-ups. Package PRs and exact-head evidence are summarized in progress.md.
-- No consolidated PR to develop has been created yet. Do not merge it or close M3 issues before user acceptance.
+- PR #127 is the final delivery surface. Keep it unmerged and all M3 issues open until user acceptance.
 - Integration worktree: C:\Users\user\.codex\worktrees\m3-milestone-integration\ca_meta_app, branch desktop/milestone-m3.
 
 ## Completed M3.01 job-authorization follow-up
@@ -21,10 +21,10 @@ P2 advisory retained from source/security review: DurableWorker checks context j
 
 The accepted approach is fail closed: derive tenant from the persisted row, require exact job ID + claim token + workerRef + RUNNING + unexpired lease, compare the claimed type/payload/resource key, and verify the live service grant and persisted resource before any handler. Never trust caller tenant/principal or log the claim token. The configured proof hash and real credential issuer/secret provisioning remain Not confirmed until external deployment evidence exists.
 
-## Next actions
+## Delivery and resume
 
-1. Run the final milestone-level hosted candidate, planning/contract and orchestrator gates on the committed docs+source head. Do not repeat package suites locally.
-2. Open the consolidated PR desktop/milestone-m3 → develop, attach it to this task, verify its exact head and checks, and present it for user acceptance. Do not merge it.
+1. Re-read PR #127's current head SHA and required check conclusions in GitHub. If it is draft or a required gate is pending/failing, resolve only the affected gate; do not repeat already passing package suites locally.
+2. Once the exact current head is green, keep the PR ready for human review and await user acceptance. Do not merge it or close M3 issues before acceptance.
 
 ## External limits
 

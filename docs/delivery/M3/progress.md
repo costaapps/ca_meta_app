@@ -3,8 +3,8 @@
 ## Execution snapshot
 
 - Develop baseline: 89f44ced872226afecc71b195b8c0e0cd6311179 (M2 consolidated PR #105).
-- Milestone branch: desktop/milestone-m3. The last package squash before this documentation update is 43307aaddeb9647ac0e963e1baf8bc131104b240 (PR #126); verify the final docs+source head in the consolidated PR and its checks.
-- All 12 planned packages are squash-integrated, including the M3.01 job-authorization follow-up. There are 14 package PRs total because M3.03 and M3.01 each needed a follow-up. No consolidated PR to develop exists yet.
+- Milestone branch: desktop/milestone-m3. The last package squash is 43307aaddeb9647ac0e963e1baf8bc131104b240 (PR #126); the consolidated acceptance surface is [PR #127](https://github.com/costaapps/ca_meta_app/pull/127), targeting develop.
+- All 12 planned packages are squash-integrated, including the M3.01 job-authorization follow-up. There are 14 package PRs total because M3.03 and M3.01 each needed a follow-up. PR #127 is the final delivery surface; its current head and checks in GitHub are authoritative. Do not merge it or close M3 issues before user acceptance.
 - Integration worktree: C:\Users\user\.codex\worktrees\m3-milestone-integration\ca_meta_app.
 - Runtime used for local package work: Windows PowerShell, Node v24.22.2, npm 11.19.1. The current integration phase relies on hosted exact-head checks; no broad local suite is planned.
 - Project #12 is not exposed by the connected GitHub tools.
@@ -35,6 +35,6 @@
 - The old API JUnit artifact 13232145002 contained a migration preflight failure that did not reproduce in later exact-head candidate runs. Its cause remains Not confirmed.
 - No production PHP/rewrite equivalence, Suite4 issuer, real Meta grant, real email delivery, staging, DNS/TLS or production import has been established by this checkout.
 
-## Next action
+## Consolidated delivery
 
-After this documentation update is committed, run the final hosted candidate, contract, planning and orchestrator gates on the exact docs+source SHA. Then open the consolidated PR from desktop/milestone-m3 to develop with the full issue/evidence table and external limits. Do not merge it.
+PR [#127](https://github.com/costaapps/ca_meta_app/pull/127) consolidates desktop/milestone-m3 into develop with the issue-to-package evidence table, decisions, and external limits. Before any readiness or acceptance claim, confirm its current head SHA and required check conclusions on GitHub. Keep the PR unmerged and all M3 issues open until the user accepts it.
