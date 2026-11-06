@@ -201,6 +201,26 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/meta/bootstrap": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Read safe Meta flow availability and capability status
+         * @description Requires an active portal session. Returns only public app bootstrap fields and allowlisted status codes; app secrets, token settings, secret-manager references, redirect URIs, tenant IDs and provider credentials are never returned. A configured public app ID or config ID is not tenant authorization. `enabled` means only that the flow's current version, review and discovery gates are met; connection readiness still requires provider proof. Missing or unconfirmed external evidence keeps the affected flow/capability unavailable.
+         */
+        readonly get: operations["readMetaConfigurationBootstrap"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/onboarding-sessions": {
         readonly parameters: {
             readonly query?: never;
@@ -740,6 +760,36 @@ export interface components {
         readonly FlowVariant: "FACEBOOK_LOGIN" | "INSTAGRAM_VIA_FACEBOOK_LOGIN" | "INSTAGRAM_LOGIN" | "WHATSAPP_CLOUD_API" | "WHATSAPP_COEXISTENCE";
         /** @enum {string} */
         readonly MetaFlowVariant: "FACEBOOK" | "INSTAGRAM" | "WHATSAPP_EXCLUSIVE" | "WHATSAPP_COEXISTENCE";
+        /** @enum {string} */
+        readonly MetaAuthenticationVariant: "FACEBOOK_LOGIN_FOR_BUSINESS" | "INSTAGRAM_VIA_FACEBOOK_LOGIN" | "INSTAGRAM_LOGIN" | "WHATSAPP_EMBEDDED_SIGNUP" | "WHATSAPP_BUSINESS_APP_ONBOARDING";
+        /** @enum {string} */
+        readonly MetaBootstrapReason: "CONFIGURATION_MISSING" | "CONFIGURATION_DISABLED" | "VERSION_EVIDENCE_REQUIRED" | "PERMISSION_MAPPING_NOT_CONFIRMED" | "CAPABILITY_EVIDENCE_MISSING" | "ACCESS_LEVEL_NOT_CONFIRMED" | "APP_REVIEW_NOT_CONFIRMED" | "SANDBOX_NOT_CONFIRMED";
+        readonly MetaCapabilityStatus: {
+            /** @enum {string} */
+            readonly operation: "ASSET_DISCOVERY" | "SEND_MESSAGE" | "MANAGE_COMMENTS" | "MANAGE_TEMPLATES" | "READ_STATUS" | "SUBSCRIBE_WEBHOOKS" | "SYNC_HISTORY";
+            readonly enabled: boolean;
+            readonly reasonCode: components["schemas"]["MetaBootstrapReason"] | null;
+        };
+        readonly MetaBootstrapProfile: {
+            readonly flowVariant: components["schemas"]["MetaFlowVariant"];
+            readonly authVariant: components["schemas"]["MetaAuthenticationVariant"];
+            readonly enabled: boolean;
+            readonly reasonCode: components["schemas"]["MetaBootstrapReason"] | null;
+            /** @description Public Meta app identifier, included only for an enabled profile. */
+            readonly providerAppId?: string;
+            /** @description Public Embedded Signup config identifier, never authorization evidence. */
+            readonly publicConfigId?: string;
+            readonly appDomain?: string;
+            readonly javascriptSdkVersion?: string;
+            readonly embeddedSignupVersion?: string;
+            readonly capabilities: readonly components["schemas"]["MetaCapabilityStatus"][];
+        };
+        readonly MetaConfigurationBootstrap: {
+            readonly requestId: string;
+            /** @constant */
+            readonly manifestVersion: "m4.01-2026-11-06.1";
+            readonly profiles: readonly components["schemas"]["MetaBootstrapProfile"][];
+        };
         readonly FlowDefinition: {
             readonly variant: components["schemas"]["FlowVariant"];
             readonly flowVariant?: components["schemas"]["MetaFlowVariant"];
@@ -1611,6 +1661,28 @@ export interface operations {
             readonly 422: components["responses"]["Unprocessable"];
             readonly 429: components["responses"]["TooManyRequests"];
             readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly readMetaConfigurationBootstrap: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Sanitized flow availability snapshot */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MetaConfigurationBootstrap"];
+                };
+            };
+            readonly 401: components["responses"]["Unauthorized"];
             readonly default: components["responses"]["UnexpectedError"];
         };
     };

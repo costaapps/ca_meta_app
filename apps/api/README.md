@@ -10,6 +10,10 @@ marked public. Session routes also have an explicit portal-session guard; they a
 The health routes are public. `POST /api/v1/auth/preauth` creates only a rate-limited browser
 binding; it does not authenticate or establish membership. `POST /api/v1/auth/exchanges` returns
 a safe 503 when its optional trusted ticket issuer/key configuration is absent.
+`GET /api/v1/meta/bootstrap` requires a verified portal session and returns a safe allowlist-only
+projection of per-flow availability. Meta provider actions remain unavailable unless the matching
+server profile, current version evidence, permission mapping, App Review evidence and Sandbox gate
+are all satisfied. Missing Meta configuration does not prevent unrelated API startup.
 
 ## Toolchain and commands
 
@@ -49,6 +53,34 @@ only invalid or missing field names.
 | API_DATABASE_USER | 1–64 letters, digits, or underscores |
 | API_DATABASE_PASSWORD | Non-blank; valid leading/trailing whitespace is preserved and never logged |
 | API_DATABASE_CONNECT_TIMEOUT_MS | 100–5000 milliseconds |
+
+### Optional Meta app configuration
+
+`API_META_APP_CONFIGS_JSON` is an optional JSON array of server-owned app profiles. Profiles are
+strictly separated by `NODE_ENV`, product flow, and explicit auth variant. A production process
+accepts only `environment=production` plus `appMode=LIVE`; development, test and staging accept only
+their own environment with `appMode=DEVELOPMENT`. Callback and redirect URIs must use HTTPS and
+origins already listed in `API_ALLOWED_ORIGINS`; normalized `appDomain` must match the callback host.
+Graph host selection is derived from the fixed flow/auth allowlist; the registry never accepts an
+arbitrary API host.
+
+`API_META_TRUSTED_APP_IDS_JSON` is a separate, protected deployment allowlist for the current
+`NODE_ENV`; each entry binds a numeric provider app ID and reference to an exact flow/auth variant.
+Profiles carry only the reference. The runtime requires the allowlist's environment to match `NODE_ENV`
+and never accepts a raw app ID from the profile JSON. Secret-manager references must use the same
+environment namespace (`vault://meta-app/<NODE_ENV>/...`); staging rejects production namespaces.
+The deployment owner must source staging IDs from the staging Meta app configuration. Numeric IDs
+cannot prove their own Meta environment.
+
+The profile stores secret-manager references, not secret/token material. `graphApi`,
+`javascriptSdk` and `embeddedSignup` carry distinct version evidence. The server rejects malformed
+profiles or untrusted/extra fields and logs only the names of invalid configuration fields. If either
+setting needed by configured profiles is absent or does not match, startup fails closed. If no profiles
+are configured, all five variants remain unavailable with `CONFIGURATION_MISSING`. `enabled=true`
+alone never enables a flow; the code-versioned capability manifest and evidence for every required
+permission, including access, review, Sandbox and owner, must also pass. Use
+[`docs/delivery/M4/m4-01-runbook.md`](../../docs/delivery/M4/m4-01-runbook.md) for the schema, change
+process and rollback.
 
 ### Optional Suite4 ticket-entry configuration
 

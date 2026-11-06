@@ -3,6 +3,11 @@ import { createPublicKey, randomBytes } from 'node:crypto';
 import type { TicketExchangeConfiguration } from '../auth-exchange/ticket-contract.js';
 import type { ConfiguredTicketPublicKey } from '../auth-exchange/configured-ticket-key-set.js';
 import type { WorkerServiceCredentialHash } from '../identity/identity.trust.js';
+import {
+  parseMetaAppConfigurations,
+  parseTrustedMetaProviderAppIds,
+  type MetaAppConfiguration,
+} from '../meta-config/meta-app-config.configuration.js';
 
 export type RuntimeEnvironment = 'development' | 'test' | 'staging' | 'production';
 
@@ -46,6 +51,8 @@ export interface ApiEnvironment {
     readonly password: string;
     readonly connectTimeoutMs: number;
   };
+  /** Server-only profiles; absent configuration keeps every Meta action unavailable. */
+  readonly metaAppConfigurations?: readonly MetaAppConfiguration[];
   readonly portalSessionRecoveryKey: string;
   /** Optional runtime-only key ring. Missing keys intentionally disable credential operations. */
   readonly credentialKeyRing?: CredentialKeyRingConfiguration;
@@ -528,6 +535,18 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   const platformIdentityAdmins = platformIdentityAdminsField(source, invalid);
   const workerServiceCredentials = workerServiceCredentialHashesField(source, invalid);
   const credentialKeyRing = credentialKeyRingField(source, invalid);
+  const trustedMetaProviderAppIds = parseTrustedMetaProviderAppIds(
+    source.API_META_TRUSTED_APP_IDS_JSON,
+    nodeEnv as RuntimeEnvironment,
+    invalid,
+  );
+  const metaAppConfigurations = parseMetaAppConfigurations(
+    source.API_META_APP_CONFIGS_JSON,
+    nodeEnv as RuntimeEnvironment,
+    allowedOrigins,
+    invalid,
+    trustedMetaProviderAppIds,
+  );
 
   if (invalid.length > 0) {
     const fieldNames = [...new Set([...REQUIRED_FIELDS.filter((name) => source[name] === undefined || source[name]?.trim() === ''), ...invalid])];
@@ -557,6 +576,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
       password: databasePassword,
       connectTimeoutMs,
     },
+    ...(metaAppConfigurations ? { metaAppConfigurations } : {}),
     identity: {
       platformIdentityAdmins,
       ...(workerServiceCredentials ? { workerServiceCredentials } : {}),

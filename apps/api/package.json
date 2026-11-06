@@ -14,6 +14,7 @@
     "legacy-import:dry-run": "node dist/legacy-import/legacy-import.cli.js --dry-run --fixture synthetic-inventory.json",
     "test:m3-11": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/test/m3-11-legacy-import.spec.js",
     "test:m3-12": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/test/m3-12-asset-catalog.spec.js",
+    "test:m4-01": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/test/m4-01-meta-app-config.spec.js",
     "test:m3-09": "node ../../tools/m3-09/run-focused-test.mjs",
     "test:m3-08": "node ../../tools/m3-08/run-focused-test.mjs",
     "lint": "node ../../tools/m2-08/lint-api-boundary.mjs",

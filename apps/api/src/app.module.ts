@@ -20,6 +20,7 @@ import { MetaAssetsModule } from './meta-assets/meta-assets.module.js';
 import { MagicLinkModule } from './auth/magic-link.module.js';
 import { PrivacyModule } from './privacy/privacy.module.js';
 import { OnboardingStatusModule } from './onboarding/onboarding-status.module.js';
+import { MetaAppConfigModule } from './meta-config/meta-app-config.module.js';
 
 @Module({})
 export class ApiModule {
@@ -50,6 +51,7 @@ export class ApiModule {
         MagicLinkModule.register(environment),
         PrivacyModule.register(environment),
         OnboardingStatusModule.register(identityModule, environment),
+        MetaAppConfigModule.register(identityModule, environment),
       ],
       providers: [
         { provide: STRUCTURED_LOGGER, useClass: ConsoleStructuredLogger },
