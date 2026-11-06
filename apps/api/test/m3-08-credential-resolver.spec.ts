@@ -80,7 +80,7 @@ function context(assetId: string, tenantId = tenantA, appConfigurationId = appA,
   return { tenantId, provider: 'META', appConfigurationId, environment, assetId, operation };
 }
 
-function policyFor(value: CredentialResolutionContext): CredentialOperationPolicy {
+function policyFor(value: CredentialResolutionContext, overrides: Partial<CredentialOperationPolicy> = {}): CredentialOperationPolicy {
   return {
     tenantId: value.tenantId,
     provider: value.provider,
@@ -104,6 +104,7 @@ function policyFor(value: CredentialResolutionContext): CredentialOperationPolic
     }],
     allowExpiring: false,
     maxHealthObservationAgeSeconds: 3600,
+    ...overrides,
   };
 }
 
@@ -389,6 +390,56 @@ test('revocation and version changes invalidate one-use handles; the resolver ke
     error instanceof CredentialResolutionError && error.code === 'CONTEXT_CHANGED');
   assert.equal(freshRepository.calls.length, 2);
   assert.equal(freshRuntime.vault.calls.length, 0);
+});
+
+test('keeps Instagram auth variants distinct and binds one-use handles to the exact context', async () => {
+  const scope = await serviceScopeFor(tenantA);
+  const value = context(uuid(79), tenantA, appA, 'MANAGE_COMMENTS');
+  const instagramPolicy = policyFor(value, {
+    flowVariant: 'INSTAGRAM',
+    authVariant: 'INSTAGRAM_VIA_FACEBOOK_LOGIN',
+    assetKinds: ['INSTAGRAM_BUSINESS_ACCOUNT'],
+    ancestryRules: [],
+  });
+  const repository = new MemoryResolutionRepository();
+  repository.snapshots.set(value.assetId, {
+    asset: asset(value.assetId, 'INSTAGRAM_BUSINESS_ACCOUNT'),
+    candidates: [candidate(value, { grantAssetKind: 'INSTAGRAM_BUSINESS_ACCOUNT' })],
+  });
+  const policies = new MemoryPolicies();
+  policies.policies.set(value.assetId, instagramPolicy);
+  const runtime = resolver(repository, policies);
+  const resolved = await runtime.service.resolve(value, { serviceScope: scope, correlationId });
+
+  let callbackRan = false;
+  await runtime.service.withCredentialForContext(resolved.handle, {
+    ...value,
+    flowVariant: 'INSTAGRAM',
+    authVariant: 'INSTAGRAM_VIA_FACEBOOK_LOGIN',
+  }, async (secret) => {
+    callbackRan = true;
+    assert.match(secret, /^synthetic-secret-marker-/);
+  });
+  assert.equal(callbackRan, true);
+  assert.equal(runtime.vault.calls.length, 1);
+
+  const mismatchHandle = await runtime.service.resolve(value, { serviceScope: scope, correlationId });
+  await assert.rejects(runtime.service.withCredentialForContext(mismatchHandle.handle, {
+    ...value,
+    flowVariant: 'INSTAGRAM',
+    authVariant: 'INSTAGRAM_LOGIN',
+  }, async () => undefined), (error: unknown) =>
+    error instanceof CredentialResolutionError && error.code === 'CONTEXT_CHANGED');
+  assert.equal(runtime.vault.calls.length, 1);
+
+  policies.policies.set(value.assetId, policyFor(value, {
+    flowVariant: 'INSTAGRAM',
+    authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS',
+    assetKinds: ['INSTAGRAM_BUSINESS_ACCOUNT'],
+    ancestryRules: [],
+  }));
+  await assert.rejects(runtime.service.resolve(value, { serviceScope: scope, correlationId }), (error: unknown) =>
+    error instanceof CredentialResolutionError && error.code === 'DEPENDENCY_UNAVAILABLE');
 });
 
 test('rejects conventional phone registration for Coexistence and fails if selection audit is unavailable', async () => {

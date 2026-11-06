@@ -21,11 +21,15 @@ import { MagicLinkModule } from './auth/magic-link.module.js';
 import { PrivacyModule } from './privacy/privacy.module.js';
 import { OnboardingStatusModule } from './onboarding/onboarding-status.module.js';
 import { MetaAppConfigModule } from './meta-config/meta-app-config.module.js';
+import { MetaGraphModule } from './meta-graph/meta-graph.module.js';
 
 @Module({})
 export class ApiModule {
   static register(environment: ApiEnvironment): DynamicModule {
     const identityModule = IdentityModule.register(environment);
+    const metaAssetsModule = MetaAssetsModule.register(identityModule, environment);
+    const metaAppConfigModule = MetaAppConfigModule.register(identityModule, environment);
+    const metaGraphModule = MetaGraphModule.register(metaAssetsModule, metaAppConfigModule);
     const ticket = environment.portalEntryTicket;
     const authExchangeModule = ticket
       ? AuthExchangeModule.register({
@@ -45,13 +49,14 @@ export class ApiModule {
       module: ApiModule,
       imports: [
         HealthModule.register(environment),
-        MetaAssetsModule.register(identityModule, environment),
+        metaAssetsModule,
         identityModule,
         authExchangeModule,
         MagicLinkModule.register(environment),
         PrivacyModule.register(environment),
         OnboardingStatusModule.register(identityModule, environment),
-        MetaAppConfigModule.register(identityModule, environment),
+        metaAppConfigModule,
+        metaGraphModule,
       ],
       providers: [
         { provide: STRUCTURED_LOGGER, useClass: ConsoleStructuredLogger },

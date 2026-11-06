@@ -11,6 +11,7 @@ import type {
   CredentialResolutionAuditPort,
   CredentialResolutionAuthorizationPort,
   CredentialResolutionCandidate,
+  CredentialExecutionContext,
   CredentialResolutionContext,
   CredentialResolutionHandle,
   CredentialResolutionRepository,
@@ -26,7 +27,7 @@ const MAX_ANCESTRY_DEPTH = 4;
 
 const FLOW_AUTH_VARIANTS = {
   FACEBOOK: ['FACEBOOK_LOGIN_FOR_BUSINESS'],
-  INSTAGRAM: ['FACEBOOK_LOGIN_FOR_BUSINESS', 'INSTAGRAM_LOGIN'],
+  INSTAGRAM: ['INSTAGRAM_VIA_FACEBOOK_LOGIN', 'INSTAGRAM_LOGIN'],
   WHATSAPP_EXCLUSIVE: ['WHATSAPP_EMBEDDED_SIGNUP'],
   WHATSAPP_COEXISTENCE: ['WHATSAPP_BUSINESS_APP_ONBOARDING'],
 } as const;
@@ -70,7 +71,7 @@ function validContext(context: CredentialResolutionContext): boolean {
   return !!context && context.provider === 'META' && isEnvironment(context.environment) &&
     UUID.test(context.tenantId) && UUID.test(context.appConfigurationId) && UUID.test(context.assetId) &&
     ['ASSET_DISCOVERY', 'READ_STATUS', 'SUBSCRIBE_WEBHOOKS', 'SEND_MESSAGE', 'MANAGE_TEMPLATES',
-      'PHONE_REGISTRATION_CONVENTIONAL'].includes(context.operation);
+      'MANAGE_COMMENTS', 'SYNC_HISTORY', 'PHONE_REGISTRATION_CONVENTIONAL'].includes(context.operation);
 }
 
 function validPolicy(context: CredentialResolutionContext, policy: CredentialOperationPolicy): boolean {
@@ -323,13 +324,38 @@ export class CredentialResolverService {
 
   /** The trusted adapter receives plaintext only inside the vault callback. Handles are one-use. */
   async withCredential(handle: CredentialResolutionHandle, execute: (secret: string) => Promise<void>): Promise<void> {
+    await this.executeCredential(handle, undefined, execute);
+  }
+
+  /** Consume a handle only when its hidden resolver policy exactly matches the adapter context. */
+  async withCredentialForContext(
+    handle: CredentialResolutionHandle,
+    expected: CredentialExecutionContext,
+    execute: (secret: string) => Promise<void>,
+  ): Promise<void> {
+    await this.executeCredential(handle, expected, execute);
+  }
+
+  private async executeCredential(
+    handle: CredentialResolutionHandle,
+    expected: CredentialExecutionContext | undefined,
+    execute: (secret: string) => Promise<void>,
+  ): Promise<void> {
     if (typeof handle !== 'object' || handle === null) throw new CredentialResolutionError('ACCESS_DENIED');
     const state = this.handles.get(handle);
     if (!state) throw new CredentialResolutionError('ACCESS_DENIED');
     this.handles.delete(handle);
+    if (expected && (!validContext(expected) || expected.flowVariant !== state.policy.flowVariant ||
+        expected.authVariant !== state.policy.authVariant || expected.tenantId !== state.context.tenantId ||
+        expected.provider !== state.context.provider || expected.appConfigurationId !== state.context.appConfigurationId ||
+        expected.environment !== state.context.environment || expected.assetId !== state.context.assetId ||
+        expected.operation !== state.context.operation)) {
+      throw new CredentialResolutionError('CONTEXT_CHANGED');
+    }
     await this.authorize(state.actor.serviceScope, state.context.tenantId);
     const currentPolicy = await this.findPolicy(state.context);
-    if (currentPolicy.version !== state.policy.version) throw new CredentialResolutionError('CONTEXT_CHANGED');
+    if (currentPolicy.version !== state.policy.version || currentPolicy.flowVariant !== state.policy.flowVariant ||
+        currentPolicy.authVariant !== state.policy.authVariant) throw new CredentialResolutionError('CONTEXT_CHANGED');
     const { selected } = await this.inspectAndSelect(state.context, currentPolicy);
     if (!isSameSelection(selected.candidate, state.candidate)) throw new CredentialResolutionError('CONTEXT_CHANGED');
     await this.vault.withCredential({

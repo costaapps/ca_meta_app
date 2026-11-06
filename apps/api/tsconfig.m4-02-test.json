@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-test",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/meta-config/meta-app-config.configuration.ts",
+    "src/meta-config/meta-app-config.registry.ts",
+    "src/meta-config/capability-manifest.ts",
+    "src/config/environment.ts",
+    "src/credentials/credential-resolver.types.ts",
+    "src/meta-assets/meta-assets.types.ts",
+    "src/identity/identity.types.ts",
+    "src/meta-graph/**/*.ts",
+    "test/m4-02-meta-graph.spec.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}
