@@ -52,28 +52,45 @@ export type MetaWebhookProcessResult =
 
 export interface MetaWebhookStatusFence {
   readonly leaseVersion: number;
+  readonly leaseToken: string;
   readonly eventKey: string;
   readonly providerTimestamp: string;
 }
 
-/** Must treat eventRef as an idempotency key. This port is local-only; no Meta API calls belong here. */
-/** For `statuses`, require statusFence and atomically reject a stale lease or provider timestamp before changing delivery state. */
-export interface MetaWebhookItemProcessor {
-  process(input: {
-    readonly eventRef: string;
-    readonly eventKey: string;
-    readonly schemaVersion: number;
-    readonly tenantId: string;
-    readonly appConfigurationId: string;
-    readonly assetId: string;
-    readonly eventType: string;
+interface MetaWebhookItemProcessorInputBase {
+  readonly eventRef: string;
+  readonly eventKey: string;
+  readonly schemaVersion: number;
+  readonly tenantId: string;
+  readonly appConfigurationId: string;
+  readonly assetId: string;
+  readonly eventType: string;
+  readonly item: Readonly<Record<string, unknown>>;
+}
+
+export type MetaWebhookItemProcessorInput = MetaWebhookItemProcessorInputBase & (
+  | {
+    readonly itemKind: 'statuses';
+    readonly providerTimestamp: string;
+    readonly providerMessageId: string;
+    readonly providerStatus: string;
+    readonly providerStatusRank: number | null;
+    readonly statusFence: MetaWebhookStatusFence;
+  }
+  | {
+    readonly itemKind: 'change' | 'messages' | 'messaging';
     readonly providerTimestamp: string | null;
     readonly providerMessageId: string | null;
-    readonly providerStatus: string | null;
-    readonly providerStatusRank: number | null;
-    readonly statusFence?: MetaWebhookStatusFence;
-    readonly item: Readonly<Record<string, unknown>>;
-  }, signal?: AbortSignal): Promise<MetaWebhookProcessResult>;
+    readonly providerStatus: null;
+    readonly providerStatusRank: null;
+    readonly statusFence: null;
+  }
+);
+
+/** Must treat eventRef as an idempotency key. This port is local-only; no Meta API calls belong here. */
+/** For `statuses`, atomically verify statusFence is current and reject a stale provider timestamp before changing delivery state. */
+export interface MetaWebhookItemProcessor {
+  process(input: MetaWebhookItemProcessorInput, signal?: AbortSignal): Promise<MetaWebhookProcessResult>;
 }
 
 export interface MetaWebhookReplayAuthorization {

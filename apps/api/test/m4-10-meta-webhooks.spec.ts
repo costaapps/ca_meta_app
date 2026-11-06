@@ -403,7 +403,8 @@ test('worker passes the status fence to the local processor and releases its cla
   }, 'synthetic-worker-1');
   assert.equal(await worker.runOne(), true);
   assert.deepEqual((processorInput as { statusFence: unknown }).statusFence, {
-    leaseVersion: 8, eventKey: 'b'.repeat(64), providerTimestamp: statusLease.providerTimestamp,
+    leaseVersion: 8, leaseToken: statusLease.leaseToken,
+    eventKey: 'b'.repeat(64), providerTimestamp: statusLease.providerTimestamp,
   });
   assert.deepEqual(finalized, {
     eventId: 'item-synthetic-status', workerRef: 'synthetic-worker-1', leaseVersion: 3,
