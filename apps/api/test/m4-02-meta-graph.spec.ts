@@ -101,7 +101,7 @@ test('HTTP 200 Graph error normalizes safe type/code/subcode/trace and omits sec
   assert.equal(transport.calls[0]?.host, 'graph.facebook.com');
   assert.equal(transport.calls[0]?.path, `/v27.0/${providerObjectId}/messages`);
   assert.equal(transport.calls[0]?.path.includes('access_token'), false);
-  assert.equal(assetId !== providerObjectId, true, 'internal tenant asset UUID and provider object ID are distinct');
+  assert.notEqual(assetId, providerObjectId, 'internal tenant asset UUID and provider object ID are distinct');
   assert.equal(runtime.credentials.contexts[0]?.assetId, assetId);
   assert.equal(transport.calls[0]?.correlationId, correlationId);
   assert.equal(transport.calls[0]?.headers['authorization'], `Bearer ${TOKEN}`);
