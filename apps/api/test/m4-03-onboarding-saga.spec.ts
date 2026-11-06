@@ -65,7 +65,7 @@ class MemorySagaCheckpointPort implements OnboardingSagaCheckpointPort {
       auth_variant: 'WHATSAPP_EMBEDDED_SIGNUP', configuration_ref: 'synthetic-config-v1',
       capability_manifest_version: 'meta-capability-manifest-v1', graph_api_version: 'v27.0',
       expires_at: new Date(Date.now() + 60_000), status: this.status, steps_json: this.steps,
-      saga_checkpoint_json: this.evidence,
+      saga_checkpoint_json: JSON.stringify(this.evidence),
     };
     return { row, steps: [...this.steps], evidence: { ...this.evidence } };
   }

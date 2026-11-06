@@ -162,7 +162,7 @@ function makeService(
   } as unknown as TenantAuthorizationService;
   const configurations = {
     resolve(flowVariant: OnboardingCreateCommand['flowVariant']) {
-      const authVariant = flowVariant === 'FACEBOOK_LOGIN' ? 'FACEBOOK_LOGIN_FOR_BUSINESS'
+      const authVariant: OnboardingCreateCommand['authVariant'] = flowVariant === 'FACEBOOK_LOGIN' ? 'FACEBOOK_LOGIN_FOR_BUSINESS'
         : flowVariant === 'INSTAGRAM_VIA_FACEBOOK_LOGIN' ? 'INSTAGRAM_VIA_FACEBOOK_LOGIN'
           : flowVariant === 'INSTAGRAM_LOGIN' ? 'INSTAGRAM_LOGIN'
             : flowVariant === 'WHATSAPP_COEXISTENCE' ? 'WHATSAPP_BUSINESS_APP_ONBOARDING' : 'WHATSAPP_EMBEDDED_SIGNUP';

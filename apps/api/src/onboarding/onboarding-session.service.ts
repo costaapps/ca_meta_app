@@ -14,6 +14,7 @@ import {
   type OnboardingCreateInput,
   type OnboardingCreated,
   type OnboardingFlowConfigurationResolver,
+  type OnboardingFlowVariant,
   type OnboardingProviderLaunchPort,
   type OnboardingProviderOutcome,
   type OnboardingSessionStore,
@@ -223,6 +224,7 @@ export function metaProfileForOnboardingFlow(flowVariant: OnboardingFlowVariant)
     case 'INSTAGRAM_LOGIN': return { flowVariant: 'INSTAGRAM', authVariant: 'INSTAGRAM_LOGIN' };
     case 'WHATSAPP_CLOUD_API': return { flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP' };
     case 'WHATSAPP_COEXISTENCE': return { flowVariant: 'WHATSAPP_COEXISTENCE', authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING' };
+    default: throw new OnboardingConflictError();
   }
 }
 

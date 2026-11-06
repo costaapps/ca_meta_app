@@ -57,7 +57,7 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     stateHash: providerStateHash, codeHash: hashOnboardingValue(rawCode),
   }));
   const codeContext = { tenantId, onboardingId, flowVariant: 'WHATSAPP_CLOUD_API' as const,
-    authVariant: 'WHATSAPP_EMBEDDED_SIGNUP', configurationRef: 'synthetic-whatsapp-config-v1' };
+    authVariant: 'WHATSAPP_EMBEDDED_SIGNUP' as const, configurationRef: 'synthetic-whatsapp-config-v1' };
   const sealedCode = protector.seal(codeContext, rawCode);
   let jobId: string | undefined;
 
