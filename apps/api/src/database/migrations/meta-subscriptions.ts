@@ -133,6 +133,7 @@ const binding = tableStep('create-meta-subscription-bindings', 'ca_meta_subscrip
     { name: 'ix_ca_meta_subscription_binding_asset', columns: ['tenant_id', 'asset_id', 'binding_state'], unique: false },
     { name: 'ix_ca_meta_subscription_binding_asset_context', columns: ['tenant_id', 'asset_id', 'app_configuration_id', 'provider', 'environment'], unique: false },
     { name: 'ix_ca_meta_subscription_binding_grant', columns: ['tenant_id', 'authorization_id', 'binding_state'], unique: false },
+    { name: 'ix_ca_meta_subscription_binding_authorization_context', columns: ['tenant_id', 'authorization_id', 'app_configuration_id', 'provider', 'environment'], unique: false },
   ],
   [
     { name: 'fk_ca_meta_subscription_binding_target', columns: ['tenant_id', 'target_id', 'app_configuration_id', 'provider', 'environment'], table: 'ca_meta_subscription_targets', referencedColumns: ['tenant_id', 'id', 'app_configuration_id', 'provider', 'environment'] },
@@ -157,6 +158,7 @@ const binding = tableStep('create-meta-subscription-bindings', 'ca_meta_subscrip
     KEY ix_ca_meta_subscription_binding_asset (tenant_id, asset_id, binding_state),
     KEY ix_ca_meta_subscription_binding_asset_context (tenant_id, asset_id, app_configuration_id, provider, environment),
     KEY ix_ca_meta_subscription_binding_grant (tenant_id, authorization_id, binding_state),
+    KEY ix_ca_meta_subscription_binding_authorization_context (tenant_id, authorization_id, app_configuration_id, provider, environment),
     CONSTRAINT ck_ca_meta_subscription_binding_provider CHECK (provider = 'META'),
     CONSTRAINT ck_ca_meta_subscription_binding_state CHECK (binding_state IN ('ACTIVE','REMOVED')),
     CONSTRAINT ck_ca_meta_subscription_binding_json CHECK (JSON_VALID(desired_fields)),
