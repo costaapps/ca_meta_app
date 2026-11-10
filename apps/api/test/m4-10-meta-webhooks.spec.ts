@@ -9,9 +9,11 @@ import {
   MetaWebhookSignatureError,
 } from '../src/meta-webhooks/meta-webhook-ingress.service.js';
 import { compareMetaWebhookStatusOrder, itemFromProtectedDelivery, MetaWebhookPayloadValidationError,
-  parseMetaWebhookDelivery } from '../src/meta-webhooks/meta-webhook-validation.js';
+  META_WEBHOOK_RAW_POST_PATH, parseMetaWebhookDelivery } from '../src/meta-webhooks/meta-webhook-validation.js';
 import { verifyChallengeToken, verifyMetaWebhookSignature } from '../src/meta-webhooks/meta-webhook-signature.js';
 import { MetaWebhookRepository } from '../src/meta-webhooks/meta-webhook.repository.js';
+import type { MetaWebhookEventRow } from '../src/meta-webhooks/meta-webhook.repository.js';
+import { MetaWebhookReplayService } from '../src/meta-webhooks/meta-webhook-replay.service.js';
 import { MetaWebhookWorker } from '../src/meta-webhooks/meta-webhook-worker.js';
 import type {
   MetaWebhookPayloadProtector,
@@ -104,6 +106,59 @@ test('per-item parsing preserves message and status changes and routes only by o
   assert.equal(parsed.items.some((item) => item.resourceExternalId === '+15550000001'), false);
 });
 
+test('WhatsApp account updates use the WABA while messages/statuses without phone metadata stay unmapped', () => {
+  const raw = Buffer.from(JSON.stringify({
+    object: 'whatsapp_business_account',
+    entry: [
+      { id: 'synthetic-waba-account', changes: [{ field: 'account_update', value: { event: 'name_update' } }] },
+      { id: 'synthetic-waba-missing-phone', changes: [{ field: 'messages', value: {
+        messages: [{ id: 'wamid.synthetic.missing-phone', timestamp: '1793980800', type: 'text' }],
+        statuses: [{ id: 'wamid.synthetic.missing-phone', status: 'delivered', timestamp: '1793980801' }],
+      } }] },
+    ],
+  }), 'utf8');
+  const parsed = parseMetaWebhookDelivery(raw);
+  const accountEvent = parsed.items.find((item) => item.field === 'account_update');
+  assert.deepEqual(accountEvent?.resourceKinds, ['WHATSAPP_BUSINESS_ACCOUNT']);
+  assert.equal(accountEvent?.resourceExternalId, 'synthetic-waba-account');
+  const messageAndStatus = parsed.items.filter((item) => item.locator.nestedKind === 'messages' || item.locator.nestedKind === 'statuses');
+  assert.equal(messageAndStatus.length, 2);
+  assert.ok(messageAndStatus.every((item) => item.resourceKinds.length === 0 && item.resourceExternalId === null),
+    'entry.id is not used as a fallback asset for individual messages or statuses');
+});
+
+test('history and message echoes route only by each item phone number and never by the WABA entry', () => {
+  const raw = Buffer.from(JSON.stringify({
+    object: 'whatsapp_business_account',
+    entry: [{ id: 'synthetic-waba-unconfirmed-family', changes: [
+      { field: 'history', value: { messages: [
+        { id: 'wamid.history.with-phone', phone_number_id: 'synthetic-history-phone' },
+        { id: 'wamid.history.without-phone' },
+      ] } },
+      { field: 'smb_message_echoes', value: { messages: [
+        { id: 'wamid.echo.with-phone', phone_number_id: 'synthetic-echo-phone' },
+        { id: 'wamid.echo.without-phone' },
+      ] } },
+      { field: 'smb_app_state_sync', value: { metadata: { phone_number_id: 'synthetic-unconfirmed-phone' }, state: 'synthetic' } },
+    ] }],
+  }), 'utf8');
+  const parsed = parseMetaWebhookDelivery(raw);
+  const history = parsed.items.filter((item) => item.field === 'history');
+  const echoes = parsed.items.filter((item) => item.field === 'smb_message_echoes');
+  const appState = parsed.items.find((item) => item.field === 'smb_app_state_sync');
+  assert.deepEqual(history.map((item) => item.resourceExternalId), ['synthetic-history-phone', null]);
+  assert.deepEqual(echoes.map((item) => item.resourceExternalId), ['synthetic-echo-phone', null]);
+  assert.ok([...history, ...echoes].filter((item) => item.resourceExternalId === null)
+    .every((item) => item.resourceKinds.length === 0), 'missing leaf references stay tenantless');
+  assert.deepEqual(appState?.resourceKinds, [], 'unconfirmed account-state shape has no WABA fallback');
+});
+
+test('raw-body boundary matches the canonical appConfigRef route shape', () => {
+  assert.equal(META_WEBHOOK_RAW_POST_PATH.test('/api/v1/webhooks/meta/appConfig_01.v2-3'), true);
+  assert.equal(META_WEBHOOK_RAW_POST_PATH.test('/api/v1/webhooks/meta/config/ref'), false);
+  assert.equal(META_WEBHOOK_RAW_POST_PATH.test(`/api/v1/webhooks/meta/${'a'.repeat(97)}`), false);
+});
+
 test('provider status ordering rejects older statuses and fails closed on ambiguous timestamp ties', () => {
   const sent = { timestamp: '2026-11-06T00:00:01.000Z', status: 'sent', rank: 10 };
   const delivered = { timestamp: '2026-11-06T00:00:02.000Z', status: 'delivered', rank: 20 };
@@ -113,6 +168,12 @@ test('provider status ordering rejects older statuses and fails closed on ambigu
   assert.equal(compareMetaWebhookStatusOrder(sent, delivered), 'OLDER');
   assert.equal(compareMetaWebhookStatusOrder(readAtSameSecond, delivered), 'NEWER');
   assert.equal(compareMetaWebhookStatusOrder(failedAtSameSecond, delivered), 'AMBIGUOUS');
+  assert.equal(compareMetaWebhookStatusOrder(
+    { timestamp: '2026-11-06T00:00:03.000Z', status: 'sent', rank: 10 }, delivered,
+  ), 'OLDER', 'a later timestamp cannot regress the known progress rank');
+  assert.equal(compareMetaWebhookStatusOrder(
+    { timestamp: '2026-11-06T00:00:03.000Z', status: 'failed', rank: null }, delivered,
+  ), 'AMBIGUOUS', 'an unknown status rank is never authorized by a newer timestamp');
 });
 
 test('status claim suppresses provider timestamps older than the latest processed item', async () => {
@@ -157,16 +218,59 @@ test('envelope bounds reject malformed and oversized bodies', () => {
   assert.throws(() => parseMetaWebhookDelivery(Buffer.from('{"object":"page","entry":[]}')), MetaWebhookPayloadValidationError);
 });
 
-test('app ID configuration is exact to the runtime environment and rejects secret conflicts', () => {
-  const resolver = new MetaWebhookConfigurationResolver([fakeProfile()], apiEnvironment().nodeEnv);
-  assert.equal(resolver.resolve('1234567890')?.appSecretRef, 'vault://meta-app/test/synthetic/app-secret');
-  assert.equal(resolver.resolve('9999999999'), undefined);
-  const conflict = new MetaWebhookConfigurationResolver([
-    fakeProfile(), fakeProfile({ flowVariant: 'WHATSAPP_COEXISTENCE', appSecretRef: 'vault://meta-app/test/other/app-secret' }),
+test('appConfigRef resolves one exact profile in the runtime environment and rejects duplicates', () => {
+  const profile = fakeProfile();
+  const resolver = new MetaWebhookConfigurationResolver([profile], apiEnvironment().nodeEnv);
+  assert.equal(resolver.resolveByAppConfigRef('synthetic-config')?.providerAppId, '1234567890');
+  const sharedAppId = new MetaWebhookConfigurationResolver([
+    profile, fakeProfile({ configurationRef: 'synthetic-coexistence-config', flowVariant: 'WHATSAPP_COEXISTENCE',
+      authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING' }),
   ], 'test');
-  assert.equal(conflict.resolve('1234567890'), undefined);
+  assert.equal(sharedAppId.resolveByAppConfigRef('synthetic-config')?.configurationRef, 'synthetic-config');
+  assert.equal(sharedAppId.resolveByAppConfigRef('synthetic-coexistence-config')?.configurationRef,
+    'synthetic-coexistence-config', 'profiles sharing one provider App ID remain individually resolvable');
+  assert.equal(resolver.resolveByAppConfigRef('1234567890'), undefined, 'the public route reference is not the provider App ID');
+  const conflict = new MetaWebhookConfigurationResolver([
+    profile, fakeProfile({ flowVariant: 'WHATSAPP_COEXISTENCE', authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING',
+      appSecretRef: 'vault://meta-app/test/other/app-secret' }),
+  ], 'test');
+  assert.equal(conflict.resolveByAppConfigRef('synthetic-config'), undefined, 'duplicate public references fail closed even when profiles differ');
   const otherEnvironment = new MetaWebhookConfigurationResolver([fakeProfile({ environment: 'staging' })], 'test');
-  assert.equal(otherEnvironment.resolve('1234567890'), undefined);
+  assert.equal(otherEnvironment.resolveByAppConfigRef('synthetic-config'), undefined);
+});
+
+test('quarantine replay fails closed when the durable source configuration is missing or ambiguous', async () => {
+  const profile = fakeProfile();
+  const reasons: string[] = [];
+  const row = {
+    id: 'event-synthetic-quarantine', provider_app_id: '1234567890', environment: 'test',
+    delivery_id: '12345678-1234-4123-8123-123456789abc', item_locator_json: '{}', event_ref: 'a'.repeat(64),
+    app_configuration_ref: null, delivery_provider_app_id: '1234567890', delivery_environment: 'test',
+    key_reference: 'synthetic-key', nonce: Buffer.alloc(12), authentication_tag: Buffer.alloc(16),
+    ciphertext: Buffer.from('synthetic'), expires_at: new Date(Date.now() + 60_000).toISOString(),
+  } as unknown as MetaWebhookEventRow;
+  let currentRow = row;
+  const repository = {
+    async getQuarantined() { return currentRow; },
+    async recordReplayUnavailable(input: { readonly reasonCode: string }) { reasons.push(input.reasonCode); },
+  } as unknown as MetaWebhookRepository;
+  const protector: MetaWebhookPayloadProtector = {
+    async protect(input) { return protectedPayload(input.reference, input.rawBody); },
+    async unprotect() { throw new Error('unprotect must not run without a unique exact profile'); },
+  };
+  const authorization = { async assertAuthorized() { return undefined; } };
+  const replay = new MetaWebhookReplayService([profile], 'test', repository, protector, authorization);
+  assert.equal(await replay.replayQuarantined({ eventId: row.id, actorRef: 'synthetic-operator', caseRef: 'synthetic-case' }),
+    'STILL_QUARANTINED');
+  assert.equal(reasons.pop(), 'APPLICATION_CONTEXT_UNAVAILABLE', 'missing source configuration stays quarantined');
+
+  currentRow = { ...row, app_configuration_ref: 'synthetic-config' };
+  const ambiguousReplay = new MetaWebhookReplayService([
+    profile, fakeProfile({ flowVariant: 'WHATSAPP_COEXISTENCE', authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING' }),
+  ], 'test', repository, protector, authorization);
+  assert.equal(await ambiguousReplay.replayQuarantined({ eventId: row.id, actorRef: 'synthetic-operator', caseRef: 'synthetic-case' }),
+    'STILL_QUARANTINED');
+  assert.equal(reasons.pop(), 'APPLICATION_CONTEXT_UNAVAILABLE', 'duplicate exact references stay quarantined');
 });
 
 test('signature is checked before parsing, and challenge never requests an App Secret', async () => {
@@ -189,11 +293,11 @@ test('signature is checked before parsing, and challenge never requests an App S
     new MetaWebhookConfigurationResolver([fakeProfile()], 'test'), secrets, protector, repository,
   );
 
-  assert.equal(await service.challenge({ providerAppId: '1234567890', mode: 'subscribe',
+  assert.equal(await service.challenge({ appConfigRef: 'synthetic-config', mode: 'subscribe',
     verifyToken: verificationToken, challenge: 'synthetic-challenge' }), 'synthetic-challenge');
   assert.equal(calls.verification, 1);
   assert.equal(calls.appSecret, 0);
-  await assert.rejects(service.ingest({ providerAppId: '1234567890', rawBody: Buffer.from('{', 'utf8'), signature: 'sha256=bad' }), MetaWebhookSignatureError);
+  await assert.rejects(service.ingest({ appConfigRef: 'synthetic-config', rawBody: Buffer.from('{', 'utf8'), signature: 'sha256=bad' }), MetaWebhookSignatureError);
   assert.equal(calls.protect, 0);
   assert.equal(calls.persist, 0);
 });
@@ -225,7 +329,7 @@ test('ingress persists signature-verification evidence before it reports success
   const service = new MetaWebhookIngressService(new MetaWebhookConfigurationResolver([profile], 'test'), secrets, protector, repository);
   let settled = false;
   const receivedAt = new Date('2000-01-01T00:00:00.000Z');
-  const pending = service.ingest({ providerAppId: '1234567890', rawBody: raw, signature: signature(raw), receivedAt })
+  const pending = service.ingest({ appConfigRef: 'synthetic-config', rawBody: raw, signature: signature(raw), receivedAt })
     .then((value) => { settled = true; return value; });
   await persistenceStarted;
   assert.equal(settled, false);
@@ -236,15 +340,23 @@ test('ingress persists signature-verification evidence before it reports success
   assert.equal(settled, true);
 });
 
-test('unknown and conflicting catalog owners persist tenantless quarantine items', async () => {
+test('unknown, conflicting, and missing asset references persist tenantless quarantine items', async () => {
+  const missingPhoneMetadata = Buffer.from(JSON.stringify({
+    object: 'whatsapp_business_account',
+    entry: [{ id: 'synthetic-waba-missing-phone', changes: [{ field: 'messages', value: {
+      messages: [{ id: 'wamid.synthetic.missing-phone', timestamp: '1793980800', type: 'text' }],
+      statuses: [{ id: 'wamid.synthetic.missing-phone', status: 'delivered', timestamp: '1793980801' }],
+    } }] }],
+  }), 'utf8');
   const scenarios = [
-    { routes: [], reason: 'UNKNOWN_ASSET' },
+    { raw: envelope(), routes: [], reason: 'UNKNOWN_ASSET' },
     { routes: [
       { tenant_id: 'tenant-synthetic-a', app_configuration_id: 'config-synthetic-a', asset_id: 'asset-synthetic-a' },
       { tenant_id: 'tenant-synthetic-b', app_configuration_id: 'config-synthetic-b', asset_id: 'asset-synthetic-b' },
-    ], reason: 'CONFLICTING_ASSET_OWNER' },
+    ], raw: envelope(), reason: 'CONFLICTING_ASSET_OWNER' },
+    { raw: missingPhoneMetadata, routes: [], reason: 'RESOURCE_REFERENCE_MISSING' },
   ];
-  for (const { routes, reason } of scenarios) {
+  for (const { raw, routes, reason } of scenarios) {
     const inserted: unknown[][] = [];
     const manager = {
       async query(sql: string, parameters: unknown[] = []) {
@@ -263,11 +375,10 @@ test('unknown and conflicting catalog owners persist tenantless quarantine items
       async transaction<T>(callback: (value: typeof manager) => Promise<T>) { return callback(manager); },
     };
     const repository = new MetaWebhookRepository({ async getDataSource() { return dataSource; } } as never);
-    const raw = envelope();
-    const item = parseMetaWebhookDelivery(envelope()).items[0];
+    const item = parseMetaWebhookDelivery(raw).items[0];
     assert.ok(item);
     const result = await repository.persist({
-      application: { providerAppId: '1234567890', environment: 'test', appSecretRef: 'secret-ref', providerAppIdRef: 'app-ref' },
+      application: { configurationRef: 'synthetic-config', providerAppId: '1234567890', environment: 'test', appSecretRef: 'secret-ref', providerAppIdRef: 'app-ref' },
       items: [item], rawBody: raw, payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw),
       receivedAt: new Date(), signatureVerifiedAt: new Date(),
     });
@@ -303,7 +414,7 @@ test('concurrent redelivery acknowledges only after the unique-key winner is vis
   const dataSource = { manager, async transaction<T>(callback: (value: typeof manager) => Promise<T>) { return callback(manager); } };
   const repository = new MetaWebhookRepository({ async getDataSource() { return dataSource; } } as never);
   const result = await repository.persist({
-    application: { providerAppId: '1234567890', environment: 'test', appSecretRef: 'secret-ref', providerAppIdRef: 'app-ref' },
+    application: { configurationRef: 'synthetic-config', providerAppId: '1234567890', environment: 'test', appSecretRef: 'secret-ref', providerAppIdRef: 'app-ref' },
     items: [item], rawBody: raw, payload: protectedPayload('12345678-1234-4123-8123-123456789abc', raw),
     receivedAt: new Date(), signatureVerifiedAt: new Date(),
   });
@@ -331,7 +442,7 @@ test('database commit failure rejects ingress so the controller cannot acknowled
     new MetaWebhookConfigurationResolver([fakeProfile()], 'test'), secrets, protector, repository,
   );
   const raw = envelope();
-  await assert.rejects(service.ingest({ providerAppId: '1234567890', rawBody: raw, signature: signature(raw) }), /commit failure/);
+  await assert.rejects(service.ingest({ appConfigRef: 'synthetic-config', rawBody: raw, signature: signature(raw) }), /commit failure/);
 });
 
 test('worker retries a local handler failure with a fenced lease and a safe error code', async () => {

@@ -31,8 +31,12 @@ export class MetaWebhookReplayService {
       if (row) await this.repository.recordReplayUnavailable({ ...input, reasonCode: 'PAYLOAD_EXPIRED_OR_UNAVAILABLE' });
       return 'STILL_QUARANTINED';
     }
-    const application = this.configuration.resolve(row.provider_app_id);
-    if (!application || application.environment !== row.environment) {
+    const application = row.app_configuration_ref
+      ? this.configuration.resolveByAppConfigRef(row.app_configuration_ref)
+      : undefined;
+    if (!application || application.configurationRef !== row.app_configuration_ref ||
+        row.delivery_provider_app_id !== row.provider_app_id || row.delivery_environment !== row.environment ||
+        application.providerAppId !== row.provider_app_id || application.environment !== row.environment) {
       await this.repository.recordReplayUnavailable({ ...input, reasonCode: 'APPLICATION_CONTEXT_UNAVAILABLE' });
       return 'STILL_QUARANTINED';
     }

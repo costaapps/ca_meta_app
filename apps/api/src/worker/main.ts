@@ -9,6 +9,9 @@ import type { CredentialInspectionPort, CredentialLifecyclePolicyPort, Credentia
 import type { JobType } from '../jobs/event-validation.js';
 import { DurableWorker, type JobFinalizer, type JobHandler } from './durable-worker.js';
 import type { MetaAssetRefreshAdapter } from '../meta-assets/asset-refresh.service.js';
+import { MetaWebhookRepository } from '../meta-webhooks/meta-webhook.repository.js';
+import { MetaWebhookWorker } from '../meta-webhooks/meta-webhook-worker.js';
+import type { MetaWebhookItemProcessor, MetaWebhookPayloadProtector } from '../meta-webhooks/meta-webhook.types.js';
 import { MysqlIdentityRepository } from '../identity/mysql-identity.repository.js';
 import { ServiceTenantAuthorizationService } from '../identity/identity.service.js';
 import { WorkerServiceIdentityVerifier } from '../identity/identity.trust.js';
@@ -40,6 +43,16 @@ function configuredMetaOnboardingSagaAdapter(): OnboardingSagaAdapter | undefine
   return undefined;
 }
 
+interface MetaWebhookWorkerAdapters {
+  readonly payloadProtector: MetaWebhookPayloadProtector;
+  readonly processor: MetaWebhookItemProcessor;
+}
+
+/** Durable webhook items stay unclaimed until both the protected store and local processor exist. */
+function configuredMetaWebhookWorkerAdapters(): MetaWebhookWorkerAdapters | undefined {
+  return undefined;
+}
+
 export async function bootstrapWorker(): Promise<void> {
   let database: DurableWorkDatabase | undefined;
   let identityRepository: MysqlIdentityRepository | undefined;
@@ -48,6 +61,11 @@ export async function bootstrapWorker(): Promise<void> {
     database = new DurableWorkDatabase(environment);
     const handlers = new Map<JobType, JobHandler>();
     const finalizers = new Map<JobType, JobFinalizer>();
+    const webhookAdapters = configuredMetaWebhookWorkerAdapters();
+    const webhookWorker = webhookAdapters
+      ? new MetaWebhookWorker(new MetaWebhookRepository(database), webhookAdapters.payloadProtector,
+        webhookAdapters.processor, `meta-webhook-worker:${process.pid}`)
+      : undefined;
     let lifecycleScheduler: CredentialLifecycleScheduler | undefined;
     const lifecycleAdapters = environment.credentialLifecycleSchedulerEnabled
       ? configuredCredentialLifecycleAdapters() : undefined;
@@ -103,14 +121,17 @@ export async function bootstrapWorker(): Promise<void> {
     const scheduleTask = lifecycleScheduler?.run(stopping.signal, () => {
       process.stderr.write(`${JSON.stringify({ level: 'error', event: 'credential_lifecycle.schedule_failed' })}\n`);
     });
+    const webhookTask = webhookWorker?.run(stopping.signal, (safeCode) => {
+      process.stderr.write(`${JSON.stringify({ level: 'error', event: 'meta_webhook.worker_failed', safeCode })}\n`);
+    });
     process.stdout.write(`${JSON.stringify({ level: 'info', event: 'worker.started', handlers: handlers.size,
       credentialLifecycleSchedulerRequested: environment.credentialLifecycleSchedulerEnabled,
-      credentialLifecycleScheduler: Boolean(lifecycleScheduler) })}\n`);
+      credentialLifecycleScheduler: Boolean(lifecycleScheduler), metaWebhookWorker: Boolean(webhookWorker) })}\n`);
     try {
       await worker.run(stopping.signal);
     } finally {
       stopping.abort();
-      await scheduleTask;
+      await Promise.all([scheduleTask, webhookTask].filter((task): task is Promise<void> => task !== undefined));
       process.removeListener('SIGTERM', stop);
       process.removeListener('SIGINT', stop);
     }

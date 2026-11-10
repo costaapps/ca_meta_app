@@ -11,7 +11,7 @@ import { REQUEST_DRAIN, type RequestDrain } from './common/http/request-drain.js
 import { CLOCK, type MonotonicClock } from './common/time/clock.port.js';
 import { portalRequestSecurityMiddleware } from './common/security/portal-request-security.js';
 import { PortalSessionVerifier } from './identity/identity.trust.js';
-import { META_WEBHOOK_MAX_BODY_BYTES } from './meta-webhooks/meta-webhook-validation.js';
+import { META_WEBHOOK_MAX_BODY_BYTES, META_WEBHOOK_RAW_POST_PATH } from './meta-webhooks/meta-webhook-validation.js';
 
 export const API_BODY_LIMIT_BYTES = 65_536;
 
@@ -43,7 +43,7 @@ export function configureHttpBoundaries(app: INestApplication, environment: ApiE
   app.use(requestDrain.middleware());
   const metaWebhookRawParser = raw({ type: 'application/json', limit: META_WEBHOOK_MAX_BODY_BYTES, inflate: false });
   app.use((request: import('express').Request, response: import('express').Response, next: import('express').NextFunction) => {
-    if (request.method === 'POST' && /^\/api\/v1\/webhooks\/meta\/[0-9]{1,32}$/.test(request.path)) {
+    if (request.method === 'POST' && META_WEBHOOK_RAW_POST_PATH.test(request.path)) {
       metaWebhookRawParser(request, response, next);
       return;
     }

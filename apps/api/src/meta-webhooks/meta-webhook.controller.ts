@@ -17,10 +17,10 @@ function oneQueryString(value: unknown): string | undefined {
 export class MetaWebhookController {
   constructor(private readonly ingress: MetaWebhookIngressService) {}
 
-  @Get(':providerAppId')
+  @Get(':appConfigRef')
   @PublicRoute()
   async verifyChallenge(
-    @Param('providerAppId') providerAppId: string,
+    @Param('appConfigRef') appConfigRef: string,
     @Query('hub.mode') mode: unknown,
     @Query('hub.verify_token') verifyToken: unknown,
     @Query('hub.challenge') challenge: unknown,
@@ -28,7 +28,7 @@ export class MetaWebhookController {
   ): Promise<void> {
     try {
       const result = await this.ingress.challenge({
-        providerAppId,
+        appConfigRef,
         mode: oneQueryString(mode),
         verifyToken: oneQueryString(verifyToken),
         challenge: oneQueryString(challenge),
@@ -40,10 +40,10 @@ export class MetaWebhookController {
     }
   }
 
-  @Post(':providerAppId')
+  @Post(':appConfigRef')
   @PublicRoute()
   async receive(
-    @Param('providerAppId') providerAppId: string,
+    @Param('appConfigRef') appConfigRef: string,
     @Req() request: Request,
     @Res() response: Response,
   ): Promise<void> {
@@ -53,7 +53,7 @@ export class MetaWebhookController {
     }
     try {
       const result = await this.ingress.ingest({
-        providerAppId,
+        appConfigRef,
         rawBody: request.body,
         signature: request.get('x-hub-signature-256'),
       });

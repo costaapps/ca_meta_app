@@ -1,6 +1,8 @@
 import type { RuntimeEnvironment } from '../config/environment.js';
 
 export interface MetaWebhookApplication {
+  /** Exact server-side profile reference used by the public callback and durable replay context. */
+  readonly configurationRef: string;
   readonly providerAppId: string;
   readonly environment: RuntimeEnvironment;
   readonly appSecretRef: string;

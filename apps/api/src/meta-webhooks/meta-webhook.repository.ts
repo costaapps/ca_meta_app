@@ -22,6 +22,9 @@ export interface MetaWebhookEventRow {
   payload_reference?: string;
   provider_app_id: string;
   environment: string;
+  app_configuration_ref: string | null;
+  delivery_provider_app_id: string | null;
+  delivery_environment: string | null;
   delivery_id: string | null;
   item_locator_json: string;
   event_ref: string;
@@ -142,11 +145,11 @@ export class MetaWebhookRepository {
       this.validateProtectedPayload(input.payload, input.receivedAt);
       await manager.query(
         `INSERT INTO ca_meta_webhook_deliveries
-         (id, provider_app_id, environment, key_reference, nonce, authentication_tag, ciphertext,
+         (id, provider_app_id, app_configuration_ref, environment, key_reference, nonce, authentication_tag, ciphertext,
           raw_sha256, signature_verified_at, received_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          input.payload.reference, input.application.providerAppId, input.application.environment,
+          input.payload.reference, input.application.providerAppId, input.application.configurationRef, input.application.environment,
           input.payload.keyReference, input.payload.nonce, input.payload.authenticationTag,
           input.payload.ciphertext, createHash('sha256').update(input.rawBody).digest(),
           mysqlDate(input.signatureVerifiedAt.toISOString()), mysqlDate(input.receivedAt.toISOString()), mysqlDate(input.payload.expiresAt),
@@ -431,6 +434,8 @@ export class MetaWebhookRepository {
     const dataSource = await this.database.getDataSource();
     const rows = await dataSource.query(
       `SELECT event.id, event.provider_app_id, event.environment, event.delivery_id,
+              delivery.provider_app_id AS delivery_provider_app_id,
+              delivery.app_configuration_ref, delivery.environment AS delivery_environment,
               event.item_locator_json, event.event_ref, event.event_type, event.tenant_id,
               event.app_configuration_id, event.asset_id, event.route_state, event.process_state,
               event.quarantine_reason, event.lease_owner, event.lease_version, event.attempt,
@@ -452,6 +457,25 @@ export class MetaWebhookRepository {
   }): Promise<'ROUTED' | 'STILL_QUARANTINED'> {
     const dataSource = await this.database.getDataSource();
     return dataSource.transaction(async (manager) => {
+      const deliveryContext = await manager.query(
+        `SELECT event.provider_app_id, event.environment, event.delivery_id,
+                delivery.provider_app_id AS delivery_provider_app_id,
+                delivery.environment AS delivery_environment, delivery.app_configuration_ref
+         FROM ca_meta_webhook_events event
+         INNER JOIN ca_meta_webhook_deliveries delivery ON delivery.id = event.delivery_id
+         WHERE event.id = ? AND event.route_state = 'QUARANTINED' AND event.process_state = 'BLOCKED'
+         FOR UPDATE`,
+        [input.item.id],
+      ) as Array<{ provider_app_id: string; environment: string; delivery_id: string;
+        delivery_provider_app_id: string; delivery_environment: string; app_configuration_ref: string }>;
+      const stored = deliveryContext[0];
+      if (deliveryContext.length !== 1 || !stored || stored.provider_app_id !== input.item.provider_app_id ||
+          stored.environment !== input.item.environment || stored.delivery_id !== input.item.delivery_id ||
+          stored.delivery_provider_app_id !== input.application.providerAppId ||
+          stored.delivery_environment !== input.application.environment ||
+          stored.app_configuration_ref !== input.application.configurationRef) {
+        throw new Error('Quarantined webhook delivery context changed before replay.');
+      }
       const resolution = await this.resolveAssetRouteWithin(manager, input.application, input.itemLocator);
       const route = resolution.kind === 'ROUTED' ? resolution.route : undefined;
       const nextState = route ? 'ROUTED' : 'QUARANTINED';
@@ -462,9 +486,11 @@ export class MetaWebhookRepository {
            route_state = ?, process_state = ?, quarantine_reason = ?, attempt = 0, lease_owner = NULL,
            lease_until = NULL, lease_version = lease_version + 1, next_attempt_at = NULL,
            updated_at = UTC_TIMESTAMP(6)
-         WHERE id = ? AND route_state = 'QUARANTINED' AND process_state = 'BLOCKED'`,
+         WHERE id = ? AND delivery_id = ? AND provider_app_id = ? AND environment = ?
+           AND route_state = 'QUARANTINED' AND process_state = 'BLOCKED'`,
         [route?.tenantId ?? null, route?.appConfigurationId ?? null, route?.assetId ?? null,
-          nextState, route ? 'PENDING' : 'BLOCKED', reason, input.item.id],
+          nextState, route ? 'PENDING' : 'BLOCKED', reason, input.item.id, input.item.delivery_id,
+          input.item.provider_app_id, input.item.environment],
       );
       if (affectedRows(updated) !== 1) throw new Error('Quarantined webhook item changed before replay.');
       await manager.query(

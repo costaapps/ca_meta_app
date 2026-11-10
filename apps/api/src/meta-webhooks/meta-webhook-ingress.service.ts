@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { ApiEnvironment } from '../config/environment.js';
 import type { MetaAppConfiguration } from '../meta-config/meta-app-config.configuration.js';
-import { META_WEBHOOK_MAX_BODY_BYTES, MetaWebhookPayloadValidationError, parseMetaWebhookDelivery } from './meta-webhook-validation.js';
+import { META_WEBHOOK_APP_CONFIG_REF_PATTERN, META_WEBHOOK_MAX_BODY_BYTES,
+  MetaWebhookPayloadValidationError, parseMetaWebhookDelivery } from './meta-webhook-validation.js';
 import { verifyChallengeToken, verifyMetaWebhookSignature } from './meta-webhook-signature.js';
 import type { MetaWebhookRepository } from './meta-webhook.repository.js';
 import type {
@@ -25,23 +26,22 @@ export class MetaWebhookChallengeError extends Error {
 export class MetaWebhookConfigurationResolver {
   constructor(private readonly profiles: readonly MetaAppConfiguration[], private readonly environment: ApiEnvironment['nodeEnv']) {}
 
-  resolve(providerAppId: string): MetaWebhookApplication | undefined {
-    if (!/^\d{1,32}$/.test(providerAppId)) return undefined;
-    const matching = this.profiles.filter((profile) => profile.enabled && profile.environment === this.environment &&
-      profile.providerAppId === providerAppId);
-    if (matching.length === 0) return undefined;
-    const secretReferences = new Set(matching.map((profile) => profile.appSecretRef));
-    const applicationReferences = new Set(matching.map((profile) => profile.providerAppIdRef));
-    if (secretReferences.size !== 1 || applicationReferences.size !== 1) return undefined;
+  resolveByAppConfigRef(appConfigRef: string): MetaWebhookApplication | undefined {
+    if (!META_WEBHOOK_APP_CONFIG_REF_PATTERN.test(appConfigRef)) return undefined;
+    const matching = this.profiles.filter((profile) => profile.environment === this.environment &&
+      profile.configurationRef === appConfigRef);
+    if (matching.length !== 1) return undefined;
     const profile = matching[0];
-    if (!profile) return undefined;
+    if (!profile?.enabled) return undefined;
     return {
-      providerAppId,
+      configurationRef: profile.configurationRef,
+      providerAppId: profile.providerAppId,
       environment: this.environment,
       appSecretRef: profile.appSecretRef,
       providerAppIdRef: profile.providerAppIdRef,
     };
   }
+
 }
 
 export class MetaWebhookIngressService {
@@ -53,12 +53,12 @@ export class MetaWebhookIngressService {
   ) {}
 
   async challenge(input: {
-    readonly providerAppId: string;
+    readonly appConfigRef: string;
     readonly mode: string | undefined;
     readonly verifyToken: string | undefined;
     readonly challenge: string | undefined;
   }): Promise<string> {
-    const application = this.configuration.resolve(input.providerAppId);
+    const application = this.configuration.resolveByAppConfigRef(input.appConfigRef);
     if (!application || input.mode !== 'subscribe' || !input.challenge || input.challenge.length > 512) {
       throw new MetaWebhookChallengeError();
     }
@@ -73,7 +73,7 @@ export class MetaWebhookIngressService {
   }
 
   async ingest(input: {
-    readonly providerAppId: string;
+    readonly appConfigRef: string;
     readonly rawBody: Buffer;
     readonly signature: string | undefined;
     readonly receivedAt?: Date;
@@ -81,7 +81,7 @@ export class MetaWebhookIngressService {
     if (!Buffer.isBuffer(input.rawBody) || input.rawBody.length === 0 || input.rawBody.length > META_WEBHOOK_MAX_BODY_BYTES) {
       throw new Error('Webhook body is outside the accepted size bounds.');
     }
-    const application = this.configuration.resolve(input.providerAppId);
+    const application = this.configuration.resolveByAppConfigRef(input.appConfigRef);
     if (!application) throw new MetaWebhookConfigurationUnavailableError();
 
     // Verify the exact raw byte sequence before JSON parsing or trusting provider fields.

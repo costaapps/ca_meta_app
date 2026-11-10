@@ -6,6 +6,8 @@ export const META_WEBHOOK_MAX_ENTRIES = 100;
 export const META_WEBHOOK_MAX_CHANGES_PER_ENTRY = 100;
 export const META_WEBHOOK_MAX_ITEMS = 500;
 export const META_WEBHOOK_SCHEMA_VERSION = 1 as const;
+export const META_WEBHOOK_APP_CONFIG_REF_PATTERN = /^[A-Za-z0-9._-]{1,96}$/;
+export const META_WEBHOOK_RAW_POST_PATH = /^\/api\/v1\/webhooks\/meta\/[A-Za-z0-9._-]{1,96}$/;
 
 export class MetaWebhookPayloadValidationError extends Error {
   constructor() { super('Meta webhook payload failed validation.'); }
@@ -92,12 +94,14 @@ export function compareMetaWebhookStatusOrder(input: {
 }): MetaWebhookStatusOrder {
   const incomingTime = Date.parse(input.timestamp);
   const currentTime = Date.parse(current.timestamp);
-  if (!Number.isFinite(incomingTime) || !Number.isFinite(currentTime)) return 'AMBIGUOUS';
+  if (!Number.isFinite(incomingTime) || !Number.isFinite(currentTime) || input.rank === null || current.rank === null) {
+    return 'AMBIGUOUS';
+  }
   if (incomingTime < currentTime) return 'OLDER';
-  if (incomingTime > currentTime) return 'NEWER';
   if (input.status === current.status) return 'SAME';
-  if (input.rank === null || current.rank === null) return 'AMBIGUOUS';
   if (input.rank < current.rank) return 'OLDER';
+  if (incomingTime > currentTime && input.rank > current.rank) return 'NEWER';
+  if (incomingTime > currentTime) return 'AMBIGUOUS';
   if (input.rank > current.rank) return 'NEWER';
   return 'AMBIGUOUS';
 }
@@ -111,18 +115,31 @@ function stableItemHash(parts: readonly unknown[]): string {
   return createHash('sha256').update(canonicalJson(parts), 'utf8').digest('hex');
 }
 
+const WHATSAPP_ACCOUNT_LEVEL_FIELDS = new Set(['account_update']);
+
 function resourceFor(
   object: string,
   entryId: unknown,
   value: JsonRecord,
   item: JsonRecord,
+  field: string,
+  nestedKind: MetaWebhookItemLocator['nestedKind'],
 ): { readonly kinds: readonly MetaWebhookResourceKind[]; readonly externalId: string | null } {
   if (object === 'whatsapp_business_account') {
+    if (nestedKind === 'change' && WHATSAPP_ACCOUNT_LEVEL_FIELDS.has(field)) {
+      return { kinds: ['WHATSAPP_BUSINESS_ACCOUNT'], externalId: objectId(entryId) };
+    }
+    if (field === 'history' || field === 'smb_message_echoes') {
+      if (nestedKind !== 'messages' && nestedKind !== 'statuses') return { kinds: [], externalId: null };
+      const phoneId = objectId(item.phone_number_id);
+      if (phoneId) return { kinds: ['WHATSAPP_PHONE_NUMBER'], externalId: phoneId };
+      return { kinds: [], externalId: null };
+    }
+    if (field === 'smb_app_state_sync') return { kinds: [], externalId: null };
     const metadata = isRecord(value.metadata) ? value.metadata : undefined;
     const phoneId = objectId(metadata?.phone_number_id);
     if (phoneId) return { kinds: ['WHATSAPP_PHONE_NUMBER'], externalId: phoneId };
-    const accountId = objectId(entryId);
-    return { kinds: ['WHATSAPP_BUSINESS_ACCOUNT'], externalId: accountId };
+    return { kinds: [], externalId: null };
   }
   if (object === 'page') {
     return { kinds: ['FACEBOOK_PAGE'], externalId: objectId(entryId) };
@@ -130,8 +147,6 @@ function resourceFor(
   if (object === 'instagram') {
     return { kinds: ['INSTAGRAM_BUSINESS_ACCOUNT', 'INSTAGRAM_CREATOR_ACCOUNT'], externalId: objectId(entryId) };
   }
-  // Keep the argument visibly consumed so future object-specific extractors cannot route by arbitrary text.
-  void item;
   return { kinds: [], externalId: null };
 }
 
@@ -192,7 +207,7 @@ export function parseMetaWebhookDelivery(rawBody: Buffer): ParsedMetaWebhookDeli
       readonly locator: MetaWebhookItemLocator;
     }): void => {
       if (items.length >= META_WEBHOOK_MAX_ITEMS) throw new MetaWebhookPayloadValidationError();
-      const resource = resourceFor(object, entry.id, input.value, input.item);
+      const resource = resourceFor(object, entry.id, input.value, input.item, input.field, input.locator.nestedKind);
       const itemHash = stableItemHash([object, entry.id, input.field, input.locator.nestedKind, input.item]);
       const eventRef = createHash('sha256')
         .update(`${object}\0${entry.id}\0${input.field}\0${itemHash}`, 'utf8')

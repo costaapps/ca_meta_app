@@ -76,7 +76,7 @@ function appendOnlyAuditTrigger(event: 'UPDATE' | 'DELETE'): DdlStep {
 const deliveries = tableStep(
   'create-meta-webhook-deliveries',
   'ca_meta_webhook_deliveries',
-  ['id', 'provider_app_id', 'environment', 'key_reference', 'nonce', 'authentication_tag', 'ciphertext', 'raw_sha256', 'signature_verified_at', 'received_at', 'expires_at'],
+  ['id', 'provider_app_id', 'app_configuration_ref', 'environment', 'key_reference', 'nonce', 'authentication_tag', 'ciphertext', 'raw_sha256', 'signature_verified_at', 'received_at', 'expires_at'],
   [
     { name: 'PRIMARY', columns: ['id'], unique: true },
     { name: 'ix_ca_meta_webhook_delivery_expiry', columns: ['expires_at', 'id'], unique: false },
@@ -85,6 +85,7 @@ const deliveries = tableStep(
   `CREATE TABLE IF NOT EXISTS ca_meta_webhook_deliveries (
     id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     provider_app_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    app_configuration_ref VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     environment VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     key_reference VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     nonce BINARY(12) NOT NULL,
@@ -227,7 +228,7 @@ const replayAudit = tableStep(
 
 const definition = {
   id: '202611060010-meta-webhooks',
-  schemaVersion: 1,
+  schemaVersion: 17,
   minimumSupportedApiVersion: 1,
   steps: [deliveries, events, statusLocks, replayAudit, appendOnlyAuditTrigger('UPDATE'), appendOnlyAuditTrigger('DELETE')],
 } as const;
