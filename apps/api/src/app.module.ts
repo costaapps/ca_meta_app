@@ -24,6 +24,7 @@ import { MetaAppConfigModule } from './meta-config/meta-app-config.module.js';
 import { MetaGraphModule } from './meta-graph/meta-graph.module.js';
 import { MetaWebhooksModule } from './meta-webhooks/meta-webhooks.module.js';
 import { MetaSubscriptionsModule } from './meta-subscriptions/meta-subscriptions.module.js';
+import { FacebookPagesModule } from './meta-facebook/facebook-pages.module.js';
 
 @Module({})
 export class ApiModule {
@@ -33,7 +34,8 @@ export class ApiModule {
     const metaWebhooksModule = MetaWebhooksModule.register(environment, metaAssetsModule);
     const metaAppConfigModule = MetaAppConfigModule.register(identityModule, environment);
     const metaGraphModule = MetaGraphModule.register(metaAssetsModule, metaAppConfigModule);
-    const metaSubscriptionsModule = MetaSubscriptionsModule.register(metaAssetsModule, metaGraphModule, metaAppConfigModule);
+    const metaSubscriptionsModule = MetaSubscriptionsModule.register(metaAssetsModule, metaGraphModule, metaAppConfigModule, identityModule);
+    const facebookPagesModule = FacebookPagesModule.register(identityModule, metaSubscriptionsModule);
     const ticket = environment.portalEntryTicket;
     const authExchangeModule = ticket
       ? AuthExchangeModule.register({
@@ -63,6 +65,7 @@ export class ApiModule {
         metaAppConfigModule,
         metaGraphModule,
         metaSubscriptionsModule,
+        facebookPagesModule,
       ],
       providers: [
         { provide: STRUCTURED_LOGGER, useClass: ConsoleStructuredLogger },

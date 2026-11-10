@@ -1,5 +1,7 @@
 import type { MetaSubscriptionActor } from '../meta-subscriptions/meta-subscriptions.types.js';
 import type { MetaSubscriptionService } from '../meta-subscriptions/meta-subscription.service.js';
+import type { TenantContextService } from '../identity/identity.service.js';
+import type { VerifiedPortalSession } from '../identity/identity.trust.js';
 import { isFacebookPageSelectionContext, isUuid, type FacebookPageSelectionContext } from './facebook-pages.types.js';
 
 export interface FacebookPageSelectionResult {
@@ -8,10 +10,51 @@ export interface FacebookPageSelectionResult {
   readonly outcomes: readonly { readonly assetRef: string; readonly state: string; readonly reasonCode?: string }[];
 }
 
+export interface FacebookPageSelectionStatus {
+  readonly readiness: 'PARTIAL' | 'ACTION_REQUIRED';
+  readonly selectedAssetRefs: readonly string[];
+  readonly outcomes: readonly { readonly assetRef: string;
+    readonly state: 'PENDING' | 'ACTIVE' | 'PARTIAL' | 'UNKNOWN' | 'MANUAL_ACTION_REQUIRED'; readonly reasonCode?: string }[];
+}
+
 /** Persists the user's Page selection through M4.11 bindings and reconciles only those Page assets. */
 export class FacebookPageSelectionService {
   constructor(private readonly subscriptions: Pick<MetaSubscriptionService,
-    'connect' | 'disconnect' | 'listSelectedAssets'>) {}
+    'connect' | 'disconnect' | 'listSelectedAssets' | 'readFacebookPageSelection' | 'replaceFacebookPageSelection'>,
+    private readonly tenantContexts?: TenantContextService) {}
+
+  async readForPortal(input: { readonly authorizationId: string; readonly appConfigurationRef: string;
+    readonly environment: FacebookPageSelectionContext['environment']; readonly correlationId: string; readonly tenantContextRef: string },
+    session: VerifiedPortalSession): Promise<FacebookPageSelectionStatus> {
+    if (!this.tenantContexts || !isUuid(input.authorizationId) || !isUuid(input.appConfigurationRef) || !isUuid(input.correlationId) ||
+        !['development', 'test', 'staging', 'production'].includes(input.environment)) {
+      throw new Error('Facebook Page selection is unavailable.');
+    }
+    const tenantScope = await this.tenantContexts.resolveCurrent(session, input.tenantContextRef);
+    const selected = await this.subscriptions.readFacebookPageSelection({ authorizationId: input.authorizationId,
+      appConfigurationId: input.appConfigurationRef, environment: input.environment,
+      correlationId: input.correlationId }, { tenantScope, correlationId: input.correlationId });
+    return Object.freeze({ readiness: selected.length ? 'PARTIAL' as const : 'ACTION_REQUIRED' as const,
+      selectedAssetRefs: Object.freeze(selected.map((page) => page.assetId)),
+      outcomes: Object.freeze(selected.map((page) => Object.freeze({ assetRef: page.assetId, state: 'PARTIAL' as const,
+        reasonCode: 'PAGE_SUBSCRIPTION_NOT_CONFIRMED' }))) });
+  }
+
+  async replaceForPortal(input: { readonly authorizationId: string; readonly appConfigurationRef: string;
+    readonly environment: FacebookPageSelectionContext['environment']; readonly selectedAssetRefs: readonly string[];
+    readonly correlationId: string; readonly tenantContextRef: string }, session: VerifiedPortalSession): Promise<FacebookPageSelectionStatus> {
+    if (!this.tenantContexts || !isUuid(input.authorizationId) || !isUuid(input.appConfigurationRef) || !isUuid(input.correlationId) ||
+        !['development', 'test', 'staging', 'production'].includes(input.environment) ||
+        !Array.isArray(input.selectedAssetRefs) || input.selectedAssetRefs.length > 500 ||
+        input.selectedAssetRefs.some((assetRef) => !isUuid(assetRef)) || new Set(input.selectedAssetRefs).size !== input.selectedAssetRefs.length) {
+      throw new Error('Facebook Page selection is invalid.');
+    }
+    const tenantScope = await this.tenantContexts.resolveCurrent(session, input.tenantContextRef);
+    return await this.subscriptions.replaceFacebookPageSelection({ authorizationId: input.authorizationId,
+      appConfigurationId: input.appConfigurationRef, environment: input.environment,
+      selectedAssetRefs: input.selectedAssetRefs, correlationId: input.correlationId },
+    { tenantScope, correlationId: input.correlationId });
+  }
 
   async replaceSelection(input: FacebookPageSelectionContext & { readonly selectedAssetRefs: readonly string[] },
     actor: MetaSubscriptionActor): Promise<FacebookPageSelectionResult> {

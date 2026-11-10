@@ -3,7 +3,7 @@ import type { MetaEnvironment } from '../meta-assets/meta-assets.types.js';
 
 export const FACEBOOK_LOGIN_FOR_BUSINESS = 'FACEBOOK_LOGIN_FOR_BUSINESS' as const;
 export const FACEBOOK_MANAGED_PAGES_PATH = '/me/accounts' as const;
-export const FACEBOOK_MANAGED_PAGES_FIELDS = Object.freeze(['id', 'name', 'access_token', 'tasks'] as const);
+export const FACEBOOK_MANAGED_PAGES_FIELDS = Object.freeze(['name', 'access_token', 'tasks'] as const);
 export const FACEBOOK_PAGES_PROVIDER = Symbol('FACEBOOK_PAGES_PROVIDER');
 export const FACEBOOK_PAGE_ASSET_STORE = Symbol('FACEBOOK_PAGE_ASSET_STORE');
 export const FACEBOOK_PAGE_PROJECTION_PORT = Symbol('FACEBOOK_PAGE_PROJECTION_PORT');
@@ -17,8 +17,8 @@ export interface FacebookManagedPage {
   /** Provider page ID, kept server-side and never accepted from a browser selection request. */
   readonly id: string;
   readonly name: string | null;
-  /** Page-specific credential. It is accepted only by the vault-owning asset store. */
-  readonly pageAccessToken: string;
+  /** Opaque credential metadata UUID returned by the vault-owned batch enrollment callback. */
+  readonly credentialRef: string;
   /** Observed Page tasks are role context; they are not Graph permissions or capability grants. */
   readonly tasks: readonly string[];
 }
@@ -26,8 +26,6 @@ export interface FacebookManagedPage {
 export interface FacebookPageListPage {
   readonly outcome: 'SUCCEEDED' | 'PARTIAL' | 'FAILED';
   readonly pages: readonly FacebookManagedPage[];
-  /** `null` confirms there is no next page. Undefined is an incomplete provider response. */
-  readonly nextCursor?: string | null;
   readonly safeErrorCode?: string;
 }
 
@@ -38,10 +36,10 @@ export interface FacebookPagesProvider {
     readonly idempotencyKey: string;
     readonly signal: AbortSignal;
   }): Promise<{ readonly authorizationRef: string; readonly grantedScopes: readonly string[]; readonly observedAt: string }>;
-  /** Use FACEBOOK_MANAGED_PAGES_PATH and FACEBOOK_MANAGED_PAGES_FIELDS with the stored user grant. */
+  /** Use the typed /me/accounts Graph operation; Page tokens never enter this provider result. */
   listManagedPages(input: FacebookPagesContext & {
     readonly authorizationRef: string;
-    readonly after: string | null;
+    readonly idempotencyKey: string;
     readonly signal: AbortSignal;
   }): Promise<FacebookPageListPage>;
   reconcile?(input: FacebookPagesContext & {
@@ -69,6 +67,7 @@ export interface FacebookPageAssetStore {
   persistCompletePageSet(input: FacebookPagesContext & {
     readonly authorizationRef: string;
     readonly pages: readonly FacebookManagedPage[];
+    readonly idempotencyKey: string;
     readonly observedAt: string;
   }): Promise<readonly { readonly providerPageId: string; readonly assetRef: string }[]>;
 }

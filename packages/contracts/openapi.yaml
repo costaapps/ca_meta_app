@@ -1470,6 +1470,99 @@ paths:
         Idempotency-Key and body, which returns the recorded job. Provider
         authorization/callback are separate single-use steps; never discard the
         prior grant on an ambiguous result.
+  /api/v1/facebook/pages/authorizations/{authorizationId}/selection:
+    parameters:
+      - name: authorizationId
+        in: path
+        required: true
+        description: Internal authorization UUID; it grants no authority without the
+          current portal tenant context.
+        schema:
+          type: string
+          format: uuid
+      - $ref: "#/components/parameters/TenantContext"
+      - $ref: "#/components/parameters/FacebookPageAppConfigurationId"
+      - $ref: "#/components/parameters/FacebookPageEnvironment"
+    get:
+      operationId: readFacebookPageSelection
+      tags:
+        - Facebook Pages
+      summary: Read selected Facebook Pages for one current authorization
+      description: Requires the portal session, current tenant context, and
+        RESOURCE_READ membership permission. The response contains internal Page
+        asset UUIDs only. Provider IDs, access tokens and raw Graph data are
+        excluded. A selection is PARTIAL while Page subscription evidence is not
+        confirmed; no provider call is made.
+      security: *a10
+      responses:
+        "200":
+          description: Sanitized Page selection status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacebookPageSelectionStatus"
+              examples:
+                partial:
+                  summary: Page selection awaits provider evidence
+                  value:
+                    readiness: PARTIAL
+                    selectedAssetRefs:
+                      - 20000000-0000-4000-8000-000000000004
+                    outcomes:
+                      - assetRef: 20000000-0000-4000-8000-000000000004
+                        state: PARTIAL
+                        reasonCode: PAGE_SUBSCRIPTION_NOT_CONFIRMED
+                    requestId: 20000000-0000-4000-8000-000000000006
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "503": *a20
+        default: *a21
+    put:
+      operationId: replaceFacebookPageSelection
+      tags:
+        - Facebook Pages
+      summary: Replace explicitly selected Facebook Pages
+      description: Requires the portal session, current tenant context, CSRF
+        protection and CONNECT membership permission. The request accepts only
+        internal Page asset UUIDs. Each Page is revalidated against the exact
+        active Facebook Login for Business authorization before M4.11 persists
+        its desired binding. Read permission cannot mutate selection.
+        Subscription remains fail-closed and PARTIAL until endpoint, field and
+        grant evidence is confirmed.
+      security: *a10
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceFacebookPageSelectionRequest"
+            examples:
+              replace:
+                value:
+                  selectedAssetRefs:
+                    - 20000000-0000-4000-8000-000000000004
+      responses:
+        "200":
+          description: Sanitized Page selection status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacebookPageSelectionStatus"
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "413": *a17
+        "503": *a20
+        default: *a21
+      x-external-effect: Persists tenant-scoped desired Page selection only; no Graph
+        subscription call is enabled.
   /api/v1/assets:
     get:
       operationId: listAssets
@@ -2376,6 +2469,28 @@ components:
         type: string
         minLength: 16
         maxLength: 512
+    FacebookPageAppConfigurationId:
+      name: appConfigurationId
+      in: query
+      required: true
+      description: Internal Meta app configuration UUID; the catalog still verifies it
+        against current tenant-bound Page assets.
+      schema:
+        type: string
+        format: uuid
+    FacebookPageEnvironment:
+      name: environment
+      in: query
+      required: true
+      description: Exact environment already bound to the internal authorization and
+        Page asset.
+      schema:
+        type: string
+        enum:
+          - development
+          - test
+          - staging
+          - production
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -3630,6 +3745,70 @@ components:
             - string
             - "null"
           maxLength: 512
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    ReplaceFacebookPageSelectionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - selectedAssetRefs
+      properties:
+        selectedAssetRefs:
+          type: array
+          maxItems: 500
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+    FacebookPageSelectionOutcome:
+      type: object
+      additionalProperties: false
+      required:
+        - assetRef
+        - state
+      properties:
+        assetRef:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            - PENDING
+            - ACTIVE
+            - PARTIAL
+            - UNKNOWN
+            - MANUAL_ACTION_REQUIRED
+        reasonCode:
+          type: string
+          pattern: ^[A-Z][A-Z0-9_]{1,63}$
+    FacebookPageSelectionStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - readiness
+        - selectedAssetRefs
+        - outcomes
+        - requestId
+      properties:
+        readiness:
+          type: string
+          enum:
+            - PARTIAL
+            - ACTION_REQUIRED
+        selectedAssetRefs:
+          type: array
+          maxItems: 500
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        outcomes:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/FacebookPageSelectionOutcome"
         requestId:
           type: string
           minLength: 1

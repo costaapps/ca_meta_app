@@ -7,10 +7,7 @@ import { FACEBOOK_LOGIN_FOR_BUSINESS, isFacebookPagesContext, isIsoUtc, isUuid,
   type FacebookManagedPage, type FacebookPageAssetStore, type FacebookPageProjectionPort, type FacebookPagesContext,
   type FacebookPagesProvider } from './facebook-pages.types.js';
 
-const MAX_PAGE_LIST_REQUESTS = 50;
 const MAX_DISCOVERED_PAGES = 500;
-const MAX_CURSOR_LENGTH = 1_024;
-const CURSOR = /^[A-Za-z0-9._~+/%=-]{1,1024}$/;
 const PAGE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const TASK_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const SCOPE_NAME = /^[A-Za-z][A-Za-z0-9_]{0,127}$/;
@@ -47,13 +44,13 @@ export class FacebookPagesOnboardingAdapter implements OnboardingSagaAdapter {
   }): Promise<{ readonly assetRefs: readonly string[] }> {
     const context = facebookContext(input);
     if (!isUuid(input.authorizationRef)) throw new OnboardingSagaEffectError('UNKNOWN');
-    const pages = await collectCompletePageSet(this.provider, context, input.authorizationRef, input.signal);
+    const pages = await collectCompletePageSet(this.provider, context, input.authorizationRef, input.idempotencyKey, input.signal);
     // Empty is intentionally returned as empty. M4.03 records PARTIAL and never emits auth_success/READY.
     if (pages.length === 0) return Object.freeze({ assetRefs: Object.freeze([]) });
     if (input.signal.aborted) throw new OnboardingSagaEffectError('NO_EFFECT');
     try {
       const persisted = await this.assets.persistCompletePageSet({ ...context, authorizationRef: input.authorizationRef,
-        pages, observedAt: new Date().toISOString() });
+        pages, idempotencyKey: input.idempotencyKey, observedAt: new Date().toISOString() });
       const persistedIds = persisted.map((asset) => asset.providerPageId);
       const expectedIds = pages.map((page) => page.id);
       if (persisted.length !== pages.length || new Set(persistedIds).size !== persistedIds.length ||
@@ -138,39 +135,28 @@ export async function collectCompletePageSet(
   provider: Pick<FacebookPagesProvider, 'listManagedPages'>,
   context: FacebookPagesContext,
   authorizationRef: string,
+  idempotencyKey: string,
   signal: AbortSignal,
 ): Promise<readonly FacebookManagedPage[]> {
-  const output: FacebookManagedPage[] = [];
+  if (signal.aborted || !isUuid(authorizationRef) || typeof idempotencyKey !== 'string' ||
+      idempotencyKey.length < 16 || idempotencyKey.length > 128) throw new OnboardingSagaEffectError('NO_EFFECT');
+  let response: Awaited<ReturnType<FacebookPagesProvider['listManagedPages']>>;
+  try { response = await provider.listManagedPages({ ...context, authorizationRef, idempotencyKey, signal }); }
+  catch { throw new OnboardingSagaEffectError('NO_EFFECT'); }
+  if (!response || typeof response !== 'object' || response.outcome !== 'SUCCEEDED' || !Array.isArray(response.pages) ||
+      response.pages.length > MAX_DISCOVERED_PAGES) throw new OnboardingSagaEffectError('NO_EFFECT');
   const pageIds = new Set<string>();
-  const cursors = new Set<string>();
-  let after: string | null = null;
-  for (let requestNumber = 0; requestNumber < MAX_PAGE_LIST_REQUESTS; requestNumber += 1) {
-    if (signal.aborted) throw new OnboardingSagaEffectError('NO_EFFECT');
-    let response: Awaited<ReturnType<FacebookPagesProvider['listManagedPages']>>;
-    try { response = await provider.listManagedPages({ ...context, authorizationRef, after, signal }); }
-    catch { throw new OnboardingSagaEffectError('NO_EFFECT'); }
-    if (!response || typeof response !== 'object' || response.outcome !== 'SUCCEEDED' ||
-        response.nextCursor === undefined || !Array.isArray(response.pages)) {
-      throw new OnboardingSagaEffectError('NO_EFFECT');
-    }
-    if (response.pages.length > MAX_DISCOVERED_PAGES || output.length + response.pages.length > MAX_DISCOVERED_PAGES) {
-      throw new OnboardingSagaEffectError('NO_EFFECT');
-    }
-    for (const page of response.pages) {
-      if (!validPage(page) || pageIds.has(page.id)) throw new OnboardingSagaEffectError('NO_EFFECT');
-      pageIds.add(page.id);
-      output.push(Object.freeze({ id: page.id, name: page.name, pageAccessToken: page.pageAccessToken,
-        tasks: Object.freeze([...page.tasks]) }));
-    }
-    if (response.nextCursor === null) return Object.freeze(output);
-    if (typeof response.nextCursor !== 'string' || response.nextCursor.length > MAX_CURSOR_LENGTH || !CURSOR.test(response.nextCursor) ||
-        response.nextCursor === after || cursors.has(response.nextCursor)) {
-      throw new OnboardingSagaEffectError('NO_EFFECT');
-    }
-    cursors.add(response.nextCursor);
-    after = response.nextCursor;
+  const credentialRefs = new Set<string>();
+  const output: FacebookManagedPage[] = [];
+  for (const page of response.pages) {
+    if (!validPage(page) || pageIds.has(page.id) || credentialRefs.has(page.credentialRef)) throw new OnboardingSagaEffectError('NO_EFFECT');
+    pageIds.add(page.id);
+    credentialRefs.add(page.credentialRef);
+    output.push(Object.freeze({ id: page.id, name: page.name, credentialRef: page.credentialRef,
+      tasks: Object.freeze([...page.tasks]) }));
   }
-  throw new OnboardingSagaEffectError('NO_EFFECT');
+  if (signal.aborted) throw new OnboardingSagaEffectError('NO_EFFECT');
+  return Object.freeze(output);
 }
 
 function facebookContext(input: OnboardingSagaContext): FacebookPagesContext {
@@ -197,8 +183,7 @@ function subscriptionRequest(context: ReturnType<typeof selectionContextFor>): O
 function validPage(page: FacebookManagedPage): boolean {
   return !!page && typeof page.id === 'string' && PAGE_ID.test(page.id) &&
     (page.name === null || (typeof page.name === 'string' && page.name.length <= 255 && !/[\u0000-\u001f\u007f]/.test(page.name))) &&
-    typeof page.pageAccessToken === 'string' && page.pageAccessToken.length >= 8 && page.pageAccessToken.length <= 8_192 &&
-    !/[\u0000-\u001f\u007f]/.test(page.pageAccessToken) && safeNames(page.tasks, TASK_NAME, 64);
+    isUuid(page.credentialRef) && safeNames(page.tasks, TASK_NAME, 64);
 }
 
 function safeNames(values: readonly string[], pattern: RegExp, maxItems = 256): boolean {

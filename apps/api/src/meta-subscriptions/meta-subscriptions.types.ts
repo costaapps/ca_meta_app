@@ -1,6 +1,6 @@
 import type { MetaEnvironment } from '../meta-assets/meta-assets.types.js';
 import type { MetaAuthVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
-import type { VerifiedServiceTenantScope } from '../identity/identity.types.js';
+import type { AuthorizedTenantScope, VerifiedServiceTenantScope } from '../identity/identity.types.js';
 
 export type MetaSubscriptionState = 'SUBSCRIBED' | 'UNSUBSCRIBED' | 'UNKNOWN';
 export type MetaSubscriptionReconcileState = 'PENDING' | 'ACTIVE' | 'PARTIAL' | 'UNKNOWN' | 'MANUAL_ACTION_REQUIRED';
@@ -108,6 +108,12 @@ export interface MetaSubscriptionSelectedAsset {
   readonly targetAssetId: string;
   readonly authorizationId: string;
   readonly desiredFields: readonly string[];
+}
+
+/** Portal selection is accepted only with an identity context minted by TenantContextService. */
+export interface MetaFacebookPageSelectionActor {
+  readonly tenantScope: AuthorizedTenantScope;
+  readonly correlationId: string;
 }
 
 export type MetaSubscriptionProviderResult =

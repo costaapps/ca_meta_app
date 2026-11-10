@@ -6,7 +6,8 @@ import { MysqlMetaSubscriptionCatalog } from '../src/meta-subscriptions/mysql-me
 import { MysqlMetaSubscriptionStore } from '../src/meta-subscriptions/mysql-meta-subscription.store.js';
 import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { FacebookPageSelectionService } from '../src/meta-facebook/facebook-page-selection.service.js';
-import { collectCompletePageSet, FacebookPagesOnboardingAdapter } from '../src/meta-facebook/facebook-pages-onboarding.adapter.js';
+import { FacebookPagesOnboardingAdapter } from '../src/meta-facebook/facebook-pages-onboarding.adapter.js';
+import { MetaGraphFacebookPagesProvider, type FacebookPagesGraphDiscoveryClient } from '../src/meta-facebook/facebook-pages-graph.provider.js';
 import { facebookPageCapabilitySnapshot, type FacebookManagedPage, type FacebookPageAssetStore,
   type FacebookPageProjectionPort, type FacebookPageSelectionContext, type FacebookPagesContext,
   type FacebookPagesProvider } from '../src/meta-facebook/facebook-pages.types.js';
@@ -16,6 +17,8 @@ const CONFIG = '20000000-0000-4000-8000-000000000002';
 const AUTHORIZATION = '20000000-0000-4000-8000-000000000003';
 const PAGE_A = '20000000-0000-4000-8000-000000000004';
 const PAGE_B = '20000000-0000-4000-8000-000000000005';
+const PAGE_CREDENTIAL_A = '20000000-0000-4000-8000-000000000014';
+const PAGE_CREDENTIAL_B = '20000000-0000-4000-8000-000000000015';
 const CORRELATION = '20000000-0000-4000-8000-000000000006';
 
 function context(): FacebookPagesContext {
@@ -25,8 +28,8 @@ function context(): FacebookPagesContext {
     correlationId: CORRELATION, graphApiVersion: 'v1.0', capabilityManifestVersion: 'test' });
 }
 
-function page(id: string, pageAccessToken: string, tasks: readonly string[] = ['MANAGE']) : FacebookManagedPage {
-  return Object.freeze({ id, name: `Page ${id.slice(-1)}`, pageAccessToken, tasks: Object.freeze([...tasks]) });
+function page(id: string, credentialRef: string, tasks: readonly string[] = ['MANAGE']) : FacebookManagedPage {
+  return Object.freeze({ id, name: `Page ${id.slice(-1)}`, credentialRef, tasks: Object.freeze([...tasks]) });
 }
 
 function adapter(input: { readonly provider: FacebookPagesProvider; readonly assets: FacebookPageAssetStore;
@@ -38,16 +41,14 @@ function adapter(input: { readonly provider: FacebookPagesProvider; readonly ass
     async () => undefined, input.projection ?? { publish: async () => undefined }, () => 'test');
 }
 
-test('Facebook discovery follows every cursor before persisting per-Page credentials', async () => {
-  const providerCalls: Array<string | null> = [];
+test('Facebook discovery persists the complete safe Graph result with per-Page vault credential refs', async () => {
+  let providerCalls = 0;
   const observedPages: FacebookManagedPage[] = [];
   const provider: FacebookPagesProvider = {
-    exchangeAndStoreAuthorization: async () => ({ authorizationRef: AUTHORIZATION, grantedScopes: ['pages_show_list'], observedAt: '2026-11-10T12:00:00Z' }),
-    listManagedPages: async ({ after }) => {
-      providerCalls.push(after);
-      return after === null
-        ? { outcome: 'SUCCEEDED', pages: [page('101', 'page-token-alpha')], nextCursor: 'cursor-1' }
-        : { outcome: 'SUCCEEDED', pages: [page('202', 'page-token-beta')], nextCursor: null };
+    exchangeAndStoreAuthorization: async () => ({ authorizationRef: AUTHORIZATION, grantedScopes: [], observedAt: '2026-11-10T12:00:00Z' }),
+    listManagedPages: async () => {
+      providerCalls += 1;
+      return { outcome: 'SUCCEEDED', pages: [page('101', PAGE_CREDENTIAL_A), page('202', PAGE_CREDENTIAL_B)] };
     },
   };
   const assets: FacebookPageAssetStore = { persistCompletePageSet: async ({ pages }) => {
@@ -60,17 +61,18 @@ test('Facebook discovery follows every cursor before persisting per-Page credent
   assert.deepEqual(authorization, { authorizationRef: AUTHORIZATION });
   const discovered = await sut.discoverAndPersistAssets({ ...context(), authorizationRef: authorization.authorizationRef,
     idempotencyKey: 'onboarding:asset-verification', signal: new AbortController().signal });
-  assert.deepEqual(providerCalls, [null, 'cursor-1']);
+  assert.equal(providerCalls, 1, 'the typed Graph collector owns bounded pagination before this adapter receives a result');
   assert.deepEqual(discovered.assetRefs, [PAGE_A, PAGE_B]);
-  assert.deepEqual(observedPages.map((item) => item.pageAccessToken), ['page-token-alpha', 'page-token-beta']);
-  assert.equal(JSON.stringify(discovered).includes('page-token'), false, 'Page credentials are never returned in saga evidence.');
+  assert.deepEqual(observedPages.map((item) => item.credentialRef), [PAGE_CREDENTIAL_A, PAGE_CREDENTIAL_B]);
+  assert.equal(JSON.stringify(discovered).includes('credentialRef'), false, 'credential refs are never returned in saga evidence.');
+  assert.equal(JSON.stringify(discovered).includes('token'), false, 'Page credentials are never returned in saga evidence.');
 });
 
 test('zero Pages is an empty recoverable result and does not persist fake authorization assets', async () => {
   let persistCalls = 0;
   const provider: FacebookPagesProvider = {
     exchangeAndStoreAuthorization: async () => ({ authorizationRef: AUTHORIZATION, grantedScopes: [], observedAt: '2026-11-10T12:00:00Z' }),
-    listManagedPages: async () => ({ outcome: 'SUCCEEDED', pages: [], nextCursor: null }),
+    listManagedPages: async () => ({ outcome: 'SUCCEEDED', pages: [] }),
   };
   const assets: FacebookPageAssetStore = { persistCompletePageSet: async () => { persistCalls += 1; return []; } };
   const result = await adapter({ provider, assets }).discoverAndPersistAssets({ ...context(), authorizationRef: AUTHORIZATION,
@@ -79,25 +81,58 @@ test('zero Pages is an empty recoverable result and does not persist fake author
   assert.equal(persistCalls, 0);
 });
 
-test('incomplete pagination and duplicate cursors fail before any Page token reaches persistence', async () => {
+test('partial Graph discovery fails before incomplete Page credentials reach asset persistence', async () => {
   let persistCalls = 0;
   const provider: FacebookPagesProvider = {
     exchangeAndStoreAuthorization: async () => ({ authorizationRef: AUTHORIZATION, grantedScopes: [], observedAt: '2026-11-10T12:00:00Z' }),
-    listManagedPages: async ({ after }) => after === null
-      ? { outcome: 'SUCCEEDED', pages: [page('101', 'page-token-alpha')], nextCursor: 'cursor-1' }
-      : { outcome: 'PARTIAL', pages: [page('202', 'page-token-beta')], nextCursor: 'cursor-2' },
+    listManagedPages: async () => ({ outcome: 'PARTIAL', pages: [page('202', PAGE_CREDENTIAL_B)], safeErrorCode: 'PAGINATION_INCOMPLETE' }),
   };
   const assets: FacebookPageAssetStore = { persistCompletePageSet: async () => { persistCalls += 1; return []; } };
   await assert.rejects(adapter({ provider, assets }).discoverAndPersistAssets({ ...context(), authorizationRef: AUTHORIZATION,
     idempotencyKey: 'onboarding:asset-verification', signal: new AbortController().signal }));
   assert.equal(persistCalls, 0);
+});
 
-  let calls = 0;
-  await assert.rejects(collectCompletePageSet({ listManagedPages: async ({ after }) => {
-    calls += 1;
-    return { outcome: 'SUCCEEDED', pages: [page(String(calls), `page-token-${calls}`)], nextCursor: 'same-cursor' };
-  } }, context(), AUTHORIZATION, new AbortController().signal));
-  assert.equal(calls, 2, 'cursor replay stops before a third request');
+test('typed Graph adapter resolves a server-owned user handle and sends Page tokens only to atomic vault enrollment', async () => {
+  let resolvedAsset = '';
+  let enrolledToken = '';
+  const graph: FacebookPagesGraphDiscoveryClient = {
+    discoverFacebookPages: async (input, enrollmentRef, consume, options) => {
+      assert.equal(input.endpoint, 'FACEBOOK_PAGES_DISCOVERY');
+      assert.equal(input.resourceId, 'me');
+      assert.equal(input.operation, 'ASSET_DISCOVERY');
+      assert.equal(options?.maxItems, 500);
+      const signal = options?.signal ?? new AbortController().signal;
+      const batch = { flowVariant: 'FACEBOOK' as const, authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS' as const,
+        tenantId: TENANT, appConfigurationId: CONFIG, environment: 'test' as const,
+        authorizationAssetRef: PAGE_A, correlationId: CORRELATION, enrollmentRef,
+        pages: [{ providerPageId: '101', pageName: 'Page 1', pageTasks: ['MANAGE'], pageAccessToken: 'synthetic-token-only' }],
+        signal };
+      const enrolled = await consume(batch);
+      return { outcome: 'SUCCEEDED', pages: [{ providerPageId: '101', pageName: 'Page 1', pageTasks: ['MANAGE'],
+        credentialRef: enrolled.credentialRefs[0]!.credentialRef }] };
+    },
+  };
+  const provider = new MetaGraphFacebookPagesProvider(
+    { resolve: async (context) => { resolvedAsset = context.assetId; return { status: 'READY', capability: 'ASSET_DISCOVERY',
+      purpose: 'CUSTOMER_OPERATION', family: 'SYNTHETIC', handle: {} as never }; } } as never,
+    { resolve: async () => ({ authorizationRef: AUTHORIZATION, resolutionContext: { tenantId: TENANT, provider: 'META',
+      appConfigurationId: CONFIG, environment: 'test', assetId: PAGE_A, operation: 'ASSET_DISCOVERY' },
+      actor: { serviceScope: { tenantId: TENANT, principalId: '20000000-0000-4000-8000-000000000008', scopes: ['META_CONNECTION_EXECUTE'] } as never,
+        correlationId: CORRELATION } }) },
+    { resolve: () => ({ configurationRef: context().configurationRef, versions: { graphApi: { status: 'VERIFIED' } } }) } as never,
+    graph,
+    { enrollPageCredentialsAtomically: async ({ pages }) => {
+      enrolledToken = pages[0]!.pageAccessToken;
+      return [{ providerPageId: '101', credentialRef: PAGE_CREDENTIAL_A }];
+    } },
+  );
+  const result = await provider.listManagedPages({ ...context(), authorizationRef: AUTHORIZATION,
+    idempotencyKey: 'onboarding:asset-verification', signal: new AbortController().signal });
+  assert.equal(resolvedAsset, PAGE_A);
+  assert.equal(enrolledToken, 'synthetic-token-only');
+  assert.deepEqual(result.pages, [{ id: '101', name: 'Page 1', credentialRef: PAGE_CREDENTIAL_A, tasks: ['MANAGE'] }]);
+  assert.equal(JSON.stringify(result).includes('synthetic-token-only'), false);
 });
 
 test('Page tasks never grant message or comment capability', () => {
@@ -175,7 +210,7 @@ test('Page selection persists only exact Page assets through M4.11 service and d
   const selection: FacebookPageSelectionContext = { tenantId: TENANT, authorizationRef: AUTHORIZATION,
     appConfigurationRef: CONFIG, environment: 'test', correlationId: CORRELATION };
   const result = await new FacebookPageSelectionService(subscriptions as unknown as Pick<MetaSubscriptionService,
-    'connect' | 'reconcile' | 'disconnect' | 'listSelectedAssets'>).replaceSelection({ ...selection, selectedAssetRefs: [PAGE_B] },
+    'connect' | 'disconnect' | 'listSelectedAssets' | 'readFacebookPageSelection' | 'replaceFacebookPageSelection'>).replaceSelection({ ...selection, selectedAssetRefs: [PAGE_B] },
       {} as MetaSubscriptionActor);
   assert.deepEqual(calls, [`connect:${PAGE_B}`, `disconnect:${PAGE_A}`]);
   assert.deepEqual(result.selectedAssetRefs, [PAGE_B]);
