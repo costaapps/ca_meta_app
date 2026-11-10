@@ -1,0 +1,31 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/config/environment.ts",
+    "src/common/http/**/*.ts",
+    "src/common/security/**/*.ts",
+    "src/common/time/**/*.ts",
+    "src/database/migrations/**/*.ts",
+    "src/identity/**/*.ts",
+    "src/jobs/**/*.ts",
+    "src/meta-config/**/*.ts",
+    "src/meta-graph/**/*.ts",
+    "src/meta-assets/**/*.ts",
+    "src/credentials/**/*.ts",
+    "src/onboarding/**/*.ts",
+    "src/whatsapp-exclusive/**/*.ts",
+    "src/privacy/redaction.ts",
+    "src/worker/durable-worker.ts",
+    "test/m3-05-onboarding-session.spec.ts",
+    "test/m3-05-onboarding-status.spec.ts",
+    "test/m4-02-meta-graph.spec.ts",
+    "test/m4-03-onboarding-saga.spec.ts",
+    "test/m4-04-whatsapp-exclusive.spec.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { EntityManager } from 'typeorm';
 import { isUuid } from '../jobs/event-validation.js';
 import type { OnboardingFlowVariant } from './onboarding-session.types.js';
+import { isSafePhoneReadiness, type OnboardingPhoneReadiness } from './onboarding-phone-readiness.js';
 
 export interface OnboardingSagaEvidenceContext {
   readonly tenantId: string;
@@ -18,6 +19,7 @@ export interface OnboardingSagaEvidenceValues {
   readonly verifiedAssetRefs?: readonly string[];
   readonly subscriptionRef?: string;
   readonly projectionRef?: string;
+  readonly phoneReadiness?: readonly OnboardingPhoneReadiness[];
 }
 
 export type OnboardingSagaReceiptStage = 'subscription' | 'projection';
@@ -48,6 +50,10 @@ export function assertSafeOnboardingSagaEvidence(
     new Set(evidence.verifiedAssetRefs).size !== evidence.verifiedAssetRefs.length || !evidence.verifiedAssetRefs.every(isUuid))) {
     throw new Error('Unsafe verified asset evidence.');
   }
+  if (evidence.phoneReadiness !== undefined && (!evidence.verifiedAssetRefs ||
+      !isSafePhoneReadiness(evidence.phoneReadiness, context.flowVariant, evidence.verifiedAssetRefs))) {
+    throw new Error('Unsafe WhatsApp phone readiness evidence.');
+  }
   if (evidence.subscriptionRef !== undefined && (!evidence.authorizationRef || !evidence.verifiedAssetRefs?.length ||
     evidence.subscriptionRef !== onboardingSagaStageReceipt('subscription', context, evidence.authorizationRef, evidence.verifiedAssetRefs))) {
     throw new Error('Unsafe subscription evidence reference.');
@@ -67,7 +73,7 @@ export async function assertOwnedOnboardingSagaEvidence(
 ): Promise<void> {
   assertSafeOnboardingSagaEvidence(evidence, context);
   if (!evidence.authorizationRef) {
-    if (evidence.verifiedAssetRefs || evidence.subscriptionRef || evidence.projectionRef) {
+    if (evidence.verifiedAssetRefs || evidence.subscriptionRef || evidence.projectionRef || evidence.phoneReadiness) {
       throw new Error('Onboarding evidence has no owning authorization.');
     }
     return;
@@ -95,7 +101,7 @@ export async function assertOwnedOnboardingSagaEvidence(
   if (!assetRefs) return;
   const placeholders = assetRefs.map(() => '?').join(', ');
   const ownedAssets = await manager.query(
-    `SELECT aa.asset_id
+    `SELECT aa.asset_id, asset.asset_kind
      FROM ca_meta_asset_authorizations aa
      INNER JOIN ca_meta_assets asset
        ON asset.tenant_id = aa.tenant_id AND asset.id = aa.asset_id
@@ -115,10 +121,20 @@ export async function assertOwnedOnboardingSagaEvidence(
        AND auth.flow_variant = ? AND auth.auth_variant = ? AND auth.authorization_state = 'ACTIVE'`,
     [context.tenantId, context.providerEnvironment, context.providerAppId, context.tenantId,
       evidence.authorizationRef, ...assetRefs, databaseAuthorization.flowVariant, databaseAuthorization.authVariant],
-  ) as Array<{ asset_id: string }>;
+  ) as Array<{ asset_id: string; asset_kind: string }>;
   const ownedIds = new Set(ownedAssets.map((row) => row.asset_id));
   if (ownedIds.size !== assetRefs.length || !assetRefs.every((ref) => ownedIds.has(ref))) {
     throw new Error('Onboarding asset evidence is not owned by this tenant and authorization.');
+  }
+  if (evidence.phoneReadiness) {
+    if (databaseAuthorization.flowVariant !== 'WHATSAPP_EXCLUSIVE' || databaseAuthorization.authVariant !== 'WHATSAPP_EMBEDDED_SIGNUP') {
+      throw new Error('WhatsApp phone readiness is attached to another onboarding flow.');
+    }
+    const phoneRefs = ownedAssets.filter((asset) => asset.asset_kind === 'WHATSAPP_PHONE_NUMBER').map((asset) => asset.asset_id).sort();
+    const readinessRefs = evidence.phoneReadiness.map((item) => item.assetRef).sort();
+    if (phoneRefs.length === 0 || phoneRefs.length !== readinessRefs.length || phoneRefs.some((ref, index) => ref !== readinessRefs[index])) {
+      throw new Error('WhatsApp phone readiness does not cover exactly the verified numbers.');
+    }
   }
 }
 

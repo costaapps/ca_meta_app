@@ -6,7 +6,8 @@ import { META_CAPABILITY_MANIFEST, META_CAPABILITY_MANIFEST_VERSION, type MetaOp
 import { MetaAppConfigRegistry } from '../src/meta-config/meta-app-config.registry.js';
 import { InMemoryMetaGraphMetrics, MetaGraphClient } from '../src/meta-graph/meta-graph.client.js';
 import { MetaGraphTransportFailure } from '../src/meta-graph/meta-graph.transport.js';
-import type { MetaGraphExecutionContext, MetaGraphInput, MetaGraphTransport, MetaGraphTransportRequest, MetaGraphTransportResponse } from '../src/meta-graph/meta-graph.types.js';
+import type { MetaGraphExecutionContext, MetaGraphFacebookPageDiscoveryInput, MetaGraphInput, MetaGraphTransport,
+  MetaGraphTransportRequest, MetaGraphTransportResponse } from '../src/meta-graph/meta-graph.types.js';
 
 const TOKEN = 'synthetic-graph-token-never-return';
 const tenantId = '00000000-0000-4000-8000-000000000001';
@@ -77,10 +78,119 @@ class SequenceTransport implements MetaGraphTransport {
 function response(statusCode: number, body: unknown, headers: Record<string, string | undefined> = {}): MetaGraphTransportResponse {
   return { statusCode, headers, body: JSON.stringify(body) };
 }
-function client(transport: MetaGraphTransport, credentials = new FakeCredentials(), options: ConstructorParameters<typeof MetaGraphClient>[4] = {}) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function client(transport: MetaGraphTransport, credentials = new FakeCredentials(), options: ConstructorParameters<typeof MetaGraphClient>[4] = {},
+  profile: MetaAppConfiguration = fixtureProfile()) {
   const metrics = new InMemoryMetaGraphMetrics();
-  const instance = new MetaGraphClient(new MetaAppConfigRegistry([fixtureProfile()]), credentials, transport, metrics, options);
+  const instance = new MetaGraphClient(new MetaAppConfigRegistry([profile]), credentials, transport, metrics, options);
   return { instance, credentials, metrics };
+}
+
+function exclusiveClient(transport: MetaGraphTransport, credentials = new FakeCredentials(),
+  options: ConstructorParameters<typeof MetaGraphClient>[4] = {}) {
+  const profile = exclusiveProfile();
+  const baseRegistry = new MetaAppConfigRegistry([profile]);
+  const baseBootstrap = baseRegistry.bootstrap();
+  const operations = new Set<MetaOperation>(['ASSET_DISCOVERY', 'PHONE_REGISTRATION_CONVENTIONAL']);
+  // Test-only enablement exercises the exclusive routes without asserting production grants.
+  const bootstrap = Object.freeze({ ...baseBootstrap, profiles: Object.freeze(baseBootstrap.profiles.map((item) =>
+    item.flowVariant === 'WHATSAPP_EXCLUSIVE' && item.authVariant === 'WHATSAPP_EMBEDDED_SIGNUP'
+      ? Object.freeze({ ...item, enabled: true, reasonCode: null, capabilities: Object.freeze(item.capabilities.map((capability) =>
+        operations.has(capability.operation) ? Object.freeze({ ...capability, enabled: true, reasonCode: null }) : capability)) })
+      : item)) });
+  const registry = Object.freeze({ resolve: () => profile, bootstrap: () => bootstrap }) as unknown as MetaAppConfigRegistry;
+  const metrics = new InMemoryMetaGraphMetrics();
+  const instance = new MetaGraphClient(registry, credentials, transport, metrics, options);
+  return { instance, credentials, metrics };
+}
+
+function facebookDiscoveryClient(transport: MetaGraphTransport, credentials = new FakeCredentials(),
+  options: ConstructorParameters<typeof MetaGraphClient>[4] = {}) {
+  const profile = facebookProfile();
+  const baseRegistry = new MetaAppConfigRegistry([profile]);
+  const baseBootstrap = baseRegistry.bootstrap();
+  // Test-only enablement exercises the closed route while the production manifest keeps this capability disabled.
+  const bootstrap = Object.freeze({ ...baseBootstrap, profiles: Object.freeze(baseBootstrap.profiles.map((item) =>
+    item.flowVariant === 'FACEBOOK' && item.authVariant === 'FACEBOOK_LOGIN_FOR_BUSINESS'
+      ? Object.freeze({ ...item, enabled: true, reasonCode: null, capabilities: Object.freeze(item.capabilities.map((capability) =>
+        capability.operation === 'ASSET_DISCOVERY' ? Object.freeze({ ...capability, enabled: true, reasonCode: null }) : capability)) })
+      : item)) });
+  const registry = Object.freeze({ resolve: () => profile, bootstrap: () => bootstrap }) as unknown as MetaAppConfigRegistry;
+  const metrics = new InMemoryMetaGraphMetrics();
+  const instance = new MetaGraphClient(registry, credentials, transport, metrics, options);
+  return { instance, credentials, metrics };
+}
+
+function exclusiveProfile(): MetaAppConfiguration {
+  const flowVariant = 'WHATSAPP_EXCLUSIVE';
+  const authVariant = 'WHATSAPP_EMBEDDED_SIGNUP';
+  const capabilityEvidence = META_CAPABILITY_MANIFEST.filter((entry) => entry.flowVariant === flowVariant && entry.authVariant === authVariant)
+    .map((entry) => ({ operation: entry.operation, permissions: entry.candidatePermissions.map((permission) => ({
+      permission, permissionStatus: 'CONFIRMED' as const, accessLevel: 'ADVANCED' as const,
+      appReviewStatus: 'APPROVED' as const, sandboxStatus: 'PASSED' as const,
+      approvalOwner: 'synthetic-fixture-owner', evidenceUrl: 'https://developers.facebook.com/docs/graph-api/overview/',
+    })) }));
+  return Object.freeze({ ...fixtureProfile(), flowVariant, authVariant, configurationRef: 'synthetic-exclusive-v1', capabilityEvidence });
+}
+
+function facebookProfile(): MetaAppConfiguration {
+  const flowVariant = 'FACEBOOK';
+  const authVariant = 'FACEBOOK_LOGIN_FOR_BUSINESS';
+  const capabilityEvidence = META_CAPABILITY_MANIFEST.filter((entry) => entry.flowVariant === flowVariant && entry.authVariant === authVariant)
+    .map((entry) => ({ operation: entry.operation, permissions: entry.candidatePermissions.map((permission) => ({
+      permission, permissionStatus: 'CONFIRMED' as const, accessLevel: 'ADVANCED' as const,
+      appReviewStatus: 'APPROVED' as const, sandboxStatus: 'PASSED' as const,
+      approvalOwner: 'synthetic-fixture-owner', evidenceUrl: 'https://developers.facebook.com/docs/graph-api/overview/',
+    })) }));
+  return Object.freeze({ ...fixtureProfile(), flowVariant, authVariant, configurationRef: 'synthetic-facebook-v1', capabilityEvidence });
+}
+
+function facebookPageDiscoveryRequest(): MetaGraphFacebookPageDiscoveryInput {
+  const operation = 'ASSET_DISCOVERY' as const;
+  const context: MetaGraphExecutionContext = {
+    tenantId, provider: 'META', appConfigurationId, environment: 'test', assetId, operation,
+    flowVariant: 'FACEBOOK', authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS',
+    configurationRef: 'synthetic-facebook-v1', providerObjectId,
+  };
+  return { context, credentialHandle: Object.freeze({}) as CredentialResolutionHandle,
+    credentialCapability: operation, operation, correlationId, resourceId: 'me', endpoint: 'FACEBOOK_PAGES_DISCOVERY' };
+}
+
+function exclusiveRequest(body: Record<string, unknown>, operation: MetaOperation = 'PHONE_REGISTRATION_CONVENTIONAL'): MetaGraphInput {
+  const context: MetaGraphExecutionContext = {
+    tenantId, provider: 'META', appConfigurationId, environment: 'test', assetId, operation,
+    flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP',
+    configurationRef: 'synthetic-exclusive-v1', providerObjectId,
+  };
+  return { context, credentialHandle: Object.freeze({}) as CredentialResolutionHandle,
+    credentialCapability: operation, operation, correlationId, resourceId: providerObjectId,
+    endpoint: 'PHONE_REGISTER', body } as unknown as MetaGraphInput;
+}
+
+function exclusivePhoneListRequest(): MetaGraphInput {
+  const operation = 'ASSET_DISCOVERY' as const;
+  const context: MetaGraphExecutionContext = {
+    tenantId, provider: 'META', appConfigurationId, environment: 'test', assetId, operation,
+    flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP',
+    configurationRef: 'synthetic-exclusive-v1', providerObjectId,
+  };
+  return { context, credentialHandle: Object.freeze({}) as CredentialResolutionHandle,
+    credentialCapability: operation, operation, correlationId, resourceId: providerObjectId,
+    endpoint: 'ASSET_EDGE_LIST', edge: 'phone_numbers', query: { fields: 'id,verified_name,display_phone_number,quality_rating', limit: 100 } };
+}
+
+function exclusiveOwnedWabaRequest(): MetaGraphInput {
+  const operation = 'ASSET_DISCOVERY' as const;
+  const context: MetaGraphExecutionContext = {
+    tenantId, provider: 'META', appConfigurationId, environment: 'test', assetId, operation,
+    flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP',
+    configurationRef: 'synthetic-exclusive-v1', providerObjectId,
+  };
+  return { context, credentialHandle: Object.freeze({}) as CredentialResolutionHandle,
+    credentialCapability: operation, operation, correlationId, resourceId: providerObjectId,
+    endpoint: 'ASSET_EDGE_LIST', edge: 'owned_whatsapp_business_accounts' };
 }
 
 test('synthetic fixture mirrors a fully verified M4.01 profile while pending graph evidence stays blocked', () => {
@@ -141,6 +251,224 @@ test('resource ID mismatch against the server-resolved provider object is reject
   assert.equal(result.error?.category, 'REQUEST_INVALID');
   assert.equal(runtime.credentials.callbacks, 0);
   assert.equal(transport.calls.length, 0);
+});
+
+test('exclusive WhatsApp registration uses the exact route/body and scrubs PIN echoes', async () => {
+  const pin = '123456';
+  const transport = new SequenceTransport([response(200, { success: true, pin, message: `registration used ${pin}` })]);
+  const credentials = new FakeCredentials();
+  const runtime = exclusiveClient(transport, credentials);
+  const result = await runtime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin }));
+
+  assert.equal(result.outcome, 'SUCCEEDED');
+  assert.deepEqual(transport.calls.map((call) => [call.method, call.path, call.operation]), [
+    ['POST', `/v27.0/${providerObjectId}/register`, 'PHONE_REGISTRATION_CONVENTIONAL'],
+  ]);
+  assert.deepEqual(JSON.parse(transport.calls[0]?.body ?? '{}'), { messaging_product: 'whatsapp', pin });
+  assert.equal(credentials.callbacks, 1);
+  assert.equal(JSON.stringify(result).includes(pin), false);
+  assert.equal(JSON.stringify(result).includes(TOKEN), false);
+});
+
+test('registration rejects Coexistence, invalid PIN and additional body fields before credential use', async () => {
+  const transport = new SequenceTransport([]);
+  const runtime = client(transport);
+  const coexistence = await runtime.instance.execute(request('PHONE_REGISTER', 'PHONE_REGISTRATION_CONVENTIONAL', {
+    body: { messaging_product: 'whatsapp', pin: '123456' },
+  }));
+  assert.equal(coexistence.error?.category, 'REQUEST_INVALID');
+  assert.equal(runtime.credentials.callbacks, 0);
+
+  const exclusiveRuntime = exclusiveClient(transport);
+  const invalidPin = await exclusiveRuntime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin: '12345' }));
+  const extraField = await exclusiveRuntime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin: '123456', assetId }));
+  assert.equal(invalidPin.error?.category, 'REQUEST_INVALID');
+  assert.equal(extraField.error?.category, 'REQUEST_INVALID');
+  assert.equal(exclusiveRuntime.credentials.callbacks, 0);
+  assert.equal(transport.calls.length, 0);
+});
+
+test('ambiguous registration POST is not retried', async () => {
+  const transport = new SequenceTransport([new MetaGraphTransportFailure('OVERALL_TIMEOUT')]);
+  const runtime = exclusiveClient(transport);
+  const result = await runtime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin: '123456' }));
+  assert.equal(result.outcome, 'UNKNOWN');
+  assert.equal(result.ambiguous, true);
+  assert.equal(result.retries, 0);
+  assert.equal(transport.calls.length, 1);
+});
+
+test('exclusive phone_numbers discovery consumes every bounded Graph page', async () => {
+  const transport = new SequenceTransport([
+    response(200, { data: [{ id: '1906385232743451', verified_name: 'Synthetic One', display_phone_number: '+15550000001' }],
+      paging: { next: `https://graph.facebook.com/v27.0/${providerObjectId}/phone_numbers?limit=100&after=cursor-two` } }),
+    response(200, { data: [{ id: '1913623884432103', verified_name: 'Synthetic Two', display_phone_number: '+15550000002' }] }),
+  ]);
+  const runtime = exclusiveClient(transport);
+  const result = await runtime.instance.collect(exclusivePhoneListRequest(), { maxPages: 100, maxItems: 100 });
+  assert.equal(result.outcome, 'SUCCEEDED');
+  assert.deepEqual(result.data.map((item) => isRecord(item) ? item['id'] : undefined),
+    ['1906385232743451', '1913623884432103']);
+  assert.equal(transport.calls.length, 2);
+  assert.ok(transport.calls[1]?.path.includes('after=cursor-two'));
+  assert.equal(runtime.credentials.callbacks, 1);
+});
+
+test('owned WABA discovery is exclusive-only and uses the server-resolved business ID', async () => {
+  const transport = new SequenceTransport([response(200, { data: [{ id: 'waba-123' }] })]);
+  const exclusive = exclusiveClient(transport);
+  const result = await exclusive.instance.collect(exclusiveOwnedWabaRequest());
+  assert.equal(result.outcome, 'SUCCEEDED');
+  assert.equal(transport.calls[0]?.path, `/v27.0/${providerObjectId}/owned_whatsapp_business_accounts`);
+  assert.equal(exclusive.credentials.callbacks, 1);
+
+  const coexistence = client(transport);
+  const denied = await coexistence.instance.collect(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'owned_whatsapp_business_accounts' }));
+  assert.equal(denied.error?.category, 'REQUEST_INVALID');
+  assert.equal(coexistence.credentials.callbacks, 0);
+  assert.equal(transport.calls.length, 1);
+});
+
+test('Facebook Page discovery uses exact me/accounts projection, paginates before atomic token enrollment, and returns refs only', async () => {
+  const userAccessToken = 'synthetic-facebook-user-token';
+  const pageTokenOne = 'synthetic-page-token-one';
+  const pageTokenTwo = 'synthetic-page-token-two';
+  const credentialRefOne = '10000000-0000-4000-8000-000000000001';
+  const credentialRefTwo = '10000000-0000-4000-8000-000000000002';
+  const transport = new SequenceTransport([
+    response(200, { data: [{ id: '123456789', name: 'Synthetic Page One', access_token: pageTokenOne, tasks: ['PROFILE_PLUS_MANAGE'] }],
+      paging: { next: `https://graph.facebook.com/v27.0/me/accounts?fields=name%2Caccess_token%2Ctasks&limit=100&after=next-page&access_token=${userAccessToken}` } }),
+    response(200, { data: [{ id: '234567890', name: 'Synthetic Page Two', access_token: pageTokenTwo, tasks: ['PROFILE_PLUS_ANALYZE'] }] }),
+  ]);
+  const credentials = new FakeCredentials();
+  const runtime = facebookDiscoveryClient(transport, credentials);
+  let enrollmentCalls = 0;
+  const result = await runtime.instance.discoverFacebookPages(facebookPageDiscoveryRequest(),
+    'd3c90208-010c-48b0-90e3-ef28f825efde', async (input) => {
+      enrollmentCalls += 1;
+      assert.equal(input.authorizationAssetRef, assetId);
+      assert.equal(input.enrollmentRef, 'd3c90208-010c-48b0-90e3-ef28f825efde');
+      assert.equal(input.flowVariant, 'FACEBOOK');
+      assert.equal(input.authVariant, 'FACEBOOK_LOGIN_FOR_BUSINESS');
+      assert.deepEqual(input.pages.map((page) => page.pageAccessToken), [pageTokenOne, pageTokenTwo]);
+      assert.equal(input.pages.length, 2);
+      return { credentialRefs: [
+        { providerPageId: '123456789', credentialRef: credentialRefOne },
+        { providerPageId: '234567890', credentialRef: credentialRefTwo },
+      ] };
+    });
+
+  assert.equal(result.outcome, 'SUCCEEDED');
+  assert.deepEqual(result.pages, [
+    { providerPageId: '123456789', pageName: 'Synthetic Page One', pageTasks: ['PROFILE_PLUS_MANAGE'], credentialRef: credentialRefOne },
+    { providerPageId: '234567890', pageName: 'Synthetic Page Two', pageTasks: ['PROFILE_PLUS_ANALYZE'], credentialRef: credentialRefTwo },
+  ]);
+  assert.equal(enrollmentCalls, 1);
+  assert.equal(credentials.callbacks, 1);
+  assert.equal(credentials.contexts[0]?.tenantId, tenantId);
+  assert.equal(credentials.contexts[0]?.appConfigurationId, appConfigurationId);
+  assert.equal(credentials.contexts[0]?.assetId, assetId);
+  assert.equal(credentials.contexts[0]?.operation, 'ASSET_DISCOVERY');
+  assert.equal(credentials.contexts[0]?.flowVariant, 'FACEBOOK');
+  assert.equal(credentials.contexts[0]?.authVariant, 'FACEBOOK_LOGIN_FOR_BUSINESS');
+  assert.equal(transport.calls.length, 2);
+  assert.equal(transport.calls[0]?.path, '/v27.0/me/accounts?fields=name%2Caccess_token%2Ctasks&limit=100');
+  assert.equal(transport.calls[0]?.headers.authorization, `Bearer ${TOKEN}`);
+  assert.ok(transport.calls[1]?.path.includes('after=next-page'));
+  assert.equal(transport.calls[1]?.path.includes('&access_token='), false);
+  for (const secret of [userAccessToken, pageTokenOne, pageTokenTwo]) assert.equal(JSON.stringify(result).includes(secret), false);
+  assert.equal(JSON.stringify(result).includes('access_token'), false);
+  assert.equal(JSON.stringify(runtime.metrics.snapshot()).includes(pageTokenOne), false);
+});
+
+test('Facebook Page discovery failure before pagination completes never calls the vault consumer or exposes tokens', async () => {
+  const pageToken = 'synthetic-page-token-never-return';
+  const transport = new SequenceTransport([
+    response(200, { data: [{ id: '123456789', name: 'Synthetic Page', access_token: pageToken, tasks: ['PROFILE_PLUS_MANAGE'] }],
+      paging: { next: 'https://graph.facebook.com/v27.0/me/accounts?fields=name%2Caccess_token%2Ctasks&limit=100&after=next-page' } }),
+    response(200, { error: { message: pageToken, type: 'OAuthException', code: 190 } }),
+  ]);
+  const runtime = facebookDiscoveryClient(transport);
+  let enrollmentCalls = 0;
+  const result = await runtime.instance.discoverFacebookPages(facebookPageDiscoveryRequest(),
+    'd3c90208-010c-48b0-90e3-ef28f825efde', async () => {
+      enrollmentCalls += 1;
+      return { credentialRefs: [] };
+    });
+
+  assert.equal(result.outcome, 'FAILED');
+  assert.equal(result.error?.category, 'CREDENTIAL_REJECTED');
+  assert.deepEqual(result.pages, []);
+  assert.equal(enrollmentCalls, 0);
+  assert.equal(JSON.stringify(result).includes(pageToken), false);
+});
+
+test('Facebook Page discovery suppresses vault callback details and raw Page tokens on failure', async () => {
+  const pageToken = 'synthetic-page-token-in-callback-error';
+  const transport = new SequenceTransport([response(200, { data: [
+    { id: '123456789', name: 'Synthetic Page', access_token: pageToken, tasks: ['PROFILE_PLUS_MANAGE'] },
+  ] })]);
+  const runtime = facebookDiscoveryClient(transport);
+  const result = await runtime.instance.discoverFacebookPages(facebookPageDiscoveryRequest(),
+    'd3c90208-010c-48b0-90e3-ef28f825efde', async () => { throw new Error(`vault rejected ${pageToken}`); });
+
+  assert.equal(result.outcome, 'FAILED');
+  assert.equal(result.error?.category, 'CREDENTIAL_UNAVAILABLE');
+  assert.deepEqual(result.pages, []);
+  assert.equal(JSON.stringify(result).includes(pageToken), false);
+});
+
+test('Facebook Page discovery rejects generic collection, other flow variants, missing consumer and unsafe enrollment maps', async () => {
+  const transport = new SequenceTransport([]);
+  const runtime = facebookDiscoveryClient(transport);
+  const generic = await runtime.instance.collect(facebookPageDiscoveryRequest());
+  assert.equal(generic.error?.category, 'REQUEST_INVALID');
+  assert.equal(runtime.credentials.callbacks, 0);
+
+  const wrongPath = await runtime.instance.discoverFacebookPages(
+    { ...facebookPageDiscoveryRequest(), resourceId: '123456789' } as unknown as MetaGraphFacebookPageDiscoveryInput,
+    'd3c90208-010c-48b0-90e3-ef28f825efde', async () => ({ credentialRefs: [] }));
+  const freeQuery = await runtime.instance.discoverFacebookPages(
+    { ...facebookPageDiscoveryRequest(), query: { fields: 'id,access_token', limit: 1 } } as unknown as MetaGraphFacebookPageDiscoveryInput,
+    'd3c90208-010c-48b0-90e3-ef28f825efde', async () => ({ credentialRefs: [] }));
+  assert.equal(wrongPath.error?.category, 'REQUEST_INVALID');
+  assert.equal(freeQuery.error?.category, 'REQUEST_INVALID');
+  assert.equal(runtime.credentials.callbacks, 0);
+
+  const coexistence = await client(transport).instance.discoverFacebookPages(
+    { ...facebookPageDiscoveryRequest(), context: { ...facebookPageDiscoveryRequest().context,
+      flowVariant: 'WHATSAPP_COEXISTENCE', authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING' } } as unknown as MetaGraphFacebookPageDiscoveryInput,
+    'd3c90208-010c-48b0-90e3-ef28f825efde', async () => ({ credentialRefs: [] }));
+  assert.equal(coexistence.error?.category, 'REQUEST_INVALID');
+  assert.equal(transport.calls.length, 0);
+
+  const noConsumer = await runtime.instance.discoverFacebookPages(facebookPageDiscoveryRequest(),
+    'd3c90208-010c-48b0-90e3-ef28f825efde', undefined as unknown as Parameters<typeof runtime.instance.discoverFacebookPages>[2]);
+  assert.equal(noConsumer.error?.category, 'CREDENTIAL_UNAVAILABLE');
+  assert.equal(runtime.credentials.callbacks, 0);
+
+  const cancelledController = new AbortController();
+  cancelledController.abort();
+  let cancelledEnrollmentCalls = 0;
+  const cancelled = await runtime.instance.discoverFacebookPages(facebookPageDiscoveryRequest(),
+    'd3c90208-010c-48b0-90e3-ef28f825efde', async () => {
+      cancelledEnrollmentCalls += 1;
+      return { credentialRefs: [] };
+    }, { signal: cancelledController.signal });
+  assert.equal(cancelled.cancelled, true);
+  assert.equal(cancelledEnrollmentCalls, 0);
+  assert.equal(runtime.credentials.callbacks, 0);
+
+  const invalidMapRuntime = facebookDiscoveryClient(new SequenceTransport([response(200, { data: [
+    { id: '123456789', name: 'Synthetic Page', access_token: 'synthetic-page-token', tasks: ['PROFILE_PLUS_MANAGE'] },
+  ] })]));
+  const invalidMap = await invalidMapRuntime.instance.discoverFacebookPages(facebookPageDiscoveryRequest(),
+    'd3c90208-010c-48b0-90e3-ef28f825efde', async () => ({ credentialRefs: [
+      { providerPageId: '123456789', credentialRef: 'synthetic-page-token' },
+    ] }));
+  assert.equal(invalidMap.error?.category, 'CREDENTIAL_UNAVAILABLE');
+  assert.deepEqual(invalidMap.pages, []);
+  assert.equal(JSON.stringify(invalidMap).includes('synthetic-page-token'), false);
 });
 
 test('collect processes cursor pages with bounds and strips a token query from provider next URLs', async () => {

@@ -6,6 +6,7 @@ import type { MetaGraphHost, MetaGraphTransport, MetaGraphTransportRequest, Meta
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
+const CURSOR = /^[A-Za-z0-9._~+/%=-]{1,1024}$/;
 const HOST: Readonly<Record<MetaGraphTransportRequest['authVariant'], MetaGraphHost>> = Object.freeze({
   FACEBOOK_LOGIN_FOR_BUSINESS: 'graph.facebook.com', INSTAGRAM_VIA_FACEBOOK_LOGIN: 'graph.facebook.com',
   INSTAGRAM_LOGIN: 'graph.instagram.com', WHATSAPP_EMBEDDED_SIGNUP: 'graph.facebook.com',
@@ -48,13 +49,41 @@ function routeAllowed(input: MetaGraphTransportRequest, pathname: string): boole
   const edge = segments.slice(2).join('/');
   switch (input.operation) {
     case 'READ_STATUS': return input.method === 'GET' && edge === '';
-    case 'ASSET_DISCOVERY': return input.method === 'GET' && ['accounts', 'businesses', 'instagram_accounts', 'owned_pages', 'phone_numbers'].includes(edge);
+    case 'ASSET_DISCOVERY': return input.method === 'GET' && (segments[1] === 'me'
+      ? input.flowVariant === 'FACEBOOK' && input.authVariant === 'FACEBOOK_LOGIN_FOR_BUSINESS' && edge === 'accounts'
+      : edge === 'owned_whatsapp_business_accounts'
+        ? input.flowVariant === 'WHATSAPP_EXCLUSIVE' && input.authVariant === 'WHATSAPP_EMBEDDED_SIGNUP'
+        : ['accounts', 'businesses', 'instagram_accounts', 'owned_pages', 'phone_numbers'].includes(edge));
     case 'SEND_MESSAGE': return input.method === 'POST' && edge === 'messages';
     case 'MANAGE_TEMPLATES': return ['GET', 'POST'].includes(input.method) && edge === 'message_templates';
     case 'MANAGE_COMMENTS': return (input.method === 'GET' && edge === 'comments') || (input.method === 'POST' && edge === 'replies');
     case 'SUBSCRIBE_WEBHOOKS': return ['GET', 'POST'].includes(input.method) && edge === 'subscribed_apps';
+    case 'PHONE_REGISTRATION_CONVENTIONAL': return input.flowVariant === 'WHATSAPP_EXCLUSIVE' &&
+      input.authVariant === 'WHATSAPP_EMBEDDED_SIGNUP' && input.method === 'POST' && edge === 'register';
     default: return false;
   }
+}
+
+function containsPinKey(value: unknown, depth = 0): boolean {
+  if (depth > 20) return true;
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some((item) => containsPinKey(item, depth + 1));
+  return Object.entries(value).some(([key, item]) => key.toLowerCase() === 'pin' || containsPinKey(item, depth + 1));
+}
+
+function safeBody(input: MetaGraphTransportRequest): boolean {
+  if (input.operation !== 'PHONE_REGISTRATION_CONVENTIONAL') {
+    if (input.body === undefined) return true;
+    try { return !containsPinKey(JSON.parse(input.body)); } catch { return false; }
+  }
+  if (!input.body) return false;
+  try {
+    const value: unknown = JSON.parse(input.body);
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    const body = value as Record<string, unknown>;
+    return Object.keys(body).length === 2 && Object.keys(body).every((key) => key === 'messaging_product' || key === 'pin') &&
+      body['messaging_product'] === 'whatsapp' && typeof body['pin'] === 'string' && /^\d{6}$/.test(body['pin']);
+  } catch { return false; }
 }
 
 function safePath(input: MetaGraphTransportRequest): boolean {
@@ -62,12 +91,15 @@ function safePath(input: MetaGraphTransportRequest): boolean {
   const parts = input.path.split('?'); if (parts.length > 2) return false;
   const [pathname, query = ''] = parts;
   if (!pathname || !routeAllowed(input, pathname)) return false;
-  if (!query) return true;
+  const pageDiscoveryPath = /^\/v\d{1,2}\.\d{1,3}\/me\/accounts$/.test(pathname);
+  if (!query) return !pageDiscoveryPath;
   const allowed = new Set(['fields', 'limit', 'after', 'since', 'until']); const params = new URLSearchParams(query); const seen = new Set<string>();
   for (const [key, value] of params) {
     if (!allowed.has(key) || seen.has(key) || value.length > 1_024 || /[\u0000-\u001f\u007f]/.test(value)) return false;
     seen.add(key);
   }
+  if (pageDiscoveryPath && (params.get('fields') !== 'name,access_token,tasks' || params.get('limit') !== '100' ||
+      params.has('since') || params.has('until') || (params.has('after') && !CURSOR.test(params.get('after') ?? '')))) return false;
   return true;
 }
 
@@ -82,7 +114,7 @@ export class NodeMetaGraphTransport implements MetaGraphTransport {
     const headerNames = Object.keys(input.headers).map((key) => key.toLowerCase());
     if (!profile || profile.configurationRef !== input.configurationRef || profile.versions.graphApi.status !== 'VERIFIED' ||
         input.graphApiVersion !== profile.versions.graphApi.value || !capability?.enabled || input.host !== HOST[input.authVariant] ||
-        !UUID.test(input.correlationId) || !safePath(input) || headerNames.some((key) => !['accept', 'authorization', 'content-type'].includes(key)) ||
+        !UUID.test(input.correlationId) || !safePath(input) || !safeBody(input) || headerNames.some((key) => !['accept', 'authorization', 'content-type'].includes(key)) ||
         input.headers['accept'] !== 'application/json' ||
         (input.body === undefined ? input.headers['content-type'] !== undefined : input.headers['content-type'] !== 'application/json') ||
         !/^Bearer [^\s\r\n]{8,8192}$/.test(input.headers['authorization'] ?? '') ||

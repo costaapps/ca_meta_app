@@ -12,7 +12,8 @@ export type MetaOperation =
   | 'MANAGE_TEMPLATES'
   | 'READ_STATUS'
   | 'SUBSCRIBE_WEBHOOKS'
-  | 'SYNC_HISTORY';
+  | 'SYNC_HISTORY'
+  | 'PHONE_REGISTRATION_CONVENTIONAL';
 
 export interface MetaCapabilityManifestEntry {
   readonly flowVariant: MetaProductFlow;
@@ -29,7 +30,7 @@ export interface MetaCapabilityManifestEntry {
 }
 
 /** Increment this value whenever the versioned operation/permission evidence changes. */
-export const META_CAPABILITY_MANIFEST_VERSION = 'm4.01-2026-11-06.1';
+export const META_CAPABILITY_MANIFEST_VERSION = 'm4.04-2026-11-10.1';
 
 const WHATSAPP_CLOUD_DOC = 'https://www.postman.com/meta/whatsapp-business-platform/documentation/wlk6lh4/whatsapp-cloud-api';
 const WHATSAPP_SIGNUP_DOC = 'https://www.postman.com/meta/whatsapp-business-platform/documentation/du6gzjv/embedded-signup';
@@ -88,6 +89,7 @@ export const META_CAPABILITY_MANIFEST: readonly MetaCapabilityManifestEntry[] = 
   entry('WHATSAPP_EXCLUSIVE', 'WHATSAPP_EMBEDDED_SIGNUP', 'MANAGE_TEMPLATES', ['whatsapp_business_management'], 'EXAMPLE_ONLY', WHATSAPP_CLOUD_DOC),
   entry('WHATSAPP_EXCLUSIVE', 'WHATSAPP_EMBEDDED_SIGNUP', 'READ_STATUS', [], 'NOT_CONFIRMED', WHATSAPP_CLOUD_DOC),
   entry('WHATSAPP_EXCLUSIVE', 'WHATSAPP_EMBEDDED_SIGNUP', 'SUBSCRIBE_WEBHOOKS', ['whatsapp_business_management'], 'EXAMPLE_ONLY', WHATSAPP_CLOUD_DOC),
+  entry('WHATSAPP_EXCLUSIVE', 'WHATSAPP_EMBEDDED_SIGNUP', 'PHONE_REGISTRATION_CONVENTIONAL', ['whatsapp_business_messaging'], 'EXAMPLE_ONLY', WHATSAPP_CLOUD_DOC),
 
   entry('WHATSAPP_COEXISTENCE', 'WHATSAPP_BUSINESS_APP_ONBOARDING', 'ASSET_DISCOVERY', ['business_management', 'whatsapp_business_management'], 'EXAMPLE_ONLY', WHATSAPP_SIGNUP_DOC, 'ADVANCED'),
   entry('WHATSAPP_COEXISTENCE', 'WHATSAPP_BUSINESS_APP_ONBOARDING', 'SEND_MESSAGE', ['whatsapp_business_messaging'], 'EXAMPLE_ONLY', WHATSAPP_CLOUD_DOC, 'ADVANCED'),

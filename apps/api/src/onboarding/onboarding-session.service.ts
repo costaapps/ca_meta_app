@@ -212,6 +212,7 @@ export class OnboardingSessionService {
       status: record.status,
       readiness: record.readiness,
       steps: Object.freeze(record.steps.map((step) => Object.freeze({ ...step }))),
+      ...(record.phoneReadiness ? { phoneReadiness: Object.freeze(record.phoneReadiness.map((item) => Object.freeze({ ...item }))) } : {}),
       nextAction: record.nextAction,
       lastUpdatedAt: record.lastUpdatedAt.toISOString(),
     });

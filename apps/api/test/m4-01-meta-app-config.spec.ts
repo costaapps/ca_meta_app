@@ -347,10 +347,11 @@ test('the bootstrap route requires a portal session and returns only its allowli
 
 test('each product/auth profile has an explicit versioned operation policy', () => {
   const rows = META_CAPABILITY_MANIFEST;
-  assert.equal(rows.length, 25);
+  assert.equal(rows.length, 26);
   assert.ok(rows.every((row) => row.evidenceSources.length >= 2));
   assert.ok(rows.every((row) => row.approvalOwner === 'UNASSIGNED'));
   assert.ok(rows.some((row) => row.flowVariant === 'WHATSAPP_COEXISTENCE' && row.operation === 'SYNC_HISTORY'));
+  assert.ok(rows.some((row) => row.flowVariant === 'WHATSAPP_EXCLUSIVE' && row.operation === 'PHONE_REGISTRATION_CONVENTIONAL'));
   assert.ok(rows.some((row) => row.flowVariant === 'INSTAGRAM' && row.authVariant === 'INSTAGRAM_LOGIN' && row.operation === 'SEND_MESSAGE'));
   assert.ok(rows.some((row) => row.flowVariant === 'INSTAGRAM' && row.authVariant === 'INSTAGRAM_VIA_FACEBOOK_LOGIN' && row.operation === 'MANAGE_COMMENTS'));
 });

@@ -1,5 +1,6 @@
 import type { OnboardingCodeContext } from './onboarding-code-crypto.js';
 import type { OnboardingStep } from './onboarding-session.types.js';
+import type { OnboardingPhoneReadiness } from './onboarding-phone-readiness.js';
 
 export const META_ONBOARDING_SAGA_ADAPTER = Symbol('META_ONBOARDING_SAGA_ADAPTER');
 
@@ -16,13 +17,17 @@ export interface OnboardingSagaEvidence {
   readonly verifiedAssetRefs?: readonly string[];
   readonly subscriptionRef?: string;
   readonly projectionRef?: string;
+  readonly phoneReadiness?: readonly OnboardingPhoneReadiness[];
 }
 
 export interface OnboardingSagaAdapter {
   /** Exchanges this one-use code for the exact flow/config; persist returned credentials through the encrypted vault. */
   exchangeAuthorizationCode(input: OnboardingSagaContext & { readonly code: string; readonly idempotencyKey: string; readonly signal: AbortSignal }): Promise<{ readonly authorizationRef: string }>;
   /** Resolves provider IDs from a server-side catalog and persists verified assets and grants. */
-  discoverAndPersistAssets(input: OnboardingSagaContext & { readonly authorizationRef: string; readonly idempotencyKey: string; readonly signal: AbortSignal }): Promise<{ readonly assetRefs: readonly string[] }>;
+  discoverAndPersistAssets(input: OnboardingSagaContext & { readonly authorizationRef: string; readonly idempotencyKey: string; readonly signal: AbortSignal }): Promise<{
+    readonly assetRefs: readonly string[];
+    readonly phoneReadiness?: readonly OnboardingPhoneReadiness[];
+  }>;
   /** Applies exact subscriptions; a local context-bound receipt is checkpointed after success. */
   ensureSubscriptions(input: OnboardingSagaContext & { readonly authorizationRef: string; readonly assetRefs: readonly string[]; readonly idempotencyKey: string; readonly signal: AbortSignal }): Promise<void>;
   /** Emits the bounded connection projection; its local context-bound receipt is checkpointed after success. */

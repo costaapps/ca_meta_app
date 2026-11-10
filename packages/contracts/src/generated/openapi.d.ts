@@ -810,7 +810,7 @@ export interface components {
         readonly MetaConfigurationBootstrap: {
             readonly requestId: string;
             /** @constant */
-            readonly manifestVersion: "m4.01-2026-11-06.1";
+            readonly manifestVersion: "m4.04-2026-11-10.1";
             readonly profiles: readonly components["schemas"]["MetaBootstrapProfile"][];
         };
         readonly FlowDefinition: {
@@ -876,11 +876,23 @@ export interface components {
             /** @enum {string} */
             readonly readiness: "READY" | "PARTIAL" | "UNKNOWN";
             readonly steps: readonly components["schemas"]["StepStatus"][];
+            /** @description Per-number readiness for exclusive WhatsApp Cloud API onboarding. Contains internal tenant-scoped asset references and safe state only; never provider IDs or secrets. */
+            readonly phoneReadiness?: readonly components["schemas"]["OnboardingPhoneReadiness"][];
             /** @enum {string} */
             readonly nextAction: "WAIT" | "CHECK_STATUS" | "REAUTHORIZE" | "RECONCILE" | "RESUME" | "RESOLVE_CONFLICT" | "NONE";
             /** Format: date-time */
             readonly lastUpdatedAt: string;
             readonly requestId: string;
+        };
+        readonly OnboardingPhoneReadiness: {
+            /** Format: uuid */
+            readonly assetRef: string;
+            /** @enum {string} */
+            readonly state: "READY" | "ACTION_REQUIRED" | "UNKNOWN";
+            /** @enum {string} */
+            readonly reasonCode: "REGISTERED" | "ALREADY_REGISTERED" | "PHONE_REGISTRATION_REQUIRED" | "PHONE_STATE_NOT_CONFIRMED" | "PIN_NOT_AVAILABLE" | "TOKEN_ELIGIBILITY_NOT_CONFIRMED" | "REGISTRATION_REJECTED" | "REGISTRATION_RESULT_UNKNOWN";
+            /** Format: date-time */
+            readonly observedAt: string;
         };
         readonly ProviderAuthorizationCodeRequest: {
             /** @description Ephemeral Meta provider code from this onboarding flow. Never log, persist in cleartext, or return. */
