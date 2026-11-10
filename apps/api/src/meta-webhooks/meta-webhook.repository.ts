@@ -26,7 +26,7 @@ export interface MetaWebhookEventRow {
   delivery_provider_app_id: string | null;
   delivery_environment: string | null;
   delivery_id: string | null;
-  item_locator_json: string;
+  item_locator_json: string | ParsedMetaWebhookItem['locator'];
   event_ref: string;
   schema_version: number | string;
   event_type: string;
@@ -373,7 +373,9 @@ export class MetaWebhookRepository {
           ciphertext: Buffer.from(row.ciphertext as Buffer),
           expiresAt: normalizeSqlTimestamp(row.expires_at as string | Date),
         },
-        locator: JSON.parse(row.item_locator_json) as ParsedMetaWebhookItem['locator'],
+        locator: typeof row.item_locator_json === 'string'
+          ? JSON.parse(row.item_locator_json) as ParsedMetaWebhookItem['locator']
+          : row.item_locator_json,
       };
     });
   }
