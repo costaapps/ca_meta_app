@@ -1,9 +1,12 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
+import type { OutboxEventEnvelope } from '../jobs/event-validation.js';
+import type { OutboxService } from '../outbox/outbox-service.js';
 import {
   isAssetObservationTenantAssetRef,
   parseAssetObservationSnapshot,
   reduceAssetObservation,
+  toPublicAssetStatusObservation,
   type AssetObservationInput,
   type AssetObservationSnapshot,
   AssetObservationInputError,
@@ -22,7 +25,11 @@ interface ObservationRow {
 
 /** Tenant-scoped append-only observation storage. It never writes authorization, grant or credential tables. */
 export class MysqlAssetObservationRepository {
-  constructor(private readonly database: DurableWorkDatabase, private readonly now: () => Date = () => new Date()) {}
+  constructor(
+    private readonly database: DurableWorkDatabase,
+    private readonly outbox: Pick<OutboxService, 'appendWithin'>,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
 
   async record(input: {
     readonly tenantId: string;
@@ -68,6 +75,16 @@ export class MysqlAssetObservationRepository {
         [randomUUID(), input.tenantId, input.authorizationId, input.assetId, snapshot.version, snapshot.schemaVersion, snapshot.source,
           mysqlDate(snapshot.observedAt), mysqlDate(snapshot.fetchedAt), JSON.stringify(snapshot), mysqlDate(fetchedAt)],
       );
+      const actionableReason = toPublicAssetStatusObservation(snapshot, 'VERIFIED', fetchedAt).actionableReason;
+      if (snapshot.driftCodes.length > 0 && actionableReason !== 'NONE') {
+        await this.outbox.appendWithin(manager, assetDriftEvent({
+          tenantId: input.tenantId,
+          authorizationId: input.authorizationId,
+          assetId: input.assetId,
+          snapshot,
+          actionableReason,
+        }));
+      }
       return Object.freeze({ kind: 'RECORDED' as const, snapshot });
     });
   }
@@ -104,6 +121,41 @@ export class MysqlAssetObservationRepository {
       } });
     }
   }
+}
+
+function assetDriftEvent(input: {
+  readonly tenantId: string;
+  readonly authorizationId: string;
+  readonly assetId: string;
+  readonly snapshot: AssetObservationSnapshot;
+  readonly actionableReason: 'REAUTHORIZE' | 'CHECK_STATUS' | 'RECONCILE';
+}): OutboxEventEnvelope {
+  const identity = [input.tenantId, input.authorizationId, input.assetId, String(input.snapshot.version),
+    input.snapshot.driftCodes.join(',')].join('\0');
+  const digest = createHash('sha256').update(identity).digest('hex');
+  const notificationRef = `notice_${digest}`;
+  const eventId = `asset-drift:${digest}`;
+  return Object.freeze({
+    eventId,
+    tenantRef: input.tenantId,
+    schemaVersion: 1,
+    eventType: 'asset.drift.detected',
+    aggregateRef: notificationRef,
+    aggregateVersion: 1,
+    actor: { kind: 'SYSTEM', ref: 'asset-observation' },
+    correlationId: eventId,
+    causationId: `asset-observation:${digest}`,
+    createdAt: input.snapshot.fetchedAt,
+    enqueuedAt: input.snapshot.fetchedAt,
+    data: {
+      kind: 'ASSET_DRIFT_DETECTED',
+      notificationRef,
+      assetRef: input.assetId,
+      status: 'UNREAD',
+      driftCodes: input.snapshot.driftCodes,
+      actionableReason: input.actionableReason,
+    },
+  });
 }
 
 function parseSnapshot(value: string | AssetObservationSnapshot): AssetObservationSnapshot {

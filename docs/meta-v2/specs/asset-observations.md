@@ -14,7 +14,8 @@ The only stored dimensions are the already normalized local catalog concepts: as
 - `ACTIVE`, `INACTIVE`, `UNKNOWN`, and `UNAVAILABLE` are distinct. Missing, unknown, or unavailable status does not remove an asset. An unavailable read preserves the last known normalized values, marks the relevant dimensions unavailable, and makes the status observation stale.
 - Permission state is `OBSERVED`, `UNKNOWN`, or `UNAVAILABLE`. An observed empty grant list is different from a missing grant field. Grant names are bounded and normalized; a missing/unavailable list preserves prior names for diagnosis but marks its availability accordingly.
 - Each asset has a monotonic append-only version. An observation whose provider time is equal to or older than the latest accepted observation is ignored. An unavailable attempt can be appended without advancing provider observation time.
-- Drift codes describe status, permission, subscription, or projection changes. They contain no raw before/after values and are deduplicated within each snapshot. This package does not send notifications or repair subscriptions.
+- Drift codes describe status, permission, subscription, or projection transitions. They contain no raw before/after values; `PROJECTION_STALE` is emitted only when a projection enters an unresolved state, while the read model keeps `RECONCILE` actionable until it returns to a resolved state.
+- A newly detected actionable drift appends one deterministic `asset.drift.detected` outbox intent in the same transaction as its snapshot. Its idempotency identity covers tenant, authorization, asset, snapshot version and the sorted drift-code set. A later observation with the same normalized drift state emits no equivalent notice; a distinct later transition can emit a new one. The event carries only an opaque notice reference, asset reference, bounded drift codes and a non-`NONE` next action. No outbox delivery handler or notification provider is installed, so the intent is durable but not externally delivered. Subscription repair remains out of scope.
 - The existing 24-hour catalog freshness bound is reused as a display stale deadline. It is not an end-to-end or provider SLO; changes-real-Meta-within-SLO remains an external gate.
 - A status observation never reactivates a revoked/disconnected authorization or credential. Existing authorization/credential records remain authoritative for operation resolution.
 
@@ -35,6 +36,7 @@ The connection-detail catalog already scopes its asset query to one server-resol
 | AC03 — delayed update cannot revive revoked asset/credential | Append-only snapshot storage does not write authorization, asset-authorization, grant, or credential tables; stale input is rejected | M4.13 remains responsible for revocation callbacks and cleanup |
 | AC04 — refresh is budgeted and coalesced | Synthetic coordinator test covers active-job coalescing and the local cooldown | Meta per-kind rate limits are Not confirmed |
 | AC05 — four public resource kinds avoid fictional provider fields | Typed normalized contract and synthetic fixtures cover Page, Instagram account variants, WABA, and phone number | Exact supported Meta status/grant fields are Not confirmed |
+| AC06 — newly detected drift creates a deduplicated notice with a next action | Synthetic transaction test covers safe outbox event contents, tenant scope, atomic append, and repeated-state suppression | Outbox delivery, recipients, and real-provider fields remain Not confirmed |
 
 ## Focused harness
 

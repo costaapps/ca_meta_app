@@ -3713,10 +3713,9 @@ components:
     AssetStatusObservation:
       type: object
       additionalProperties: false
-      description: >-
-        Tenant-scoped normalized observation. It does not authorize operations or
-        change authorization/credential state. Unsupported provider-specific
-        fields remain Not confirmed.
+      description: Tenant-scoped normalized observation. It does not authorize
+        operations or change authorization/credential state. Unsupported
+        provider-specific fields remain Not confirmed.
       required:
         - status
         - availability
@@ -3810,7 +3809,7 @@ components:
             - string
             - "null"
           maxLength: 64
-          pattern: "^[A-Z0-9_.-]{1,64}$"
+          pattern: ^[A-Z0-9_.-]{1,64}$
     AssetCapabilities:
       type: object
       additionalProperties: false

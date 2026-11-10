@@ -1061,14 +1061,6 @@ export interface components {
             /** @enum {string} */
             readonly projectionState: "UNKNOWN" | "PENDING" | "SYNCED" | "STALE" | "FAILED";
         };
-        /** @description Advisory snapshot derived from verified evidence and current membership. Exact Meta operation-to-grant eligibility is Not confirmed; these flags do not authorize server operations. */
-        readonly AssetCapabilities: {
-            readonly canSend: boolean;
-            readonly canManageTemplates: boolean;
-            readonly canSubscribe: boolean;
-            readonly canReauthorize: boolean;
-            readonly canDisconnect: boolean;
-        };
         /** @description Tenant-scoped normalized observation. It does not authorize operations or change authorization/credential state. Unsupported provider-specific fields remain Not confirmed. */
         readonly AssetStatusObservation: {
             /** @enum {string} */
@@ -1094,6 +1086,14 @@ export interface components {
             /** @enum {string} */
             readonly actionableReason: "REAUTHORIZE" | "CHECK_STATUS" | "RECONCILE" | "NONE";
             readonly providerCode: string | null;
+        };
+        /** @description Advisory snapshot derived from verified evidence and current membership. Exact Meta operation-to-grant eligibility is Not confirmed; these flags do not authorize server operations. */
+        readonly AssetCapabilities: {
+            readonly canSend: boolean;
+            readonly canManageTemplates: boolean;
+            readonly canSubscribe: boolean;
+            readonly canReauthorize: boolean;
+            readonly canDisconnect: boolean;
         };
         readonly AssetListPage: {
             readonly items: readonly components["schemas"]["AssetListItem"][];

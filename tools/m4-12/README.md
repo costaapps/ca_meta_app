@@ -1,6 +1,6 @@
 # M4.12 focused harness
 
-The harness covers versioned asset-observation reduction, stale/unknown distinction, late-event rejection, bounded unknown status tokens, tenant-scoped persistence, and manual refresh coalescing/budget behavior. Fixtures are synthetic. It does not call Meta, load credentials, connect to a database, or use production data.
+The harness covers versioned asset-observation reduction, stale/unknown distinction, late-event rejection, bounded unknown status tokens, tenant-scoped persistence, transactional/idempotent drift outbox intents, unresolved-state next actions, and manual refresh coalescing/budget behavior. Fixtures are synthetic. It does not call Meta, load credentials, connect to a database, or use production data.
 
 ## Setup
 
@@ -18,7 +18,7 @@ From the repository root:
 npm run test:m4-12 --workspace=@ca-meta/api
 ```
 
-The harness uses `apps/api/tsconfig.m4-12-test.json`, emits into a private `apps/api/.test-runs/m4-12-*` directory, runs `m4-12-asset-observation.spec.js`, then removes only that verified child. No Docker or MySQL is needed. The implementer did not run this command; the coordinator owns the focused gate.
+The harness uses `apps/api/tsconfig.m4-12-test.json`, emits into a private `apps/api/.test-runs/m4-12-*` directory, runs `m4-12-asset-observation.spec.js`, then removes only that verified child. The drift outbox appender is synthetic; durable events are represented by the existing outbox, but external delivery is not configured. No Docker or MySQL is needed. The implementer did not run this command; the coordinator owns the focused gate.
 
 ## Limits
 

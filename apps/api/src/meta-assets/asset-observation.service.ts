@@ -153,7 +153,9 @@ export function reduceAssetObservation(input: {
   if (previous && incoming.subscriptionState !== undefined && previous.subscriptionState !== subscriptionState) {
     driftCodes.add('SUBSCRIPTION_CHANGED');
   }
-  if (projectionState === 'STALE' || projectionState === 'FAILED') driftCodes.add('PROJECTION_STALE');
+  const projectionWasUnresolved = previous?.projectionState === 'STALE' || previous?.projectionState === 'FAILED';
+  if ((projectionState === 'STALE' || projectionState === 'FAILED') &&
+      (!previous || !projectionWasUnresolved)) driftCodes.add('PROJECTION_STALE');
 
   return Object.freeze({
     schemaVersion: ASSET_OBSERVATION_SCHEMA_VERSION,
@@ -184,9 +186,14 @@ export function toPublicAssetStatusObservation(snapshot: AssetObservationSnapsho
   authorizationStatus: 'VERIFIED' | 'REVOKED' | 'UNKNOWN', now: string): PublicAssetStatusObservation {
   const stale = isAssetObservationStale(snapshot, now);
   const status = stale ? 'STALE' : snapshot.status.availability === 'OBSERVED' ? snapshot.status.value : 'UNKNOWN';
+  const subscriptionUnresolved = ['PENDING', 'FAILED', 'REMOVED'].includes(snapshot.subscriptionState);
+  const projectionUnresolved = ['PENDING', 'STALE', 'FAILED'].includes(snapshot.projectionState);
+  const needsReconciliation = status === 'INACTIVE' || snapshot.driftCodes.includes('PERMISSIONS_CHANGED') ||
+    subscriptionUnresolved || projectionUnresolved;
   const actionableReason = authorizationStatus === 'REVOKED' ? 'REAUTHORIZE'
-    : stale || status === 'UNKNOWN' || snapshot.permissions.availability !== 'OBSERVED' ? 'CHECK_STATUS'
-      : status === 'INACTIVE' || snapshot.driftCodes.length > 0 ? 'RECONCILE' : 'NONE';
+    : stale || status === 'UNKNOWN' || snapshot.permissions.availability !== 'OBSERVED' ||
+      snapshot.subscriptionState === 'UNKNOWN' || snapshot.projectionState === 'UNKNOWN' ? 'CHECK_STATUS'
+      : needsReconciliation ? 'RECONCILE' : 'NONE';
   return Object.freeze({
     status,
     availability: snapshot.status.availability,

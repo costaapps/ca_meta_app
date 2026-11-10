@@ -12,6 +12,7 @@ import {
 import { MysqlAssetObservationRepository } from '../src/meta-assets/mysql-asset-observation.repository.js';
 import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import type { DurableJobStore } from '../src/jobs/job-store.js';
+import type { OutboxService } from '../src/outbox/outbox-service.js';
 
 const tenantId = '10000000-0000-4000-8000-000000000001';
 const assetId = '10000000-0000-4000-8000-000000000002';
@@ -82,6 +83,13 @@ test('M4.12 detects permission, subscription, and projection drift without repai
   assert.ok(changed);
   assert.deepEqual(changed.driftCodes, ['PERMISSIONS_CHANGED', 'PROJECTION_STALE', 'SUBSCRIPTION_CHANGED']);
   assert.deepEqual(current.permissions.grantNames, ['pages_show_list'], 'append-only reducer does not mutate prior snapshots');
+  const stillUnresolved = snapshot(observation({ observedAt: '2026-11-10T12:00:02.500Z',
+    permissions: { availability: 'OBSERVED', grantNames: [] }, subscriptionState: 'FAILED', projectionState: 'STALE',
+  }), changed, 3);
+  assert.ok(stillUnresolved);
+  assert.deepEqual(stillUnresolved.driftCodes, [], 'the same unresolved projection state does not create a second drift transition');
+  assert.equal(toPublicAssetStatusObservation(stillUnresolved, 'VERIFIED', '2026-11-10T12:00:03.000Z').actionableReason,
+    'RECONCILE', 'the action stays available while subscription and projection drift remain unresolved');
 });
 
 test('M4.12 accepts only bounded, shared catalog dimensions for the four resource families', () => {
@@ -118,8 +126,9 @@ test('M4.12 repository locks and writes only within the requested tenant and sto
     async transaction<T>(run: (managerValue: typeof manager) => Promise<T>) { return run(manager); },
     async query() { return []; },
   };
+  const outbox = { async appendWithin() { assert.fail('a first observation without drift must not create a notice'); } } as unknown as Pick<OutboxService, 'appendWithin'>;
   const repository = new MysqlAssetObservationRepository({ async getDataSource() { return dataSource; } } as unknown as DurableWorkDatabase,
-    () => new Date('2026-11-10T12:00:01.000Z'));
+    outbox, () => new Date('2026-11-10T12:00:01.000Z'));
   const written = await repository.record({ tenantId, authorizationId, assetId, observation: observation() });
   assert.equal(written.kind, 'RECORDED');
   assert.ok(inserted);
@@ -138,6 +147,77 @@ test('M4.12 repository locks and writes only within the requested tenant and sto
 
   await assert.rejects(repository.record({ tenantId: '20000000-0000-4000-8000-000000000001', authorizationId,
     assetId, observation: observation() }));
+});
+
+test('M4.12 appends one tenant-scoped outbox notice for a new drift and suppresses repeated drift states', async () => {
+  const previous = snapshot();
+  assert.ok(previous);
+  let latest: AssetObservationSnapshot = previous;
+  const statements: string[] = [];
+  const manager = {
+    async query(sql: string, parameters: unknown[] = []) {
+      statements.push(sql);
+      if (sql.includes('FROM ca_meta_tenants')) return parameters[0] === tenantId ? [{ id: tenantId }] : [];
+      if (sql.includes('FROM ca_meta_asset_authorizations')) return parameters[0] === tenantId &&
+          parameters[1] === authorizationId && parameters[2] === assetId
+        ? [{ id: assetId, asset_kind: 'FACEBOOK_PAGE' }] : [];
+      if (sql.includes('FROM ca_meta_asset_observations')) return [{ snapshot_json: JSON.stringify(latest) }];
+      if (sql.includes('INSERT INTO ca_meta_asset_observations')) {
+        latest = JSON.parse(String(parameters[9])) as AssetObservationSnapshot;
+        return [];
+      }
+      throw new Error('Unexpected synthetic SQL statement.');
+    },
+  };
+  const dataSource = {
+    async transaction<T>(run: (managerValue: typeof manager) => Promise<T>) { return run(manager); },
+    async query() { return []; },
+  };
+  const events: unknown[] = [];
+  const outbox = {
+    async appendWithin(managerValue: unknown, event: unknown) {
+      assert.equal(managerValue, manager, 'the event and snapshot share the same database transaction');
+      statements.push('OUTBOX_APPEND');
+      events.push(event);
+      return { id: 'outbox-synthetic', jobId: 'job-synthetic', duplicate: false };
+    },
+  } as unknown as Pick<OutboxService, 'appendWithin'>;
+  const repository = new MysqlAssetObservationRepository({ async getDataSource() { return dataSource; } } as unknown as DurableWorkDatabase,
+    outbox, () => new Date('2026-11-10T12:00:01.000Z'));
+  const changed = observation({ observedAt: '2026-11-10T12:00:00.500Z',
+    status: { value: 'INACTIVE', availability: 'OBSERVED' },
+    permissions: { availability: 'OBSERVED', grantNames: [] },
+    subscriptionState: 'FAILED', projectionState: 'STALE',
+  });
+  const first = await repository.record({ tenantId, authorizationId, assetId, observation: changed });
+  assert.equal(first.kind, 'RECORDED');
+  assert.equal(events.length, 1);
+  assert.ok(statements.indexOf('OUTBOX_APPEND') > statements.findIndex((sql) => sql.includes('INSERT INTO ca_meta_asset_observations')));
+  const notice = events[0] as { eventId: string; tenantRef: string; eventType: string; aggregateRef: string;
+    aggregateVersion: number; data: { kind: string; notificationRef: string; assetRef: string; status: string;
+      driftCodes: readonly string[]; actionableReason: string } };
+  assert.equal(notice.tenantRef, tenantId);
+  assert.equal(notice.eventType, 'asset.drift.detected');
+  assert.equal(notice.aggregateRef, notice.data.notificationRef);
+  assert.equal(notice.aggregateVersion, 1);
+  assert.equal(notice.data.kind, 'ASSET_DRIFT_DETECTED');
+  assert.equal(notice.data.assetRef, assetId);
+  assert.equal(notice.data.status, 'UNREAD');
+  assert.deepEqual(notice.data.driftCodes, ['ASSET_STATUS_CHANGED', 'PERMISSIONS_CHANGED', 'PROJECTION_STALE', 'SUBSCRIPTION_CHANGED']);
+  assert.equal(notice.data.actionableReason, 'RECONCILE');
+  assert.equal(JSON.stringify(notice).includes('pages_show_list'), false);
+  assert.equal(JSON.stringify(notice).includes('providerPayload'), false);
+
+  const repeatedState = await repository.record({ tenantId, authorizationId, assetId, observation: observation({
+    ...changed, observedAt: '2026-11-10T12:00:00.700Z',
+  }) });
+  assert.equal(repeatedState.kind, 'RECORDED');
+  assert.equal(events.length, 1, 'a newer snapshot with the same drift state adds no equivalent notice');
+  const duplicate = await repository.record({ tenantId, authorizationId, assetId, observation: observation({
+    ...changed, observedAt: '2026-11-10T12:00:00.700Z',
+  }) });
+  assert.equal(duplicate.kind, 'SUPERSEDED');
+  assert.equal(events.length, 1, 'a repeated event timestamp is idempotent');
 });
 
 test('M4.12 refresh admission coalesces active work and enforces a per-asset cooldown budget', async () => {
