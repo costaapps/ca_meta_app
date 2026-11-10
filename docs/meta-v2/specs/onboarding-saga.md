@@ -1,6 +1,6 @@
 # SPEC · Meta onboarding session and finalization saga
 
-Status: implemented (acceptance gate pending). Issue: [#45](https://github.com/costaapps/ca_meta_app/issues/45). ADR: [ADR-012](../adrs/ADR-012-m4-03-onboarding-saga.md). Contracts: [OpenAPI onboarding routes](../contracts/openapi.yaml); [M4.01 flow configuration](meta-onboarding.md); [M4.02 Graph transport](meta-graph-client.md). Functional owner: Meta integration. Evidence SHA: pending package commit.
+Status: implementation gate passed; package PR acceptance pending. Issue: [#45](https://github.com/costaapps/ca_meta_app/issues/45). ADR: [ADR-012](../adrs/ADR-012-m4-03-onboarding-saga.md). Contracts: [OpenAPI onboarding routes](../contracts/openapi.yaml); [M4.01 flow configuration](meta-onboarding.md); [M4.02 Graph transport](meta-graph-client.md). Functional owner: Meta integration. Evidence SHA: `5df139e4e81e5f96194ea1fdcca6d724bb4166fe`.
 
 ## Problem and behavior
 
@@ -50,4 +50,4 @@ Run migration 16 only through the established migration runner against the dedic
 
 Harness: [`tools/m4-03/README.md`](../../../tools/m4-03/README.md). Focused command: `npm run test:m4-03 --workspace=@ca-meta/api`. It compiles to a private temporary directory and runs touched M3.05 onboarding regression, M4.03 saga, MariaDB-gated integration and migration-unit specs sequentially. The database tests run only with the disposable M2.05 MariaDB profile and `M2_DURABLE_WORK_TEST=1`.
 
-Focused tests are authored but have not been run in this package worktree at coordinator request. Final compilation/test evidence must be attached by the coordinator to the exact integrated SHA. Real Meta OAuth, permission grants, app review, account/asset eligibility, provider adapter behavior and production callback routing are **Not confirmed**; no real Meta request or credential was used.
+Coordinator command `node tools/m4-03/run-focused-test.mjs` passed on evidence SHA `5df139e4e81e5f96194ea1fdcca6d724bb4166fe` with Node v24.22.1 and MariaDB 11.8.9: 22 passed, 0 failed, 0 skipped, including both gated MariaDB fixtures. The report-only commit that follows does not change implementation or tests. Real Meta OAuth, permission grants, app review, account/asset eligibility, provider adapter behavior and production callback routing are **Not confirmed**; no real Meta request or credential was used.
