@@ -239,7 +239,7 @@ export function parseAssetObservationSnapshot(value: unknown): AssetObservationS
   }
   if (!isRecord(parsed) || parsed.schemaVersion !== ASSET_OBSERVATION_SCHEMA_VERSION ||
       !Number.isSafeInteger(parsed.version) || Number(parsed.version) < 1 || !isUuid(parsed.authorizationRef) ||
-      !isMetaAssetKind(parsed.kind) ||
+      typeof parsed.kind !== 'string' || !isMetaAssetKind(parsed.kind) ||
       !['META_API', 'SIGNED_WEBHOOK'].includes(String(parsed.source)) ||
       !isNullableIsoUtc(parsed.observedAt) || !isIsoUtc(parsed.fetchedAt) || !isIsoUtc(parsed.staleAfter) ||
       !isRecord(parsed.status) || !['ACTIVE', 'INACTIVE', 'UNKNOWN'].includes(String(parsed.status.value)) ||
