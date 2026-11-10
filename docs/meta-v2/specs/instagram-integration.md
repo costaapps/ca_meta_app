@@ -56,7 +56,7 @@ No request in this package sends a message, replies to a comment, creates a subs
 
 | Issue criterion | Local implementation/evidence | External status |
 |---|---|---|
-| AC01 — one production variant end-to-end; document the other | Variant-specific adapter and 12-case synthetic harness; no real provider call | Not met: no authorized Meta app/Sandbox evidence or configured provider adapter |
+| AC01 — one production variant end-to-end; document the other | Variant-specific adapter and 14-case synthetic harness; no real provider call | Not met: no authorized Meta app/Sandbox evidence or configured provider adapter |
 | AC02 — never exchange tokens, scopes or endpoints between variants | Exact flow/auth guard; explicit persisted-auth mapping; host/scope and Page-link distinction documented | App-specific exchange/grant evidence Not confirmed |
 | AC03 — Facebook Login keeps Page relation; direct Login has none | Atomic-store port contract and negative/positive contract fixtures | Runtime persistence/vault integration not registered |
 | AC04 — zero accounts or missing webhook is not ready | Zero returns empty refs; partial/unknown subscription fails closed before projection | Instagram subscription semantics and live webhook receipt Not confirmed |
