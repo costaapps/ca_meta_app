@@ -468,6 +468,7 @@ describe('CoexistenceOnboardingService', () => {
   });
 
   it('keeps four consecutive ready numbers in separate ordered history entries', async () => {
+    const restoreCookie = installSyntheticCsrfCookie();
     const harness = serviceHarness();
     const refs: string[] = [];
     try {
@@ -491,6 +492,7 @@ describe('CoexistenceOnboardingService', () => {
       expect(harness.post.mock.calls.filter(([url]) => url.endsWith('/onboarding-sessions'))).toHaveLength(4);
     } finally {
       harness.service.dispose();
+      restoreCookie();
       vi.restoreAllMocks();
     }
   });
