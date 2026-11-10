@@ -246,6 +246,14 @@ test('status stays attached to the starting tenant after a valid session tenant 
   assert.equal(authorizationCalls.at(-1)?.tenantId, 'tenant-original');
   assert.equal(authorizationCalls.at(-1)?.operation, 'CONNECT');
 
+  const phoneReadiness = [{ assetRef: 'f1c90208-010c-48b0-90e3-ef28f825efdd', state: 'ACTION_REQUIRED' as const,
+    reasonCode: 'TOKEN_ELIGIBILITY_NOT_CONFIRMED' as const, observedAt: '2026-11-10T12:00:00.000Z' }];
+  store.records.set(created.id, Object.freeze({ ...store.records.get(created.id)!, status: 'PARTIAL', readiness: 'PARTIAL',
+    nextAction: 'RESUME', phoneReadiness }));
+  const partial = await service.read(switchedSession, created.id, switchedContext);
+  assert.equal(partial?.status, 'PARTIAL');
+  assert.deepEqual(partial?.phoneReadiness, phoneReadiness);
+
   const otherSession = await makeSession({ sessionId: '5be3f2f7-ff8b-4440-aad5-5e560c871324', contextRef: initialContext });
   assert.equal(await service.read(otherSession, created.id, initialContext), undefined);
 });

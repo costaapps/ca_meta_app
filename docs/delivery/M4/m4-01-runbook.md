@@ -40,7 +40,8 @@ The onboarding session and tenant membership checks remain the authority boundar
 
 The server capability manifest is
 [`apps/api/src/meta-config/capability-manifest.ts`](../../apps/api/src/meta-config/capability-manifest.ts),
-version `m4.01-2026-11-06.1`. Its permission candidates extend (and do not replace) the
+current version `m4.04-2026-11-10.1` (the M4.01 baseline was bumped by M4.04 to add the exclusive-only
+conventional phone registration operation). Its permission candidates extend (and do not replace) the
 [M1.03 capability matrix](../../meta-v2/meta-capability-matrix.md) and synthetic offline harness.
 The M1.03 fixture IDs and version labels remain synthetic; its negative Coexistence registration
 case is preserved.
@@ -95,7 +96,7 @@ reference with a secret value.
     ],
     "appSecretRef": "vault://meta-app/staging/wa-coexistence/app-secret",
     "tokenConfigurationRef": "vault://meta-app/staging/wa-coexistence/token-config",
-    "capabilityManifestVersion": "m4.01-2026-11-06.1",
+    "capabilityManifestVersion": "m4.04-2026-11-10.1",
     "enabled": false,
     "versions": {
       "graphApi": { "value": "v0.0", "status": "NOT_CONFIRMED" },

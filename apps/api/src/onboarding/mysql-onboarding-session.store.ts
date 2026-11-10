@@ -12,6 +12,7 @@ import type {
   OnboardingStep,
   OnboardingStoredRecord,
 } from './onboarding-session.types.js';
+import { isSafePhoneReadiness, type OnboardingPhoneReadiness } from './onboarding-phone-readiness.js';
 
 interface OnboardingRow extends RowDataPacket {
   id: string;
@@ -35,6 +36,7 @@ interface OnboardingRow extends RowDataPacket {
   status: string;
   readiness: string;
   steps_json: unknown;
+  saga_checkpoint_json?: unknown;
   next_action: string;
   last_updated_at: string | Date;
   provider_state_consumed_at: string | Date | null;
@@ -83,6 +85,21 @@ function isStep(value: unknown): value is OnboardingStep {
     STEP_STATUSES.has((value as { status: OnboardingStep['status'] }).status);
 }
 
+function checkpointPhoneReadiness(value: unknown, flowVariant: OnboardingFlowVariant): readonly OnboardingPhoneReadiness[] | undefined {
+  let checkpoint: unknown = value;
+  if (typeof checkpoint === 'string') {
+    try { checkpoint = JSON.parse(checkpoint); } catch { throw new Error('Onboarding persistence returned invalid checkpoint JSON.'); }
+  } else if (Buffer.isBuffer(checkpoint)) {
+    try { checkpoint = JSON.parse(checkpoint.toString('utf8')); } catch { throw new Error('Onboarding persistence returned invalid checkpoint JSON.'); }
+  }
+  if (checkpoint === undefined || checkpoint === null) return undefined;
+  if (typeof checkpoint !== 'object' || Array.isArray(checkpoint)) throw new Error('Onboarding persistence returned malformed checkpoint data.');
+  const readiness = (checkpoint as Record<string, unknown>)['phoneReadiness'];
+  if (readiness === undefined) return undefined;
+  if (!isSafePhoneReadiness(readiness, flowVariant)) throw new Error('Onboarding persistence returned unsafe phone readiness.');
+  return Object.freeze(readiness.map((item) => Object.freeze({ ...item })));
+}
+
 function mapRecord(row: OnboardingRow): OnboardingStoredRecord {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(row.id) || !FLOW_VALUES.has(row.flow_variant as OnboardingFlowVariant) ||
     !STATUS_VALUES.has(row.status as OnboardingStatusName) || !READINESS_VALUES.has(row.readiness as OnboardingReadiness) ||
@@ -98,6 +115,7 @@ function mapRecord(row: OnboardingRow): OnboardingStoredRecord {
     (row.return_route !== 'connections' && row.return_route !== 'setup')) {
     throw new Error('Onboarding persistence returned a malformed record.');
   }
+  const phoneReadiness = checkpointPhoneReadiness(row.saga_checkpoint_json, row.flow_variant as OnboardingFlowVariant);
   return Object.freeze({
     id: row.id,
     tenantId: row.tenant_id,
@@ -120,6 +138,7 @@ function mapRecord(row: OnboardingRow): OnboardingStoredRecord {
     status: row.status as OnboardingStatusName,
     readiness: row.readiness as OnboardingReadiness,
     steps: jsonArray(row.steps_json, isStep),
+    ...(phoneReadiness ? { phoneReadiness } : {}),
     nextAction: row.next_action as OnboardingNextAction,
     lastUpdatedAt: dateValue(row.last_updated_at),
     stateConsumed: row.provider_state_consumed_at !== null,
@@ -212,7 +231,7 @@ export class MysqlOnboardingSessionStore implements OnboardingSessionStore, OnAp
               s.configuration_ref, s.provider_app_id, s.provider_environment, s.auth_variant,
               s.capability_manifest_version, s.graph_api_version, s.requested_capabilities, s.return_route,
               s.idempotency_key_hash, s.request_hash, s.provider_state_hash, s.expires_at, s.status, s.readiness,
-              s.steps_json,
+              s.steps_json, s.saga_checkpoint_json,
               CASE WHEN EXISTS (
                 SELECT 1 FROM ca_meta_jobs j
                 WHERE j.tenant_id = s.tenant_id AND j.resource_scope_ref = s.id AND j.job_type = 'ONBOARDING_STEP'

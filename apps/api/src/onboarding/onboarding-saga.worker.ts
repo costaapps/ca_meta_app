@@ -2,6 +2,7 @@ import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { ClaimedJob, JobOutcome } from '../jobs/job-store.js';
 import type { JobHandler } from '../worker/durable-worker.js';
 import type { OnboardingStep } from './onboarding-session.types.js';
+import { hasReadyPhoneReadiness, isSafePhoneReadiness, type OnboardingPhoneReadiness } from './onboarding-phone-readiness.js';
 import type { OnboardingFlowConfigurationResolver } from './onboarding-session.types.js';
 import type { OnboardingCodeConsumer } from './onboarding-code-submission.store.js';
 import { OnboardingSagaEffectError, type OnboardingSagaAdapter, type OnboardingSagaContext } from './onboarding-saga.types.js';
@@ -34,6 +35,7 @@ export interface SagaCheckpoint {
   readonly verifiedAssetRefs?: readonly string[];
   readonly subscriptionRef?: string;
   readonly projectionRef?: string;
+  readonly phoneReadiness?: readonly OnboardingPhoneReadiness[];
 }
 
 export interface OnboardingSagaSnapshot {
@@ -91,7 +93,7 @@ function makeSteps(value: SagaRow['steps_json']): OnboardingStep[] {
 function makeCheckpoint(value: SagaRow['saga_checkpoint_json']): SagaCheckpoint {
   const parsed = decodeJson<Record<string, unknown>>(value);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
-    Object.keys(parsed).some((key) => !['authorizationRef', 'verifiedAssetRefs', 'subscriptionRef', 'projectionRef'].includes(key))) {
+    Object.keys(parsed).some((key) => !['authorizationRef', 'verifiedAssetRefs', 'subscriptionRef', 'projectionRef', 'phoneReadiness'].includes(key))) {
     throw new Error('Onboarding saga evidence is malformed.');
   }
   return parsed as SagaCheckpoint;
@@ -354,7 +356,9 @@ export function createOnboardingSagaHandler(
       capabilityManifestVersion: current.row.capability_manifest_version, graphApiVersion: current.row.graph_api_version });
 
     let assetRefs = current.evidence.verifiedAssetRefs;
-    if (!assetRefs) {
+    const whatsappExclusive = current.row.flow_variant === 'WHATSAPP_CLOUD_API' && current.row.auth_variant === 'WHATSAPP_EMBEDDED_SIGNUP';
+    const needsPhoneRegistration = whatsappExclusive && !hasReadyPhoneReadiness(current.evidence.phoneReadiness);
+    if (!assetRefs || needsPhoneRegistration) {
       if (!stageIsPending(current.steps, 'asset-verification')) return { kind: 'UNKNOWN', safeErrorCode: 'PROVIDER_RESULT_UNKNOWN' };
       if (!await repository.canContinue(job.tenantId, onboardingId)) {
         await repository.checkpoint({ tenantId: job.tenantId, onboardingId, stage: 'asset-verification', stepStatus: 'FAILED',
@@ -376,15 +380,34 @@ export function createOnboardingSagaHandler(
         }
         const discovery = await adapter.discoverAndPersistAssets({ ...baseContext, authorizationRef,
           idempotencyKey: `${onboardingId}:asset-verification`, signal });
-        assetRefs = discovery.assetRefs;
-        if (!Array.isArray(assetRefs) || assetRefs.length === 0) {
+        const discoveredAssetRefs = discovery.assetRefs;
+        if (!Array.isArray(discoveredAssetRefs) || discoveredAssetRefs.length === 0) {
           await repository.checkpoint({ tenantId: job.tenantId, onboardingId, stage: 'asset-verification', stepStatus: 'FAILED',
             status: 'PARTIAL', readiness: 'PARTIAL', nextAction: 'REAUTHORIZE' });
           return { kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' };
         }
-        assertSafeEvidence({ verifiedAssetRefs: assetRefs }, current.row);
+        if (assetRefs && (assetRefs.length !== discoveredAssetRefs.length || assetRefs.some((ref) => !discoveredAssetRefs.includes(ref)))) {
+          throw new OnboardingSagaEffectError('UNKNOWN');
+        }
+        assetRefs = discoveredAssetRefs;
+        const phoneReadiness = discovery.phoneReadiness;
+        if (whatsappExclusive && !isSafePhoneReadiness(phoneReadiness, current.row.flow_variant, assetRefs)) {
+          throw new OnboardingSagaEffectError('NO_EFFECT');
+        }
+        const discoveryEvidence = { verifiedAssetRefs: assetRefs, ...(phoneReadiness ? { phoneReadiness } : {}) };
+        assertSafeEvidence(discoveryEvidence, current.row);
+        if (whatsappExclusive && phoneReadiness?.some((item) => item.reasonCode === 'REGISTRATION_RESULT_UNKNOWN')) {
+          await repository.checkpoint({ tenantId: job.tenantId, onboardingId, stage: 'asset-verification', stepStatus: 'UNKNOWN',
+            status: 'PROVISIONING', readiness: 'UNKNOWN', nextAction: 'RECONCILE', evidence: discoveryEvidence });
+          return { kind: 'UNKNOWN', safeErrorCode: 'PROVIDER_RESULT_UNKNOWN' };
+        }
+        if (whatsappExclusive && !hasReadyPhoneReadiness(phoneReadiness)) {
+          await repository.checkpoint({ tenantId: job.tenantId, onboardingId, stage: 'asset-verification', stepStatus: 'RETRY_PENDING',
+            status: 'PARTIAL', readiness: 'PARTIAL', nextAction: 'RESUME', evidence: discoveryEvidence });
+          return { kind: 'SUCCEEDED' };
+        }
         await repository.checkpoint({ tenantId: job.tenantId, onboardingId, stage: 'asset-verification', stepStatus: 'SUCCEEDED',
-          status: 'ASSETS_VERIFIED', readiness: 'UNKNOWN', nextAction: 'WAIT', evidence: { verifiedAssetRefs: assetRefs } });
+          status: 'ASSETS_VERIFIED', readiness: 'UNKNOWN', nextAction: 'WAIT', evidence: discoveryEvidence });
       } catch (error) {
         if (error instanceof OnboardingSagaEffectError && error.disposition === 'NO_EFFECT') {
           const automaticRetriesExhausted = job.attempt >= job.maxAttempts;
@@ -496,8 +519,11 @@ function stageEvidence(stage: Stage, evidence: SagaCheckpoint, row: SagaRow, cur
       return { authorizationRef: evidence.authorizationRef };
     case 'asset-verification':
       if (!Array.isArray(evidence.verifiedAssetRefs)) return undefined;
-      try { assertSafeEvidence({ verifiedAssetRefs: evidence.verifiedAssetRefs }, row); } catch { return undefined; }
-      return { verifiedAssetRefs: evidence.verifiedAssetRefs };
+      if (currentEvidence.verifiedAssetRefs && (currentEvidence.verifiedAssetRefs.length !== evidence.verifiedAssetRefs.length ||
+          currentEvidence.verifiedAssetRefs.some((ref) => !evidence.verifiedAssetRefs?.includes(ref)))) return undefined;
+      try { assertSafeEvidence({ verifiedAssetRefs: evidence.verifiedAssetRefs,
+        ...(evidence.phoneReadiness ? { phoneReadiness: evidence.phoneReadiness } : {}) }, row); } catch { return undefined; }
+      return { verifiedAssetRefs: evidence.verifiedAssetRefs, ...(evidence.phoneReadiness ? { phoneReadiness: evidence.phoneReadiness } : {}) };
     case 'subscription':
       if (!currentEvidence.authorizationRef || !currentEvidence.verifiedAssetRefs?.length) return undefined;
       return { subscriptionRef: onboardingSagaStageReceipt('subscription', context, currentEvidence.authorizationRef, currentEvidence.verifiedAssetRefs) };
