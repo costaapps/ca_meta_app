@@ -145,10 +145,11 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
          AND constraint_type = 'CHECK' AND constraint_name = 'saga_checkpoint_json'`,
     );
     assert.equal(sagaJsonCheck.length, 1, 'MariaDB JSON alias exposes its JSON_VALID constraint');
-    await executeMigrationDdl('ALTER TABLE ca_meta_onboarding_sessions DROP CONSTRAINT `saga_checkpoint_json`');
+    await executeMigrationDdl(`ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN saga_checkpoint_json
+      LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '{}'`);
     await assert.rejects(() => deployMigrations(migrationEnvironment), /JSON alias column without its JSON_VALID constraint/,
       'a MariaDB LONGTEXT JSON alias without JSON_VALID must block migration recovery');
-    await resetMigrationCheck('saga_checkpoint_json', 'JSON_VALID(saga_checkpoint_json)');
+    await executeMigrationDdl("ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN saga_checkpoint_json JSON NOT NULL DEFAULT ('{}')");
     onboardingSagaJsonCheckDrifted = false;
     await deployMigrations(migrationEnvironment);
 
@@ -441,7 +442,7 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
 
   } finally {
     if (onboardingSagaJsonCheckDrifted) {
-      await resetMigrationCheck('saga_checkpoint_json', 'JSON_VALID(saga_checkpoint_json)');
+      await executeMigrationDdl("ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN saga_checkpoint_json JSON NOT NULL DEFAULT ('{}')");
     }
     if (onboardingReadyCheckDrifted) {
       await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'READY' OR readiness = 'READY'");
