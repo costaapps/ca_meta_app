@@ -982,6 +982,73 @@ paths:
         "429": *a19
         "503": *a20
         default: *a21
+  /api/v1/onboarding-sessions/{onboardingSessionId}/actions:
+    parameters:
+      - name: onboardingSessionId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    post:
+      operationId: requestOnboardingRecovery
+      tags:
+        - Onboarding
+      summary: Resume a safe stage or reconcile an uncertain result
+      description: The server revalidates the current tenant membership, original
+        principal, portal session and pinned Meta configuration before accepting
+        an action. RESUME is available only for a downstream stage whose adapter
+        proved NO_EFFECT; authorization-code exchange cannot be resumed.
+        RECONCILE queries the configured adapter without repeating an uncertain
+        mutation or submitting the one-use code. The worker rechecks
+        authorization immediately before each external call.
+      security: *a10
+      parameters: *a23
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingRecoveryRequest"
+            examples:
+              subscriptionRetry:
+                summary: Resume only a subscription stage proven to have no effect
+                value:
+                  action: RESUME
+                  stage: subscription
+      responses:
+        "202":
+          description: Sanitized durable job acceptance
+          headers:
+            Location:
+              description: Relative URI of the tenant-scoped accepted job; poll it for the
+                outcome.
+              schema:
+                type: string
+                pattern: ^/api/v1/jobs/[A-Za-z0-9_-]+$
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobAccepted"
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-idempotency-scope: tenant + recovery endpoint + Idempotency-Key; payload hash
+        binds onboarding, action and stage.
+      x-external-effect: Queues a user-approved safe continuation or read-only
+        provider reconciliation; no ambiguous mutation repeats.
   /api/v1/onboarding-sessions/{onboardingSessionId}/authorization-code:
     parameters:
       - name: onboardingSessionId
@@ -3023,6 +3090,7 @@ components:
             - CHECK_STATUS
             - REAUTHORIZE
             - RECONCILE
+            - RESUME
             - RESOLVE_CONFLICT
             - NONE
         lastUpdatedAt:
@@ -3052,6 +3120,25 @@ components:
           maxLength: 512
           writeOnly: true
           description: One-use server-generated state reference bound to this onboarding.
+    OnboardingRecoveryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+        - stage
+      properties:
+        action:
+          type: string
+          enum:
+            - RESUME
+            - RECONCILE
+        stage:
+          type: string
+          enum:
+            - authorization
+            - asset-verification
+            - subscription
+            - projection
     Connection:
       type: object
       additionalProperties: false

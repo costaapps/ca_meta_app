@@ -62,6 +62,8 @@ class MemoryOnboardingStore implements OnboardingSessionStore {
       steps: Object.freeze([
         Object.freeze({ name: 'authorization', status: 'PENDING' as const }),
         Object.freeze({ name: 'asset-verification', status: 'PENDING' as const }),
+        Object.freeze({ name: 'subscription', status: 'PENDING' as const }),
+        Object.freeze({ name: 'projection', status: 'PENDING' as const }),
       ]),
       nextAction: 'WAIT',
       lastUpdatedAt: now,
@@ -74,6 +76,17 @@ class MemoryOnboardingStore implements OnboardingSessionStore {
   async findForSession(id: string, currentSessionId: string, currentPrincipalId: string): Promise<OnboardingStoredRecord | undefined> {
     const record = this.records.get(id);
     return record?.portalSessionId === currentSessionId && record.principalId === currentPrincipalId ? record : undefined;
+  }
+
+  async findByProviderStateHash(providerStateHash: string): Promise<OnboardingStoredRecord | undefined> {
+    return [...this.records.values()].find((candidate) => candidate.providerStateHash === providerStateHash);
+  }
+
+  async cancelByProviderState(providerStateHash: string): Promise<boolean> {
+    const record = [...this.records.values()].find((candidate) => candidate.providerStateHash === providerStateHash);
+    if (!record || record.stateConsumed || record.status !== 'AWAITING_PROVIDER') return false;
+    this.records.set(record.id, Object.freeze({ ...record, status: 'CANCELLED', nextAction: 'NONE', stateConsumed: true }));
+    return true;
   }
 
   async completeByProviderState(providerStateHash: string, outcome: OnboardingProviderOutcome): Promise<boolean> {
@@ -147,7 +160,18 @@ function makeService(
       authorizationCalls.push({ tenantId: targetTenantId, operation });
     },
   } as unknown as TenantAuthorizationService;
-  return new OnboardingSessionService(store, contexts, authorization, new OnboardingStateSigner(signingKey), launch, clock);
+  const configurations = {
+    resolve(flowVariant: OnboardingCreateCommand['flowVariant']) {
+      const authVariant: OnboardingCreateCommand['authVariant'] = flowVariant === 'FACEBOOK_LOGIN' ? 'FACEBOOK_LOGIN_FOR_BUSINESS'
+        : flowVariant === 'INSTAGRAM_VIA_FACEBOOK_LOGIN' ? 'INSTAGRAM_VIA_FACEBOOK_LOGIN'
+          : flowVariant === 'INSTAGRAM_LOGIN' ? 'INSTAGRAM_LOGIN'
+            : flowVariant === 'WHATSAPP_COEXISTENCE' ? 'WHATSAPP_BUSINESS_APP_ONBOARDING' : 'WHATSAPP_EMBEDDED_SIGNUP';
+      return { configurationRef: `synthetic-${flowVariant.toLowerCase()}-v1`, providerAppId: 'synthetic-meta-app',
+        providerEnvironment: 'test' as const, authVariant,
+        capabilityManifestVersion: 'meta-capability-manifest-v1', graphApiVersion: 'v27.0' };
+    },
+  };
+  return new OnboardingSessionService(store, contexts, authorization, new OnboardingStateSigner(signingKey), launch, clock, configurations);
 }
 
 const createInput = {
@@ -193,6 +217,9 @@ test('missing state-signing configuration fails before creating an onboarding ro
   const authorization = { async authorize() {} } as unknown as TenantAuthorizationService;
   const service = new OnboardingSessionService(
     store, contexts, authorization, new OnboardingStateSigner(undefined), launch, () => now,
+    { resolve: () => ({ configurationRef: 'synthetic-config-v1', providerAppId: 'synthetic-meta-app',
+      providerEnvironment: 'test', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP',
+      capabilityManifestVersion: 'meta-capability-manifest-v1', graphApiVersion: 'v27.0' }) },
   );
   const session = await makeSession({ contextRef: initialContext });
 
@@ -244,12 +271,15 @@ class SyntheticVerifiedProvider extends TrustedOnboardingCompletionIssuer {
     readonly readiness: OnboardingReadiness;
     readonly steps: readonly OnboardingStep[];
     readonly nextAction: OnboardingNextAction;
+    readonly verifiedAssetRefs?: readonly string[];
+    readonly subscriptionVerified?: boolean;
+    readonly projectionVerified?: boolean;
   }): OnboardingProviderOutcome {
     return this.issueVerifiedOutcome(input);
   }
 }
 
-test('only trusted provider evidence can complete onboarding; READY requires verified authorization and asset steps and is one-use', async () => {
+test('only trusted provider evidence can complete onboarding; READY requires nonempty assets plus subscription and projection evidence and is one-use', async () => {
   const store = new MemoryOnboardingStore();
   const launch = new SyntheticProviderLaunch();
   const service = makeService(store, launch);
@@ -283,8 +313,13 @@ test('only trusted provider evidence can complete onboarding; READY requires ver
     steps: [
       { name: 'authorization', status: 'SUCCEEDED', providerPayload: 'never-persist-this' } as unknown as OnboardingStep,
       { name: 'asset-verification', status: 'SUCCEEDED' },
+      { name: 'subscription', status: 'SUCCEEDED' },
+      { name: 'projection', status: 'SUCCEEDED' },
     ],
     nextAction: 'NONE',
+    verifiedAssetRefs: ['asset-catalog-opaque-ref'],
+    subscriptionVerified: true,
+    projectionVerified: true,
   });
   assert.equal(await completion.complete(verified), true);
   assert.equal(await completion.complete(verified), false);
@@ -294,6 +329,8 @@ test('only trusted provider evidence can complete onboarding; READY requires ver
   assert.deepEqual(final?.steps, [
     { name: 'authorization', status: 'SUCCEEDED' },
     { name: 'asset-verification', status: 'SUCCEEDED' },
+    { name: 'subscription', status: 'SUCCEEDED' },
+    { name: 'projection', status: 'SUCCEEDED' },
   ]);
   assert.equal(JSON.stringify(final).includes('never-persist-this'), false);
 });

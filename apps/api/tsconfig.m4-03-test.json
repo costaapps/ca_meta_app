@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/config/environment.ts",
+    "src/common/http/**/*.ts",
+    "src/common/security/**/*.ts",
+    "src/common/time/**/*.ts",
+    "src/database/migrations/**/*.ts",
+    "src/identity/**/*.ts",
+    "src/jobs/**/*.ts",
+    "src/meta-config/**/*.ts",
+    "src/onboarding/**/*.ts",
+    "src/privacy/redaction.ts",
+    "src/worker/durable-worker.ts",
+    "test/m3-05-onboarding-session.spec.ts",
+    "test/m3-05-onboarding.integration.spec.ts",
+    "test/m4-03-onboarding-saga.spec.ts",
+    "test/m4-03-onboarding.integration.spec.ts",
+    "test/migration-unit.spec.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}

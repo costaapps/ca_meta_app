@@ -16,6 +16,7 @@ import { PRIVACY_GOVERNANCE_MIGRATION, PRIVACY_GOVERNANCE_TABLES } from '../src/
 import { CREDENTIAL_LIFECYCLE_MIGRATION, CREDENTIAL_LIFECYCLE_TABLES } from '../src/database/migrations/credential-lifecycle.js';
 import { MAGIC_LINK_IDENTITY_LEDGER_MIGRATION, MAGIC_LINK_IDENTITY_LEDGER_TABLES } from '../src/database/migrations/magic-link-identity-ledger.js';
 import { LEGACY_IMPORT_MIGRATION, LEGACY_IMPORT_TABLES } from '../src/database/migrations/legacy-import-ledger.js';
+import { ONBOARDING_CODE_TABLES, ONBOARDING_SAGA_MIGRATION } from '../src/database/migrations/onboarding-saga.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -57,9 +58,9 @@ test('migration configuration rejects runtime account reuse and privileged built
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
   const schemaVersions = MIGRATIONS.map((migration) => migration.schemaVersion);
-  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
-  assert.equal(schemaVersions.at(-1), 15);
-  assert.equal(MIGRATIONS.length, 15);
+  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+  assert.equal(schemaVersions.at(-1), 16);
+  assert.equal(MIGRATIONS.length, 16);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -123,6 +124,28 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(MIGRATIONS.find((migration) => migration.schemaVersion === CREDENTIAL_LIFECYCLE_MIGRATION.schemaVersion)?.id, CREDENTIAL_LIFECYCLE_MIGRATION.id);
   assert.equal(MIGRATIONS.find((migration) => migration.schemaVersion === MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.schemaVersion)?.id, MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.id);
   assert.equal(MIGRATIONS.find((migration) => migration.schemaVersion === LEGACY_IMPORT_MIGRATION.schemaVersion)?.id, LEGACY_IMPORT_MIGRATION.id);
+  assert.equal(ONBOARDING_SAGA_MIGRATION.id, '202611060014-m4-03-onboarding-saga');
+  assert.equal(ONBOARDING_SAGA_MIGRATION.schemaVersion, 16);
+  assert.deepEqual(ONBOARDING_SAGA_MIGRATION.steps.map((step) => step.id), [
+    'add-onboarding-configuration-ref', 'add-onboarding-provider-app-id', 'add-onboarding-provider-environment',
+    'add-onboarding-auth-variant', 'add-onboarding-capability-manifest-version',
+    'add-onboarding-graph-api-version', 'add-onboarding-saga-checkpoint-json',
+    'add-onboarding-tenant-candidate-key', 'extend-onboarding-next-actions', 'create-onboarding-code-envelopes',
+  ]);
+  const recoveryActionsStep = ONBOARDING_SAGA_MIGRATION.steps.find((step) => step.id === 'extend-onboarding-next-actions');
+  assert.ok(recoveryActionsStep && 'sql' in recoveryActionsStep && recoveryActionsStep.sql.includes("'RESUME'"));
+  const compatibleOnboardingStep = ONBOARDING_SAGA_MIGRATION.steps.find((step) => step.id === 'add-onboarding-configuration-ref');
+  assert.deepEqual(compatibleOnboardingStep && 'sql' in compatibleOnboardingStep ?
+    compatibleOnboardingStep.compatiblePriorSteps?.map(({ migrationId, stepId }) => ({ migrationId, stepId })) : [], [{
+      migrationId: '202611030010-persisted-onboarding-sessions', stepId: 'create-persisted-onboarding-sessions',
+    }]);
+  const codeEnvelopeStep = ONBOARDING_SAGA_MIGRATION.steps.at(-1);
+  assert.ok(codeEnvelopeStep && 'sql' in codeEnvelopeStep);
+  assert.ok(codeEnvelopeStep.sql.includes('nonce BINARY(12) NULL'));
+  assert.ok(codeEnvelopeStep.sql.includes('ciphertext VARBINARY(16384) NULL'));
+  assert.ok(codeEnvelopeStep.sql.includes('authentication_tag BINARY(16) NULL'));
+  assert.ok(!/authorization_code\s+(?:TEXT|VARCHAR|VARBINARY)/i.test(codeEnvelopeStep.sql));
+  assert.ok(ONBOARDING_CODE_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   const flowContextStep = CREDENTIAL_LIFECYCLE_MIGRATION.steps.find((step) => step.id === 'add-authorization-flow-auth-context');
   assert.ok(flowContextStep && 'sql' in flowContextStep);
   assert.deepEqual(flowContextStep.compatiblePriorSteps?.map(({ migrationId, stepId }) => ({ migrationId, stepId })), [{

@@ -71,6 +71,12 @@ test('M3.05 MariaDB onboarding rows are session scoped, idempotent by tenant and
       tenantContextHash: 'e'.repeat(64),
       createdAt: new Date(Date.now()),
       flowVariant: 'WHATSAPP_CLOUD_API' as const,
+      configurationRef: 'synthetic-whatsapp-config-v1',
+      providerAppId: 'synthetic-meta-app',
+      providerEnvironment: 'test' as const,
+      authVariant: 'WHATSAPP_EMBEDDED_SIGNUP' as const,
+      capabilityManifestVersion: 'meta-capability-manifest-v1',
+      graphApiVersion: 'v27.0',
       requestedCapabilities: ['READ_STATUS'],
       returnRoute: 'connections' as const,
       idempotencyHash,
@@ -82,7 +88,7 @@ test('M3.05 MariaDB onboarding rows are session scoped, idempotent by tenant and
     assert.equal(created.id, id);
     assert.equal(created.tenantId, tenantA);
     assert.equal(created.status, 'AWAITING_PROVIDER');
-    assert.deepEqual(created.steps.map((step) => step.name), ['authorization', 'asset-verification']);
+    assert.deepEqual(created.steps.map((step) => step.name), ['authorization', 'asset-verification', 'subscription', 'projection']);
     assert.equal(await store.findForSession(id, sessionA, principalA).then((row) => row?.tenantId), tenantA);
     assert.equal(await store.findForSession(id, sessionB, principalB), undefined, 'a different tenant session cannot read the onboarding');
     assert.equal(await store.findForSession(id, sessionA, principalB), undefined, 'a different principal cannot read the onboarding');

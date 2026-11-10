@@ -264,6 +264,29 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/onboarding-sessions/{onboardingSessionId}/actions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                readonly onboardingSessionId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Resume a safe stage or reconcile an uncertain result
+         * @description The server revalidates the current tenant membership, original principal, portal session and pinned Meta configuration before accepting an action. RESUME is available only for a downstream stage whose adapter proved NO_EFFECT; authorization-code exchange cannot be resumed. RECONCILE queries the configured adapter without repeating an uncertain mutation or submitting the one-use code. The worker rechecks authorization immediately before each external call.
+         */
+        readonly post: operations["requestOnboardingRecovery"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/onboarding-sessions/{onboardingSessionId}/authorization-code": {
         readonly parameters: {
             readonly query?: never;
@@ -854,7 +877,7 @@ export interface components {
             readonly readiness: "READY" | "PARTIAL" | "UNKNOWN";
             readonly steps: readonly components["schemas"]["StepStatus"][];
             /** @enum {string} */
-            readonly nextAction: "WAIT" | "CHECK_STATUS" | "REAUTHORIZE" | "RECONCILE" | "RESOLVE_CONFLICT" | "NONE";
+            readonly nextAction: "WAIT" | "CHECK_STATUS" | "REAUTHORIZE" | "RECONCILE" | "RESUME" | "RESOLVE_CONFLICT" | "NONE";
             /** Format: date-time */
             readonly lastUpdatedAt: string;
             readonly requestId: string;
@@ -864,6 +887,12 @@ export interface components {
             readonly authorizationCode: string;
             /** @description One-use server-generated state reference bound to this onboarding. */
             readonly stateRef: string;
+        };
+        readonly OnboardingRecoveryRequest: {
+            /** @enum {string} */
+            readonly action: "RESUME" | "RECONCILE";
+            /** @enum {string} */
+            readonly stage: "authorization" | "asset-verification" | "subscription" | "projection";
         };
         readonly Connection: {
             readonly id: string;
@@ -1761,6 +1790,63 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["OnboardingStatus"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 404: components["responses"]["NotFound"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 412: components["responses"]["PreconditionFailed"];
+            readonly 413: components["responses"]["PayloadTooLarge"];
+            readonly 422: components["responses"]["Unprocessable"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly requestOnboardingRecovery: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /**
+                 * @description Exact configured browser Origin; wildcard matching is forbidden.
+                 * @example https://portal.example.invalid
+                 */
+                readonly Origin: components["parameters"]["Origin"];
+                /** @description Must match the configured exact-origin topology; cross-site, missing or invalid values fail. */
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                /** @description Session-bound anti-CSRF value; not a DTO property and not sufficient without the session cookie. */
+                readonly "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+                /**
+                 * @description Random caller-generated request key; server scope is current tenant + operation + key. Same payload hash replays prior acceptance; different payload hash returns 409 with no new effect.
+                 * @example idem_example_key_01
+                 */
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            readonly path: {
+                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                readonly onboardingSessionId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["OnboardingRecoveryRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Sanitized durable job acceptance */
+            readonly 202: {
+                headers: {
+                    /** @description Relative URI of the tenant-scoped accepted job; poll it for the outcome. */
+                    readonly Location?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["JobAccepted"];
                 };
             };
             readonly 400: components["responses"]["BadRequest"];

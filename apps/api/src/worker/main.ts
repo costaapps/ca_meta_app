@@ -12,6 +12,12 @@ import type { MetaAssetRefreshAdapter } from '../meta-assets/asset-refresh.servi
 import { MysqlIdentityRepository } from '../identity/mysql-identity.repository.js';
 import { ServiceTenantAuthorizationService } from '../identity/identity.service.js';
 import { WorkerServiceIdentityVerifier } from '../identity/identity.trust.js';
+import type { OnboardingSagaAdapter } from '../onboarding/onboarding-saga.types.js';
+import { OnboardingCodeProtector } from '../onboarding/onboarding-code-crypto.js';
+import { MysqlOnboardingCodeConsumer } from '../onboarding/onboarding-code-submission.store.js';
+import { createOnboardingSagaHandler } from '../onboarding/onboarding-saga.worker.js';
+import { MetaOnboardingConfigurationResolver } from '../onboarding/meta-onboarding-configuration.resolver.js';
+import { MetaAppConfigRegistry } from '../meta-config/meta-app-config.registry.js';
 
 interface CredentialLifecycleAdapters {
   readonly policies: CredentialLifecyclePolicyPort;
@@ -26,6 +32,11 @@ function configuredCredentialLifecycleAdapters(): CredentialLifecycleAdapters | 
 
 /** A job handler is registered only alongside an installed provider adapter. */
 function configuredMetaAssetRefreshAdapter(): MetaAssetRefreshAdapter | undefined {
+  return undefined;
+}
+
+/** No reviewed Meta onboarding adapter is installed; all provider exchange effects stay disabled. */
+function configuredMetaOnboardingSagaAdapter(): OnboardingSagaAdapter | undefined {
   return undefined;
 }
 
@@ -59,6 +70,14 @@ export async function bootstrapWorker(): Promise<void> {
           return { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DEPENDENCY_UNAVAILABLE' };
         }
       });
+    }
+    const onboardingSagaAdapter = configuredMetaOnboardingSagaAdapter();
+    if (onboardingSagaAdapter) {
+      const codeConsumer = new MysqlOnboardingCodeConsumer(database,
+        new OnboardingCodeProtector(environment.onboardingStateSigningKey));
+      const configurations = new MetaOnboardingConfigurationResolver(
+        new MetaAppConfigRegistry(environment.metaAppConfigurations ?? []), environment.nodeEnv);
+      handlers.set('ONBOARDING_STEP', createOnboardingSagaHandler(database, codeConsumer, onboardingSagaAdapter, undefined, configurations));
     }
     let authorization: JobExecutionAuthorizationPort = new FailClosedJobExecutionAuthorizationPort();
     if (handlers.size > 0) {
