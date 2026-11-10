@@ -9,6 +9,7 @@ const indexes = [
   { name: 'PRIMARY', columns: ['id'], unique: true },
   { name: 'uq_ca_meta_asset_observations_version', columns: ['tenant_id', 'authorization_id', 'asset_id', 'version'], unique: true },
   { name: 'ix_ca_meta_asset_observations_fetched', columns: ['tenant_id', 'authorization_id', 'asset_id', 'fetched_at'], unique: false },
+  { name: 'ix_ca_meta_asset_observations_tenant_asset', columns: ['tenant_id', 'asset_id'], unique: false },
 ] as const;
 
 async function verifyKeys(queryRunner: QueryRunner): Promise<void> {
@@ -56,6 +57,7 @@ const table: DdlStep = {
     PRIMARY KEY (id),
     UNIQUE KEY uq_ca_meta_asset_observations_version (tenant_id, authorization_id, asset_id, version),
     KEY ix_ca_meta_asset_observations_fetched (tenant_id, authorization_id, asset_id, fetched_at),
+    KEY ix_ca_meta_asset_observations_tenant_asset (tenant_id, asset_id),
     CONSTRAINT ck_ca_meta_asset_observations_source CHECK (source IN ('META_API', 'SIGNED_WEBHOOK')),
     CONSTRAINT ck_ca_meta_asset_observations_schema CHECK (schema_version = 1),
     CONSTRAINT ck_ca_meta_asset_observations_json CHECK (JSON_VALID(snapshot_json)),

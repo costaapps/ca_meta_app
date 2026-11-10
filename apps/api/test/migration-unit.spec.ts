@@ -109,6 +109,9 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.match(observationsTable.sql, /FOREIGN KEY \(tenant_id, asset_id\)/);
   assert.match(observationsTable.sql, /FOREIGN KEY \(tenant_id, authorization_id, asset_id\)/);
   assert.match(observationsTable.sql, /UNIQUE KEY uq_ca_meta_asset_observations_version \(tenant_id, authorization_id, asset_id, version\)/);
+  assert.match(observationsTable.sql, /KEY ix_ca_meta_asset_observations_tenant_asset \(tenant_id, asset_id\)/);
+  assert.ok(observationsTable.definition.includes('ix_ca_meta_asset_observations_tenant_asset'),
+    'the asset foreign key has an explicit supporting index for deterministic MariaDB shape verification');
   assert.match(observationsTable.sql, /snapshot_json JSON NOT NULL/);
   assert.ok(ASSET_OBSERVATION_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.deepEqual(LEGACY_IMPORT_MIGRATION.steps.map((step) => step.id), [
