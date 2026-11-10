@@ -4,10 +4,12 @@ import { ChannelSetupComponent } from './features/channels/pages/channel-setup/c
 import { ChannelTemplatesComponent } from './features/channels/pages/channel-templates/channel-templates.component';
 import { EmbedShellComponent } from './features/embed/embed-shell.component';
 import { OAuthReturnComponent } from './features/embed/oauth-return.component';
+import { CoexistenceSetupComponent } from './features/coexistence/coexistence-setup.component';
 
 export const routes: Routes = [
   { path: 'embed', component: EmbedShellComponent },
   { path: 'oauth/return', component: OAuthReturnComponent },
+  { path: 'setup/coexistence', component: CoexistenceSetupComponent },
   {
     path: 'setup',
     component: ChannelSetupComponent,
