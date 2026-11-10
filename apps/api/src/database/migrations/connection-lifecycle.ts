@@ -11,6 +11,15 @@ const callbackColumns = [
   'app_configuration_ref_hash', 'event_ref_hash', 'payload_ref_hash', 'callback_kind', 'receipt_state', 'created_at', 'updated_at',
 ] as const;
 
+interface ForeignKeyShape {
+  readonly name: string;
+  readonly columns: readonly string[];
+  readonly table: string;
+  readonly referencedColumns: readonly string[];
+  readonly updateRule: 'RESTRICT';
+  readonly deleteRule: 'RESTRICT';
+}
+
 async function verifyIndexes(queryRunner: QueryRunner, table: string,
   expected: readonly { readonly name: string; readonly columns: readonly string[]; readonly unique: boolean }[]): Promise<void> {
   const rows = await queryRunner.query(
@@ -29,17 +38,49 @@ async function verifyIndexes(queryRunner: QueryRunner, table: string,
   })) throw new Error(`Migration found an incompatible index on ${table}.`);
 }
 
+async function verifyForeignKeys(queryRunner: QueryRunner, table: string,
+  expected: readonly ForeignKeyShape[]): Promise<void> {
+  const rows = await queryRunner.query(
+    `SELECT k.constraint_name AS name, k.column_name AS column_name,
+            k.referenced_table_name AS referenced_table, k.referenced_column_name AS referenced_column,
+            r.update_rule AS update_rule, r.delete_rule AS delete_rule
+     FROM information_schema.key_column_usage k
+     JOIN information_schema.referential_constraints r
+       ON r.constraint_schema = k.constraint_schema AND r.table_name = k.table_name AND r.constraint_name = k.constraint_name
+     WHERE k.table_schema = DATABASE() AND k.table_name = ? AND k.referenced_table_name IS NOT NULL
+     ORDER BY k.constraint_name, k.ordinal_position`,
+    [table],
+  ) as Array<{ name: string; column_name: string; referenced_table: string; referenced_column: string; update_rule: string; delete_rule: string }>;
+  const actual = new Map<string, { columns: string[]; table: string; referencedColumns: string[]; updateRule: string; deleteRule: string }>();
+  for (const row of rows) {
+    const foreignKey = actual.get(row.name) ?? {
+      columns: [], table: row.referenced_table, referencedColumns: [], updateRule: row.update_rule, deleteRule: row.delete_rule,
+    };
+    foreignKey.columns.push(row.column_name);
+    foreignKey.referencedColumns.push(row.referenced_column);
+    actual.set(row.name, foreignKey);
+  }
+  if (actual.size !== expected.length || expected.some((foreignKey) => {
+    const found = actual.get(foreignKey.name);
+    return !found || found.table !== foreignKey.table || found.columns.join('\0') !== foreignKey.columns.join('\0') ||
+      found.referencedColumns.join('\0') !== foreignKey.referencedColumns.join('\0') ||
+      found.updateRule.toUpperCase() !== foreignKey.updateRule || found.deleteRule.toUpperCase() !== foreignKey.deleteRule;
+  })) throw new Error(`Migration found an incompatible foreign key on ${table}.`);
+}
+
 function tableStep(id: string, table: string, columns: readonly string[], indexes: readonly {
   readonly name: string; readonly columns: readonly string[]; readonly unique: boolean;
-}[], sql: string): DdlStep {
+}[], sql: string, foreignKeys: readonly ForeignKeyShape[] = []): DdlStep {
   return {
     id, phase: 'expand', sql, definitionVersion: 'v1',
-    definition: JSON.stringify({ table, columns, indexes, verify: [assertExpectedColumns.toString(), verifyIndexes.toString()] }),
+    definition: JSON.stringify({ table, columns, indexes, foreignKeys,
+      verify: [assertExpectedColumns.toString(), verifyIndexes.toString(), verifyForeignKeys.toString()] }),
     retryWhenAbsent: true,
     verify: async ({ queryRunner }) => {
       if (!(await tableExists(queryRunner, table))) return false;
       await assertExpectedColumns(queryRunner, table, columns);
       await verifyIndexes(queryRunner, table, indexes);
+      await verifyForeignKeys(queryRunner, table, foreignKeys);
       return true;
     },
   };
@@ -58,6 +99,18 @@ const callbackIndexes = [
   { name: 'PRIMARY', columns: ['app_configuration_ref_hash', 'event_ref_hash'], unique: true },
   { name: 'ix_ca_meta_lifecycle_callback_state', columns: ['receipt_state', 'updated_at'], unique: false },
 ] as const;
+
+const commandForeignKeys: readonly ForeignKeyShape[] = [
+  { name: 'fk_ca_meta_connection_command_tenant', columns: ['tenant_id'], table: 'ca_meta_tenants',
+    referencedColumns: ['id'], updateRule: 'RESTRICT', deleteRule: 'RESTRICT' },
+  { name: 'fk_ca_meta_connection_command_authorization', columns: ['tenant_id', 'authorization_id'],
+    table: 'ca_meta_authorizations', referencedColumns: ['tenant_id', 'id'], updateRule: 'RESTRICT', deleteRule: 'RESTRICT' },
+  { name: 'fk_ca_meta_connection_command_asset', columns: ['tenant_id', 'authorization_id', 'asset_id'],
+    table: 'ca_meta_asset_authorizations', referencedColumns: ['tenant_id', 'authorization_id', 'asset_id'],
+    updateRule: 'RESTRICT', deleteRule: 'RESTRICT' },
+  { name: 'fk_ca_meta_connection_command_onboarding', columns: ['onboarding_session_id'],
+    table: 'ca_meta_onboarding_sessions', referencedColumns: ['id'], updateRule: 'RESTRICT', deleteRule: 'RESTRICT' },
+];
 
 const commands = tableStep(
   'create-meta-connection-lifecycle-commands', 'ca_meta_connection_lifecycle_commands', commandColumns, commandIndexes,
@@ -92,7 +145,7 @@ const commands = tableStep(
       REFERENCES ca_meta_asset_authorizations (tenant_id, authorization_id, asset_id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT fk_ca_meta_connection_command_onboarding FOREIGN KEY (onboarding_session_id)
       REFERENCES ca_meta_onboarding_sessions (id) ON UPDATE RESTRICT ON DELETE RESTRICT
-  ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
+  ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`, commandForeignKeys,
 );
 
 const callbacks = tableStep(

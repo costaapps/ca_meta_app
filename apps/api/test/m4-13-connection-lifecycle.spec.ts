@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { QueryRunner } from 'typeorm';
+import { CONNECTION_LIFECYCLE_MIGRATION } from '../src/database/migrations/connection-lifecycle.js';
 import { PortalSessionVerifier } from '../src/identity/identity.trust.js';
 import { ConnectionLifecycleConfigurationUnavailableError, ConnectionLifecycleService,
   ConnectionLifecycleScopeRequiredError } from '../src/meta-lifecycle/connection-lifecycle.service.js';
@@ -17,6 +19,34 @@ const appConfigurationId = '10000000-0000-4000-8000-000000000003';
 const assetId = '10000000-0000-4000-8000-000000000004';
 const onboardingId = '10000000-0000-4000-8000-000000000005';
 const requestId = '10000000-0000-4000-8000-000000000006';
+
+test('M4.13 migration verifier rejects a missing tenant-scoped command foreign key', async () => {
+  const step = CONNECTION_LIFECYCLE_MIGRATION.steps[0];
+  assert.ok(step && 'verify' in step);
+  const shape = JSON.parse(step.definition) as {
+    table: string;
+    columns: string[];
+    indexes: Array<{ name: string; columns: string[]; unique: boolean }>;
+    foreignKeys: Array<{ name: string; columns: string[]; table: string; referencedColumns: string[]; updateRule: string; deleteRule: string }>;
+  };
+  const runner = (foreignKeys = shape.foreignKeys) => ({
+    async query(sql: string) {
+      if (sql.includes('information_schema.tables')) return [{ name: shape.table }];
+      if (sql.includes('information_schema.columns')) return shape.columns.map((name) => ({ name }));
+      if (sql.includes('information_schema.statistics')) return shape.indexes.flatMap((index) =>
+        index.columns.map((column_name) => ({ name: index.name, column_name, non_unique: index.unique ? 0 : 1 })));
+      if (sql.includes('information_schema.key_column_usage')) return foreignKeys.flatMap((foreignKey) =>
+        foreignKey.columns.map((column_name, index) => ({ name: foreignKey.name, column_name,
+          referenced_table: foreignKey.table, referenced_column: foreignKey.referencedColumns[index],
+          update_rule: foreignKey.updateRule, delete_rule: foreignKey.deleteRule })));
+      return [];
+    },
+  }) as unknown as QueryRunner;
+  const context = { queryRunner: runner(), migrationId: CONNECTION_LIFECYCLE_MIGRATION.id, stepId: step.id };
+  assert.equal(await step.verify(context), true);
+  const missingAssetBinding = shape.foreignKeys.filter(({ name }) => name !== 'fk_ca_meta_connection_command_asset');
+  await assert.rejects(step.verify({ ...context, queryRunner: runner(missingAssetBinding) }), /incompatible foreign key/);
+});
 
 async function verifiedSession() {
   const verifier = new PortalSessionVerifier({

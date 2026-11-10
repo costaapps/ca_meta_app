@@ -1582,10 +1582,10 @@ paths:
         or create a deletion tombstone.
       x-idempotency-scope: App configuration + verified event identity digest; exact
         repeated callbacks do not repeat local effects.
-      x-retry-policy: This local creation may be retried only with the same
-        Idempotency-Key and body, which returns the recorded job. Provider
-        authorization/callback are separate single-use steps; never discard the
-        prior grant on an ambiguous result.
+      x-retry-policy: Provider redelivery is deduplicated by app-configuration and
+        verified event digests. Exact repeats return DUPLICATE; changed payloads
+        are rejected; a verified UNMAPPED receipt may be retried after its
+        server-side target mapping is corrected.
   /api/v1/facebook/pages/authorizations/{authorizationId}/selection:
     parameters:
       - name: authorizationId
