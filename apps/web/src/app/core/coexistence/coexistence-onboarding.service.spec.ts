@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@angular/compiler';
 import { describe, expect, it, vi } from 'vitest';
-import { of } from 'rxjs';
+import { of, Subject, type Observable } from 'rxjs';
 import type { HttpClient } from '@angular/common/http';
 import { CoexistenceOnboardingService, reauthorizationIdempotencyKey } from './coexistence-onboarding.service';
 import type { CoexistenceProviderAdapter } from './coexistence-provider-adapter';
@@ -118,6 +118,7 @@ function serviceHarness(options: {
   readonly state?: string;
   readonly source?: MessageEventSource;
   readonly expiresInMs?: number;
+  readonly statusResponse?: (status: unknown) => Observable<unknown>;
 } = {}): ServiceHarness {
   const ref = options.ref ?? onboardingRef;
   const state = options.state ?? stateRef;
@@ -127,14 +128,15 @@ function serviceHarness(options: {
   let createCount = 0;
   let preparedCount = 0;
   const messageSource = options.source ?? window;
-  const get = vi.fn((url: string) => of(url.endsWith('/session')
-    ? { tenantContextRef: activeTenantContextRef }
-    : url.endsWith('/integrations/flows') ? flowList : (() => {
-      const path = url.split('/');
-      const sessionsIndex = path.lastIndexOf('onboarding-sessions');
-      const requestedRef = path[sessionsIndex + 1] ?? ref;
-      return serverStatuses.get(requestedRef) ?? pendingServerStatus(requestedRef);
-    })()));
+  const get = vi.fn((url: string) => {
+    if (url.endsWith('/session')) return of({ tenantContextRef: activeTenantContextRef });
+    if (url.endsWith('/integrations/flows')) return of(flowList);
+    const path = url.split('/');
+    const sessionsIndex = path.lastIndexOf('onboarding-sessions');
+    const requestedRef = path[sessionsIndex + 1] ?? ref;
+    const status = serverStatuses.get(requestedRef) ?? pendingServerStatus(requestedRef);
+    return options.statusResponse?.(status) ?? of(status);
+  });
   const post = vi.fn((url: string, body: unknown, _options?: unknown) => {
     if (url.endsWith('/onboarding-sessions')) {
       createCount += 1;
@@ -437,6 +439,63 @@ describe('CoexistenceOnboardingService', () => {
     } finally {
       harness.service.dispose();
       restoreCookie();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('discards an older recovery status after a newer manual read confirms READY', async () => {
+    vi.useFakeTimers();
+    const restoreCookie = installSyntheticCsrfCookie();
+    const deferredStatusResponses: Subject<unknown>[] = [];
+    let deferStatusResponses = false;
+    const harness = serviceHarness({
+      statusResponse: (status) => {
+        if (!deferStatusResponses) return of(status);
+        const response = new Subject<unknown>();
+        deferredStatusResponses.push(response);
+        return response;
+      },
+    });
+    const partial = {
+      ...pendingServerStatus(onboardingRef),
+      status: 'PARTIAL',
+      readiness: 'PARTIAL',
+      steps: [{ name: 'subscription', status: 'UNKNOWN' }],
+      nextAction: 'RECONCILE',
+    };
+    try {
+      await startSyntheticAttempt(harness);
+      harness.setStatus(partial);
+      dispatchSyntheticMessage(harness.messageSource, { fixtureEvent: 'finished' });
+      await flushMicrotasks();
+      expect(harness.service.getSnapshot().attempts[0]?.state).toBe('partial');
+
+      deferStatusResponses = true;
+      const recovery = harness.service.recover(onboardingRef, { action: 'RECONCILE', stage: 'subscription' });
+      await flushMicrotasks();
+      expect(deferredStatusResponses).toHaveLength(1);
+
+      const manualRefresh = harness.service.refreshAttemptStatus(onboardingRef);
+      await flushMicrotasks();
+      expect(deferredStatusResponses).toHaveLength(2);
+
+      deferredStatusResponses[1]?.next(readyStatus);
+      deferredStatusResponses[1]?.complete();
+      await manualRefresh;
+      expect(harness.service.getSnapshot().attempts[0]?.state).toBe('ready');
+
+      deferredStatusResponses[0]?.next(partial);
+      deferredStatusResponses[0]?.complete();
+      await recovery;
+
+      expect(harness.service.getSnapshot().attempts[0]?.state).toBe('ready');
+      expect(harness.post.mock.calls.filter(([url]) => url.endsWith('/actions'))).toHaveLength(0);
+      expect(harness.service.getSnapshot().canStart).toBe(true);
+    } finally {
+      harness.service.dispose();
+      for (const response of deferredStatusResponses) response.complete();
+      restoreCookie();
+      vi.useRealTimers();
       vi.restoreAllMocks();
     }
   });

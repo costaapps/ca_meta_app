@@ -90,6 +90,11 @@ interface ServerOnboardingStatus {
   readonly steps: readonly CoexistenceStepSnapshot[];
 }
 
+interface VersionedServerStatus {
+  readonly sequence: number;
+  readonly status: ServerOnboardingStatus;
+}
+
 interface MutableAttempt {
   readonly onboardingRef: string;
   readonly stateRef: string;
@@ -103,6 +108,7 @@ interface MutableAttempt {
   codeSubmitted: boolean;
   confirmationRequested: boolean;
   statusReadInFlight: boolean;
+  statusReadSequence: number;
   nextAction?: string;
   serverStatus?: string;
   steps?: readonly CoexistenceStepSnapshot[];
@@ -406,6 +412,7 @@ export class CoexistenceOnboardingService {
           codeSubmitted: false,
           confirmationRequested: true,
           statusReadInFlight: false,
+          statusReadSequence: 0,
           recoveryActionInFlight: false,
         });
         const attempt = this.attempts[this.attempts.length - 1];
@@ -425,6 +432,7 @@ export class CoexistenceOnboardingService {
         codeSubmitted: false,
         confirmationRequested: false,
         statusReadInFlight: false,
+        statusReadSequence: 0,
         recoveryActionInFlight: false,
         prepared,
       };
@@ -517,8 +525,10 @@ export class CoexistenceOnboardingService {
     attempt.message = 'Consultando o status atual antes de solicitar a ação segura do servidor…';
     this.publish(attempt.state === 'partial' ? 'partial' : 'awaiting_server_confirmation', attempt.message);
     try {
-      const currentStatus = await this.readServerStatus(attempt);
-      if (this.disposed) return;
+      const statusRead = await this.readServerStatus(attempt);
+      if (this.disposed || !statusRead || statusRead.sequence !== attempt.statusReadSequence ||
+          this.isTerminal(attempt.state)) return;
+      const currentStatus = statusRead.status;
       this.applyServerStatus(attempt, currentStatus);
       if (this.isTerminal(attempt.state) ||
           !recoveryOptionsFor(currentStatus).some((candidate) => sameRecoveryOption(candidate, option))) return;
@@ -597,16 +607,19 @@ export class CoexistenceOnboardingService {
     return { tenantContextRef: session.tenantContextRef, csrfToken: csrfToken ?? '' };
   }
 
-  private async readServerStatus(attempt: MutableAttempt): Promise<ServerOnboardingStatus> {
+  private async readServerStatus(attempt: MutableAttempt): Promise<VersionedServerStatus | undefined> {
+    const sequence = ++attempt.statusReadSequence;
     const context = await this.readContext(false);
+    if (sequence !== attempt.statusReadSequence) return undefined;
     this.assertAttemptTenantContext(attempt, context);
     const value = await firstValueFrom(this.http.get<unknown>(
       `${this.baseUrl}/onboarding-sessions/${encodeURIComponent(attempt.onboardingRef)}`,
       { withCredentials: true, headers: new HttpHeaders({ 'X-Tenant-Context': context.tenantContextRef }) },
     ));
+    if (sequence !== attempt.statusReadSequence) return undefined;
     const status = parseServerStatus(value, attempt.onboardingRef);
     if (!status) throw new Error('Invalid onboarding status.');
-    return status;
+    return { sequence, status };
   }
 
   private assertAttemptTenantContext(attempt: MutableAttempt, context: PortalContext): void {
@@ -724,7 +737,9 @@ export class CoexistenceOnboardingService {
     if (attempt.statusReadInFlight || this.isTerminal(attempt.state)) return;
     attempt.statusReadInFlight = true;
     try {
-      const status = await this.readServerStatus(attempt);
+      const statusRead = await this.readServerStatus(attempt);
+      if (!statusRead || statusRead.sequence !== attempt.statusReadSequence || this.isTerminal(attempt.state)) return;
+      const status = statusRead.status;
       attempt.lastUpdatedAt = status.lastUpdatedAt;
       this.applyServerStatus(attempt, status);
     } catch (error) {
