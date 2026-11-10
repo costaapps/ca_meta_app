@@ -3349,6 +3349,8 @@ components:
           $ref: "#/components/schemas/AssetDiagnostics"
         capabilities:
           $ref: "#/components/schemas/AssetCapabilities"
+        statusObservation:
+          $ref: "#/components/schemas/AssetStatusObservation"
     ConnectionDetail:
       type: object
       additionalProperties: false
@@ -3488,6 +3490,8 @@ components:
           $ref: "#/components/schemas/AssetCapabilities"
         diagnostics:
           $ref: "#/components/schemas/AssetDiagnostics"
+        statusObservation:
+          $ref: "#/components/schemas/AssetStatusObservation"
         requestId:
           type: string
           minLength: 1
@@ -3546,6 +3550,8 @@ components:
           $ref: "#/components/schemas/AssetCapabilities"
         diagnostics:
           $ref: "#/components/schemas/AssetDiagnostics"
+        statusObservation:
+          $ref: "#/components/schemas/AssetStatusObservation"
     AssetDiagnostics:
       type: object
       additionalProperties: false
@@ -3592,6 +3598,107 @@ components:
         projectionState:
           type: string
           enum: [UNKNOWN, PENDING, SYNCED, STALE, FAILED]
+    AssetStatusObservation:
+      type: object
+      additionalProperties: false
+      description: >-
+        Tenant-scoped normalized observation. It does not authorize operations or
+        change authorization/credential state. Unsupported provider-specific
+        fields remain Not confirmed.
+      required:
+        - status
+        - availability
+        - observedAt
+        - fetchedAt
+        - staleAfter
+        - source
+        - version
+        - permissionAvailability
+        - subscriptionState
+        - projectionState
+        - driftCodes
+        - actionableReason
+        - providerCode
+      properties:
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - INACTIVE
+            - UNKNOWN
+            - STALE
+        availability:
+          type: string
+          enum:
+            - OBSERVED
+            - MISSING
+            - UNKNOWN
+            - UNAVAILABLE
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        fetchedAt:
+          type: string
+          format: date-time
+        staleAfter:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum:
+            - META_API
+            - SIGNED_WEBHOOK
+        version:
+          type: integer
+          minimum: 1
+        permissionAvailability:
+          type: string
+          enum:
+            - OBSERVED
+            - UNKNOWN
+            - UNAVAILABLE
+        subscriptionState:
+          type: string
+          enum:
+            - UNKNOWN
+            - PENDING
+            - ACTIVE
+            - FAILED
+            - REMOVED
+        projectionState:
+          type: string
+          enum:
+            - UNKNOWN
+            - PENDING
+            - SYNCED
+            - STALE
+            - FAILED
+        driftCodes:
+          type: array
+          maxItems: 4
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - ASSET_STATUS_CHANGED
+              - PERMISSIONS_CHANGED
+              - SUBSCRIPTION_CHANGED
+              - PROJECTION_STALE
+        actionableReason:
+          type: string
+          enum:
+            - REAUTHORIZE
+            - CHECK_STATUS
+            - RECONCILE
+            - NONE
+        providerCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: "^[A-Z0-9_.-]{1,64}$"
     AssetCapabilities:
       type: object
       additionalProperties: false

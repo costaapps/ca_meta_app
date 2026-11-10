@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { EnvironmentValidationError, validateEnvironment } from '../config/environment.js';
 import { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import { DurableJobStore } from '../jobs/job-store.js';
+import { OutboxService } from '../outbox/outbox-service.js';
 import { FailClosedJobExecutionAuthorizationPort, MysqlJobExecutionAuthorizationPort } from '../jobs/job-execution-authorization.js';
 import type { JobExecutionAuthorizationPort } from '../jobs/job-execution-authorization.js';
 import { CredentialInspectionWorker, CredentialLifecycleScheduler } from '../credentials/credential-lifecycle.service.js';
@@ -9,6 +10,7 @@ import type { CredentialInspectionPort, CredentialLifecyclePolicyPort, Credentia
 import type { JobType } from '../jobs/event-validation.js';
 import { DurableWorker, type JobFinalizer, type JobHandler } from './durable-worker.js';
 import type { MetaAssetRefreshAdapter } from '../meta-assets/asset-refresh.service.js';
+import { MysqlAssetObservationRepository } from '../meta-assets/mysql-asset-observation.repository.js';
 import { MetaWebhookRepository } from '../meta-webhooks/meta-webhook.repository.js';
 import { MetaWebhookWorker } from '../meta-webhooks/meta-webhook-worker.js';
 import type { MetaWebhookItemProcessor, MetaWebhookPayloadProtector } from '../meta-webhooks/meta-webhook.types.js';
@@ -59,6 +61,7 @@ export async function bootstrapWorker(): Promise<void> {
   try {
     const environment = validateEnvironment(process.env);
     database = new DurableWorkDatabase(environment);
+    const jobs = new DurableJobStore(database);
     const handlers = new Map<JobType, JobHandler>();
     const finalizers = new Map<JobType, JobFinalizer>();
     const webhookAdapters = configuredMetaWebhookWorkerAdapters();
@@ -74,19 +77,26 @@ export async function bootstrapWorker(): Promise<void> {
         lifecycleAdapters.inspector, Math.random);
       handlers.set('CREDENTIAL_INSPECTION', inspection.handler);
       finalizers.set('CREDENTIAL_INSPECTION', inspection.finalizer);
-      lifecycleScheduler = new CredentialLifecycleScheduler(database, new DurableJobStore(database), `api-worker:${process.pid}`);
+      lifecycleScheduler = new CredentialLifecycleScheduler(database, jobs, `api-worker:${process.pid}`);
     }
     const assetRefreshAdapter = configuredMetaAssetRefreshAdapter();
     if (assetRefreshAdapter) {
+      const observations = new MysqlAssetObservationRepository(database, new OutboxService(database, jobs));
       handlers.set('ASSET_REFRESH', async (job, signal) => {
         if (job.payload.kind !== 'ASSET_REFRESH') return { kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' };
+        let assetObservations: Awaited<ReturnType<MetaAssetRefreshAdapter['refresh']>>;
         try {
-          await assetRefreshAdapter.refresh({ tenantId: job.tenantId, assetId: job.payload.assetId,
+          assetObservations = await assetRefreshAdapter.refresh({ tenantId: job.tenantId, assetId: job.payload.assetId,
             appConfigurationId: job.payload.appConfigurationId, environment: job.payload.environment }, signal);
-          return { kind: 'SUCCEEDED' };
         } catch {
+          await observations.recordUnavailable({ tenantId: job.tenantId, assetId: job.payload.assetId }).catch(() => undefined);
           return { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DEPENDENCY_UNAVAILABLE' };
         }
+        for (const observation of assetObservations ?? []) {
+          await observations.record({ tenantId: job.tenantId, assetId: job.payload.assetId,
+            authorizationId: observation.authorizationId, observation: observation.observation });
+        }
+        return { kind: 'SUCCEEDED' };
       });
     }
     const onboardingSagaAdapter = configuredMetaOnboardingSagaAdapter();
@@ -110,7 +120,7 @@ export async function bootstrapWorker(): Promise<void> {
       );
     }
     // M2.05 provides the durable runner. M3.09 and M3.12 remain without provider adapters here.
-    const worker = new DurableWorker(new DurableJobStore(database), {
+    const worker = new DurableWorker(jobs, {
       workerRef: `api-worker:${process.pid}`,
       leaseMs: 30_000,
     }, handlers, authorization, finalizers);

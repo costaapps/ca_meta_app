@@ -319,7 +319,7 @@ test('reauthorization reflects M3.09 open impacts in exact tenant, environment, 
   const repository = new MysqlMetaAssetsRepository(database, {} as never, {} as never);
   const page = await repository.listAssetCatalog({ tenantId, environment: 'test', limit: 10 });
   assert.equal(page.items[0]?.reauthorizationRequired, true);
-  assert.equal(statements.length, 2, 'catalog uses one page query and one batched evidence query, with no per-asset reauth query');
+  assert.equal(statements.length, 3, 'catalog uses page, batched observation, and batched evidence queries without an N+1 reauth query');
   const query = statements[0]?.sql ?? '';
   assert.match(query, /ca_meta_credential_reauth_impacts/i);
   assert.match(query, /intent\.status IN \('PENDING', 'ACKNOWLEDGED'\)/i);

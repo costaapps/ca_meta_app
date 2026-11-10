@@ -17,6 +17,7 @@ import { CREDENTIAL_LIFECYCLE_MIGRATION, CREDENTIAL_LIFECYCLE_TABLES } from '../
 import { MAGIC_LINK_IDENTITY_LEDGER_MIGRATION, MAGIC_LINK_IDENTITY_LEDGER_TABLES } from '../src/database/migrations/magic-link-identity-ledger.js';
 import { LEGACY_IMPORT_MIGRATION, LEGACY_IMPORT_TABLES } from '../src/database/migrations/legacy-import-ledger.js';
 import { ONBOARDING_CODE_TABLES, ONBOARDING_SAGA_MIGRATION } from '../src/database/migrations/onboarding-saga.js';
+import { ASSET_OBSERVATIONS_MIGRATION, ASSET_OBSERVATION_TABLES } from '../src/database/migrations/asset-observations.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -58,9 +59,9 @@ test('migration configuration rejects runtime account reuse and privileged built
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
   const schemaVersions = MIGRATIONS.map((migration) => migration.schemaVersion);
-  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
-  assert.equal(schemaVersions.at(-1), 18);
-  assert.equal(MIGRATIONS.length, 18);
+  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+  assert.equal(schemaVersions.at(-1), 19);
+  assert.equal(MIGRATIONS.length, 19);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -99,6 +100,20 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   }]);
   assert.ok(MAGIC_LINK_IDENTITY_LEDGER_MIGRATION.steps[0]?.definition.includes('uq_ca_meta_magic_identity_proof'));
   assert.equal(LEGACY_IMPORT_MIGRATION.schemaVersion, 15);
+  assert.equal(ASSET_OBSERVATIONS_MIGRATION.schemaVersion, 19);
+  assert.deepEqual(ASSET_OBSERVATIONS_MIGRATION.steps.map((step) => step.id), [
+    'create-meta-asset-observations', 'asset-observation-no-update', 'asset-observation-no-delete',
+  ]);
+  const observationsTable = ASSET_OBSERVATIONS_MIGRATION.steps[0];
+  assert.ok(observationsTable && 'sql' in observationsTable);
+  assert.match(observationsTable.sql, /FOREIGN KEY \(tenant_id, asset_id\)/);
+  assert.match(observationsTable.sql, /FOREIGN KEY \(tenant_id, authorization_id, asset_id\)/);
+  assert.match(observationsTable.sql, /UNIQUE KEY uq_ca_meta_asset_observations_version \(tenant_id, authorization_id, asset_id, version\)/);
+  assert.match(observationsTable.sql, /KEY ix_ca_meta_asset_observations_tenant_asset \(tenant_id, asset_id\)/);
+  assert.ok(observationsTable.definition.includes('ix_ca_meta_asset_observations_tenant_asset'),
+    'the asset foreign key has an explicit supporting index for deterministic MariaDB shape verification');
+  assert.match(observationsTable.sql, /snapshot_json JSON NOT NULL/);
+  assert.ok(ASSET_OBSERVATION_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.deepEqual(LEGACY_IMPORT_MIGRATION.steps.map((step) => step.id), [
     'create-legacy-import-batches', 'create-legacy-import-items', 'create-legacy-import-claims',
   ]);
