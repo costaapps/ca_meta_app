@@ -6,6 +6,7 @@ import type { MetaGraphHost, MetaGraphTransport, MetaGraphTransportRequest, Meta
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
+const CURSOR = /^[A-Za-z0-9._~+/%=-]{1,1024}$/;
 const HOST: Readonly<Record<MetaGraphTransportRequest['authVariant'], MetaGraphHost>> = Object.freeze({
   FACEBOOK_LOGIN_FOR_BUSINESS: 'graph.facebook.com', INSTAGRAM_VIA_FACEBOOK_LOGIN: 'graph.facebook.com',
   INSTAGRAM_LOGIN: 'graph.instagram.com', WHATSAPP_EMBEDDED_SIGNUP: 'graph.facebook.com',
@@ -48,9 +49,11 @@ function routeAllowed(input: MetaGraphTransportRequest, pathname: string): boole
   const edge = segments.slice(2).join('/');
   switch (input.operation) {
     case 'READ_STATUS': return input.method === 'GET' && edge === '';
-    case 'ASSET_DISCOVERY': return input.method === 'GET' && (edge === 'owned_whatsapp_business_accounts'
-      ? input.flowVariant === 'WHATSAPP_EXCLUSIVE' && input.authVariant === 'WHATSAPP_EMBEDDED_SIGNUP'
-      : ['accounts', 'businesses', 'instagram_accounts', 'owned_pages', 'phone_numbers'].includes(edge));
+    case 'ASSET_DISCOVERY': return input.method === 'GET' && (segments[1] === 'me'
+      ? input.flowVariant === 'FACEBOOK' && input.authVariant === 'FACEBOOK_LOGIN_FOR_BUSINESS' && edge === 'accounts'
+      : edge === 'owned_whatsapp_business_accounts'
+        ? input.flowVariant === 'WHATSAPP_EXCLUSIVE' && input.authVariant === 'WHATSAPP_EMBEDDED_SIGNUP'
+        : ['accounts', 'businesses', 'instagram_accounts', 'owned_pages', 'phone_numbers'].includes(edge));
     case 'SEND_MESSAGE': return input.method === 'POST' && edge === 'messages';
     case 'MANAGE_TEMPLATES': return ['GET', 'POST'].includes(input.method) && edge === 'message_templates';
     case 'MANAGE_COMMENTS': return (input.method === 'GET' && edge === 'comments') || (input.method === 'POST' && edge === 'replies');
@@ -88,12 +91,15 @@ function safePath(input: MetaGraphTransportRequest): boolean {
   const parts = input.path.split('?'); if (parts.length > 2) return false;
   const [pathname, query = ''] = parts;
   if (!pathname || !routeAllowed(input, pathname)) return false;
-  if (!query) return true;
+  const pageDiscoveryPath = /^\/v\d{1,2}\.\d{1,3}\/me\/accounts$/.test(pathname);
+  if (!query) return !pageDiscoveryPath;
   const allowed = new Set(['fields', 'limit', 'after', 'since', 'until']); const params = new URLSearchParams(query); const seen = new Set<string>();
   for (const [key, value] of params) {
     if (!allowed.has(key) || seen.has(key) || value.length > 1_024 || /[\u0000-\u001f\u007f]/.test(value)) return false;
     seen.add(key);
   }
+  if (pageDiscoveryPath && (params.get('fields') !== 'name,access_token,tasks' || params.get('limit') !== '100' ||
+      params.has('since') || params.has('until') || (params.has('after') && !CURSOR.test(params.get('after') ?? '')))) return false;
   return true;
 }
 

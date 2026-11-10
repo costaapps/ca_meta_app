@@ -36,6 +36,7 @@ export type MetaGraphAssetEdge = 'accounts' | 'businesses' | 'comments' | 'insta
 
 export type MetaGraphInput =
   | (MetaGraphBaseInput & { readonly endpoint: 'OBJECT_READ' })
+  | (MetaGraphBaseInput & { readonly endpoint: 'FACEBOOK_PAGES_DISCOVERY'; readonly resourceId: 'me'; readonly query?: never })
   | (MetaGraphBaseInput & { readonly endpoint: 'ASSET_EDGE_LIST'; readonly edge: Exclude<MetaGraphAssetEdge, 'comments' | 'message_templates' | 'subscribed_apps'> })
   | (MetaGraphBaseInput & { readonly endpoint: 'TEMPLATES_LIST' })
   | (MetaGraphBaseInput & { readonly endpoint: 'COMMENTS_LIST' })
@@ -45,6 +46,8 @@ export type MetaGraphInput =
   | (MetaGraphBaseInput & { readonly endpoint: 'COMMENT_REPLY'; readonly body: Readonly<Record<string, MetaGraphJson>> })
   | (MetaGraphBaseInput & { readonly endpoint: 'SUBSCRIBE_APP'; readonly body: Readonly<Record<string, MetaGraphJson>> })
   | (MetaGraphBaseInput & { readonly endpoint: 'PHONE_REGISTER'; readonly body: Readonly<{ readonly messaging_product: 'whatsapp'; readonly pin: string }> });
+
+export type MetaGraphFacebookPageDiscoveryInput = Extract<MetaGraphInput, { readonly endpoint: 'FACEBOOK_PAGES_DISCOVERY' }>;
 
 export type MetaGraphSafeErrorCategory =
   | 'CAPABILITY_DISABLED'
@@ -113,6 +116,57 @@ export interface MetaGraphCollectionResult {
   readonly retries: number;
   readonly retryable: boolean;
   readonly ambiguous: boolean;
+}
+
+/** Sensitive in-memory input passed only to the tenant-owned atomic Page credential enrollment callback. */
+export interface MetaGraphFacebookPageCredentialBatchInput {
+  /** Stable server-owned onboarding/saga UUID used as the vault enrollment idempotency key. */
+  readonly enrollmentRef: string;
+  readonly tenantId: string;
+  readonly appConfigurationId: string;
+  readonly environment: MetaGraphExecutionContext['environment'];
+  readonly flowVariant: 'FACEBOOK';
+  readonly authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS';
+  readonly authorizationAssetRef: string;
+  readonly correlationId: string;
+  readonly pages: readonly {
+    readonly providerPageId: string;
+    readonly pageName: string | null;
+    readonly pageTasks: readonly string[];
+    /** Never return, log, trace or project this value. Persist it directly to the protected vault. */
+    readonly pageAccessToken: string;
+  }[];
+  readonly signal?: AbortSignal;
+}
+
+/** Stores every Page token atomically using a tenant/authorization-bound vault operation. */
+export type MetaGraphFacebookPageCredentialConsumer = (input: MetaGraphFacebookPageCredentialBatchInput) =>
+  Promise<{ readonly credentialRefs: readonly { readonly providerPageId: string; readonly credentialRef: string }[] }>;
+
+/** Internal discovery result safe to pass between backend adapters; it has no access-token field. */
+export interface MetaGraphFacebookPageDiscoveryItem {
+  readonly providerPageId: string;
+  readonly pageName: string | null;
+  readonly pageTasks: readonly string[];
+  readonly credentialRef: string;
+}
+
+export interface MetaGraphFacebookPageDiscoveryResult {
+  readonly outcome: MetaGraphCollectionResult['outcome'];
+  readonly pages: readonly MetaGraphFacebookPageDiscoveryItem[];
+  readonly checkpoint?: MetaGraphCheckpoint;
+  readonly error?: MetaGraphSafeError;
+  readonly httpStatus?: number;
+  readonly attempts: number;
+  readonly retries: number;
+  readonly retryable: boolean;
+  readonly cancelled?: true;
+}
+
+export interface MetaGraphFacebookPageDiscoveryOptions {
+  readonly maxPages?: number;
+  readonly maxItems?: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface MetaGraphMetricLabels {
