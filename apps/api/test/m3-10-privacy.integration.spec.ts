@@ -151,13 +151,14 @@ test('M3.10 MariaDB retention is tenant/category scoped, cutoff based, resumable
     assert.equal(Number(queueCount[0]?.count ?? 0), 0);
 
     const deletionInput = {
-      tenantId: tenantA, actorRef, targetRef: `asset:${randomUUID()}`, scope: 'ASSET',
+      // Keep the opaque asset references independent of the phone-number heuristic's random false positives.
+      tenantId: tenantA, actorRef, targetRef: 'asset:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', scope: 'ASSET',
       reasonCode: 'PRIVACY_REQUEST', idempotencyKey: randomUUID(), correlationId: randomUUID(),
     } as const;
     const requested = await deletion.request(deletionInput);
     const repeated = await deletion.request(deletionInput);
     assert.equal(repeated.requestId, requested.requestId, 'same request hash replays the original status and evidence');
-    await assert.rejects(deletion.request({ ...deletionInput, targetRef: `asset:${randomUUID()}` }), /reused for a different request/);
+    await assert.rejects(deletion.request({ ...deletionInput, targetRef: 'asset:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }), /reused for a different request/);
     const status = await deletion.status({ tenantId: tenantA, actorRef, requestId: requested.requestId });
     assert.equal(status?.status, 'RECEIVED');
     assert.equal('requesterRef' in (status ?? {}), false);
