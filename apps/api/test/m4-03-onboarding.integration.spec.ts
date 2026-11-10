@@ -377,6 +377,10 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     if (jobId) await dataSource.query('DELETE FROM ca_meta_jobs WHERE tenant_id = ? AND id = ?', [tenantId, jobId]);
     await dataSource.query('DELETE FROM ca_meta_onboarding_codes WHERE tenant_id = ?', [tenantId]);
     await dataSource.query('DELETE FROM ca_meta_onboarding_sessions WHERE tenant_id = ?', [tenantId]);
+    await dataSource.query('DELETE FROM ca_meta_asset_authorizations WHERE tenant_id = ?', [tenantId]);
+    await dataSource.query('DELETE FROM ca_meta_assets WHERE tenant_id = ?', [tenantId]);
+    await dataSource.query('DELETE FROM ca_meta_authorizations WHERE tenant_id = ?', [tenantId]);
+    await dataSource.query('DELETE FROM ca_meta_app_configurations WHERE tenant_id = ?', [tenantId]);
     await dataSource.query('DELETE FROM ca_meta_memberships WHERE tenant_id = ?', [tenantId]);
     await dataSource.query('DELETE FROM ca_meta_portal_sessions WHERE id = ?', [portalSessionId]);
     await dataSource.query('DELETE FROM ca_meta_principals WHERE id = ?', [principalId]);
