@@ -70,6 +70,8 @@ Eventos de janela exigem schema/type/event, limites e origem exata documentada. 
 
 O limite implementado para M4.05 está descrito em [Coexistence browser onboarding](specs/coexistence-embedded-signup.md) e [ADR-013](adrs/ADR-013-m4-05-coexistence-browser-correlation.md): a rota separada mantém o adapter desativado enquanto versão, `featureType`, schema e semântica origin/source não tiverem evidência oficial revisada. Fixtures locais normalizam apenas a interface interna; não representam mensagem Meta.
 
+A fronteira server-side de M4.06 está descrita em [Coexistence server finalization](specs/coexistence-server-finalization.md) e [ADR-014](adrs/ADR-014-m4-06-coexistence-server-finalization.md). Ela reutiliza os checkpoints do M4.03 e a reconciliação do M4.11, mas não instala um adapter de provedor sem contrato atual confirmado para troca, grants, ativos e subscriptions Coexistence.
+
 Quando o usuário conclui QR, UI informa que está verificando a conexão. FINISH não equivale a READY. Campos opcionais de evento não devem ser exigidos cegamente: IDs faltantes podem ser descobertos pelo backend dentro do escopo autorizado; ambiguidade exige seleção/prova e não “primeiro recurso retornado”.
 
 ### Servidor
