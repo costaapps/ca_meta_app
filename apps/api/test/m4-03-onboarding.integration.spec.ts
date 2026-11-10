@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { createConnection, type Connection } from 'mysql2/promise';
+import { createConnection, type Connection, type RowDataPacket } from 'mysql2/promise';
 import test from 'node:test';
 import { readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
 import { deployMigrations } from '../src/database/migrations/migration-runner.js';
@@ -96,7 +96,7 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
   };
   const resetMigrationCheck = async (name: string, clause: string): Promise<void> => {
     const connection = await getMigrationConnection();
-    const [rows] = await connection.query<Array<{ constraint_name: string }>>(
+    const [rows] = await connection.query<Array<RowDataPacket & { constraint_name: string }>>(
       `SELECT constraint_name FROM information_schema.table_constraints
        WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions'
          AND constraint_type = 'CHECK' AND constraint_name = ?`, [name],
@@ -416,7 +416,7 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
 
     onboardingSagaJsonCheckDrifted = true;
     const migrationDdlConnection = await getMigrationConnection();
-    const [sagaJsonCheck] = await migrationDdlConnection.query<Array<{ constraint_name: string }>>(
+    const [sagaJsonCheck] = await migrationDdlConnection.query<Array<RowDataPacket & { constraint_name: string }>>(
       `SELECT constraint_name FROM information_schema.table_constraints
        WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions'
          AND constraint_type = 'CHECK' AND constraint_name = 'saga_checkpoint_json'`,
