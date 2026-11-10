@@ -89,8 +89,55 @@ function normalizeOnboardingColumnType(value: string): string {
 }
 
 function normalizeCheckClause(value: string): string {
-  return value.replace(/'[^']*'|[^']+/gu, (part) => part.startsWith("'") ? part : part.toLowerCase())
-    .replaceAll('`', '').replaceAll(/\s+/gu, '').replace(/^\((.*)\)$/u, '$1');
+  let normalized = '';
+  let inString = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (inString) {
+      normalized += character;
+      if (character === '\\' && index + 1 < value.length) {
+        normalized += value[++index]!;
+      } else if (character === "'" && value[index + 1] === "'") {
+        normalized += value[++index]!;
+      } else if (character === "'") {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === "'") {
+      inString = true;
+      normalized += character;
+    } else if (character !== '`' && !/\s/u.test(character)) {
+      normalized += character.toLowerCase();
+    }
+  }
+
+  while (normalized.startsWith('(') && normalized.endsWith(')')) {
+    let depth = 0;
+    let quoted = false;
+    let wrapsWholeClause = true;
+    for (let index = 0; index < normalized.length; index += 1) {
+      const character = normalized[index]!;
+      if (quoted) {
+        if (character === '\\' && index + 1 < normalized.length) index += 1;
+        else if (character === "'" && normalized[index + 1] === "'") index += 1;
+        else if (character === "'") quoted = false;
+        continue;
+      }
+      if (character === "'") quoted = true;
+      else if (character === '(') depth += 1;
+      else if (character === ')') {
+        depth -= 1;
+        if (depth === 0 && index < normalized.length - 1) {
+          wrapsWholeClause = false;
+          break;
+        }
+      }
+    }
+    if (!wrapsWholeClause || depth !== 0) break;
+    normalized = normalized.slice(1, -1);
+  }
+  return normalized;
 }
 const priorOnboardingIndexes = [
   { name: 'PRIMARY', columns: ['id'], unique: true },

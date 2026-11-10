@@ -414,6 +414,14 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     onboardingReadyCheckDrifted = false;
     await deployMigrations(migrationEnvironment);
 
+    onboardingReadyCheckDrifted = true;
+    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'RE ADY' OR readiness = 'RE ADY'");
+    await assert.rejects(() => deployMigrations(migrationEnvironment), /unexpected onboarding CHECK constraint/,
+      'whitespace inside a CHECK string literal must remain semantically significant');
+    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'READY' OR readiness = 'READY'");
+    onboardingReadyCheckDrifted = false;
+    await deployMigrations(migrationEnvironment);
+
     onboardingSagaJsonCheckDrifted = true;
     const migrationDdlConnection = await getMigrationConnection();
     const [sagaJsonCheck] = await migrationDdlConnection.query<Array<RowDataPacket & { constraint_name: string }>>(
