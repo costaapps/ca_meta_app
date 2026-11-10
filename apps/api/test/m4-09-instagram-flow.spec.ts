@@ -275,7 +275,8 @@ test('unconfigured provider, asset store and subscription port fail closed', asy
     new InstagramAccountStoreNotConfigured(), new InstagramSubscriptionsNotConfigured(), new MemoryProjection());
   await assert.rejects(adapter.exchangeAuthorizationCode({ ...context(), code: syntheticCode,
     idempotencyKey, signal: new AbortController().signal }), OnboardingSagaEffectError);
-  const result = await new InstagramProviderNotConfigured().discoverProfessionalAccounts({ ...context(),
+  const unconfiguredProvider: InstagramProvider = new InstagramProviderNotConfigured();
+  const result = await unconfiguredProvider.discoverProfessionalAccounts({ ...context(),
     authorizationRef, idempotencyKey, signal: new AbortController().signal });
   assert.equal(result.outcome, 'FAILED');
   assert.equal(result.safeErrorCode, 'INSTAGRAM_PROVIDER_NOT_CONFIGURED');
