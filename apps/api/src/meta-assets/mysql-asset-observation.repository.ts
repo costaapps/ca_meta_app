@@ -142,7 +142,7 @@ function assetDriftEvent(input: {
     eventType: 'asset.drift.detected',
     aggregateRef: notificationRef,
     aggregateVersion: 1,
-    actor: { kind: 'SYSTEM', ref: 'asset-observation' },
+    actor: { kind: 'SYSTEM' as const, ref: 'asset-observation' },
     correlationId: eventId,
     causationId: `asset-observation:${digest}`,
     createdAt: input.snapshot.fetchedAt,
