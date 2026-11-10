@@ -6,7 +6,7 @@
 
 ## Scope
 
-Persist subscription desired state separately from provider observations for each tenant, Meta app configuration, environment, target and field set. Keep application-level Webhooks configuration separate from per-asset/WABA `subscribed_apps` bindings. Resolve credentials only for the server-persisted operation context. Serialize reconciliation per WABA, retain recoverable partial outcomes, audit state changes, and preserve shared WABA subscriptions when one phone is disconnected.
+Persist subscription desired state separately from provider observations for each tenant, Meta app configuration, environment, target and field set. Keep application-level Webhooks configuration separate from per-asset bindings. Resolve credentials only for the server-persisted operation context. Serialize reconciliation per target, retain recoverable partial outcomes, audit state changes, and preserve shared WABA subscriptions when one phone is disconnected. The generic target/binding schema also accepts a direct Facebook Page target under the exact Facebook Login for Business authorization tuple; its provider remains fail-closed.
 
 ## Acceptance criteria and evidence mapping
 
@@ -22,15 +22,17 @@ Persist subscription desired state separately from provider observations for eac
 | AC08 — Four numbers sharing one WABA do not race or lose desired bindings. | One unique target row is keyed by internal WABA asset UUID; all bindings update under its row lock. | Concurrent synthetic four-phone test checks four active bindings, one write, and subsequent idempotent reconciliation. |
 | AC09 — Audit events contain opaque internal references, safe reason codes, versions, actor hash and correlation ID; audit rows are append-only. | `ca_meta_subscription_audit` and migration triggers reject UPDATE/DELETE. No provider response/body or credentials are persisted. | The focused harness has no Meta client/network dependency; the audit DDL is migration-verified by the integrated migration gate. |
 | AC10 — A focused executable harness is repeatable and cleans up isolated output. | `tools/m4-11/run-focused-test.mjs`, `tools/m4-11/README.md`, and `apps/api/tsconfig.m4-11-test.json`. | Run `node tools/m4-11/run-focused-test.mjs`; output is compiled into an OS temp directory and deleted in `finally`. Not run by this implementer per coordinator instruction. |
+| M4.08 extension — Page target intent is tenant/app/environment scoped, bound to one verified Page authorization and does not use a WABA provider path. | `MysqlMetaSubscriptionCatalog` resolves only `FACEBOOK` + `FACEBOOK_LOGIN_FOR_BUSINESS` + `FACEBOOK_PAGE`; the generic target key is the Page asset UUID; selected bindings are read through the exact authorization context. | The focused synthetic unit proof records one Page desired binding and verifies a Page with unconfirmed subscription remains `PARTIAL` without invoking the WhatsApp provider. |
 
 ## Boundaries and unresolved evidence
 
-- Only WhatsApp Cloud WABA `subscribed_apps` is implemented. Facebook Page and Instagram variants return a safe partial state until their target, grant and subscription semantics are confirmed.
+- Only WhatsApp Cloud WABA `subscribed_apps` has a provider mutation adapter. Facebook Page target intent is persisted in the same v18 generic target/binding tables, but Page requests return `PAGE_SUBSCRIPTION_NOT_CONFIRMED` before Graph or credential resolution. Instagram remains fail-closed and has no target contract in this extension.
 - App-level Webhooks configuration is stored independently, but its mutation and observed fields remain `NOT_CONFIRMED`; no app-level Graph mutation occurs.
 - A non-empty per-binding asset field set remains desired state but blocks provider writes as `ASSET_SUBSCRIPTION_FIELDS_NOT_CONFIRMED`. The supported endpoint's field semantics are not confirmed.
 - The Meta-maintained WhatsApp Cloud API collection documents GET/POST/DELETE on `/{WABA-ID}/subscribed_apps`, the POST subscription behavior and separation from app Webhooks. Exact permission grants, Graph version availability, GET response item shape, empty request body behavior, and DELETE behavior still require app-specific review/Sandbox evidence. The official GET example does not confirm whether the returned app ID is top-level or nested; the adapter accepts only a string item or top-level `id` and fails closed with `GRAPH_READ_RESPONSE_INVALID` for unconfirmed nested shapes such as `whatsapp_business_api_data.id`. A focused synthetic test proves this rejection occurs before any write. The adapter verifies each supported-shape write before marking ACTIVE.
 - Disconnect with no active binding intentionally requires manual removal because no confirmed DELETE adapter exists. This prevents claiming a remote removal that was not verified.
 - No real Meta request, credential, browser input, production database or customer data is used by the focused harness.
+- Facebook Page desired state reuses `target_asset_id` and binding rows; no migration is needed. The Page target is scoped by the verified Facebook authorization and is distinct from any WhatsApp target. Page subscription permissions, endpoint behavior and fields remain **Not confirmed**.
 
 ## Gate
 

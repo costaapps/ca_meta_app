@@ -22,11 +22,16 @@ interface AssetContextRow {
 }
 
 function isFlow(value: string | null): value is MetaFlowVariant {
-  return value === 'WHATSAPP_EXCLUSIVE' || value === 'WHATSAPP_COEXISTENCE';
+  return value === 'FACEBOOK' || value === 'WHATSAPP_EXCLUSIVE' || value === 'WHATSAPP_COEXISTENCE';
 }
 
 function isAuth(value: string | null, flow: MetaFlowVariant): value is MetaAuthVariant {
+  if (flow === 'FACEBOOK') return value === 'FACEBOOK_LOGIN_FOR_BUSINESS';
   return flow === 'WHATSAPP_EXCLUSIVE' ? value === 'WHATSAPP_EMBEDDED_SIGNUP' : value === 'WHATSAPP_BUSINESS_APP_ONBOARDING';
+}
+
+function eligibleTargetKind(flow: MetaFlowVariant, assetKind: string): assetKind is 'FACEBOOK_PAGE' | 'WHATSAPP_BUSINESS_ACCOUNT' {
+  return flow === 'FACEBOOK' ? assetKind === 'FACEBOOK_PAGE' : assetKind === 'WHATSAPP_BUSINESS_ACCOUNT';
 }
 
 function oneEligible(rows: readonly AssetContextRow[]): AssetContextRow | undefined {
@@ -50,7 +55,9 @@ export class MysqlMetaSubscriptionCatalog implements MetaSubscriptionCatalog {
     if (!source || !isFlow(source.flow_variant) || !isAuth(source.auth_variant, source.flow_variant)) return undefined;
 
     let targetId = source.asset_id;
-    if (source.asset_kind === 'WHATSAPP_PHONE_NUMBER') {
+    if (source.flow_variant === 'FACEBOOK') {
+      if (source.asset_kind !== 'FACEBOOK_PAGE') return undefined;
+    } else if (source.asset_kind === 'WHATSAPP_PHONE_NUMBER') {
       const dataSource = await this.database.getDataSource();
       const relationRows = await dataSource.query(
         `SELECT target_asset_id FROM ca_meta_asset_relations
@@ -67,7 +74,7 @@ export class MysqlMetaSubscriptionCatalog implements MetaSubscriptionCatalog {
 
     const targetRows = await this.queryAsset(input.tenantId, input.appConfigurationId, input.environment, targetId, source.authorization_id);
     const target = oneEligible(targetRows);
-    if (!target || target.asset_kind !== 'WHATSAPP_BUSINESS_ACCOUNT' || target.authorization_id !== source.authorization_id ||
+    if (!target || !eligibleTargetKind(source.flow_variant, target.asset_kind) || target.authorization_id !== source.authorization_id ||
         target.flow_variant !== source.flow_variant || target.auth_variant !== source.auth_variant || !PROVIDER_ID.test(target.external_id)) return undefined;
     return this.context(input, source, target);
   }
@@ -79,7 +86,7 @@ export class MysqlMetaSubscriptionCatalog implements MetaSubscriptionCatalog {
         !this.validEnvironment(input.environment)) return undefined;
     const rows = await this.queryAsset(input.tenantId, input.appConfigurationId, input.environment, input.targetAssetId, input.authorizationId);
     const target = oneEligible(rows);
-    if (!target || target.asset_kind !== 'WHATSAPP_BUSINESS_ACCOUNT' || !isFlow(target.flow_variant) ||
+    if (!target || !isFlow(target.flow_variant) || !eligibleTargetKind(target.flow_variant, target.asset_kind) ||
         !isAuth(target.auth_variant, target.flow_variant) || !PROVIDER_ID.test(target.external_id)) return undefined;
     return this.context(input, target, target);
   }
@@ -109,7 +116,7 @@ export class MysqlMetaSubscriptionCatalog implements MetaSubscriptionCatalog {
     return Object.freeze({ tenantId: input.tenantId, appConfigurationId: input.appConfigurationId, environment: input.environment,
       authorizationId: source.authorization_id, targetAssetId: target.asset_id, sourceAssetId: source.asset_id,
       providerObjectId: target.external_id, flowVariant, authVariant: source.auth_variant as MetaAuthVariant,
-      kind: 'WHATSAPP_BUSINESS_ACCOUNT', authorizationVersion: Number(source.authorization_version),
+      kind: target.asset_kind as MetaSubscriptionTargetContext['kind'], authorizationVersion: Number(source.authorization_version),
       targetAssetVersion: Number(target.asset_version), sourceAssetVersion: Number(source.asset_version) });
   }
 

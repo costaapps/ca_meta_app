@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { QueryRunner } from 'typeorm';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { MetaSubscriptionClaim, MetaSubscriptionReconcileState,
-  MetaSubscriptionInactiveCleanupResult, MetaSubscriptionState, MetaSubscriptionStore, MetaSubscriptionTargetContext,
+  MetaSubscriptionInactiveCleanupResult, MetaSubscriptionSelectedAsset, MetaSubscriptionSelectedAssetQuery,
+  MetaSubscriptionState, MetaSubscriptionStore, MetaSubscriptionTargetContext,
   MetaSubscriptionTargetSnapshot } from './meta-subscriptions.types.js';
 
 interface TargetRow {
@@ -333,6 +334,40 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
       return Object.freeze({ removedBindingCount: stale.length, targets: Object.freeze(outcomes) });
     } catch (error) { await runner.rollbackTransaction(); throw error; }
     finally { await runner.release(); }
+  }
+
+  async listSelectedAssets(input: MetaSubscriptionSelectedAssetQuery): Promise<readonly MetaSubscriptionSelectedAsset[]> {
+    this.validate(input.tenantId, input.appConfigurationId, input.authorizationId);
+    this.validateEnvironment(input.environment);
+    const dataSource = await this.database.getDataSource();
+    const rows = await dataSource.query(
+      `SELECT b.asset_id AS assetId, t.target_asset_id AS targetAssetId, b.authorization_id AS authorizationId,
+              b.desired_fields AS desiredFields
+       FROM ca_meta_subscription_bindings b
+       INNER JOIN ca_meta_subscription_targets t ON t.tenant_id = b.tenant_id AND t.id = b.target_id
+         AND t.app_configuration_id = b.app_configuration_id AND t.provider = b.provider AND t.environment = b.environment
+       INNER JOIN ca_meta_assets target_asset ON target_asset.tenant_id = t.tenant_id AND target_asset.id = t.target_asset_id
+         AND target_asset.app_configuration_id = t.app_configuration_id AND target_asset.provider = t.provider
+         AND target_asset.environment = t.environment AND target_asset.asset_kind = ?
+       INNER JOIN ca_meta_assets source_asset ON source_asset.tenant_id = b.tenant_id AND source_asset.id = b.asset_id
+         AND source_asset.app_configuration_id = b.app_configuration_id AND source_asset.provider = b.provider
+         AND source_asset.environment = b.environment
+       INNER JOIN ca_meta_asset_authorizations aa ON aa.tenant_id = b.tenant_id AND aa.authorization_id = b.authorization_id
+         AND aa.asset_id = b.asset_id AND aa.app_configuration_id = b.app_configuration_id
+         AND aa.provider = b.provider AND aa.environment = b.environment AND aa.state = 'ACTIVE'
+         AND aa.verification_state = 'VERIFIED' AND aa.credential_id IS NOT NULL
+       INNER JOIN ca_meta_authorizations auth ON auth.tenant_id = aa.tenant_id AND auth.id = aa.authorization_id
+         AND auth.app_configuration_id = aa.app_configuration_id AND auth.provider = aa.provider
+         AND auth.environment = aa.environment AND auth.authorization_state = 'ACTIVE'
+       WHERE b.tenant_id = ? AND b.app_configuration_id = ? AND b.provider = 'META' AND b.environment = ?
+         AND b.authorization_id = ? AND b.binding_state = 'ACTIVE' AND t.desired_state = 'SUBSCRIBED'
+         AND source_asset.asset_kind = 'FACEBOOK_PAGE' AND t.target_asset_id = b.asset_id
+         AND auth.flow_variant = 'FACEBOOK' AND auth.auth_variant = 'FACEBOOK_LOGIN_FOR_BUSINESS'
+       ORDER BY b.asset_id`,
+      [input.assetKind, input.tenantId, input.appConfigurationId, input.environment, input.authorizationId],
+    ) as Array<{ readonly assetId: string; readonly targetAssetId: string; readonly authorizationId: string; readonly desiredFields: string }>;
+    return Object.freeze(rows.map((row) => Object.freeze({ assetId: row.assetId, targetAssetId: row.targetAssetId,
+      authorizationId: row.authorizationId, desiredFields: parseFields(row.desiredFields) })));
   }
 
   async claim(input: MetaSubscriptionTargetContext, leaseMilliseconds: number): Promise<MetaSubscriptionClaim | undefined> {

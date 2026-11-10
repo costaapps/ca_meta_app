@@ -8,7 +8,7 @@ import type { VerifiedServiceCredential } from '../src/identity/identity.trust.j
 import type { CredentialResolutionContext, CredentialResolutionHandle } from '../src/credentials/credential-resolver.types.js';
 import type { MetaGraphCallResult, MetaGraphCollectionResult, MetaGraphInput } from '../src/meta-graph/meta-graph.types.js';
 import type { MetaSubscriptionActor, MetaSubscriptionClaim, MetaSubscriptionCatalog, MetaSubscriptionProvider,
-  MetaSubscriptionProviderResult, MetaSubscriptionRequest, MetaSubscriptionStore, MetaSubscriptionTargetContext,
+  MetaSubscriptionProviderResult, MetaSubscriptionRequest, MetaSubscriptionSelectedAssetQuery, MetaSubscriptionStore, MetaSubscriptionTargetContext,
   MetaSubscriptionTargetSnapshot } from '../src/meta-subscriptions/meta-subscriptions.types.js';
 import { MetaSubscriptionService } from '../src/meta-subscriptions/meta-subscription.service.js';
 import { MetaGraphSubscriptionProvider } from '../src/meta-subscriptions/meta-graph-subscription.provider.js';
@@ -19,6 +19,7 @@ const APP = '10000000-0000-4000-8000-000000000002';
 const CORRELATION = '10000000-0000-4000-8000-000000000003';
 const PRINCIPAL = '10000000-0000-4000-8000-000000000004';
 const TARGET = '10000000-0000-4000-8000-000000000010';
+const PAGE_ASSET = '10000000-0000-4000-8000-000000000099';
 const PROVIDER_OBJECT_ID = '554433221100';
 const PROVIDER_APP_ID = '9988776655';
 const CONFIG_REF = 'synthetic-whatsapp-config';
@@ -44,6 +45,13 @@ function context(assetId: string, authorizationId = id(5)): MetaSubscriptionTarg
     targetAssetId: TARGET, sourceAssetId: assetId, providerObjectId: PROVIDER_OBJECT_ID,
     flowVariant: 'WHATSAPP_COEXISTENCE', authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING',
     kind: 'WHATSAPP_BUSINESS_ACCOUNT', authorizationVersion: 2, targetAssetVersion: 4, sourceAssetVersion: 3 });
+}
+
+function facebookPageContext(assetId: string, authorizationId = id(5)): MetaSubscriptionTargetContext {
+  return Object.freeze({ tenantId: TENANT, appConfigurationId: APP, environment: 'test', authorizationId,
+    targetAssetId: assetId, sourceAssetId: assetId, providerObjectId: PROVIDER_OBJECT_ID,
+    flowVariant: 'FACEBOOK', authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS', kind: 'FACEBOOK_PAGE',
+    authorizationVersion: 2, targetAssetVersion: 4, sourceAssetVersion: 4 });
 }
 
 function request(assetId: string, desiredFields: readonly string[] = [], authorizationId?: string): MetaSubscriptionRequest {
@@ -128,6 +136,11 @@ class FakeStore implements MetaSubscriptionStore {
     return Object.freeze({ removedBindingCount: stale.length, targets: Object.freeze([Object.freeze({ targetId: `subscription-${TARGET}`,
       desiredState: this.desiredState, observedState: this.observedState, state: this.state,
       version: this.targetVersion, remainingBindingCount: active.length })]) });
+  }
+  async listSelectedAssets(input: MetaSubscriptionSelectedAssetQuery) {
+    return Object.freeze([...this.bindings.values()].filter((binding) => binding.state === 'ACTIVE' &&
+      binding.authorizationId === input.authorizationId).map((binding) => Object.freeze({ assetId: binding.assetId,
+        targetAssetId: TARGET, authorizationId: binding.authorizationId, desiredFields: binding.fields })));
   }
   async claim(input: MetaSubscriptionTargetContext, _leaseMilliseconds: number): Promise<MetaSubscriptionClaim | undefined> {
     this.claimAttempts += 1;
@@ -313,6 +326,27 @@ test('a browser supplied provider object ID is rejected before catalog or provid
   await assert.rejects(service.connect(forged, await actor()), /Subscription request is invalid/);
   assert.equal(catalog.calls, 0);
   assert.equal(provider.calls, 0);
+});
+
+test('Facebook Page binding is persisted as desired state but subscription stays partial without confirmed Page semantics', async () => {
+  const store = new FakeStore();
+  const catalog: MetaSubscriptionCatalog = {
+    resolveByAsset: async (input) => input.assetId === PAGE_ASSET && input.authorizationId === id(5)
+      ? facebookPageContext(PAGE_ASSET, id(5)) : undefined,
+    resolveTarget: async () => undefined,
+  };
+  let whatsappCalls = 0;
+  const provider: MetaSubscriptionProvider = { ensureWhatsAppSubscribed: async () => {
+    whatsappCalls += 1;
+    throw new Error('WhatsApp provider must not be called for a Facebook Page.');
+  } };
+  const service = new MetaSubscriptionService(store, catalog, provider);
+  const result = await service.connect(request(PAGE_ASSET, [], id(5)), await actor());
+  assert.equal(result.state, 'PARTIAL');
+  assert.equal(result.reasonCode, 'PAGE_SUBSCRIPTION_NOT_CONFIRMED');
+  assert.equal(store.desiredState, 'SUBSCRIBED', 'the selected Page remains durably desired in the existing target/binding tables');
+  assert.equal(store.bindings.get(`${PAGE_ASSET}:${id(5)}`)?.state, 'ACTIVE');
+  assert.equal(whatsappCalls, 0);
 });
 
 test('an internal grant selector must be a UUID and cannot replace the verified service scope', async () => {

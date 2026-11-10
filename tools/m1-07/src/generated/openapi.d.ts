@@ -409,6 +409,41 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/facebook/pages/authorizations/{authorizationId}/selection": {
+        readonly parameters: {
+            readonly query: {
+                /** @description Internal Meta app configuration UUID; the catalog still verifies it against current tenant-bound Page assets. */
+                readonly appConfigurationId: components["parameters"]["FacebookPageAppConfigurationId"];
+                /** @description Exact environment already bound to the internal authorization and Page asset. */
+                readonly environment: components["parameters"]["FacebookPageEnvironment"];
+            };
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+            };
+            readonly path: {
+                /** @description Internal authorization UUID; it grants no authority without the current portal tenant context. */
+                readonly authorizationId: string;
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * Read selected Facebook Pages for one current authorization
+         * @description Requires the portal session, current tenant context, and RESOURCE_READ membership permission. The response contains internal Page asset UUIDs only. Provider IDs, access tokens and raw Graph data are excluded. A selection is PARTIAL while Page subscription evidence is not confirmed; no provider call is made.
+         */
+        readonly get: operations["readFacebookPageSelection"];
+        /**
+         * Replace explicitly selected Facebook Pages
+         * @description Requires the portal session, current tenant context, CSRF protection and CONNECT membership permission. The request accepts only internal Page asset UUIDs. Each Page is revalidated against the exact active Facebook Login for Business authorization before M4.11 persists its desired binding. Read permission cannot mutate selection. Subscription remains fail-closed and PARTIAL until endpoint, field and grant evidence is confirmed.
+         */
+        readonly put: operations["replaceFacebookPageSelection"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/assets": {
         readonly parameters: {
             readonly query?: never;
@@ -1036,6 +1071,23 @@ export interface components {
             readonly nextCursor: string | null;
             readonly requestId: string;
         };
+        readonly ReplaceFacebookPageSelectionRequest: {
+            readonly selectedAssetRefs: readonly string[];
+        };
+        readonly FacebookPageSelectionOutcome: {
+            /** Format: uuid */
+            readonly assetRef: string;
+            /** @enum {string} */
+            readonly state: "PENDING" | "ACTIVE" | "PARTIAL" | "UNKNOWN" | "MANUAL_ACTION_REQUIRED";
+            readonly reasonCode?: string;
+        };
+        readonly FacebookPageSelectionStatus: {
+            /** @enum {string} */
+            readonly readiness: "PARTIAL" | "ACTION_REQUIRED";
+            readonly selectedAssetRefs: readonly string[];
+            readonly outcomes: readonly components["schemas"]["FacebookPageSelectionOutcome"][];
+            readonly requestId: string;
+        };
         readonly AutomationConfig: {
             readonly assetId: string;
             readonly enabled: boolean;
@@ -1269,6 +1321,10 @@ export interface components {
         readonly CsrfToken: string;
         /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
         readonly TenantContext: string;
+        /** @description Internal Meta app configuration UUID; the catalog still verifies it against current tenant-bound Page assets. */
+        readonly FacebookPageAppConfigurationId: string;
+        /** @description Exact environment already bound to the internal authorization and Page asset. */
+        readonly FacebookPageEnvironment: "development" | "test" | "staging" | "production";
         /**
          * @description Random caller-generated request key; server scope is current tenant + operation + key. Same payload hash replays prior acceptance; different payload hash returns 409 with no new effect.
          * @example idem_example_key_01
@@ -2153,6 +2209,89 @@ export interface operations {
             readonly 413: components["responses"]["PayloadTooLarge"];
             readonly 422: components["responses"]["Unprocessable"];
             readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly readFacebookPageSelection: {
+        readonly parameters: {
+            readonly query: {
+                /** @description Internal Meta app configuration UUID; the catalog still verifies it against current tenant-bound Page assets. */
+                readonly appConfigurationId: components["parameters"]["FacebookPageAppConfigurationId"];
+                /** @description Exact environment already bound to the internal authorization and Page asset. */
+                readonly environment: components["parameters"]["FacebookPageEnvironment"];
+            };
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+            };
+            readonly path: {
+                /** @description Internal authorization UUID; it grants no authority without the current portal tenant context. */
+                readonly authorizationId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Sanitized Page selection status */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["FacebookPageSelectionStatus"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 404: components["responses"]["NotFound"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly replaceFacebookPageSelection: {
+        readonly parameters: {
+            readonly query: {
+                /** @description Internal Meta app configuration UUID; the catalog still verifies it against current tenant-bound Page assets. */
+                readonly appConfigurationId: components["parameters"]["FacebookPageAppConfigurationId"];
+                /** @description Exact environment already bound to the internal authorization and Page asset. */
+                readonly environment: components["parameters"]["FacebookPageEnvironment"];
+            };
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+                /** @description Session-bound anti-CSRF value; not a DTO property and not sufficient without the session cookie. */
+                readonly "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            readonly path: {
+                /** @description Internal authorization UUID; it grants no authority without the current portal tenant context. */
+                readonly authorizationId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ReplaceFacebookPageSelectionRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Sanitized Page selection status */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["FacebookPageSelectionStatus"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 404: components["responses"]["NotFound"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 413: components["responses"]["PayloadTooLarge"];
             readonly 503: components["responses"]["Unavailable"];
             readonly default: components["responses"]["UnexpectedError"];
         };
