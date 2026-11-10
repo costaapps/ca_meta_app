@@ -18,7 +18,7 @@ node tools/m4-10/run-focused-test.mjs
 Remove-Item Env:M4_10_MARIADB_TEST
 ```
 
-The fixture deploys registered migrations, uses UUID-scoped synthetic tenants/assets/events, and removes only its own rows in `finally`. A successful replay audit is append-only by contract, so its synthetic audit row, terminal event, and minimal tenant/app/asset mapping remain; the protected delivery bytes and other fixture rows are removed. Migration ledger rows and schema objects also remain in the disposable schema. Do not point it at production or a shared customer database.
+The fixture deploys registered migrations, uses UUID-scoped synthetic tenants/assets/events, and removes only its own mutable rows in `finally`. Its append-only cross-tenant asset-claim quarantine row and the referenced minimal tenant/app mapping remain. A successful replay audit is also append-only, so its audit row, terminal event, and minimal tenant/app/asset mapping remain. Protected delivery bytes and other mutable fixture rows are removed. Migration ledger rows and schema objects also remain in the disposable schema. Do not point it at production or a shared customer database.
 
 The script was added as reproducible test evidence. It was not executed by the implementation agent; the milestone coordinator runs the focused gate on the integrated candidate SHA.
 

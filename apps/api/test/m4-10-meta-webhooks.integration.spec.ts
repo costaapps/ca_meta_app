@@ -434,17 +434,17 @@ test('M4.10 MariaDB webhook routes, quarantine replay, status serialization and 
       } else {
         await dataSource.query('DELETE FROM ca_meta_asset_authorizations WHERE tenant_id IN (?, ?)', [tenantA, tenantB]);
       }
-      await dataSource.query('DELETE FROM ca_meta_asset_claim_quarantine WHERE tenant_id IN (?, ?)', [tenantA, tenantB]);
       if (retainReplayEvidence) {
         await dataSource.query('DELETE FROM ca_meta_assets WHERE tenant_id IN (?, ?) AND id <> ?', [tenantA, tenantB, assetReplay]);
         await dataSource.query('DELETE FROM ca_meta_authorizations WHERE tenant_id = ?', [tenantB]);
-        await dataSource.query('DELETE FROM ca_meta_app_configurations WHERE tenant_id = ?', [tenantB]);
-        await dataSource.query('DELETE FROM ca_meta_tenants WHERE id = ?', [tenantB]);
+        // The cross-tenant quarantine claim is append-only and references tenantB's app configuration.
+        // Preserve that minimal synthetic mapping alongside the replay evidence.
       } else {
         await dataSource.query('DELETE FROM ca_meta_assets WHERE tenant_id IN (?, ?)', [tenantA, tenantB]);
         await dataSource.query('DELETE FROM ca_meta_authorizations WHERE tenant_id IN (?, ?)', [tenantA, tenantB]);
-        await dataSource.query('DELETE FROM ca_meta_app_configurations WHERE tenant_id IN (?, ?)', [tenantA, tenantB]);
-        await dataSource.query('DELETE FROM ca_meta_tenants WHERE id IN (?, ?)', [tenantA, tenantB]);
+        // The cross-tenant quarantine claim is append-only and references tenantB's app configuration.
+        await dataSource.query('DELETE FROM ca_meta_app_configurations WHERE tenant_id = ?', [tenantA]);
+        await dataSource.query('DELETE FROM ca_meta_tenants WHERE id = ?', [tenantA]);
       }
     } finally {
       await database.close();
