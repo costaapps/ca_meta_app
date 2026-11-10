@@ -16,6 +16,81 @@ const priorOnboardingColumns = [
   'expires_at', 'status', 'readiness', 'steps_json', 'next_action', 'created_at', 'last_updated_at',
   'provider_state_consumed_at', 'version',
 ] as const;
+interface OnboardingColumnShape {
+  readonly columnTypes: readonly string[];
+  readonly nullable: 'YES' | 'NO';
+  readonly defaults: readonly (string | null)[];
+  readonly characterSets: readonly (string | null)[];
+  readonly collations: readonly (string | null)[];
+}
+
+function onboardingColumnShape(
+  columnType: string | readonly string[],
+  nullable: 'YES' | 'NO',
+  defaultValue: string | null | readonly (string | null)[],
+  characterSet: string | null | readonly (string | null)[] = null,
+  collation: string | null | readonly (string | null)[] = null,
+): OnboardingColumnShape {
+  return {
+    columnTypes: typeof columnType === 'string' ? [columnType] : columnType,
+    nullable,
+    defaults: Array.isArray(defaultValue) ? defaultValue : [defaultValue as string | null],
+    characterSets: Array.isArray(characterSet) ? characterSet : [characterSet as string | null],
+    collations: Array.isArray(collation) ? collation : [collation as string | null],
+  };
+}
+
+const jsonOnboardingColumnShape = (defaultValue: string | null | readonly (string | null)[]): OnboardingColumnShape =>
+  onboardingColumnShape(['json', 'longtext'], 'NO', defaultValue, [null, 'utf8mb4'], [null, 'utf8mb4_bin']);
+
+const priorOnboardingColumnShapes: Readonly<Record<string, OnboardingColumnShape>> = {
+  id: onboardingColumnShape('char(36)', 'NO', null, 'ascii', 'ascii_bin'),
+  tenant_id: onboardingColumnShape('char(36)', 'NO', null, 'ascii', 'ascii_bin'),
+  principal_id: onboardingColumnShape('char(36)', 'NO', null, 'ascii', 'ascii_bin'),
+  portal_session_id: onboardingColumnShape('char(36)', 'NO', null, 'ascii', 'ascii_bin'),
+  tenant_context_hash: onboardingColumnShape('char(64)', 'NO', null, 'ascii', 'ascii_bin'),
+  flow_variant: onboardingColumnShape(
+    "enum('FACEBOOK_LOGIN','INSTAGRAM_VIA_FACEBOOK_LOGIN','INSTAGRAM_LOGIN','WHATSAPP_CLOUD_API','WHATSAPP_COEXISTENCE')",
+    'NO', null, 'utf8mb4', 'utf8mb4_bin'),
+  requested_capabilities: jsonOnboardingColumnShape(null),
+  return_route: onboardingColumnShape('varchar(16)', 'NO', null, 'ascii', 'ascii_bin'),
+  idempotency_key_hash: onboardingColumnShape('char(64)', 'NO', null, 'ascii', 'ascii_bin'),
+  request_hash: onboardingColumnShape('char(64)', 'NO', null, 'ascii', 'ascii_bin'),
+  provider_state_hash: onboardingColumnShape('char(64)', 'NO', null, 'ascii', 'ascii_bin'),
+  expires_at: onboardingColumnShape('datetime(6)', 'NO', null),
+  status: onboardingColumnShape(
+    "enum('CREATED','AWAITING_PROVIDER','CODE_RECEIVED','EXCHANGING','ASSETS_VERIFIED','PROVISIONING','READY','PARTIAL','CANCELLED','EXPIRED','FAILED')",
+    'NO', "'AWAITING_PROVIDER'", 'utf8mb4', 'utf8mb4_bin'),
+  readiness: onboardingColumnShape("enum('READY','PARTIAL','UNKNOWN')", 'NO', "'UNKNOWN'", 'utf8mb4', 'utf8mb4_bin'),
+  steps_json: jsonOnboardingColumnShape(null),
+  next_action: onboardingColumnShape([
+    "enum('WAIT','CHECK_STATUS','REAUTHORIZE','RECONCILE','RESOLVE_CONFLICT','NONE')",
+    "enum('WAIT','CHECK_STATUS','REAUTHORIZE','RECONCILE','RESUME','RESOLVE_CONFLICT','NONE')",
+  ], 'NO', "'WAIT'", 'utf8mb4', 'utf8mb4_bin'),
+  created_at: onboardingColumnShape('datetime(6)', 'NO', null),
+  last_updated_at: onboardingColumnShape('datetime(6)', 'NO', null),
+  provider_state_consumed_at: onboardingColumnShape('datetime(6)', 'YES', null),
+  version: onboardingColumnShape(['bigint unsigned', 'bigint(20) unsigned'], 'NO', '1'),
+};
+
+const addedOnboardingColumnShapes: Readonly<Record<string, OnboardingColumnShape>> = {
+  configuration_ref: onboardingColumnShape('varchar(96)', 'NO', "'unbound'", 'ascii', 'ascii_bin'),
+  provider_app_id: onboardingColumnShape('varchar(512)', 'NO', "'unbound'", 'utf8mb4', 'utf8mb4_nopad_bin'),
+  provider_environment: onboardingColumnShape('varchar(16)', 'NO', "'unbound'", 'ascii', 'ascii_bin'),
+  auth_variant: onboardingColumnShape('varchar(48)', 'NO', "'FACEBOOK_LOGIN_FOR_BUSINESS'", 'ascii', 'ascii_bin'),
+  capability_manifest_version: onboardingColumnShape('varchar(96)', 'NO', "'unbound'", 'ascii', 'ascii_bin'),
+  graph_api_version: onboardingColumnShape('varchar(16)', 'NO', "'v0.0'", 'ascii', 'ascii_bin'),
+  saga_checkpoint_json: jsonOnboardingColumnShape(["'{}'", "('{}')"]),
+};
+
+function normalizeOnboardingColumnType(value: string): string {
+  const normalized = value.replace(/'[^']*'|[^']+/g, (part) => part.startsWith("'") ? part : part.toLowerCase());
+  return normalized.replace(/^bigint\(\d+\) unsigned$/u, 'bigint unsigned');
+}
+
+function normalizeCheckClause(value: string): string {
+  return value.toLowerCase().replaceAll('`', '').replaceAll(/\s+/gu, '').replace(/^\((.*)\)$/u, '$1');
+}
 const priorOnboardingIndexes = [
   { name: 'PRIMARY', columns: ['id'], unique: true },
   { name: 'uq_ca_meta_onboarding_idempotency', columns: ['tenant_id', 'idempotency_key_hash'], unique: true },
@@ -33,23 +108,47 @@ const priorOnboardingForeignKeys = [
   { name: 'fk_ca_meta_onboarding_portal_session', columns: ['portal_session_id'], table: 'ca_meta_portal_sessions', referencedColumns: ['id'] },
 ] as const;
 
-async function verifyAddedOnboardingColumn(context: MigrationStepContext, column: string, type: string): Promise<boolean> {
-  if (!(await tableExists(context.queryRunner, 'ca_meta_onboarding_sessions'))) return false;
+interface OnboardingColumnMetadata {
+  readonly column_name: string;
+  readonly column_type: string;
+  readonly is_nullable: string;
+  readonly column_default: string | null;
+  readonly character_set_name: string | null;
+  readonly collation_name: string | null;
+}
+
+function assertOnboardingColumnDefinition(column: string, actual: OnboardingColumnMetadata, expected: OnboardingColumnShape): void {
+  const actualType = normalizeOnboardingColumnType(actual.column_type);
+  const expectedTypes = expected.columnTypes.map(normalizeOnboardingColumnType);
+  if (!expectedTypes.includes(actualType) || actual.is_nullable !== expected.nullable ||
+      !expected.defaults.includes(actual.column_default) || !expected.characterSets.includes(actual.character_set_name) ||
+      !expected.collations.includes(actual.collation_name)) {
+    throw new Error(`M4.03 migration found an unexpected definition for ca_meta_onboarding_sessions.${column}.`);
+  }
+}
+
+async function verifyOnboardingColumnDefinition(
+  context: MigrationStepContext,
+  column: string,
+  expected: OnboardingColumnShape,
+): Promise<boolean> {
   const rows = await context.queryRunner.query(
-    `SELECT column_name, column_type, is_nullable, column_default
+    `SELECT column_name, column_type, is_nullable, column_default, character_set_name, collation_name
      FROM information_schema.columns
      WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions' AND column_name = ?`,
     [column],
-  ) as Array<{ column_name: string; column_type: string; is_nullable: string; column_default: string | null }>;
+  ) as OnboardingColumnMetadata[];
   const found = rows[0];
   if (!found) return false;
-  const expectedType = type.match(/^(VARCHAR\(\d+\)|JSON)/i)?.[1]?.toLowerCase();
-  const actualType = found.column_type.toLowerCase();
-  const typeMatches = expectedType === 'json' ? actualType === 'json' || actualType === 'longtext' : actualType === expectedType;
-  if (!expectedType || !typeMatches || found.is_nullable !== 'NO') {
-    throw new Error(`M4.03 migration found an unexpected definition for ca_meta_onboarding_sessions.${column}.`);
-  }
+  assertOnboardingColumnDefinition(column, found, expected);
   return true;
+}
+
+async function verifyAddedOnboardingColumn(context: MigrationStepContext, column: string): Promise<boolean> {
+  if (!(await tableExists(context.queryRunner, 'ca_meta_onboarding_sessions'))) return false;
+  const expected = addedOnboardingColumnShapes[column];
+  if (!expected) throw new Error(`M4.03 migration has no expected definition for ca_meta_onboarding_sessions.${column}.`);
+  return verifyOnboardingColumnDefinition(context, column, expected);
 }
 
 function addOnboardingColumn(
@@ -67,7 +166,7 @@ function addOnboardingColumn(
       immutablePriorMigration: '202611030010-persisted-onboarding-sessions',
       compatiblePriorSteps: compatiblePriorSteps?.map(({ migrationId, stepId, verify }) => ({ migrationId, stepId, verify: verify.toString() })) }),
     retryWhenAbsent: true,
-    verify: (context) => verifyAddedOnboardingColumn(context, column, type),
+    verify: (context) => verifyAddedOnboardingColumn(context, column),
     ...(compatiblePriorSteps ? { compatiblePriorSteps } : {}),
   };
 }
@@ -77,21 +176,21 @@ async function verifyCompatibleOnboardingSessionPriorShape(context: MigrationSte
   if (!(await tableExists(queryRunner, 'ca_meta_onboarding_sessions'))) return false;
 
   const actualColumns = await tableColumns(queryRunner, 'ca_meta_onboarding_sessions');
-  const additions = new Map([
-    ['configuration_ref', 'VARCHAR(96)'], ['provider_app_id', 'VARCHAR(512)'],
-    ['provider_environment', 'VARCHAR(16)'], ['auth_variant', 'VARCHAR(48)'],
-    ['capability_manifest_version', 'VARCHAR(96)'], ['graph_api_version', 'VARCHAR(16)'],
-    ['saga_checkpoint_json', 'JSON'],
-  ]);
   const priorColumnSet = new Set<string>(priorOnboardingColumns);
   const additionalColumns = actualColumns.filter((column) => !priorColumnSet.has(column));
   const priorColumnsRemainOrdered = actualColumns
     .filter((column) => priorColumnSet.has(column)).join('\0') === priorOnboardingColumns.join('\0');
-  if (!priorColumnsRemainOrdered || additionalColumns.some((column) => !additions.has(column))) {
+  if (!priorColumnsRemainOrdered || additionalColumns.some((column) => !Object.hasOwn(addedOnboardingColumnShapes, column))) {
     throw new Error('M4.03 migration found an incompatible additive onboarding session shape.');
   }
+  for (const column of priorOnboardingColumns) {
+    const expected = priorOnboardingColumnShapes[column];
+    if (!expected || !(await verifyOnboardingColumnDefinition(context, column, expected))) {
+      throw new Error(`M4.03 migration could not verify prior onboarding column ${column}.`);
+    }
+  }
   for (const column of additionalColumns) {
-    await verifyAddedOnboardingColumn(context, column, additions.get(column)!);
+    await verifyAddedOnboardingColumn(context, column);
   }
 
   const indexRows = await queryRunner.query(
@@ -141,20 +240,42 @@ async function verifyCompatibleOnboardingSessionPriorShape(context: MigrationSte
     throw new Error('M4.03 migration found an incompatible additive onboarding foreign key shape.');
   }
 
-  const nextActionRows = await queryRunner.query(
-    `SELECT column_type, is_nullable, column_default FROM information_schema.columns
-     WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions' AND column_name = 'next_action'`,
-  ) as Array<{ column_type: string; is_nullable: string; column_default: string | null }>;
-  const nextAction = nextActionRows[0];
-  const nextActionDefault = "'WAIT'";
-  const acceptedNextActions = [
-    "enum('wait','check_status','reauthorize','reconcile','resolve_conflict','none')",
-    "enum('wait','check_status','reauthorize','reconcile','resume','resolve_conflict','none')",
-  ];
-  if (!nextAction || !acceptedNextActions.includes(nextAction.column_type.toLowerCase()) ||
-      nextAction.is_nullable !== 'NO' || nextAction.column_default !== nextActionDefault) {
-    throw new Error('M4.03 migration found an incompatible onboarding next_action definition.');
+  const checkRows = await queryRunner.query(
+    `SELECT tc.constraint_name AS name, cc.check_clause AS clause
+     FROM information_schema.table_constraints tc
+     LEFT JOIN information_schema.check_constraints cc
+       ON cc.constraint_schema = tc.constraint_schema AND cc.constraint_name = tc.constraint_name
+     WHERE tc.table_schema = DATABASE() AND tc.table_name = 'ca_meta_onboarding_sessions'
+       AND tc.constraint_type = 'CHECK'`,
+  ) as Array<{ name: string; clause: string | null }>;
+  const expectedChecks = new Map([
+    ['ck_ca_meta_onboarding_route', "return_route in ('connections','setup')"],
+    ['ck_ca_meta_onboarding_version', 'version > 0'],
+    ['ck_ca_meta_onboarding_expiry', 'expires_at > created_at'],
+    ['ck_ca_meta_onboarding_ready', "status <> 'READY' OR readiness = 'READY'"],
+    ['ck_ca_meta_onboarding_partial', "status <> 'PARTIAL' OR readiness = 'PARTIAL'"],
+  ].map(([name, clause]) => [name, normalizeCheckClause(clause)]));
+  const jsonColumnNames = new Set(['requested_capabilities', 'steps_json',
+    ...(actualColumns.includes('saga_checkpoint_json') ? ['saga_checkpoint_json'] : [])]);
+  const observedChecks = new Map<string, string>();
+  for (const row of checkRows) {
+    if (!row.clause) throw new Error(`M4.03 migration found an unverifiable onboarding CHECK constraint (${row.name}).`);
+    const clause = normalizeCheckClause(row.clause);
+    const expected = expectedChecks.get(row.name);
+    if (expected !== undefined) {
+      if (clause !== expected) throw new Error(`M4.03 migration found an unexpected onboarding CHECK constraint (${row.name}).`);
+      observedChecks.set(row.name, clause);
+      continue;
+    }
+    const jsonCheck = /^json_valid\(([a-z0-9_]+)\)$/u.exec(clause)?.[1];
+    if (!jsonCheck || !jsonColumnNames.has(jsonCheck)) {
+      throw new Error(`M4.03 migration found an unexpected onboarding CHECK constraint (${row.name}).`);
+    }
   }
+  if (observedChecks.size !== expectedChecks.size) {
+    throw new Error('M4.03 migration found missing onboarding CHECK constraints.');
+  }
+
   return true;
 }
 

@@ -29,7 +29,8 @@ function decodeJson(value: string | Buffer | Record<string, unknown> | undefined
 test('M4.03 stages authorization code ciphertext and atomically consumes it once with one durable job', {
   skip: enabled ? false : 'Run in the disposable MariaDB profile with M2_DURABLE_WORK_TEST=1.',
 }, async () => {
-  await deployMigrations(readMigrationEnvironment(process.env));
+  const migrationEnvironment = readMigrationEnvironment(process.env);
+  await deployMigrations(migrationEnvironment);
   const environment = validateEnvironment(process.env);
   const database = new DurableWorkDatabase(environment);
   const dataSource = await database.getDataSource();
@@ -72,6 +73,7 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     authVariant: 'WHATSAPP_EMBEDDED_SIGNUP' as const, configurationRef };
   const sealedCode = protector.seal(codeContext, rawCode);
   let jobId: string | undefined;
+  let onboardingStatusDrifted = false;
 
   try {
     await dataSource.query("SET time_zone = '+00:00'");
@@ -170,11 +172,6 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
       `INSERT INTO ca_meta_principals (id, kind, issuer, subject, status, version, created_at, updated_at)
        VALUES (?, 'USER', 'm4-03-synthetic', ?, 'ACTIVE', 1, ?, ?)`,
       [principalId, `subject-${principalId}`, timestamp, timestamp],
-    );
-    await dataSource.query(
-      `INSERT INTO ca_meta_memberships
-       (tenant_id, principal_id, principal_kind, roles, status, version, created_at, updated_at)
-       VALUES (?, ?, 'USER', JSON_ARRAY('owner'), 'ACTIVE', 1, ?, ?)`, [tenantId, principalId, timestamp, timestamp],
     );
     await dataSource.query(
       `INSERT INTO ca_meta_memberships
@@ -369,7 +366,24 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     await assert.rejects(recovery.queue({ ...reconcileInput, action: 'RECONCILE',
       idempotencyKey: hashOnboardingValue(`revoked-${randomUUID()}`) }), OnboardingRecoveryNotFoundError,
     'a revoked CONNECT membership cannot queue recovery work');
+
+    await dataSource.query(`ALTER TABLE ca_meta_onboarding_sessions
+      MODIFY COLUMN status VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT 'AWAITING_PROVIDER'`);
+    onboardingStatusDrifted = true;
+    await assert.rejects(() => deployMigrations(migrationEnvironment),
+      /unexpected definition for ca_meta_onboarding_sessions\.status/,
+    'an incompatible change to a prior tenant-session column must block migration recovery');
+    await dataSource.query(`ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN status
+      ENUM('CREATED','AWAITING_PROVIDER','CODE_RECEIVED','EXCHANGING','ASSETS_VERIFIED','PROVISIONING','READY','PARTIAL','CANCELLED','EXPIRED','FAILED')
+      NOT NULL DEFAULT 'AWAITING_PROVIDER'`);
+    onboardingStatusDrifted = false;
+    await deployMigrations(migrationEnvironment);
   } finally {
+    if (onboardingStatusDrifted) {
+      await dataSource.query(`ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN status
+        ENUM('CREATED','AWAITING_PROVIDER','CODE_RECEIVED','EXCHANGING','ASSETS_VERIFIED','PROVISIONING','READY','PARTIAL','CANCELLED','EXPIRED','FAILED')
+        NOT NULL DEFAULT 'AWAITING_PROVIDER'`);
+    }
     if (recoveryJobIds.length > 0) {
       await dataSource.query(`DELETE FROM ca_meta_jobs WHERE tenant_id = ? AND id IN (${recoveryJobIds.map(() => '?').join(', ')})`,
         [tenantId, ...recoveryJobIds]);
