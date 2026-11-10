@@ -408,7 +408,7 @@ test('unsupported nested subscribed_apps response shapes fail closed before any 
   const adapter = new MetaGraphSubscriptionProvider(config, credentials, graph);
   const outcome = await adapter.ensureWhatsAppSubscribed({ ...context(id(32)), actor: trustedActor });
   assert.equal(outcome.state, 'PARTIAL');
-  assert.equal(outcome.reasonCode, 'GRAPH_RESPONSE_INVALID');
+  assert.equal(outcome.reasonCode, 'GRAPH_READ_RESPONSE_INVALID');
   assert.equal(writes, 0, 'an unconfirmed nested shape must not trigger a subscription write');
 });
 
