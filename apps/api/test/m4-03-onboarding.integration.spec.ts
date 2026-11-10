@@ -107,6 +107,51 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
 
   try {
     await dataSource.query("SET time_zone = '+00:00'");
+
+    // Exercise additive-shape rejection before fixtures introduce data that earlier migrations quarantine.
+    await executeMigrationDdl(`ALTER TABLE ca_meta_onboarding_sessions
+      MODIFY COLUMN status VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT 'AWAITING_PROVIDER'`);
+    onboardingStatusDrifted = true;
+    await assert.rejects(() => deployMigrations(migrationEnvironment),
+      /unexpected definition for ca_meta_onboarding_sessions\.status/,
+    'an incompatible change to a prior tenant-session column must block migration recovery');
+    await executeMigrationDdl(`ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN status
+      ENUM('CREATED','AWAITING_PROVIDER','CODE_RECEIVED','EXCHANGING','ASSETS_VERIFIED','PROVISIONING','READY','PARTIAL','CANCELLED','EXPIRED','FAILED')
+      NOT NULL DEFAULT 'AWAITING_PROVIDER'`);
+    onboardingStatusDrifted = false;
+    await deployMigrations(migrationEnvironment);
+
+    onboardingReadyCheckDrifted = true;
+    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'ready' OR readiness = 'ready'");
+    await assert.rejects(() => deployMigrations(migrationEnvironment), /unexpected onboarding CHECK constraint/,
+      'case-sensitive enum literals in a CHECK constraint must be preserved');
+    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'READY' OR readiness = 'READY'");
+    onboardingReadyCheckDrifted = false;
+    await deployMigrations(migrationEnvironment);
+
+    onboardingReadyCheckDrifted = true;
+    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'RE ADY' OR readiness = 'RE ADY'");
+    await assert.rejects(() => deployMigrations(migrationEnvironment), /unexpected onboarding CHECK constraint/,
+      'whitespace inside a CHECK string literal must remain semantically significant');
+    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'READY' OR readiness = 'READY'");
+    onboardingReadyCheckDrifted = false;
+    await deployMigrations(migrationEnvironment);
+
+    onboardingSagaJsonCheckDrifted = true;
+    const migrationDdlConnection = await getMigrationConnection();
+    const [sagaJsonCheck] = await migrationDdlConnection.query<Array<RowDataPacket & { constraint_name: string }>>(
+      `SELECT constraint_name FROM information_schema.table_constraints
+       WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions'
+         AND constraint_type = 'CHECK' AND constraint_name = 'saga_checkpoint_json'`,
+    );
+    assert.equal(sagaJsonCheck.length, 1, 'MariaDB JSON alias exposes its JSON_VALID constraint');
+    await executeMigrationDdl('ALTER TABLE ca_meta_onboarding_sessions DROP CONSTRAINT `saga_checkpoint_json`');
+    await assert.rejects(() => deployMigrations(migrationEnvironment), /JSON alias column without its JSON_VALID constraint/,
+      'a MariaDB LONGTEXT JSON alias without JSON_VALID must block migration recovery');
+    await resetMigrationCheck('saga_checkpoint_json', 'JSON_VALID(saga_checkpoint_json)');
+    onboardingSagaJsonCheckDrifted = false;
+    await deployMigrations(migrationEnvironment);
+
     await dataSource.query(
       `INSERT INTO ca_meta_tenants (id, status, version, created_at, updated_at)
        VALUES (?, 'ACTIVE', 1, ?, ?)`, [tenantId, timestamp, timestamp],
@@ -394,48 +439,6 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
       idempotencyKey: hashOnboardingValue(`revoked-${randomUUID()}`) }), OnboardingRecoveryNotFoundError,
     'a revoked CONNECT membership cannot queue recovery work');
 
-    await executeMigrationDdl(`ALTER TABLE ca_meta_onboarding_sessions
-      MODIFY COLUMN status VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT 'AWAITING_PROVIDER'`);
-    onboardingStatusDrifted = true;
-    await assert.rejects(() => deployMigrations(migrationEnvironment),
-      /unexpected definition for ca_meta_onboarding_sessions\.status/,
-    'an incompatible change to a prior tenant-session column must block migration recovery');
-    await executeMigrationDdl(`ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN status
-      ENUM('CREATED','AWAITING_PROVIDER','CODE_RECEIVED','EXCHANGING','ASSETS_VERIFIED','PROVISIONING','READY','PARTIAL','CANCELLED','EXPIRED','FAILED')
-      NOT NULL DEFAULT 'AWAITING_PROVIDER'`);
-    onboardingStatusDrifted = false;
-    await deployMigrations(migrationEnvironment);
-
-    onboardingReadyCheckDrifted = true;
-    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'ready' OR readiness = 'ready'");
-    await assert.rejects(() => deployMigrations(migrationEnvironment), /unexpected onboarding CHECK constraint/,
-      'case-sensitive enum literals in a CHECK constraint must be preserved');
-    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'READY' OR readiness = 'READY'");
-    onboardingReadyCheckDrifted = false;
-    await deployMigrations(migrationEnvironment);
-
-    onboardingReadyCheckDrifted = true;
-    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'RE ADY' OR readiness = 'RE ADY'");
-    await assert.rejects(() => deployMigrations(migrationEnvironment), /unexpected onboarding CHECK constraint/,
-      'whitespace inside a CHECK string literal must remain semantically significant');
-    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'READY' OR readiness = 'READY'");
-    onboardingReadyCheckDrifted = false;
-    await deployMigrations(migrationEnvironment);
-
-    onboardingSagaJsonCheckDrifted = true;
-    const migrationDdlConnection = await getMigrationConnection();
-    const [sagaJsonCheck] = await migrationDdlConnection.query<Array<RowDataPacket & { constraint_name: string }>>(
-      `SELECT constraint_name FROM information_schema.table_constraints
-       WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions'
-         AND constraint_type = 'CHECK' AND constraint_name = 'saga_checkpoint_json'`,
-    );
-    assert.equal(sagaJsonCheck.length, 1, 'MariaDB JSON alias exposes its JSON_VALID constraint');
-    await executeMigrationDdl('ALTER TABLE ca_meta_onboarding_sessions DROP CONSTRAINT `saga_checkpoint_json`');
-    await assert.rejects(() => deployMigrations(migrationEnvironment), /JSON alias column without its JSON_VALID constraint/,
-      'a MariaDB LONGTEXT JSON alias without JSON_VALID must block migration recovery');
-    await resetMigrationCheck('saga_checkpoint_json', 'JSON_VALID(saga_checkpoint_json)');
-    onboardingSagaJsonCheckDrifted = false;
-    await deployMigrations(migrationEnvironment);
   } finally {
     if (onboardingSagaJsonCheckDrifted) {
       await resetMigrationCheck('saga_checkpoint_json', 'JSON_VALID(saga_checkpoint_json)');
