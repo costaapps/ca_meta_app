@@ -8,7 +8,7 @@ import { ConnectionLifecycleConfigurationUnavailableError, ConnectionLifecycleSe
 import { FailClosedMetaLifecycleCallbackVerifier, MetaLifecycleCallbackIngressService,
   MetaLifecycleCallbackSignatureError, MetaLifecycleCallbackUnavailableError } from '../src/meta-lifecycle/meta-lifecycle-callback.service.js';
 import { issueTrustedMetaLifecycleCallback, type ConnectionLifecycleCommandRepository,
-  type ConnectionLifecycleBinding } from '../src/meta-lifecycle/connection-lifecycle.types.js';
+  MetaLifecycleCallbackReplayConflictError, type ConnectionLifecycleBinding } from '../src/meta-lifecycle/connection-lifecycle.types.js';
 import type { TenantContextService, TenantAuthorizationService } from '../src/identity/identity.service.js';
 import type { OnboardingSessionService } from '../src/onboarding/onboarding-session.service.js';
 import { OnboardingConfigurationUnavailableError } from '../src/onboarding/onboarding-session.types.js';
@@ -200,4 +200,16 @@ test('M4.13 callback capability contains only hashes and duplicate event identit
   assert.deepEqual(await ingress.receive({ appConfigurationRef: 'synthetic-meta-app', rawBody: Buffer.from('synthetic fixture') }),
     { accepted: true, result: 'DUPLICATE' });
   assert.equal(applied.size, 1);
+});
+
+test('M4.13 changed payload under a replayed callback identity remains a permanent conflict', async () => {
+  const callback = issueTrustedMetaLifecycleCallback({
+    eventRefHash: 'e'.repeat(64), subjectRefHash: 'f'.repeat(64), appConfigurationRef: 'synthetic-meta-app',
+    kind: 'DEAUTHORIZATION', verifiedAt: '2026-11-10T12:00:00.000Z',
+  });
+  const ingress = new MetaLifecycleCallbackIngressService({ async verify() { return callback; } }, {
+    async process() { throw new MetaLifecycleCallbackReplayConflictError(); },
+  });
+  await assert.rejects(ingress.receive({ appConfigurationRef: 'synthetic-meta-app', rawBody: Buffer.from('changed synthetic fixture') }),
+    MetaLifecycleCallbackReplayConflictError);
 });

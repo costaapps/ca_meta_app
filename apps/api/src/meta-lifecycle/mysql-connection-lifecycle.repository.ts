@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { EntityManager } from 'typeorm';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import { AuditEventWriter, privacyRefHash } from '../privacy/audit.service.js';
+import { MetaLifecycleCallbackReplayConflictError } from './connection-lifecycle.types.js';
 import type {
   ConnectionLifecycleBinding,
   ConnectionLifecycleCommandRepository,
@@ -287,7 +288,7 @@ export class MysqlMetaLifecycleCallbackProcessor implements MetaLifecycleCallbac
       ) as Array<{ callback_kind: string; payload_ref_hash: string; receipt_state: 'RECEIVED' | 'APPLIED' | 'UNMAPPED' }>;
       const prior = priorRows[0];
       if (prior && (prior.callback_kind !== callback.kind || prior.payload_ref_hash !== payloadHash)) {
-        throw new Error('meta-lifecycle-callback-replay-conflict');
+        throw new MetaLifecycleCallbackReplayConflictError();
       }
       if (prior?.receipt_state === 'APPLIED') return 'DUPLICATE';
       if (!prior) {

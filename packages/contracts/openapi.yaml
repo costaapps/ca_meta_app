@@ -1282,12 +1282,14 @@ paths:
       - name: connectionId
         in: path
         required: true
-        description: UUID connection reference from the tenant-scoped catalog. The
+        description: Opaque connection reference from the tenant-scoped catalog. The
           server always resolves and authorizes it within the active tenant
           context.
         schema:
           type: string
-          format: uuid
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
     get:
       operationId: getConnection
       tags:
@@ -1390,16 +1392,21 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ConnectionLifecycleResult"
+                $ref: "#/components/schemas/JobAccepted"
               examples:
                 sanitized:
                   summary: Sanitized success example
                   value:
-                    commandId: 10000000-0000-4000-8000-000000000009
-                    localState: DISCONNECTED
-                    cleanupState: BLOCKED
-                    reasonCode: PROVIDER_OFFBOARDING_NOT_CONFIRMED
+                    jobId: 10000000-0000-4000-8000-000000000009
+                    status: PENDING
+                    location: /api/v1/jobs/10000000-0000-4000-8000-000000000009
                     requestId: req_example_25
+                    connectionLifecycle:
+                      commandId: 10000000-0000-4000-8000-000000000009
+                      localState: DISCONNECTED
+                      cleanupState: BLOCKED
+                      reasonCode: PROVIDER_OFFBOARDING_NOT_CONFIRMED
+                      requestId: req_example_25
         "400": *a11
         "401": *a12
         "403": *a13
@@ -1474,12 +1481,14 @@ paths:
       - name: connectionId
         in: path
         required: true
-        description: UUID connection reference from the tenant-scoped catalog. The
+        description: Opaque connection reference from the tenant-scoped catalog. The
           server always resolves and authorizes it within the active tenant
           context.
         schema:
           type: string
-          format: uuid
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
     post:
       operationId: createReauthorization
       tags:
@@ -1493,23 +1502,27 @@ paths:
       security: *a10
       parameters: *a23
       responses:
-        "201":
-          description: New local onboarding session associated with the existing
-            connection; its prior grant remains active.
+        "202":
+          description: Reauthorization work accepted; its prior grant remains active.
           headers: *a24
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OnboardingCreated"
+                $ref: "#/components/schemas/JobAccepted"
               examples:
                 sanitized:
-                  summary: Sanitized success example
+                  summary: Reauthorization session accepted
                   value:
-                    id: 10000000-0000-4000-8000-000000000005
-                    status: AWAITING_PROVIDER
-                    expiresAt: 2026-11-10T12:10:00Z
-                    launchUrl: https://provider.example/authorize?state=synthetic
+                    jobId: 10000000-0000-4000-8000-000000000005
+                    status: PENDING
+                    location: /api/v1/onboarding-sessions/10000000-0000-4000-8000-000000000005
                     requestId: req_example_26
+                    reauthorization:
+                      id: 10000000-0000-4000-8000-000000000005
+                      status: AWAITING_PROVIDER
+                      expiresAt: 2026-11-10T12:10:00Z
+                      launchUrl: https://provider.example/authorize?state=synthetic
+                      requestId: req_example_26
         "400": *a11
         "401": *a12
         "403": *a13
@@ -1538,8 +1551,9 @@ paths:
       description: The current Meta deauthorization/data-deletion wire schema,
         signature requirements, replay window, and subject mapping are Not
         confirmed. The default verifier rejects callbacks with 403;
-        processor/configuration failure returns 503. Raw callback bytes are
-        never returned or persisted.
+        processor/configuration failure returns 503; reuse of an event identity
+        with changed content returns 409. Raw callback bytes are never returned
+        or persisted.
       security: []
       parameters:
         - name: appConfigRef
@@ -1575,6 +1589,10 @@ paths:
         "400": *a11
         "403":
           description: Callback signature or flow-specific validation failed.
+        "409":
+          description: A verified event identity was already recorded with different
+            callback content; the conflicting receipt is rejected and no further
+            cleanup is applied.
         "503": *a20
         default: *a21
       x-external-effect: No destructive provider operation is invoked. Only a verified
@@ -1582,10 +1600,12 @@ paths:
         or create a deletion tombstone.
       x-idempotency-scope: App configuration + verified event identity digest; exact
         repeated callbacks do not repeat local effects.
-      x-retry-policy: Provider redelivery is deduplicated by app-configuration and
-        verified event digests. Exact repeats return DUPLICATE; changed payloads
-        are rejected; a verified UNMAPPED receipt may be retried after its
-        server-side target mapping is corrected.
+      x-retry-policy: Provider redelivery behavior is Not confirmed. Exact repeated
+        payloads return DUPLICATE after application; changed payloads under the
+        same event identity return 409. UNMAPPED receipts are acknowledged and
+        stored, but no automatic cleanup worker or internal reprocess route is
+        enabled; an identical event can be resubmitted after a server-owned
+        target mapping is corrected.
   /api/v1/facebook/pages/authorizations/{authorizationId}/selection:
     parameters:
       - name: authorizationId
@@ -3294,11 +3314,15 @@ components:
           const: PENDING
         location:
           type: string
-          pattern: ^/api/v1/jobs/[A-Za-z0-9_-]+$
+          pattern: ^/api/v1/(jobs|onboarding-sessions)/[A-Za-z0-9_-]+$
         requestId:
           type: string
           minLength: 1
           maxLength: 128
+        connectionLifecycle:
+          $ref: "#/components/schemas/ConnectionLifecycleResult"
+        reauthorization:
+          $ref: "#/components/schemas/OnboardingCreated"
     StepStatus:
       type: object
       additionalProperties: false

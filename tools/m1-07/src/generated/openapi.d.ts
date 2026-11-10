@@ -364,7 +364,7 @@ export interface paths {
             readonly query?: never;
             readonly header?: never;
             readonly path: {
-                /** @description UUID connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
+                /** @description Opaque connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
                 readonly connectionId: string;
             };
             readonly cookie?: never;
@@ -415,7 +415,7 @@ export interface paths {
             readonly query?: never;
             readonly header?: never;
             readonly path: {
-                /** @description UUID connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
+                /** @description Opaque connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
                 readonly connectionId: string;
             };
             readonly cookie?: never;
@@ -444,7 +444,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Receive a provider lifecycle callback through a fail-closed verifier boundary
-         * @description The current Meta deauthorization/data-deletion wire schema, signature requirements, replay window, and subject mapping are Not confirmed. The default verifier rejects callbacks with 403; processor/configuration failure returns 503. Raw callback bytes are never returned or persisted.
+         * @description The current Meta deauthorization/data-deletion wire schema, signature requirements, replay window, and subject mapping are Not confirmed. The default verifier rejects callbacks with 403; processor/configuration failure returns 503; reuse of an event identity with changed content returns 409. Raw callback bytes are never returned or persisted.
          */
         readonly post: operations["receiveMetaLifecycleCallback"];
         readonly delete?: never;
@@ -958,6 +958,8 @@ export interface components {
             readonly status: "PENDING";
             readonly location: string;
             readonly requestId: string;
+            readonly connectionLifecycle?: components["schemas"]["ConnectionLifecycleResult"];
+            readonly reauthorization?: components["schemas"]["OnboardingCreated"];
         };
         readonly StepStatus: {
             readonly name: string;
@@ -2166,7 +2168,7 @@ export interface operations {
                 readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
             };
             readonly path: {
-                /** @description UUID connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
+                /** @description Opaque connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
                 readonly connectionId: string;
             };
             readonly cookie?: never;
@@ -2219,7 +2221,7 @@ export interface operations {
                 readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             readonly path: {
-                /** @description UUID connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
+                /** @description Opaque connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
                 readonly connectionId: string;
             };
             readonly cookie?: never;
@@ -2234,7 +2236,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["ConnectionLifecycleResult"];
+                    readonly "application/json": components["schemas"]["JobAccepted"];
                 };
             };
             readonly 400: components["responses"]["BadRequest"];
@@ -2326,22 +2328,22 @@ export interface operations {
                 readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             readonly path: {
-                /** @description UUID connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
+                /** @description Opaque connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
                 readonly connectionId: string;
             };
             readonly cookie?: never;
         };
         readonly requestBody?: never;
         readonly responses: {
-            /** @description New local onboarding session associated with the existing connection; its prior grant remains active. */
-            readonly 201: {
+            /** @description Reauthorization work accepted; its prior grant remains active. */
+            readonly 202: {
                 headers: {
                     /** @description Relative URI of the tenant-scoped accepted job; poll it for the outcome. */
                     readonly Location?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["OnboardingCreated"];
+                    readonly "application/json": components["schemas"]["JobAccepted"];
                 };
             };
             readonly 400: components["responses"]["BadRequest"];
@@ -2385,6 +2387,13 @@ export interface operations {
             readonly 400: components["responses"]["BadRequest"];
             /** @description Callback signature or flow-specific validation failed. */
             readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A verified event identity was already recorded with different callback content; the conflicting receipt is rejected and no further cleanup is applied. */
+            readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
                 };

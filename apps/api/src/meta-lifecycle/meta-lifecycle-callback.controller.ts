@@ -7,6 +7,7 @@ import {
   MetaLifecycleCallbackSignatureError,
   MetaLifecycleCallbackUnavailableError,
 } from './meta-lifecycle-callback.service.js';
+import { MetaLifecycleCallbackReplayConflictError } from './connection-lifecycle.types.js';
 
 @Controller('/webhooks/meta-lifecycle')
 export class MetaLifecycleCallbackController {
@@ -30,6 +31,10 @@ export class MetaLifecycleCallbackController {
     } catch (error) {
       if (error instanceof MetaLifecycleCallbackSignatureError) {
         response.status(HttpStatus.FORBIDDEN).json({ received: false });
+        return;
+      }
+      if (error instanceof MetaLifecycleCallbackReplayConflictError) {
+        response.status(HttpStatus.CONFLICT).json({ received: false });
         return;
       }
       if (error instanceof MetaLifecycleCallbackUnavailableError) {

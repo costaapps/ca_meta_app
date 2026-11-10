@@ -10,9 +10,12 @@ import {
   Param,
   Post,
   Req,
+  Res,
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import type { components } from '@ca-meta/contracts';
 import { PublicRoute } from '../common/security/public-route.decorator.js';
 import { AbuseLimitService } from '../common/security/abuse-limits.js';
 import { PortalSessionGuard, type PortalRequest } from '../identity/portal-session.guard.js';
@@ -38,13 +41,23 @@ function idempotency(value: string | undefined): string {
   return value;
 }
 
-function response(result: ConnectionLifecycleDisconnectResult, requestId: string) {
+function lifecycleResponse(result: ConnectionLifecycleDisconnectResult, requestId: string): components['schemas']['ConnectionLifecycleResult'] {
   return Object.freeze({
     commandId: result.commandRef,
     localState: result.localState,
     cleanupState: result.cleanupState,
     reasonCode: result.safeReasonCode,
     requestId,
+  });
+}
+
+function acceptedDisconnect(result: ConnectionLifecycleDisconnectResult, requestId: string): components['schemas']['JobAccepted'] {
+  return Object.freeze({
+    jobId: result.commandRef,
+    status: 'PENDING',
+    location: `/api/v1/jobs/${result.commandRef}`,
+    requestId,
+    connectionLifecycle: lifecycleResponse(result, requestId),
   });
 }
 
@@ -59,19 +72,24 @@ export class ConnectionLifecycleController {
   async disconnectAuthorization(
     @Param('connectionId') connectionId: string,
     @Req() request: PortalRequest,
+    @Res({ passthrough: true }) response: Response,
     @Headers('x-tenant-context') headerContext?: string,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     await this.abuseLimits.consume('ADMIN_ACTION', {
       ip: request.ip, actor: request.portalSession.principalId, tenant: request.portalSession.tenantId,
     });
-    return response(await this.runDisconnect({
+    const result = await this.runDisconnect({
       session: request.portalSession,
       tenantContextRef: tenantContext(request, headerContext),
       authorizationRef: connectionId,
       idempotencyKey: idempotency(idempotencyKey),
       correlationId: request.requestId ?? '',
-    }), request.requestId ?? 'unknown');
+    });
+    const accepted = acceptedDisconnect(result, request.requestId ?? 'unknown');
+    response.setHeader('Location', accepted.location);
+    response.setHeader('Cache-Control', 'no-store');
+    return accepted;
   }
 
   @Delete('connections/:connectionId/assets/:assetId')
@@ -82,29 +100,35 @@ export class ConnectionLifecycleController {
     @Param('connectionId') connectionId: string,
     @Param('assetId') assetId: string,
     @Req() request: PortalRequest,
+    @Res({ passthrough: true }) response: Response,
     @Headers('x-tenant-context') headerContext?: string,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     await this.abuseLimits.consume('ADMIN_ACTION', {
       ip: request.ip, actor: request.portalSession.principalId, tenant: request.portalSession.tenantId,
     });
-    return response(await this.runDisconnect({
+    const result = await this.runDisconnect({
       session: request.portalSession,
       tenantContextRef: tenantContext(request, headerContext),
       authorizationRef: connectionId,
       assetRef: assetId,
       idempotencyKey: idempotency(idempotencyKey),
       correlationId: request.requestId ?? '',
-    }), request.requestId ?? 'unknown');
+    });
+    const location = `/api/v1/jobs/${result.commandRef}`;
+    response.setHeader('Location', location);
+    response.setHeader('Cache-Control', 'no-store');
+    return lifecycleResponse(result, request.requestId ?? 'unknown');
   }
 
   @Post('connections/:connectionId/reauthorizations')
   @PublicRoute()
   @UseGuards(PortalSessionGuard)
-  @HttpCode(HttpStatus.CREATED)
+  @HttpCode(HttpStatus.ACCEPTED)
   async reauthorize(
     @Param('connectionId') connectionId: string,
     @Req() request: PortalRequest,
+    @Res({ passthrough: true }) response: Response,
     @Headers('x-tenant-context') headerContext?: string,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
@@ -112,13 +136,23 @@ export class ConnectionLifecycleController {
       await this.abuseLimits.consume('ONBOARDING_START', {
         ip: request.ip, actor: request.portalSession.principalId, tenant: request.portalSession.tenantId,
       });
-      return await this.lifecycle.reauthorize({
+      const onboarding = await this.lifecycle.reauthorize({
         session: request.portalSession,
         tenantContextRef: tenantContext(request, headerContext),
         authorizationRef: connectionId,
         idempotencyKey: idempotency(idempotencyKey),
         requestId: request.requestId ?? 'unknown',
       });
+      const accepted = Object.freeze({
+        jobId: onboarding.id,
+        status: 'PENDING' as const,
+        location: `/api/v1/onboarding-sessions/${onboarding.id}`,
+        requestId: request.requestId ?? 'unknown',
+        reauthorization: onboarding,
+      }) satisfies components['schemas']['JobAccepted'];
+      response.setHeader('Location', accepted.location);
+      response.setHeader('Cache-Control', 'no-store');
+      return accepted;
     } catch (error) {
       if (error instanceof ConnectionLifecycleInputError) throw new BadRequestException();
       if (error instanceof ConnectionLifecycleNotFoundError) throw new NotFoundException();

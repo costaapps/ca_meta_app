@@ -85,6 +85,14 @@ export interface MetaLifecycleCallbackProcessor {
   process(callback: TrustedMetaLifecycleCallback): Promise<'APPLIED' | 'DUPLICATE' | 'UNMAPPED'>;
 }
 
+/** Stable provider event identities cannot be reused for a different callback payload. */
+export class MetaLifecycleCallbackReplayConflictError extends Error {
+  constructor() {
+    super('Lifecycle callback event identity was reused with a different payload.');
+    this.name = 'MetaLifecycleCallbackReplayConflictError';
+  }
+}
+
 export interface MetaLifecycleCallbackTarget {
   readonly appConfigurationRef: string;
   readonly tenantId: string;

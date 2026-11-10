@@ -1,5 +1,6 @@
 import {
   isTrustedMetaLifecycleCallback,
+  MetaLifecycleCallbackReplayConflictError,
   type MetaLifecycleCallbackProcessor,
   type MetaLifecycleCallbackVerifier,
   type TrustedMetaLifecycleCallback,
@@ -50,7 +51,9 @@ export class MetaLifecycleCallbackIngressService {
     let result: 'APPLIED' | 'DUPLICATE' | 'UNMAPPED';
     try {
       result = await this.processor.process(callback);
-    } catch {
+    } catch (error) {
+      // Reusing an event identity with changed content is permanent, not a transient failure.
+      if (error instanceof MetaLifecycleCallbackReplayConflictError) throw error;
       throw new MetaLifecycleCallbackUnavailableError();
     }
     return Object.freeze({ accepted: true, result });
