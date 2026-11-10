@@ -5,7 +5,7 @@ import type { VerifiedServiceTenantScope } from '../identity/identity.types.js';
 export type MetaSubscriptionState = 'SUBSCRIBED' | 'UNSUBSCRIBED' | 'UNKNOWN';
 export type MetaSubscriptionReconcileState = 'PENDING' | 'ACTIVE' | 'PARTIAL' | 'UNKNOWN' | 'MANUAL_ACTION_REQUIRED';
 export type MetaSubscriptionBindingState = 'ACTIVE' | 'REMOVED';
-export type MetaSubscriptionTargetKind = 'WHATSAPP_BUSINESS_ACCOUNT';
+export type MetaSubscriptionTargetKind = 'WHATSAPP_BUSINESS_ACCOUNT' | 'FACEBOOK_PAGE';
 
 export interface MetaSubscriptionRequest {
   readonly tenantId: string;
@@ -94,6 +94,22 @@ export interface MetaSubscriptionInactiveCleanupResult {
   readonly targets: readonly MetaSubscriptionInactiveCleanupTarget[];
 }
 
+export interface MetaSubscriptionSelectedAssetQuery {
+  readonly tenantId: string;
+  readonly appConfigurationId: string;
+  readonly environment: MetaEnvironment;
+  readonly authorizationId: string;
+  readonly assetKind: 'FACEBOOK_PAGE';
+  readonly correlationId: string;
+}
+
+export interface MetaSubscriptionSelectedAsset {
+  readonly assetId: string;
+  readonly targetAssetId: string;
+  readonly authorizationId: string;
+  readonly desiredFields: readonly string[];
+}
+
 export type MetaSubscriptionProviderResult =
   | { readonly state: 'SUBSCRIBED'; readonly observedFields: readonly string[] }
   | { readonly state: 'UNKNOWN' | 'PARTIAL'; readonly reasonCode: string; readonly retryable: boolean };
@@ -123,6 +139,7 @@ export interface MetaSubscriptionStore {
     readonly actorRef: string;
     readonly correlationId: string;
   }): Promise<MetaSubscriptionInactiveCleanupResult>;
+  listSelectedAssets(input: MetaSubscriptionSelectedAssetQuery): Promise<readonly MetaSubscriptionSelectedAsset[]>;
   claim(input: MetaSubscriptionTargetContext, leaseMilliseconds: number): Promise<MetaSubscriptionClaim | undefined>;
   complete(claim: MetaSubscriptionClaim, input: {
     readonly state: MetaSubscriptionReconcileState;
@@ -145,6 +162,7 @@ export interface MetaSubscriptionStore {
 
 export interface MetaSubscriptionProvider {
   ensureWhatsAppSubscribed(input: MetaSubscriptionTargetContext & { readonly actor: MetaSubscriptionActor }): Promise<MetaSubscriptionProviderResult>;
+  ensureFacebookPageSubscribed?(input: MetaSubscriptionTargetContext & { readonly actor: MetaSubscriptionActor }): Promise<MetaSubscriptionProviderResult>;
 }
 
 export interface MetaSubscriptionAuditEvent {

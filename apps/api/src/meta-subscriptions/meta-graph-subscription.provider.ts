@@ -46,6 +46,15 @@ export class MetaGraphSubscriptionProvider implements MetaSubscriptionProvider {
       reasonCode: post.outcome === 'UNKNOWN' ? 'AMBIGUOUS_POST_NOT_OBSERVED' : 'POST_NOT_OBSERVED', retryable: true };
   }
 
+  /** No Page Graph request is enabled until M4.01 evidence confirms the exact permission, field set and endpoint behavior. */
+  async ensureFacebookPageSubscribed(input: MetaSubscriptionTargetContext & { readonly actor: MetaSubscriptionActor }): Promise<MetaSubscriptionProviderResult> {
+    if (input.kind !== 'FACEBOOK_PAGE' || input.flowVariant !== 'FACEBOOK' ||
+        input.authVariant !== 'FACEBOOK_LOGIN_FOR_BUSINESS' || input.sourceAssetId !== input.targetAssetId) {
+      return { state: 'PARTIAL', reasonCode: 'SUBSCRIPTION_VARIANT_NOT_CONFIRMED', retryable: false };
+    }
+    return Object.freeze({ state: 'PARTIAL', reasonCode: 'PAGE_SUBSCRIPTION_NOT_CONFIRMED', retryable: false });
+  }
+
   private async read(target: MetaSubscriptionTargetContext, actor: MetaSubscriptionActor): Promise<ReadResult> {
     const input = await this.graphInput(target, actor, 'SUBSCRIBED_APPS_LIST');
     if (!input) return { subscribed: false, result: this.syntheticReadFailure() };
@@ -107,5 +116,8 @@ export class MetaGraphSubscriptionProvider implements MetaSubscriptionProvider {
 export class FailClosedMetaSubscriptionProvider implements MetaSubscriptionProvider {
   async ensureWhatsAppSubscribed(): Promise<MetaSubscriptionProviderResult> {
     return Object.freeze({ state: 'PARTIAL', reasonCode: 'PROVIDER_ADAPTER_NOT_CONFIRMED', retryable: false });
+  }
+  async ensureFacebookPageSubscribed(): Promise<MetaSubscriptionProviderResult> {
+    return Object.freeze({ state: 'PARTIAL', reasonCode: 'PAGE_SUBSCRIPTION_NOT_CONFIRMED', retryable: false });
   }
 }

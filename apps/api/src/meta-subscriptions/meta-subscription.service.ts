@@ -1,7 +1,8 @@
 import { isVerifiedServiceTenantScope } from '../identity/identity.service.js';
 import type { MetaSubscriptionActor, MetaSubscriptionCatalog, MetaSubscriptionProvider,
   MetaSubscriptionProviderResult, MetaSubscriptionReconcileResult, MetaSubscriptionRequest, MetaSubscriptionStore,
-  MetaSubscriptionTargetContext, MetaSubscriptionTargetSnapshot } from './meta-subscriptions.types.js';
+  MetaSubscriptionSelectedAsset, MetaSubscriptionSelectedAssetQuery, MetaSubscriptionTargetContext,
+  MetaSubscriptionTargetSnapshot } from './meta-subscriptions.types.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FIELD = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
@@ -30,7 +31,7 @@ export class MetaSubscriptionService {
     let context: MetaSubscriptionTargetContext | undefined;
     try { context = await this.catalog.resolveByAsset(input); } catch { return this.blocked('CATALOG_UNAVAILABLE'); }
     if (!context || context.sourceAssetId !== input.assetId) return this.blocked('ASSET_NOT_ELIGIBLE');
-    if (!this.isWhatsAppContext(context)) return this.blocked('SUBSCRIPTION_VARIANT_NOT_CONFIRMED');
+    if (!this.isSupportedContext(context)) return this.blocked('SUBSCRIPTION_VARIANT_NOT_CONFIRMED');
     let snapshot: MetaSubscriptionTargetSnapshot;
     try {
       snapshot = await this.store.ensureBinding({ ...context, desiredFields: fields,
@@ -44,7 +45,7 @@ export class MetaSubscriptionService {
     let context: MetaSubscriptionTargetContext | undefined;
     try { context = await this.catalog.resolveByAsset(input); } catch { return this.blocked('CATALOG_UNAVAILABLE'); }
     if (!context || context.sourceAssetId !== input.assetId) return this.blocked('ASSET_NOT_ELIGIBLE');
-    if (!this.isWhatsAppContext(context)) return this.blocked('SUBSCRIPTION_VARIANT_NOT_CONFIRMED');
+    if (!this.isSupportedContext(context)) return this.blocked('SUBSCRIPTION_VARIANT_NOT_CONFIRMED');
     return await this.reconcileContext(context, actor);
   }
 
@@ -53,7 +54,7 @@ export class MetaSubscriptionService {
     let context: MetaSubscriptionTargetContext | undefined;
     try { context = await this.catalog.resolveByAsset(input); } catch { context = undefined; }
     if (context && context.sourceAssetId === input.assetId) {
-      if (!this.isWhatsAppContext(context)) return this.blocked('SUBSCRIPTION_VARIANT_NOT_CONFIRMED');
+      if (!this.isSupportedContext(context)) return this.blocked('SUBSCRIPTION_VARIANT_NOT_CONFIRMED');
       try {
         // A currently usable grant can coexist with stale bindings from older grants on the
         // same internal asset. Retire those locally before removing only the caller-selected
@@ -100,6 +101,29 @@ export class MetaSubscriptionService {
       actorRef: actor.serviceScope.principalId });
   }
 
+  /** Returns persisted desired bindings, never browser claims or provider IDs. */
+  async listSelectedAssets(input: MetaSubscriptionSelectedAssetQuery, actor: MetaSubscriptionActor): Promise<readonly MetaSubscriptionSelectedAsset[]> {
+    const allowedKeys = new Set(['tenantId', 'appConfigurationId', 'environment', 'authorizationId', 'assetKind', 'correlationId']);
+    if (!input || Object.keys(input as unknown as Record<string, unknown>).some((key) => !allowedKeys.has(key)) ||
+        !UUID.test(input.tenantId) || !UUID.test(input.appConfigurationId) || !UUID.test(input.authorizationId) ||
+        !this.isEnvironment(input.environment) || !UUID.test(input.correlationId) || input.assetKind !== 'FACEBOOK_PAGE') {
+      throw new Error('Subscription selection query is invalid.');
+    }
+    this.validateActor(input.tenantId, input.correlationId, actor);
+    try {
+      const records = await this.store.listSelectedAssets({ tenantId: input.tenantId,
+        appConfigurationId: input.appConfigurationId, environment: input.environment,
+        authorizationId: input.authorizationId, assetKind: input.assetKind, correlationId: input.correlationId });
+      if (!Array.isArray(records) || records.some((record) => !UUID.test(record.assetId) ||
+          !UUID.test(record.targetAssetId) || record.targetAssetId !== record.assetId || record.authorizationId !== input.authorizationId ||
+          !Array.isArray(record.desiredFields) || !normalizedFields(record.desiredFields))) {
+        throw new Error('Subscription selection result is invalid.');
+      }
+      return Object.freeze(records.map((record) => Object.freeze({ ...record,
+        desiredFields: Object.freeze([...record.desiredFields]) })));
+    } catch { throw new Error('Subscription selection is unavailable.'); }
+  }
+
   private async reconcileContext(context: MetaSubscriptionTargetContext, actor: MetaSubscriptionActor, version = 0): Promise<MetaSubscriptionReconcileResult> {
     let claim: Awaited<ReturnType<MetaSubscriptionStore['claim']>>;
     try { claim = await this.store.claim(context, LEASE_MS); } catch { return this.blocked('SUBSCRIPTION_STATE_UNAVAILABLE', version); }
@@ -109,7 +133,15 @@ export class MetaSubscriptionService {
       return await this.persistFailure(claim, actor, 'ASSET_SUBSCRIPTION_FIELDS_NOT_CONFIRMED', true);
     }
     let result: MetaSubscriptionProviderResult;
-    try { result = await this.provider.ensureWhatsAppSubscribed({ ...context, actor }); }
+    try {
+      if (context.kind === 'FACEBOOK_PAGE') {
+        result = this.provider.ensureFacebookPageSubscribed
+          ? await this.provider.ensureFacebookPageSubscribed({ ...context, actor })
+          : { state: 'PARTIAL', reasonCode: 'PAGE_SUBSCRIPTION_NOT_CONFIRMED', retryable: false };
+      } else {
+        result = await this.provider.ensureWhatsAppSubscribed({ ...context, actor });
+      }
+    }
     catch { return await this.persistFailure(claim, actor, 'PROVIDER_DEPENDENCY_UNAVAILABLE', true); }
     if (result.state === 'SUBSCRIBED') {
       try {
@@ -118,13 +150,15 @@ export class MetaSubscriptionService {
         return Object.freeze({ state: 'ACTIVE', desiredState: saved.desiredState, observedState: saved.observedState, version: saved.version });
       } catch { return this.blocked('SUBSCRIPTION_OUTCOME_PERSISTENCE_FAILED', claim.claimedVersion); }
     }
-    return await this.persistFailure(claim, actor, result.reasonCode, result.retryable);
+    return await this.persistFailure(claim, actor, result.reasonCode, result.retryable, 'UNKNOWN',
+      context.kind === 'FACEBOOK_PAGE' && result.reasonCode === 'PAGE_SUBSCRIPTION_NOT_CONFIRMED' ? 'PARTIAL' : undefined);
   }
 
   private async persistFailure(claim: NonNullable<Awaited<ReturnType<MetaSubscriptionStore['claim']>>>, actor: MetaSubscriptionActor,
-    reasonCode: string, retryable: boolean, observedState: 'UNKNOWN' | 'SUBSCRIBED' = 'UNKNOWN'): Promise<MetaSubscriptionReconcileResult> {
+    reasonCode: string, retryable: boolean, observedState: 'UNKNOWN' | 'SUBSCRIBED' = 'UNKNOWN',
+    stateOverride?: 'PARTIAL' | 'UNKNOWN'): Promise<MetaSubscriptionReconcileResult> {
     const retryAt = retryable ? retryTime(claim.target.attemptCount, this.now()) : undefined;
-    const state = retryable ? 'PARTIAL' : 'UNKNOWN';
+    const state = stateOverride ?? (retryable ? 'PARTIAL' : 'UNKNOWN');
     try {
       const saved = await this.store.complete(claim, { state, observedState, observedFields: claim.target.observedFields,
         reasonCode, ...(retryAt ? { retryAt } : {}), actorRef: actor.serviceScope.principalId, correlationId: actor.correlationId });
@@ -148,7 +182,11 @@ export class MetaSubscriptionService {
     }
   }
 
-  private isWhatsAppContext(context: MetaSubscriptionTargetContext): boolean {
+  private isSupportedContext(context: MetaSubscriptionTargetContext): boolean {
+    if (context.kind === 'FACEBOOK_PAGE') {
+      return context.flowVariant === 'FACEBOOK' && context.authVariant === 'FACEBOOK_LOGIN_FOR_BUSINESS' &&
+        context.sourceAssetId === context.targetAssetId;
+    }
     return context.kind === 'WHATSAPP_BUSINESS_ACCOUNT' &&
       ((context.flowVariant === 'WHATSAPP_EXCLUSIVE' && context.authVariant === 'WHATSAPP_EMBEDDED_SIGNUP') ||
        (context.flowVariant === 'WHATSAPP_COEXISTENCE' && context.authVariant === 'WHATSAPP_BUSINESS_APP_ONBOARDING'));
