@@ -16,6 +16,7 @@ import { ONBOARDING_SESSIONS_MIGRATION, ONBOARDING_SESSION_TABLES } from './onbo
 import { LEGACY_IMPORT_MIGRATION, LEGACY_IMPORT_TABLES } from './legacy-import-ledger.js';
 import { ONBOARDING_CODE_TABLES, ONBOARDING_SAGA_MIGRATION } from './onboarding-saga.js';
 import { META_WEBHOOKS_MIGRATION, META_WEBHOOKS_TABLES } from './meta-webhooks.js';
+import { META_SUBSCRIPTIONS_MIGRATION, META_SUBSCRIPTIONS_TABLES } from './meta-subscriptions.js';
 
 function ddl(
   id: string,
@@ -283,6 +284,7 @@ const migrationsWithoutChecksums = [
   LEGACY_IMPORT_MIGRATION,
   ONBOARDING_SAGA_MIGRATION,
   META_WEBHOOKS_MIGRATION,
+  META_SUBSCRIPTIONS_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -311,5 +313,6 @@ export const DOMAIN_TABLES = [
   ...LEGACY_IMPORT_TABLES,
   ...ONBOARDING_CODE_TABLES,
   ...META_WEBHOOKS_TABLES,
+  ...META_SUBSCRIPTIONS_TABLES,
 ] as const;
 
