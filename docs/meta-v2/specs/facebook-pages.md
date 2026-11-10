@@ -2,7 +2,7 @@
 
 **Issue:** [#50](https://github.com/costaapps/ca_meta_app/issues/50)
 
-**Decision:** [ADR-014](../adrs/ADR-014-m4-08-facebook-pages.md)
+**Decision:** [ADR-015](../adrs/ADR-015-m4-08-facebook-pages.md)
 
 **Related contracts:** [onboarding saga](onboarding-saga.md), [Meta subscriptions](meta-subscriptions.md), [credential vault](credential-vault.md)
 
