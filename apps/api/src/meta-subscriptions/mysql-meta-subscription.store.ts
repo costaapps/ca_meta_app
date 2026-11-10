@@ -52,6 +52,21 @@ interface InactiveBindingCandidate {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_REASON = /^[A-Z][A-Z0-9_]{1,63}$/;
 const SAFE_FIELD = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const ENSURE_BINDING_MAX_ATTEMPTS = 4;
+
+function isTransientLockContention(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const value = error as { readonly code?: unknown; readonly driverError?: unknown };
+  const driverCode = typeof value.driverError === 'object' && value.driverError !== null && 'code' in value.driverError
+    ? (value.driverError as { readonly code?: unknown }).code : undefined;
+  const code = value.code ?? driverCode;
+  return code === 'ER_LOCK_DEADLOCK' || code === 'ER_LOCK_WAIT_TIMEOUT';
+}
+
+function ensureBindingRetryDelay(attempt: number): Promise<void> {
+  const delayMs = Math.min(60, 20 * 2 ** (attempt - 1));
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
 
 function fieldsJson(value: readonly string[]): string {
   if (!Array.isArray(value) || value.length > 64 || value.some((field) => typeof field !== 'string' || !SAFE_FIELD.test(field))) {
@@ -108,9 +123,26 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
     readonly actorRef: string; readonly correlationId: string }): Promise<MetaSubscriptionTargetSnapshot> {
     this.validate(input.tenantId, input.appConfigurationId, input.authorizationId, input.targetAssetId, input.sourceAssetId, input.correlationId);
     this.validateEnvironment(input.environment);
+    for (let attempt = 1; attempt <= ENSURE_BINDING_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.ensureBindingTransaction(input);
+      } catch (error) {
+        if (!isTransientLockContention(error) || attempt === ENSURE_BINDING_MAX_ATTEMPTS) throw error;
+        // The attempt helper has rolled back and released its QueryRunner before this backoff begins.
+        await ensureBindingRetryDelay(attempt);
+      }
+    }
+    throw new Error('Subscription binding retry loop exited unexpectedly.');
+  }
+
+  private async ensureBindingTransaction(input: MetaSubscriptionTargetContext & { readonly desiredFields: readonly string[];
+    readonly actorRef: string; readonly correlationId: string }): Promise<MetaSubscriptionTargetSnapshot> {
     const runner = await this.database.getDataSource().then((source) => source.createQueryRunner());
-    await runner.connect(); await runner.startTransaction();
+    let transactionStarted = false;
     try {
+      await runner.connect();
+      await runner.startTransaction();
+      transactionStarted = true;
       const now = this.sqlNow();
       await runner.query(
         `INSERT IGNORE INTO ca_meta_subscription_targets
@@ -152,8 +184,17 @@ export class MysqlMetaSubscriptionStore implements MetaSubscriptionStore {
       const snapshot = await this.readSnapshot(runner, input, target.id);
       await runner.commitTransaction();
       return snapshot;
-    } catch (error) { await runner.rollbackTransaction(); throw error; }
-    finally { await runner.release(); }
+    } catch (error) {
+      if (runner.isTransactionActive) {
+        try { await runner.rollbackTransaction(); }
+        catch (rollbackError) { throw new Error('Subscription binding rollback failed; automatic retry suppressed.', { cause: rollbackError }); }
+      }
+      if (!transactionStarted) throw new Error('Subscription binding transaction setup failed; automatic retry suppressed.', { cause: error });
+      throw error;
+    } finally {
+      try { await runner.release(); }
+      catch (releaseError) { throw new Error('Subscription binding QueryRunner release failed; automatic retry suppressed.', { cause: releaseError }); }
+    }
   }
 
   async removeBinding(input: MetaSubscriptionTargetContext & { readonly actorRef: string; readonly correlationId: string }): Promise<MetaSubscriptionTargetSnapshot> {
