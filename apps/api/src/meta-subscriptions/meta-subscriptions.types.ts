@@ -13,6 +13,8 @@ export interface MetaSubscriptionRequest {
   readonly environment: MetaEnvironment;
   /** Internal catalog UUID. Provider IDs are resolved on the server and are never accepted here. */
   readonly assetId: string;
+  /** Optional internal disambiguator only; the service scope grants authority, and the catalog must prove this grant owns the scoped asset and target. */
+  readonly authorizationId?: string;
   readonly desiredFields: readonly string[];
   readonly correlationId: string;
 }
@@ -97,8 +99,9 @@ export type MetaSubscriptionProviderResult =
   | { readonly state: 'UNKNOWN' | 'PARTIAL'; readonly reasonCode: string; readonly retryable: boolean };
 
 export interface MetaSubscriptionCatalog {
-  resolveByAsset(input: Pick<MetaSubscriptionRequest, 'tenantId' | 'appConfigurationId' | 'environment' | 'assetId'>): Promise<MetaSubscriptionTargetContext | undefined>;
-  resolveTarget(input: Pick<MetaSubscriptionTargetContext, 'tenantId' | 'appConfigurationId' | 'environment' | 'targetAssetId'>): Promise<MetaSubscriptionTargetContext | undefined>;
+  resolveByAsset(input: Pick<MetaSubscriptionRequest, 'tenantId' | 'appConfigurationId' | 'environment' | 'assetId' | 'authorizationId'>): Promise<MetaSubscriptionTargetContext | undefined>;
+  resolveTarget(input: Pick<MetaSubscriptionTargetContext, 'tenantId' | 'appConfigurationId' | 'environment' | 'targetAssetId'> &
+    Pick<MetaSubscriptionRequest, 'authorizationId'>): Promise<MetaSubscriptionTargetContext | undefined>;
 }
 
 export interface MetaSubscriptionStore {

@@ -41,9 +41,11 @@ export class MysqlMetaSubscriptionCatalog implements MetaSubscriptionCatalog {
   constructor(private readonly database: DurableWorkDatabase) {}
 
   async resolveByAsset(input: { readonly tenantId: string; readonly appConfigurationId: string;
-    readonly environment: MetaEnvironment; readonly assetId: string }): Promise<MetaSubscriptionTargetContext | undefined> {
-    if (!UUID.test(input.tenantId) || !UUID.test(input.appConfigurationId) || !UUID.test(input.assetId) || !this.validEnvironment(input.environment)) return undefined;
-    const sourceRows = await this.queryAsset(input.tenantId, input.appConfigurationId, input.environment, input.assetId);
+    readonly environment: MetaEnvironment; readonly assetId: string; readonly authorizationId?: string }): Promise<MetaSubscriptionTargetContext | undefined> {
+    if (!UUID.test(input.tenantId) || !UUID.test(input.appConfigurationId) || !UUID.test(input.assetId) ||
+        (input.authorizationId !== undefined && (typeof input.authorizationId !== 'string' || !UUID.test(input.authorizationId))) ||
+        !this.validEnvironment(input.environment)) return undefined;
+    const sourceRows = await this.queryAsset(input.tenantId, input.appConfigurationId, input.environment, input.assetId, input.authorizationId);
     const source = oneEligible(sourceRows);
     if (!source || !isFlow(source.flow_variant) || !isAuth(source.auth_variant, source.flow_variant)) return undefined;
 
@@ -71,9 +73,11 @@ export class MysqlMetaSubscriptionCatalog implements MetaSubscriptionCatalog {
   }
 
   async resolveTarget(input: { readonly tenantId: string; readonly appConfigurationId: string;
-    readonly environment: MetaEnvironment; readonly targetAssetId: string }): Promise<MetaSubscriptionTargetContext | undefined> {
-    if (!UUID.test(input.tenantId) || !UUID.test(input.appConfigurationId) || !UUID.test(input.targetAssetId) || !this.validEnvironment(input.environment)) return undefined;
-    const rows = await this.queryAsset(input.tenantId, input.appConfigurationId, input.environment, input.targetAssetId);
+    readonly environment: MetaEnvironment; readonly targetAssetId: string; readonly authorizationId?: string }): Promise<MetaSubscriptionTargetContext | undefined> {
+    if (!UUID.test(input.tenantId) || !UUID.test(input.appConfigurationId) || !UUID.test(input.targetAssetId) ||
+        (input.authorizationId !== undefined && (typeof input.authorizationId !== 'string' || !UUID.test(input.authorizationId))) ||
+        !this.validEnvironment(input.environment)) return undefined;
+    const rows = await this.queryAsset(input.tenantId, input.appConfigurationId, input.environment, input.targetAssetId, input.authorizationId);
     const target = oneEligible(rows);
     if (!target || target.asset_kind !== 'WHATSAPP_BUSINESS_ACCOUNT' || !isFlow(target.flow_variant) ||
         !isAuth(target.auth_variant, target.flow_variant) || !PROVIDER_ID.test(target.external_id)) return undefined;

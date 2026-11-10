@@ -46,18 +46,27 @@ function context(assetId: string, authorizationId = id(5)): MetaSubscriptionTarg
     kind: 'WHATSAPP_BUSINESS_ACCOUNT', authorizationVersion: 2, targetAssetVersion: 4, sourceAssetVersion: 3 });
 }
 
-function request(assetId: string, desiredFields: readonly string[] = []): MetaSubscriptionRequest {
-  return Object.freeze({ tenantId: TENANT, appConfigurationId: APP, environment: 'test', assetId, desiredFields, correlationId: CORRELATION });
+function request(assetId: string, desiredFields: readonly string[] = [], authorizationId?: string): MetaSubscriptionRequest {
+  return Object.freeze({ tenantId: TENANT, appConfigurationId: APP, environment: 'test', assetId,
+    ...(authorizationId ? { authorizationId } : {}), desiredFields, correlationId: CORRELATION });
 }
 
 class FakeCatalog implements MetaSubscriptionCatalog {
   calls = 0;
   allowActive = true;
   readonly authorizationByAsset = new Map<string, string>();
-  async resolveByAsset(input: Pick<MetaSubscriptionRequest, 'tenantId' | 'appConfigurationId' | 'environment' | 'assetId'>) {
+  readonly eligibleAuthorizationsByAsset = new Map<string, ReadonlySet<string>>();
+  async resolveByAsset(input: Pick<MetaSubscriptionRequest, 'tenantId' | 'appConfigurationId' | 'environment' | 'assetId' | 'authorizationId'>) {
     this.calls += 1;
-    return this.allowActive && input.tenantId === TENANT && input.appConfigurationId === APP
-      ? context(input.assetId, this.authorizationByAsset.get(input.assetId) ?? id(5)) : undefined;
+    const eligible = this.eligibleAuthorizationsByAsset.get(input.assetId);
+    const fallback = this.authorizationByAsset.get(input.assetId) ?? id(5);
+    if (!this.allowActive || input.tenantId !== TENANT || input.appConfigurationId !== APP) return undefined;
+    if (eligible) {
+      const authorizationId = input.authorizationId ?? (eligible.size === 1 ? [...eligible][0] : undefined);
+      return authorizationId && eligible.has(authorizationId) ? context(input.assetId, authorizationId) : undefined;
+    }
+    if (input.authorizationId && input.authorizationId !== fallback) return undefined;
+    return context(input.assetId, input.authorizationId ?? fallback);
   }
   async resolveTarget() { return undefined; }
 }
@@ -219,15 +228,19 @@ test('bindings retain independent authorization grants for the same asset and di
   const trustedActor = await actor();
   const sharedAsset = id(15);
   const firstGrant = id(25); const secondGrant = id(26);
+  catalog.eligibleAuthorizationsByAsset.set(sharedAsset, new Set([firstGrant, secondGrant]));
   catalog.authorizationByAsset.set(sharedAsset, firstGrant);
-  await service.connect(request(sharedAsset), trustedActor);
+  const ambiguous = await service.connect(request(sharedAsset), trustedActor);
+  assert.equal(ambiguous.reasonCode, 'ASSET_NOT_ELIGIBLE', 'the production-style catalog rejects an unselected ambiguous grant');
+  assert.equal(store.bindings.size, 0);
+  await service.connect(request(sharedAsset, [], firstGrant), trustedActor);
   catalog.authorizationByAsset.set(sharedAsset, secondGrant);
-  await service.connect(request(sharedAsset), trustedActor);
+  await service.connect(request(sharedAsset, [], secondGrant), trustedActor);
   assert.equal(store.bindings.size, 2);
   assert.deepEqual(new Set([...store.bindings.values()].map((binding) => binding.authorizationId)), new Set([firstGrant, secondGrant]));
 
   catalog.authorizationByAsset.set(sharedAsset, firstGrant);
-  const { desiredFields: _desiredFields, ...disconnectRequest } = request(sharedAsset);
+  const { desiredFields: _desiredFields, ...disconnectRequest } = request(sharedAsset, [], firstGrant);
   const disconnected = await service.disconnect(disconnectRequest, trustedActor);
   assert.equal(disconnected.state, 'ACTIVE');
   assert.equal([...store.bindings.values()].filter((binding) => binding.state === 'ACTIVE').length, 1);
@@ -302,6 +315,13 @@ test('a browser supplied provider object ID is rejected before catalog or provid
   assert.equal(provider.calls, 0);
 });
 
+test('an internal grant selector must be a UUID and cannot replace the verified service scope', async () => {
+  const service = new MetaSubscriptionService(new FakeStore(), new FakeCatalog(), new FakeProvider());
+  const malformed = { ...request(id(12)), authorizationId: 'browser-chosen-grant' } as unknown as MetaSubscriptionRequest;
+  const { desiredFields: _desiredFields, ...disconnectInput } = malformed;
+  await assert.rejects(service.disconnect(disconnectInput, await actor()), /Subscription request is invalid/);
+});
+
 test('retry backoff blocks immediate reconciliation and a later due attempt remains recoverable', async () => {
   const store = new FakeStore(); const catalog = new FakeCatalog();
   const provider: MetaSubscriptionProvider = { ensureWhatsAppSubscribed: async () => ({ state: 'PARTIAL', reasonCode: 'SYNTHETIC_TRANSIENT', retryable: true }) };
@@ -369,6 +389,27 @@ test('Graph adapter derives resourceId from the server target and verifies a suc
   const postInput = inputs[1];
   assert.equal(postInput?.endpoint, 'SUBSCRIBE_APP');
   if (postInput?.endpoint === 'SUBSCRIBE_APP') assert.deepEqual(postInput.body, {});
+});
+
+test('unsupported nested subscribed_apps response shapes fail closed before any write', async () => {
+  const trustedActor = await actor();
+  let writes = 0;
+  const graph = {
+    collect: async (): Promise<MetaGraphCollectionResult> => ({ outcome: 'SUCCEEDED',
+      data: [{ whatsapp_business_api_data: { id: PROVIDER_APP_ID } }], attempts: 1, retries: 0, retryable: false, ambiguous: false }),
+    execute: async (): Promise<MetaGraphCallResult> => {
+      writes += 1; return { outcome: 'SUCCEEDED', data: {}, attempts: 1, retries: 0, retryable: false, ambiguous: false };
+    },
+  };
+  const credentials = { resolve: async () => ({ status: 'READY' as const, capability: 'SUBSCRIBE_WEBHOOKS' as const,
+    family: 'SYNTHETIC', purpose: 'CUSTOMER_OPERATION' as const, handle: Object.freeze({}) as CredentialResolutionHandle }) };
+  const config = { resolve: () => ({ configurationRef: CONFIG_REF, providerAppId: PROVIDER_APP_ID,
+    versions: { graphApi: { value: 'v27.0', status: 'VERIFIED' } } }) } as unknown as MetaAppConfigRegistry;
+  const adapter = new MetaGraphSubscriptionProvider(config, credentials, graph);
+  const outcome = await adapter.ensureWhatsAppSubscribed({ ...context(id(32)), actor: trustedActor });
+  assert.equal(outcome.state, 'PARTIAL');
+  assert.equal(outcome.reasonCode, 'GRAPH_RESPONSE_INVALID');
+  assert.equal(writes, 0, 'an unconfirmed nested shape must not trigger a subscription write');
 });
 
 test('synthetic service scope cannot be replaced by a raw UUID', async () => {

@@ -55,6 +55,7 @@ export class MetaGraphSubscriptionProvider implements MetaSubscriptionProvider {
     if (!config) return { subscribed: false, result: this.syntheticReadFailure() };
     let subscribed = false;
     for (const item of result.data) {
+      // Official examples do not confirm nested item shapes; unknown shapes must fail closed before a write.
       const id = typeof item === 'string' ? item : record(item) && typeof item['id'] === 'string' ? item['id'] : undefined;
       if (!id || !/^\d{1,32}$/.test(id)) return { subscribed: false, result: this.syntheticReadFailure() };
       if (id === config.providerAppId) subscribed = true;

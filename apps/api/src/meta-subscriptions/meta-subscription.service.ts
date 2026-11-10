@@ -5,7 +5,7 @@ import type { MetaSubscriptionActor, MetaSubscriptionCatalog, MetaSubscriptionPr
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FIELD = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-const REQUEST_KEYS = new Set(['tenantId', 'appConfigurationId', 'environment', 'assetId', 'desiredFields', 'correlationId']);
+const REQUEST_KEYS = new Set(['tenantId', 'appConfigurationId', 'environment', 'assetId', 'authorizationId', 'desiredFields', 'correlationId']);
 const LEASE_MS = 120_000;
 const MAX_BACKOFF_SECONDS = 3_600;
 
@@ -136,6 +136,7 @@ export class MetaSubscriptionService {
   private validate(input: MetaSubscriptionRequest, actor: MetaSubscriptionActor): void {
     if (!input || typeof input !== 'object' || Object.keys(input as unknown as Record<string, unknown>).some((key) => !REQUEST_KEYS.has(key)) ||
         !UUID.test(input.tenantId) || !UUID.test(input.appConfigurationId) || !UUID.test(input.assetId) ||
+        (input.authorizationId !== undefined && (typeof input.authorizationId !== 'string' || !UUID.test(input.authorizationId))) ||
         !this.isEnvironment(input.environment) || !UUID.test(input.correlationId)) throw new Error('Subscription request is invalid.');
     this.validateActor(input.tenantId, input.correlationId, actor);
   }

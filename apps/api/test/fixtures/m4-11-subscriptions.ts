@@ -8,6 +8,8 @@ export interface MariaDbFourPhoneWabaFixture {
   readonly appConfigurationId: string;
   readonly authorizationId: string;
   readonly credentialId: string;
+  readonly secondAuthorizationId: string;
+  readonly secondCredentialId: string;
   readonly targetAssetId: string;
   readonly sourceAssetIds: readonly string[];
 }
@@ -18,6 +20,8 @@ export async function seedMariaDbFourPhoneWabaFixture(dataSource: DataSource): P
   const appConfigurationId = randomUUID();
   const authorizationId = randomUUID();
   const credentialId = randomUUID();
+  const secondAuthorizationId = randomUUID();
+  const secondCredentialId = randomUUID();
   const targetAssetId = randomUUID();
   const sourceAssetIds = Object.freeze(Array.from({ length: 4 }, () => randomUUID()));
   const evidenceHash = createHash('sha256').update(`m4-11-synthetic:${tenantId}`, 'utf8').digest('hex');
@@ -47,6 +51,21 @@ export async function seedMariaDbFourPhoneWabaFixture(dataSource: DataSource): P
       version, created_at, updated_at, revoked_at)
      VALUES (?, ?, ?, ?, 'META', 'test', 'SYNTHETIC_FIXTURE_ONLY', 'ACTIVE', 1, ?, ?, NULL)`,
     [credentialId, tenantId, authorizationId, appConfigurationId, timestamp, timestamp],
+  );
+  await dataSource.query(
+    `INSERT INTO ca_meta_authorizations
+     (id, tenant_id, app_configuration_id, provider, environment, flow_variant, auth_variant,
+      provider_authorization_id, authorization_state, version, observed_at, created_at, updated_at)
+     VALUES (?, ?, ?, 'META', 'test', 'WHATSAPP_EXCLUSIVE', 'WHATSAPP_EMBEDDED_SIGNUP',
+      ?, 'ACTIVE', 1, ?, ?, ?)`,
+    [secondAuthorizationId, tenantId, appConfigurationId, `synthetic-auth-${randomUUID()}`, timestamp, timestamp, timestamp],
+  );
+  await dataSource.query(
+    `INSERT INTO ca_meta_credentials
+     (id, tenant_id, authorization_id, app_configuration_id, provider, environment, family, status,
+      version, created_at, updated_at, revoked_at)
+     VALUES (?, ?, ?, ?, 'META', 'test', 'SYNTHETIC_FIXTURE_ONLY', 'ACTIVE', 1, ?, ?, NULL)`,
+    [secondCredentialId, tenantId, secondAuthorizationId, appConfigurationId, timestamp, timestamp],
   );
 
   const assets = [
@@ -78,6 +97,19 @@ export async function seedMariaDbFourPhoneWabaFixture(dataSource: DataSource): P
     );
   }
 
+  for (const assetId of [targetAssetId, sourceAssetIds[0]!]) {
+    await dataSource.query(
+      `INSERT INTO ca_meta_asset_authorizations
+       (tenant_id, authorization_id, asset_id, app_configuration_id, provider, environment, credential_id,
+        state, verification_state, verification_source, verification_ref_hash, verified_at,
+        subscription_state, projection_state, version, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'META', 'test', ?, 'ACTIVE', 'VERIFIED', 'META_API', ?, ?,
+        'UNKNOWN', 'UNKNOWN', 1, ?, ?)`,
+      [tenantId, secondAuthorizationId, assetId, appConfigurationId, secondCredentialId, evidenceHash,
+        timestamp, timestamp, timestamp],
+    );
+  }
+
   for (const sourceAssetId of sourceAssetIds) {
     await dataSource.query(
       `INSERT INTO ca_meta_asset_relations
@@ -88,5 +120,6 @@ export async function seedMariaDbFourPhoneWabaFixture(dataSource: DataSource): P
     );
   }
 
-  return Object.freeze({ tenantId, appConfigurationId, authorizationId, credentialId, targetAssetId, sourceAssetIds });
+  return Object.freeze({ tenantId, appConfigurationId, authorizationId, credentialId,
+    secondAuthorizationId, secondCredentialId, targetAssetId, sourceAssetIds });
 }

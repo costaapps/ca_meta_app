@@ -41,12 +41,30 @@ test('M4.11 MariaDB migration/store shares one WABA target across four phone bin
         appConfigurationId: fixture.appConfigurationId,
         environment: 'test',
         assetId,
+        authorizationId: fixture.authorizationId,
       });
       assert.ok(context, 'each synthetic phone resolves through its verified PHONE_TO_ACCOUNT relation');
       assert.equal(context.targetAssetId, fixture.targetAssetId);
       assert.equal(context.kind, 'WHATSAPP_BUSINESS_ACCOUNT');
       return context;
     }));
+    const ambiguousContext = await catalog.resolveByAsset({
+      tenantId: fixture.tenantId,
+      appConfigurationId: fixture.appConfigurationId,
+      environment: 'test',
+      assetId: fixture.sourceAssetIds[0]!,
+    });
+    assert.equal(ambiguousContext, undefined, 'the real catalog fails closed when one phone has two eligible grants and none is selected');
+    const secondGrantContext = await catalog.resolveByAsset({
+      tenantId: fixture.tenantId,
+      appConfigurationId: fixture.appConfigurationId,
+      environment: 'test',
+      assetId: fixture.sourceAssetIds[0]!,
+      authorizationId: fixture.secondAuthorizationId,
+    });
+    assert.ok(secondGrantContext, 'the real catalog resolves the explicitly selected second grant');
+    assert.equal(secondGrantContext.authorizationId, fixture.secondAuthorizationId);
+    assert.equal(secondGrantContext.targetAssetId, fixture.targetAssetId);
 
     const bindingInput = (context: (typeof contexts)[number]) => ({
       ...context,
@@ -57,6 +75,7 @@ test('M4.11 MariaDB migration/store shares one WABA target across four phone bin
     const concurrentResults = await Promise.all(contexts.map((context) => store.ensureBinding(bindingInput(context))));
     assert.equal(new Set(concurrentResults.map((result) => result.targetId)).size, 1,
       'concurrent phone upserts converge on one physical WABA target');
+    await store.ensureBinding(bindingInput(secondGrantContext));
 
     const beforeIdempotentRetry = await dataSource.query(
       `SELECT id, desired_state, desired_fields, version FROM ca_meta_subscription_targets
@@ -68,7 +87,7 @@ test('M4.11 MariaDB migration/store shares one WABA target across four phone bin
     assert.deepEqual(JSON.parse(beforeIdempotentRetry[0]?.desired_fields ?? 'null'), []);
     const firstTargetVersion = Number(beforeIdempotentRetry[0]?.version);
 
-    await Promise.all(contexts.map((context) => store.ensureBinding(bindingInput(context))));
+    await Promise.all([...contexts, secondGrantContext].map((context) => store.ensureBinding(bindingInput(context))));
     const [targetsAfterRetry, bindingsAfterRetry] = await Promise.all([
       dataSource.query(
         `SELECT id, desired_state, desired_fields, version FROM ca_meta_subscription_targets
@@ -84,7 +103,7 @@ test('M4.11 MariaDB migration/store shares one WABA target across four phone bin
     assert.equal(targetsAfterRetry.length, 1, 'repeated upserts do not duplicate the target row');
     assert.equal(Number(targetsAfterRetry[0]?.version), firstTargetVersion,
       'repeated upserts with unchanged desired state do not advance the target version');
-    assert.equal(bindingsAfterRetry.length, 4, 'repeated upserts do not duplicate source/authorization bindings');
+    assert.equal(bindingsAfterRetry.length, 5, 'four phones plus a second grant for one phone remain unique after repeated upserts');
     assert.ok(bindingsAfterRetry.every((binding) => binding.binding_state === 'ACTIVE'));
 
     const removed = await store.removeBinding({
@@ -96,8 +115,12 @@ test('M4.11 MariaDB migration/store shares one WABA target across four phone bin
       'disconnect preserves external subscription intent while other eligible bindings remain');
     assert.equal(removed.lastErrorCode, null,
       'the shared target does not claim remote unsubscribe is needed while consumers remain');
-    assert.equal(removed.bindings.filter((binding) => binding.state === 'ACTIVE').length, 3);
-    assert.equal(removed.bindings.find((binding) => binding.assetId === contexts[0]!.sourceAssetId)?.state, 'REMOVED');
+    assert.equal(removed.bindings.filter((binding) => binding.state === 'ACTIVE').length, 4);
+    assert.equal(removed.bindings.find((binding) => binding.assetId === contexts[0]!.sourceAssetId &&
+      binding.authorizationId === fixture.authorizationId)?.state, 'REMOVED');
+    assert.equal(removed.bindings.find((binding) => binding.assetId === contexts[0]!.sourceAssetId &&
+      binding.authorizationId === fixture.secondAuthorizationId)?.state, 'ACTIVE',
+    'disconnecting the selected grant preserves the other eligible grant for the same phone');
 
     const [persistedTarget, persistedActiveBindings] = await Promise.all([
       dataSource.query(
@@ -113,8 +136,8 @@ test('M4.11 MariaDB migration/store shares one WABA target across four phone bin
     ]);
     assert.equal(persistedTarget[0]?.desired_state, 'SUBSCRIBED');
     assert.equal(persistedTarget[0]?.last_safe_reason_code, null);
-    assert.equal(Number(persistedActiveBindings[0]?.count ?? 0), 3,
-      'the committed shared target retains the other three consumer bindings');
+    assert.equal(Number(persistedActiveBindings[0]?.count ?? 0), 4,
+      'the committed shared target retains the other three phones and the second grant for the selected phone');
 
     const auditRows = await dataSource.query(
       `SELECT reason_code FROM ca_meta_subscription_audit
