@@ -157,7 +157,7 @@ test('projection requires both internal relation refs and a subscription receipt
 
 test('reconcile dispatch is read-only and never calls an effect port', async () => {
   const ports = new FakePorts();
-  const result = await new CoexistenceOnboardingSagaAdapter(ports).reconcileStage(operation({ ...context(), stage: 'subscription',
+  const result = await new CoexistenceOnboardingSagaAdapter(ports).reconcileStage(operation({ ...context(), stage: 'subscription' as const,
     evidence: { authorizationRef: AUTHORIZATION, verifiedAssetRefs: [PHONE, ACCOUNT] } }));
   assert.deepEqual(result, { disposition: 'UNKNOWN' });
   assert.deepEqual(ports.calls, ['subscriptions.reconcile']);
@@ -192,7 +192,7 @@ test('M4.11 adapter builds a tenant-scoped request from internal refs and a veri
   assert.deepEqual(savedRequest, { tenantId: TENANT, appConfigurationId: APP_CONFIGURATION_ID, environment: 'test', assetId: PHONE,
     authorizationId: AUTHORIZATION, desiredFields: [], correlationId: CORRELATION });
   assert.equal(JSON.stringify(savedRequest).includes('providerObjectId'), false);
-  const reconciliation = await port.reconcile(operation({ ...context(), stage: 'subscription', evidence: {} }));
+  const reconciliation = await port.reconcile(operation({ ...context(), stage: 'subscription' as const, evidence: {} }));
   assert.deepEqual(reconciliation, { disposition: 'NO_EFFECT' });
   assert.equal(reconcileReads, 1);
 });
