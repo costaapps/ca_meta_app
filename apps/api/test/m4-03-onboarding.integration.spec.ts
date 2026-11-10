@@ -13,6 +13,7 @@ import { MysqlOnboardingCodeConsumer, MysqlOnboardingCodeSubmissionStore,
   OnboardingCodeConflictError } from '../src/onboarding/onboarding-code-submission.store.js';
 import { MysqlOnboardingSagaRecoveryStore, OnboardingRecoveryConflictError,
   OnboardingRecoveryNotFoundError } from '../src/onboarding/onboarding-saga-recovery.js';
+import { assertOwnedOnboardingSagaEvidence } from '../src/onboarding/onboarding-saga-evidence.js';
 import { createOnboardingSagaHandler, MysqlOnboardingSagaCheckpoints } from '../src/onboarding/onboarding-saga.worker.js';
 import type { OnboardingSagaAdapter } from '../src/onboarding/onboarding-saga.types.js';
 
@@ -46,7 +47,11 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
   const otherAppConfigurationId = randomUUID();
   const authorizationRef = randomUUID();
   const otherAuthorizationRef = randomUUID();
+  const instagramFacebookAuthorizationRef = randomUUID();
+  const instagramLoginAuthorizationRef = randomUUID();
   const assetRef = randomUUID();
+  const instagramFacebookAssetRef = randomUUID();
+  const instagramLoginAssetRef = randomUUID();
   const providerAppId = 'synthetic-meta-app';
   const providerEnvironment = 'test' as const;
   const configurationRef = 'synthetic-whatsapp-config-v1';
@@ -103,6 +108,17 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
       [otherAuthorizationRef, tenantId, otherAppConfigurationId, providerEnvironment, timestamp, timestamp, timestamp],
     );
     await dataSource.query(
+      `INSERT INTO ca_meta_authorizations
+       (id, tenant_id, app_configuration_id, provider, environment, flow_variant, auth_variant,
+        provider_authorization_id, authorization_state, version, observed_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'META', ?, 'INSTAGRAM', 'FACEBOOK_LOGIN_FOR_BUSINESS',
+        NULL, 'ACTIVE', 1, ?, ?, ?),
+        (?, ?, ?, 'META', ?, 'INSTAGRAM', 'INSTAGRAM_LOGIN',
+        NULL, 'ACTIVE', 1, ?, ?, ?)`,
+      [instagramFacebookAuthorizationRef, tenantId, appConfigurationId, providerEnvironment, timestamp, timestamp, timestamp,
+        instagramLoginAuthorizationRef, tenantId, appConfigurationId, providerEnvironment, timestamp, timestamp, timestamp],
+    );
+    await dataSource.query(
       `INSERT INTO ca_meta_assets
        (id, tenant_id, app_configuration_id, provider, environment, asset_kind, external_id,
         display_name, external_name, version, created_at, updated_at)
@@ -117,6 +133,39 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
        VALUES (?, ?, ?, ?, 'META', ?, NULL, 'ACTIVE', 'VERIFIED', 'META_API', ?, ?, 'UNKNOWN', 'UNKNOWN', 1, ?, ?)`,
       [tenantId, authorizationRef, assetRef, appConfigurationId, providerEnvironment, 'e'.repeat(64), timestamp, timestamp, timestamp],
     );
+    for (const [instagramAssetRef, instagramAuthorizationRef] of [
+      [instagramFacebookAssetRef, instagramFacebookAuthorizationRef],
+      [instagramLoginAssetRef, instagramLoginAuthorizationRef],
+    ]) {
+      await dataSource.query(
+        `INSERT INTO ca_meta_assets
+         (id, tenant_id, app_configuration_id, provider, environment, asset_kind, external_id,
+          display_name, external_name, version, created_at, updated_at)
+         VALUES (?, ?, ?, 'META', ?, 'INSTAGRAM_BUSINESS_ACCOUNT', ?, NULL, NULL, 1, ?, ?)`,
+        [instagramAssetRef, tenantId, appConfigurationId, providerEnvironment, `synthetic-instagram-${instagramAssetRef}`, timestamp, timestamp],
+      );
+      await dataSource.query(
+        `INSERT INTO ca_meta_asset_authorizations
+         (tenant_id, authorization_id, asset_id, app_configuration_id, provider, environment, credential_id,
+          state, verification_state, verification_source, verification_ref_hash, verified_at,
+          subscription_state, projection_state, version, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'META', ?, NULL, 'ACTIVE', 'VERIFIED', 'META_API', ?, ?, 'UNKNOWN', 'UNKNOWN', 1, ?, ?)`,
+        [tenantId, instagramAuthorizationRef, instagramAssetRef, appConfigurationId, providerEnvironment,
+          'f'.repeat(64), timestamp, timestamp, timestamp],
+      );
+    }
+    const instagramViaFacebookContext = { tenantId, onboardingId: randomUUID(), configurationRef: 'synthetic-instagram-fb-v1',
+      providerAppId, providerEnvironment, flowVariant: 'INSTAGRAM_VIA_FACEBOOK_LOGIN' as const,
+      authVariant: 'INSTAGRAM_VIA_FACEBOOK_LOGIN' };
+    const instagramLoginContext = { ...instagramViaFacebookContext, configurationRef: 'synthetic-instagram-login-v1',
+      flowVariant: 'INSTAGRAM_LOGIN' as const, authVariant: 'INSTAGRAM_LOGIN' };
+    await assertOwnedOnboardingSagaEvidence(dataSource.manager,
+      { authorizationRef: instagramFacebookAuthorizationRef, verifiedAssetRefs: [instagramFacebookAssetRef] }, instagramViaFacebookContext);
+    await assertOwnedOnboardingSagaEvidence(dataSource.manager,
+      { authorizationRef: instagramLoginAuthorizationRef, verifiedAssetRefs: [instagramLoginAssetRef] }, instagramLoginContext);
+    await assert.rejects(assertOwnedOnboardingSagaEvidence(dataSource.manager,
+      { authorizationRef: instagramLoginAuthorizationRef, verifiedAssetRefs: [instagramLoginAssetRef] }, instagramViaFacebookContext),
+    /not owned by this tenant and flow/);
     await dataSource.query(
       `INSERT INTO ca_meta_principals (id, kind, issuer, subject, status, version, created_at, updated_at)
        VALUES (?, 'USER', 'm4-03-synthetic', ?, 'ACTIVE', 1, ?, ?)`,
@@ -253,6 +302,23 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     assert.equal(reconcilePayload.stepRef, 'subscription');
     assert.equal('codeRef' in reconcilePayload, false, 'lease recovery does not enqueue a second authorization exchange');
     assert.equal(JSON.stringify(reconcilePayload).includes(rawCode), false);
+
+    await dataSource.query(
+      `UPDATE ca_meta_onboarding_sessions SET status = 'EXPIRED', next_action = 'NONE', last_updated_at = UTC_TIMESTAMP(6)
+       WHERE tenant_id = ? AND id = ?`, [tenantId, onboardingId],
+    );
+    await dataSource.query(
+      `UPDATE ca_meta_jobs SET updated_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)
+       WHERE tenant_id = ? AND id = ?`, [tenantId, expiredLease.id],
+    );
+    const terminalSession = await sessionStore.findForSession(onboardingId, portalSessionId, principalId);
+    assert.equal(terminalSession?.status, 'EXPIRED');
+    assert.equal(terminalSession?.nextAction, 'NONE', 'terminal onboarding status never advertises an unrecoverable RECONCILE action');
+    await dataSource.query(
+      `UPDATE ca_meta_onboarding_sessions SET status = 'PROVISIONING', next_action = 'WAIT',
+       last_updated_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 2 SECOND)
+       WHERE tenant_id = ? AND id = ?`, [tenantId, onboardingId],
+    );
 
     await dataSource.query(
       `UPDATE ca_meta_jobs SET status = 'SUCCEEDED', completed_at = UTC_TIMESTAMP(6)

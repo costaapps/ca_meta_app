@@ -73,7 +73,7 @@ export async function assertOwnedOnboardingSagaEvidence(
     return;
   }
 
-  const productFlow = productFlowFor(context.flowVariant);
+  const databaseAuthorization = databaseAuthorizationFor(context.flowVariant, context.authVariant);
   const authorizationRows = await manager.query(
     `SELECT auth.id
      FROM ca_meta_authorizations auth
@@ -85,7 +85,7 @@ export async function assertOwnedOnboardingSagaEvidence(
        AND auth.provider = 'META' AND auth.flow_variant = ? AND auth.auth_variant = ?
        AND auth.authorization_state = 'ACTIVE' LIMIT 1`,
     [context.tenantId, context.providerEnvironment, context.providerAppId, context.tenantId,
-      evidence.authorizationRef, productFlow, context.authVariant],
+      evidence.authorizationRef, databaseAuthorization.flowVariant, databaseAuthorization.authVariant],
   ) as Array<{ id: string }>;
   if (authorizationRows.length !== 1 || authorizationRows[0]?.id !== evidence.authorizationRef) {
     throw new Error('Onboarding authorization evidence is not owned by this tenant and flow.');
@@ -114,7 +114,7 @@ export async function assertOwnedOnboardingSagaEvidence(
        AND aa.state = 'ACTIVE' AND aa.verification_state = 'VERIFIED'
        AND auth.flow_variant = ? AND auth.auth_variant = ? AND auth.authorization_state = 'ACTIVE'`,
     [context.tenantId, context.providerEnvironment, context.providerAppId, context.tenantId,
-      evidence.authorizationRef, ...assetRefs, productFlow, context.authVariant],
+      evidence.authorizationRef, ...assetRefs, databaseAuthorization.flowVariant, databaseAuthorization.authVariant],
   ) as Array<{ asset_id: string }>;
   const ownedIds = new Set(ownedAssets.map((row) => row.asset_id));
   if (ownedIds.size !== assetRefs.length || !assetRefs.every((ref) => ownedIds.has(ref))) {
@@ -122,13 +122,28 @@ export async function assertOwnedOnboardingSagaEvidence(
   }
 }
 
-function productFlowFor(flow: OnboardingFlowVariant): string {
+function databaseAuthorizationFor(flow: OnboardingFlowVariant, authVariant: string): {
+  readonly flowVariant: string;
+  readonly authVariant: string;
+} {
   switch (flow) {
-    case 'FACEBOOK_LOGIN': return 'FACEBOOK';
+    case 'FACEBOOK_LOGIN':
+      if (authVariant === 'FACEBOOK_LOGIN_FOR_BUSINESS') return { flowVariant: 'FACEBOOK', authVariant };
+      break;
     case 'INSTAGRAM_VIA_FACEBOOK_LOGIN':
-    case 'INSTAGRAM_LOGIN': return 'INSTAGRAM';
-    case 'WHATSAPP_CLOUD_API': return 'WHATSAPP_EXCLUSIVE';
-    case 'WHATSAPP_COEXISTENCE': return 'WHATSAPP_COEXISTENCE';
-    default: throw new Error('Unsupported onboarding flow context.');
+      if (authVariant === 'INSTAGRAM_VIA_FACEBOOK_LOGIN') {
+        return { flowVariant: 'INSTAGRAM', authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS' };
+      }
+      break;
+    case 'INSTAGRAM_LOGIN':
+      if (authVariant === 'INSTAGRAM_LOGIN') return { flowVariant: 'INSTAGRAM', authVariant };
+      break;
+    case 'WHATSAPP_CLOUD_API':
+      if (authVariant === 'WHATSAPP_EMBEDDED_SIGNUP') return { flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant };
+      break;
+    case 'WHATSAPP_COEXISTENCE':
+      if (authVariant === 'WHATSAPP_BUSINESS_APP_ONBOARDING') return { flowVariant: 'WHATSAPP_COEXISTENCE', authVariant };
+      break;
   }
+  throw new Error('Unsupported onboarding flow/auth context.');
 }

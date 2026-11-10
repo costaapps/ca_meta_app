@@ -218,7 +218,7 @@ export class MysqlOnboardingSessionStore implements OnboardingSessionStore, OnAp
                 WHERE j.tenant_id = s.tenant_id AND j.resource_scope_ref = s.id AND j.job_type = 'ONBOARDING_STEP'
                   AND j.status = 'UNKNOWN' AND j.last_safe_error_code = 'LEASE_EXPIRED'
                   AND j.updated_at > s.last_updated_at
-              ) THEN 'RECONCILE' ELSE s.next_action END AS next_action,
+              ) AND s.status NOT IN ('CANCELLED', 'EXPIRED', 'FAILED', 'READY') THEN 'RECONCILE' ELSE s.next_action END AS next_action,
               s.last_updated_at, s.provider_state_consumed_at
        FROM ca_meta_onboarding_sessions s WHERE s.id = ? AND s.portal_session_id = ? AND s.principal_id = ? LIMIT 1`,
       [id, sessionId, principalId],
