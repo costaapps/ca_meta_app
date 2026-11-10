@@ -112,6 +112,18 @@ test('worker checkpoints reject credential-shaped values and accept context-boun
     /Unsafe subscription evidence reference/);
 });
 
+test('WhatsApp phone readiness accepts only safe states tied to internal verified phone refs', () => {
+  const readiness = [{ assetRef, state: 'ACTION_REQUIRED' as const, reasonCode: 'TOKEN_ELIGIBILITY_NOT_CONFIRMED' as const,
+    observedAt: '2026-11-10T12:00:00.000Z' }];
+  assert.doesNotThrow(() => assertSafeOnboardingSagaEvidence({ authorizationRef, verifiedAssetRefs: [assetRef], phoneReadiness: readiness }, evidenceContext));
+  assert.throws(() => assertSafeOnboardingSagaEvidence({ authorizationRef, verifiedAssetRefs: [assetRef],
+    phoneReadiness: [{ ...readiness[0]!, assetRef: '554433221100' }] }, evidenceContext), /Unsafe WhatsApp phone readiness/);
+  assert.throws(() => assertSafeOnboardingSagaEvidence({ authorizationRef, verifiedAssetRefs: [assetRef],
+    phoneReadiness: [{ ...readiness[0]!, state: 'READY', reasonCode: 'PIN_NOT_AVAILABLE' }] }, evidenceContext), /Unsafe WhatsApp phone readiness/);
+  assert.throws(() => assertSafeOnboardingSagaEvidence({ authorizationRef, verifiedAssetRefs: [assetRef], phoneReadiness: readiness },
+    { ...evidenceContext, flowVariant: 'WHATSAPP_COEXISTENCE', authVariant: 'WHATSAPP_BUSINESS_APP_ONBOARDING' }), /Unsafe WhatsApp phone readiness/);
+});
+
 function makeJob(): ClaimedJob {
   return {
     id: 'ba4b2240-a9df-47f4-b7a8-94e2f4c88930', tenantId, resourceScopeRef: onboardingId,
@@ -209,6 +221,35 @@ test('empty asset discovery ends PARTIAL and never attempts subscriptions or REA
   assert.equal(final?.row.status, 'PARTIAL');
   assert.equal(final?.steps.find((step) => step.name === 'asset-verification')?.status, 'FAILED');
   assert.equal(subscriptions, 0);
+});
+
+test('exclusive WhatsApp with a number requiring action checkpoints per-number readiness and pauses before subscription', async () => {
+  const checkpoints = new MemorySagaCheckpointPort();
+  const codeConsumer: OnboardingCodeConsumer = {
+    async consumeOnce() {
+      return { context: { tenantId, onboardingId, flowVariant: 'WHATSAPP_CLOUD_API',
+        authVariant: 'WHATSAPP_EMBEDDED_SIGNUP', configurationRef: 'synthetic-config-v1',
+        principalId: '112c8fc8-6284-419a-92f3-0a2584b4ecf0', portalSessionId: 'ab4ab85c-40d7-432f-b79c-7c2a5f14e7de',
+        capabilityManifestVersion: 'meta-capability-manifest-v1', graphApiVersion: 'v27.0' }, code };
+    },
+  };
+  let subscriptionCalls = 0;
+  const adapter: OnboardingSagaAdapter = {
+    async exchangeAuthorizationCode() { return { authorizationRef }; },
+    async discoverAndPersistAssets() { return { assetRefs: [assetRef], phoneReadiness: [{ assetRef, state: 'ACTION_REQUIRED',
+      reasonCode: 'TOKEN_ELIGIBILITY_NOT_CONFIRMED', observedAt: '2026-11-10T12:00:00.000Z' }] }; },
+    async ensureSubscriptions() { subscriptionCalls += 1; },
+    async publishProjection() {},
+  };
+  const handler = createOnboardingSagaHandler({} as DurableWorkDatabase, codeConsumer, adapter, checkpoints);
+  const result = await handler(makeJob(), new AbortController().signal);
+  const snapshot = await checkpoints.read(tenantId, onboardingId);
+  assert.equal(result.kind, 'SUCCEEDED');
+  assert.equal(snapshot?.row.status, 'PARTIAL');
+  assert.equal(snapshot?.row.steps_json.find((step) => step.name === 'asset-verification')?.status, 'RETRY_PENDING');
+  assert.deepEqual(snapshot?.evidence.phoneReadiness?.[0], { assetRef, state: 'ACTION_REQUIRED',
+    reasonCode: 'TOKEN_ELIGIBILITY_NOT_CONFIRMED', observedAt: '2026-11-10T12:00:00.000Z' });
+  assert.equal(subscriptionCalls, 0);
 });
 
 test('reconcile no-effect exposes RESUME and an explicit resume never repeats authorization exchange', async () => {

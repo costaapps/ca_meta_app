@@ -75,7 +75,7 @@ function recoverySteps(value: LockedSessionRow['steps_json']): RecoveryStep[] {
 function recoveryEvidence(value: LockedSessionRow['saga_checkpoint_json']): Record<string, unknown> {
   const parsed = decodeJson<Record<string, unknown>>(value);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
-    Object.keys(parsed).some((key) => !['authorizationRef', 'verifiedAssetRefs', 'subscriptionRef', 'projectionRef'].includes(key))) {
+    Object.keys(parsed).some((key) => !['authorizationRef', 'verifiedAssetRefs', 'subscriptionRef', 'projectionRef', 'phoneReadiness'].includes(key))) {
     throw new OnboardingRecoveryConflictError();
   }
   return parsed;

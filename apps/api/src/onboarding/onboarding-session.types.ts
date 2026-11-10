@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { components } from '@ca-meta/contracts';
 import type { RuntimeEnvironment } from '../config/environment.js';
+import type { OnboardingPhoneReadiness } from './onboarding-phone-readiness.js';
 
 export type OnboardingFlowVariant = components['schemas']['FlowVariant'];
 export type OnboardingStatusName = components['schemas']['OnboardingStatus']['status'];
@@ -56,6 +57,7 @@ export interface OnboardingStoredRecord {
   readonly status: OnboardingStatusName;
   readonly readiness: OnboardingReadiness;
   readonly steps: readonly OnboardingStep[];
+  readonly phoneReadiness?: readonly OnboardingPhoneReadiness[];
   readonly nextAction: OnboardingNextAction;
   readonly lastUpdatedAt: Date;
   readonly stateConsumed: boolean;

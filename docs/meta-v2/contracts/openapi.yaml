@@ -672,7 +672,7 @@ paths:
                   summary: No Meta app configuration is installed
                   value:
                     requestId: req_example_42
-                    manifestVersion: m4.01-2026-11-06.1
+                    manifestVersion: m4.04-2026-11-10.1
                     profiles:
                       - flowVariant: FACEBOOK
                         authVariant: FACEBOOK_LOGIN_FOR_BUSINESS
@@ -2835,7 +2835,7 @@ components:
           maxLength: 128
         manifestVersion:
           type: string
-          const: m4.01-2026-11-06.1
+          const: m4.04-2026-11-10.1
         profiles:
           type: array
           minItems: 5
@@ -3050,6 +3050,12 @@ components:
           maxItems: 32
           items:
             $ref: "#/components/schemas/StepStatus"
+        phoneReadiness:
+          type: array
+          maxItems: 100
+          description: Per-number readiness for exclusive WhatsApp Cloud API onboarding. Contains internal tenant-scoped asset references and safe state only; never provider IDs or secrets.
+          items:
+            $ref: "#/components/schemas/OnboardingPhoneReadiness"
         nextAction:
           type: string
           enum:
@@ -3067,6 +3073,38 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+    OnboardingPhoneReadiness:
+      type: object
+      additionalProperties: false
+      required:
+        - assetRef
+        - state
+        - reasonCode
+        - observedAt
+      properties:
+        assetRef:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            - READY
+            - ACTION_REQUIRED
+            - UNKNOWN
+        reasonCode:
+          type: string
+          enum:
+            - REGISTERED
+            - ALREADY_REGISTERED
+            - PHONE_REGISTRATION_REQUIRED
+            - PHONE_STATE_NOT_CONFIRMED
+            - PIN_NOT_AVAILABLE
+            - TOKEN_ELIGIBILITY_NOT_CONFIRMED
+            - REGISTRATION_REJECTED
+            - REGISTRATION_RESULT_UNKNOWN
+        observedAt:
+          type: string
+          format: date-time
     ProviderAuthorizationCodeRequest:
       type: object
       additionalProperties: false

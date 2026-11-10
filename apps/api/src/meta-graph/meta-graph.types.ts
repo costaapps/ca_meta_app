@@ -32,7 +32,7 @@ export interface MetaGraphBaseInput {
 }
 
 export type MetaGraphAssetEdge = 'accounts' | 'businesses' | 'comments' | 'instagram_accounts' |
-  'message_templates' | 'owned_pages' | 'phone_numbers' | 'subscribed_apps';
+  'message_templates' | 'owned_pages' | 'owned_whatsapp_business_accounts' | 'phone_numbers' | 'subscribed_apps';
 
 export type MetaGraphInput =
   | (MetaGraphBaseInput & { readonly endpoint: 'OBJECT_READ' })
@@ -43,7 +43,8 @@ export type MetaGraphInput =
   | (MetaGraphBaseInput & { readonly endpoint: 'SEND_MESSAGE'; readonly body: Readonly<Record<string, MetaGraphJson>> })
   | (MetaGraphBaseInput & { readonly endpoint: 'TEMPLATE_CREATE'; readonly body: Readonly<Record<string, MetaGraphJson>> })
   | (MetaGraphBaseInput & { readonly endpoint: 'COMMENT_REPLY'; readonly body: Readonly<Record<string, MetaGraphJson>> })
-  | (MetaGraphBaseInput & { readonly endpoint: 'SUBSCRIBE_APP'; readonly body: Readonly<Record<string, MetaGraphJson>> });
+  | (MetaGraphBaseInput & { readonly endpoint: 'SUBSCRIBE_APP'; readonly body: Readonly<Record<string, MetaGraphJson>> })
+  | (MetaGraphBaseInput & { readonly endpoint: 'PHONE_REGISTER'; readonly body: Readonly<{ readonly messaging_product: 'whatsapp'; readonly pin: string }> });
 
 export type MetaGraphSafeErrorCategory =
   | 'CAPABILITY_DISABLED'

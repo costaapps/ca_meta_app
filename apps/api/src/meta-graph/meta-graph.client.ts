@@ -30,7 +30,7 @@ const HOSTS: Readonly<Record<MetaGraphExecutionContext['authVariant'], MetaGraph
   WHATSAPP_EMBEDDED_SIGNUP: 'graph.facebook.com',
   WHATSAPP_BUSINESS_APP_ONBOARDING: 'graph.facebook.com',
 });
-const SECRET_KEY = /^(?:access[_-]?token|token|client[_-]?secret|input[_-]?token|fb[_-]?exchange[_-]?token|refresh[_-]?token|authorization|code|headers?|cookie|set[_-]?cookie|password|secret|error|paging)$/i;
+const SECRET_KEY = /^(?:access[_-]?token|token|client[_-]?secret|input[_-]?token|fb[_-]?exchange[_-]?token|refresh[_-]?token|authorization|code|headers?|cookie|set[_-]?cookie|password|pin|secret|error|paging)$/i;
 
 interface Route { operation: MetaOperation; method: MetaGraphMethod; edge: string; pages: boolean; body: boolean }
 interface Limits { connectTimeoutMs: number; headersTimeoutMs: number; readTimeoutMs: number; overallTimeoutMs: number; maxPages: number; maxItems: number; maxConcurrencyPerApp: number; maxConcurrencyGlobal: number; maxRequestsPerAppWindow: number; maxResponseBytes: number }
@@ -48,6 +48,8 @@ function err(category: MetaGraphSafeErrorCategory, attrs: Partial<Omit<MetaGraph
 }
 function route(input: MetaGraphInput): Route | undefined {
   if (!input || typeof input !== 'object') return undefined;
+  if (input.endpoint === 'PHONE_REGISTER' &&
+      (input.context?.flowVariant !== 'WHATSAPP_EXCLUSIVE' || input.context.authVariant !== 'WHATSAPP_EMBEDDED_SIGNUP')) return undefined;
   if (input.endpoint === 'ASSET_EDGE_LIST') {
     if (!record(input.context)) return undefined;
     const flow = input.context['flowVariant'];
@@ -56,8 +58,9 @@ function route(input: MetaGraphInput): Route | undefined {
     const byFlow: Readonly<Record<MetaGraphExecutionContext['flowVariant'], readonly string[]>> = {
       FACEBOOK: ['accounts', 'owned_pages'],
       INSTAGRAM: auth === 'INSTAGRAM_LOGIN' ? ['instagram_accounts'] : ['accounts', 'owned_pages', 'instagram_accounts'],
-      WHATSAPP_EXCLUSIVE: ['businesses', 'phone_numbers'],
-      WHATSAPP_COEXISTENCE: ['businesses', 'phone_numbers'],
+      WHATSAPP_EXCLUSIVE: auth === 'WHATSAPP_EMBEDDED_SIGNUP'
+        ? ['businesses', 'owned_whatsapp_business_accounts', 'phone_numbers'] : [],
+      WHATSAPP_COEXISTENCE: auth === 'WHATSAPP_BUSINESS_APP_ONBOARDING' ? ['businesses', 'phone_numbers'] : [],
     };
     if (!byFlow[flow as MetaGraphExecutionContext['flowVariant']]?.includes(input.edge)) return undefined;
   }
@@ -71,6 +74,7 @@ function route(input: MetaGraphInput): Route | undefined {
     case 'TEMPLATE_CREATE': return { operation: 'MANAGE_TEMPLATES', method: 'POST', edge: '/message_templates', pages: false, body: true };
     case 'COMMENT_REPLY': return { operation: 'MANAGE_COMMENTS', method: 'POST', edge: '/replies', pages: false, body: true };
     case 'SUBSCRIBE_APP': return { operation: 'SUBSCRIBE_WEBHOOKS', method: 'POST', edge: '/subscribed_apps', pages: false, body: true };
+    case 'PHONE_REGISTER': return { operation: 'PHONE_REGISTRATION_CONVENTIONAL', method: 'POST', edge: '/register', pages: false, body: true };
     default: return undefined;
   }
 }
@@ -93,15 +97,24 @@ function validBody(value: unknown, depth = 0): value is MetaGraphJson {
   if (!record(value) || Object.keys(value).length > 256) return false;
   return Object.entries(value).every(([key, item]) => key.length <= 128 && !secretKey(key) && validBody(item, depth + 1));
 }
-function sanitize(value: unknown, credential: string, depth = 0): MetaGraphJson {
+function validPhoneRegistrationBody(value: unknown): boolean {
+  return record(value) && Object.keys(value).length === 2 && Object.keys(value).every((key) => key === 'messaging_product' || key === 'pin') &&
+    value['messaging_product'] === 'whatsapp' && typeof value['pin'] === 'string' && /^\d{6}$/.test(value['pin']);
+}
+function validRequestBody(input: MetaGraphInput): boolean {
+  if (input.endpoint === 'PHONE_REGISTER') return validPhoneRegistrationBody(input.body);
+  return 'body' in input && validBody(input.body);
+}
+function sanitize(value: unknown, credential: string, depth = 0, sensitiveValues: readonly string[] = []): MetaGraphJson {
   if (depth > 24) return null;
   if (value === null || typeof value === 'boolean') return value;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (typeof value === 'string') return credential.length >= 8 && value.includes(credential) ? '' : value.slice(0, 16_384);
-  if (Array.isArray(value)) return Object.freeze(value.slice(0, 1_000).map((item) => sanitize(item, credential, depth + 1)));
+  if (typeof value === 'string') return (credential.length >= 8 && value.includes(credential)) ||
+    sensitiveValues.some((sensitive) => sensitive.length > 0 && value.includes(sensitive)) ? '' : value.slice(0, 16_384);
+  if (Array.isArray(value)) return Object.freeze(value.slice(0, 1_000).map((item) => sanitize(item, credential, depth + 1, sensitiveValues)));
   if (!record(value)) return null;
   const out: Record<string, MetaGraphJson> = Object.create(null) as Record<string, MetaGraphJson>;
-  for (const [key, item] of Object.entries(value).slice(0, 1_000)) if (!secretKey(key)) out[key.slice(0, 128)] = sanitize(item, credential, depth + 1);
+  for (const [key, item] of Object.entries(value).slice(0, 1_000)) if (!secretKey(key)) out[key.slice(0, 128)] = sanitize(item, credential, depth + 1, sensitiveValues);
   return Object.freeze(out);
 }
 function providerNumber(value: unknown): number | undefined { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000 ? value : undefined; }
@@ -328,7 +341,7 @@ export class MetaGraphClient {
         Object.keys(input.context).some((key) => !contextAllowed.has(key)) || input.context.provider !== 'META' ||
         !UUID.test(input.context.tenantId) || !UUID.test(input.context.appConfigurationId) || !UUID.test(input.context.assetId) || !ID.test(input.context.providerObjectId) ||
         !ID.test(input.resourceId) || !/^[A-Za-z0-9._-]{1,96}$/.test(input.context.configurationRef) || !validQuery(input.query) ||
-        (desc.method === 'POST') !== ('body' in input) || ('body' in input && (!record(input.body) || !validBody(input.body) || !bodyFits(input.body))) ||
+        (desc.method === 'POST') !== ('body' in input) || ('body' in input && (!record(input.body) || !validRequestBody(input) || !bodyFits(input.body))) ||
         (!desc.body && 'body' in input) || (mode === 'COLLECTION' && (!desc.pages || desc.method !== 'GET')) ||
         (limit.maxPages !== undefined && (!Number.isSafeInteger(limit.maxPages) || limit.maxPages < 1 || limit.maxPages > this.limits.maxPages)) ||
         (limit.maxItems !== undefined && (!Number.isSafeInteger(limit.maxItems) || limit.maxItems < 1 || limit.maxItems > this.limits.maxItems))) return false;
@@ -356,7 +369,8 @@ export class MetaGraphClient {
       return Object.freeze({ outcome: ambiguous ? 'UNKNOWN' : 'FAILED', error, httpStatus: sent.response.statusCode,
         attempts: sent.attempts, retries: sent.retries, retryable: error.retryable, ambiguous: error.ambiguous });
     }
-    return Object.freeze({ outcome: 'SUCCEEDED', data: sanitize(parsed.body, secret), httpStatus: sent.response.statusCode,
+    const sensitiveValues = input.endpoint === 'PHONE_REGISTER' ? [input.body.pin] : [];
+    return Object.freeze({ outcome: 'SUCCEEDED', data: sanitize(parsed.body, secret, 0, sensitiveValues), httpStatus: sent.response.statusCode,
       attempts: sent.attempts, retries: sent.retries, retryable: false, ambiguous: false });
   }
 
@@ -417,7 +431,7 @@ export class MetaGraphClient {
   }
 
   private finish<T extends MetaGraphCallResult | MetaGraphCollectionResult>(input: MetaGraphInput, result: T): T {
-    const operations: readonly string[] = ['ASSET_DISCOVERY', 'SEND_MESSAGE', 'MANAGE_COMMENTS', 'MANAGE_TEMPLATES', 'READ_STATUS', 'SUBSCRIBE_WEBHOOKS', 'SYNC_HISTORY'];
+    const operations: readonly string[] = ['ASSET_DISCOVERY', 'SEND_MESSAGE', 'MANAGE_COMMENTS', 'MANAGE_TEMPLATES', 'READ_STATUS', 'SUBSCRIBE_WEBHOOKS', 'SYNC_HISTORY', 'PHONE_REGISTRATION_CONVENTIONAL'];
     const flows: readonly string[] = ['FACEBOOK', 'INSTAGRAM', 'WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE'];
     const environments: readonly string[] = ['development', 'test', 'staging', 'production'];
     if (operations.includes(input.operation) && flows.includes(input.context.flowVariant) && environments.includes(input.context.environment)) {

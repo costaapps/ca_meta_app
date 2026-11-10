@@ -54,10 +54,12 @@ test('onboarding status reader is passed only server session, opaque ID and cont
   const snapshot: OnboardingStatusSnapshot = {
     id: 'onboarding-opaque-reference-123',
     flowVariant: 'WHATSAPP_CLOUD_API',
-    status: 'READY',
-    readiness: 'READY',
+    status: 'PARTIAL',
+    readiness: 'PARTIAL',
     steps: [{ name: 'authorization', status: 'SUCCEEDED' }],
-    nextAction: 'NONE',
+    phoneReadiness: [{ assetRef: 'f1c90208-010c-48b0-90e3-ef28f825efdd', state: 'ACTION_REQUIRED',
+      reasonCode: 'TOKEN_ELIGIBILITY_NOT_CONFIRMED', observedAt: '2026-11-10T12:00:00.000Z' }],
+    nextAction: 'RESUME',
     lastUpdatedAt: '2026-10-30T12:00:00.000Z',
   };
   const observed: { session?: VerifiedPortalSession; id?: string; context?: string } = {};
@@ -83,8 +85,10 @@ test('onboarding status reader is passed only server session, opaque ID and cont
   assert.equal(observed.session, session);
   assert.equal(observed.id, 'onboarding-opaque-reference-123');
   assert.equal(observed.context, 'tenant-context-reference-123456');
-  assert.equal(result.status, 'READY');
+  assert.equal(result.status, 'PARTIAL');
   assert.equal(result.requestId, 'server-request-id');
+  assert.equal(result.phoneReadiness?.[0]?.reasonCode, 'TOKEN_ELIGIBILITY_NOT_CONFIRMED');
+  assert.equal(result.phoneReadiness?.[0]?.assetRef, 'f1c90208-010c-48b0-90e3-ef28f825efdd');
   assert.equal('access_token' in result, false);
   assert.equal('tenantId' in result, false);
 });

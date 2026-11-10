@@ -77,10 +77,61 @@ class SequenceTransport implements MetaGraphTransport {
 function response(statusCode: number, body: unknown, headers: Record<string, string | undefined> = {}): MetaGraphTransportResponse {
   return { statusCode, headers, body: JSON.stringify(body) };
 }
-function client(transport: MetaGraphTransport, credentials = new FakeCredentials(), options: ConstructorParameters<typeof MetaGraphClient>[4] = {}) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function client(transport: MetaGraphTransport, credentials = new FakeCredentials(), options: ConstructorParameters<typeof MetaGraphClient>[4] = {},
+  profile: MetaAppConfiguration = fixtureProfile()) {
   const metrics = new InMemoryMetaGraphMetrics();
-  const instance = new MetaGraphClient(new MetaAppConfigRegistry([fixtureProfile()]), credentials, transport, metrics, options);
+  const instance = new MetaGraphClient(new MetaAppConfigRegistry([profile]), credentials, transport, metrics, options);
   return { instance, credentials, metrics };
+}
+
+function exclusiveProfile(): MetaAppConfiguration {
+  const flowVariant = 'WHATSAPP_EXCLUSIVE';
+  const authVariant = 'WHATSAPP_EMBEDDED_SIGNUP';
+  const capabilityEvidence = META_CAPABILITY_MANIFEST.filter((entry) => entry.flowVariant === flowVariant && entry.authVariant === authVariant)
+    .map((entry) => ({ operation: entry.operation, permissions: entry.candidatePermissions.map((permission) => ({
+      permission, permissionStatus: 'CONFIRMED' as const, accessLevel: 'ADVANCED' as const,
+      appReviewStatus: 'APPROVED' as const, sandboxStatus: 'PASSED' as const,
+      approvalOwner: 'synthetic-fixture-owner', evidenceUrl: 'https://developers.facebook.com/docs/graph-api/overview/',
+    })) }));
+  return Object.freeze({ ...fixtureProfile(), flowVariant, authVariant, configurationRef: 'synthetic-exclusive-v1', capabilityEvidence });
+}
+
+function exclusiveRequest(body: Record<string, unknown>, operation: MetaOperation = 'PHONE_REGISTRATION_CONVENTIONAL'): MetaGraphInput {
+  const context: MetaGraphExecutionContext = {
+    tenantId, provider: 'META', appConfigurationId, environment: 'test', assetId, operation,
+    flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP',
+    configurationRef: 'synthetic-exclusive-v1', providerObjectId,
+  };
+  return { context, credentialHandle: Object.freeze({}) as CredentialResolutionHandle,
+    credentialCapability: operation, operation, correlationId, resourceId: providerObjectId,
+    endpoint: 'PHONE_REGISTER', body } as unknown as MetaGraphInput;
+}
+
+function exclusivePhoneListRequest(): MetaGraphInput {
+  const operation = 'ASSET_DISCOVERY' as const;
+  const context: MetaGraphExecutionContext = {
+    tenantId, provider: 'META', appConfigurationId, environment: 'test', assetId, operation,
+    flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP',
+    configurationRef: 'synthetic-exclusive-v1', providerObjectId,
+  };
+  return { context, credentialHandle: Object.freeze({}) as CredentialResolutionHandle,
+    credentialCapability: operation, operation, correlationId, resourceId: providerObjectId,
+    endpoint: 'ASSET_EDGE_LIST', edge: 'phone_numbers', query: { fields: 'id,verified_name,display_phone_number,quality_rating', limit: 100 } };
+}
+
+function exclusiveOwnedWabaRequest(): MetaGraphInput {
+  const operation = 'ASSET_DISCOVERY' as const;
+  const context: MetaGraphExecutionContext = {
+    tenantId, provider: 'META', appConfigurationId, environment: 'test', assetId, operation,
+    flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP',
+    configurationRef: 'synthetic-exclusive-v1', providerObjectId,
+  };
+  return { context, credentialHandle: Object.freeze({}) as CredentialResolutionHandle,
+    credentialCapability: operation, operation, correlationId, resourceId: providerObjectId,
+    endpoint: 'ASSET_EDGE_LIST', edge: 'owned_whatsapp_business_accounts' };
 }
 
 test('synthetic fixture mirrors a fully verified M4.01 profile while pending graph evidence stays blocked', () => {
@@ -141,6 +192,82 @@ test('resource ID mismatch against the server-resolved provider object is reject
   assert.equal(result.error?.category, 'REQUEST_INVALID');
   assert.equal(runtime.credentials.callbacks, 0);
   assert.equal(transport.calls.length, 0);
+});
+
+test('exclusive WhatsApp registration uses the exact route/body and scrubs PIN echoes', async () => {
+  const pin = '123456';
+  const transport = new SequenceTransport([response(200, { success: true, pin, message: `registration used ${pin}` })]);
+  const credentials = new FakeCredentials();
+  const runtime = client(transport, credentials, {}, exclusiveProfile());
+  const result = await runtime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin }));
+
+  assert.equal(result.outcome, 'SUCCEEDED');
+  assert.deepEqual(transport.calls.map((call) => [call.method, call.path, call.operation]), [
+    ['POST', `/v27.0/${providerObjectId}/register`, 'PHONE_REGISTRATION_CONVENTIONAL'],
+  ]);
+  assert.deepEqual(JSON.parse(transport.calls[0]?.body ?? '{}'), { messaging_product: 'whatsapp', pin });
+  assert.equal(credentials.callbacks, 1);
+  assert.equal(JSON.stringify(result).includes(pin), false);
+  assert.equal(JSON.stringify(result).includes(TOKEN), false);
+});
+
+test('registration rejects Coexistence, invalid PIN and additional body fields before credential use', async () => {
+  const transport = new SequenceTransport([]);
+  const runtime = client(transport);
+  const coexistence = await runtime.instance.execute(request('PHONE_REGISTER', 'PHONE_REGISTRATION_CONVENTIONAL', {
+    body: { messaging_product: 'whatsapp', pin: '123456' },
+  }));
+  assert.equal(coexistence.error?.category, 'REQUEST_INVALID');
+  assert.equal(runtime.credentials.callbacks, 0);
+
+  const exclusiveRuntime = client(transport, new FakeCredentials(), {}, exclusiveProfile());
+  const invalidPin = await exclusiveRuntime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin: '12345' }));
+  const extraField = await exclusiveRuntime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin: '123456', assetId }));
+  assert.equal(invalidPin.error?.category, 'REQUEST_INVALID');
+  assert.equal(extraField.error?.category, 'REQUEST_INVALID');
+  assert.equal(exclusiveRuntime.credentials.callbacks, 0);
+  assert.equal(transport.calls.length, 0);
+});
+
+test('ambiguous registration POST is not retried', async () => {
+  const transport = new SequenceTransport([new MetaGraphTransportFailure('OVERALL_TIMEOUT')]);
+  const runtime = client(transport, new FakeCredentials(), {}, exclusiveProfile());
+  const result = await runtime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin: '123456' }));
+  assert.equal(result.outcome, 'UNKNOWN');
+  assert.equal(result.ambiguous, true);
+  assert.equal(result.retries, 0);
+  assert.equal(transport.calls.length, 1);
+});
+
+test('exclusive phone_numbers discovery consumes every bounded Graph page', async () => {
+  const transport = new SequenceTransport([
+    response(200, { data: [{ id: '1906385232743451', verified_name: 'Synthetic One', display_phone_number: '+15550000001' }],
+      paging: { next: `https://graph.facebook.com/v27.0/${providerObjectId}/phone_numbers?limit=100&after=cursor-two` } }),
+    response(200, { data: [{ id: '1913623884432103', verified_name: 'Synthetic Two', display_phone_number: '+15550000002' }] }),
+  ]);
+  const runtime = client(transport, new FakeCredentials(), {}, exclusiveProfile());
+  const result = await runtime.instance.collect(exclusivePhoneListRequest(), { maxPages: 100, maxItems: 100 });
+  assert.equal(result.outcome, 'SUCCEEDED');
+  assert.deepEqual(result.data.map((item) => isRecord(item) ? item['id'] : undefined),
+    ['1906385232743451', '1913623884432103']);
+  assert.equal(transport.calls.length, 2);
+  assert.ok(transport.calls[1]?.path.includes('after=cursor-two'));
+  assert.equal(runtime.credentials.callbacks, 1);
+});
+
+test('owned WABA discovery is exclusive-only and uses the server-resolved business ID', async () => {
+  const transport = new SequenceTransport([response(200, { data: [{ id: 'waba-123' }] })]);
+  const exclusive = client(transport, new FakeCredentials(), {}, exclusiveProfile());
+  const result = await exclusive.instance.collect(exclusiveOwnedWabaRequest());
+  assert.equal(result.outcome, 'SUCCEEDED');
+  assert.equal(transport.calls[0]?.path, `/v27.0/${providerObjectId}/owned_whatsapp_business_accounts`);
+  assert.equal(exclusive.credentials.callbacks, 1);
+
+  const coexistence = client(transport);
+  const denied = await coexistence.instance.collect(request('ASSET_EDGE_LIST', 'ASSET_DISCOVERY', { edge: 'owned_whatsapp_business_accounts' }));
+  assert.equal(denied.error?.category, 'REQUEST_INVALID');
+  assert.equal(coexistence.credentials.callbacks, 0);
+  assert.equal(transport.calls.length, 1);
 });
 
 test('collect processes cursor pages with bounds and strips a token query from provider next URLs', async () => {
