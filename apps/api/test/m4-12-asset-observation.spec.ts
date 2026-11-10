@@ -61,7 +61,8 @@ test('M4.12 ignores late observations and preserves a safe token for an unknown 
   const late = snapshot(observation({ observedAt: '2026-11-10T11:59:59.000Z',
     status: { value: 'INACTIVE', availability: 'OBSERVED' } }), current, 2);
   assert.equal(late, null);
-  const unknown = snapshot(observation({ status: { value: 'UNKNOWN', availability: 'UNKNOWN', providerCode: 'NEW_STATUS_9' } }), current, 2);
+  const unknown = snapshot(observation({ observedAt: '2026-11-10T12:00:00.500Z',
+    status: { value: 'UNKNOWN', availability: 'UNKNOWN', providerCode: 'NEW_STATUS_9' } }), current, 2);
   assert.ok(unknown);
   assert.equal(unknown.status.value, 'ACTIVE', 'an unmapped status does not replace the last known normalized state');
   assert.equal(unknown.status.availability, 'UNKNOWN');
