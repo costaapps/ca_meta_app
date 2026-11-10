@@ -4,6 +4,7 @@ import { HttpStatus } from '@nestjs/common';
 import type { ApiEnvironment } from '../../config/environment.js';
 import { errorEnvelope } from '../http/error-envelope.js';
 import type { PortalSessionVerifier } from '../../identity/identity.trust.js';
+import { META_WEBHOOK_RAW_POST_PATH } from '../../meta-webhooks/meta-webhook-validation.js';
 import {
   PORTAL_CSRF_COOKIE,
   PORTAL_SESSION_COOKIE,
@@ -42,7 +43,6 @@ function matchesHash(value: string, digest: string): boolean {
 }
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const META_WEBHOOK_INGRESS_PATH = /^\/api\/v1\/webhooks\/meta\/[A-Za-z0-9_-]{1,128}$/;
 const PORTAL_ENTRY_EXCHANGE_PATH = '/api/v1/auth/exchanges';
 const MAGIC_LINK_CONSUME_PATH = '/api/v1/auth/magic-links/consume';
 
@@ -66,7 +66,7 @@ export function portalRequestSecurityMiddleware(
 
     // Provider callbacks do not use browser Origin/CSRF. This exact contracted
     // ingress path must still be protected by its route's raw-body signature validator.
-    if (request.method === 'POST' && origin === undefined && META_WEBHOOK_INGRESS_PATH.test(request.path)) {
+    if (request.method === 'POST' && origin === undefined && META_WEBHOOK_RAW_POST_PATH.test(request.path)) {
       next();
       return;
     }

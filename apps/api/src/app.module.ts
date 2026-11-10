@@ -22,12 +22,14 @@ import { PrivacyModule } from './privacy/privacy.module.js';
 import { OnboardingStatusModule } from './onboarding/onboarding-status.module.js';
 import { MetaAppConfigModule } from './meta-config/meta-app-config.module.js';
 import { MetaGraphModule } from './meta-graph/meta-graph.module.js';
+import { MetaWebhooksModule } from './meta-webhooks/meta-webhooks.module.js';
 
 @Module({})
 export class ApiModule {
   static register(environment: ApiEnvironment): DynamicModule {
     const identityModule = IdentityModule.register(environment);
     const metaAssetsModule = MetaAssetsModule.register(identityModule, environment);
+    const metaWebhooksModule = MetaWebhooksModule.register(environment, metaAssetsModule);
     const metaAppConfigModule = MetaAppConfigModule.register(identityModule, environment);
     const metaGraphModule = MetaGraphModule.register(metaAssetsModule, metaAppConfigModule);
     const ticket = environment.portalEntryTicket;
@@ -50,6 +52,7 @@ export class ApiModule {
       imports: [
         HealthModule.register(environment),
         metaAssetsModule,
+        metaWebhooksModule,
         identityModule,
         authExchangeModule,
         MagicLinkModule.register(environment),
