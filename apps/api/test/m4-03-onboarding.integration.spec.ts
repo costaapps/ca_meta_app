@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { createConnection, type Connection } from 'mysql2/promise';
 import test from 'node:test';
 import { readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
 import { deployMigrations } from '../src/database/migrations/migration-runner.js';
@@ -64,7 +65,6 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
   const expiresAt = new Date(Date.now() + 5 * 60_000);
   const sessionSecretHash = hashOnboardingValue(`portal-session-secret-${randomUUID()}`);
   const idempotencyKey = `onboarding-code:${idempotencyHash}`;
-  const recoveryJobIds: string[] = [];
   const requestCodeHash = hashOnboardingValue(JSON.stringify({
     onboardingId, flowVariant: 'WHATSAPP_CLOUD_API', configurationRef,
     stateHash: providerStateHash, codeHash: hashOnboardingValue(rawCode),
@@ -74,6 +74,36 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
   const sealedCode = protector.seal(codeContext, rawCode);
   let jobId: string | undefined;
   let onboardingStatusDrifted = false;
+  let onboardingReadyCheckDrifted = false;
+  let onboardingSagaJsonCheckDrifted = false;
+  let migrationConnection: Connection | undefined;
+  const getMigrationConnection = async (): Promise<Connection> => {
+    migrationConnection ??= await createConnection({
+      host: migrationEnvironment.database.host,
+      port: migrationEnvironment.database.port,
+      database: migrationEnvironment.database.name,
+      user: migrationEnvironment.database.user,
+      password: migrationEnvironment.database.password,
+      connectTimeout: migrationEnvironment.database.connectTimeoutMs,
+      multipleStatements: false,
+      dateStrings: true,
+      charset: 'utf8mb4',
+    });
+    return migrationConnection;
+  };
+  const executeMigrationDdl = async (sql: string): Promise<void> => {
+    await (await getMigrationConnection()).query(sql);
+  };
+  const resetMigrationCheck = async (name: string, clause: string): Promise<void> => {
+    const connection = await getMigrationConnection();
+    const [rows] = await connection.query<Array<{ constraint_name: string }>>(
+      `SELECT constraint_name FROM information_schema.table_constraints
+       WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions'
+         AND constraint_type = 'CHECK' AND constraint_name = ?`, [name],
+    );
+    if (rows.length > 0) await connection.query(`ALTER TABLE ca_meta_onboarding_sessions DROP CONSTRAINT \`${name}\``);
+    await connection.query(`ALTER TABLE ca_meta_onboarding_sessions ADD CONSTRAINT \`${name}\` CHECK (${clause})`);
+  };
 
   try {
     await dataSource.query("SET time_zone = '+00:00'");
@@ -263,7 +293,6 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
       idempotencyKey: `m4-03-expired-${randomUUID()}`, correlationId: onboardingId, resourceScopeRef: onboardingId,
       payload: { kind: 'ONBOARDING_STEP', onboardingRef: onboardingId, stepRef: 'subscription' },
     });
-    recoveryJobIds.push(expiredLease.id);
     const expiredClaim = await jobs.claimNext('m4-03-expiring-worker', 1_000, ['ONBOARDING_STEP']);
     assert.equal(expiredClaim?.id, expiredLease.id);
     await dataSource.query('UPDATE ca_meta_jobs SET lease_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE tenant_id = ? AND id = ?',
@@ -286,7 +315,6 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     const reconcileInput = { record: recoveryRecord!, principalId, portalSessionId, stage: 'subscription' as const,
       action: 'RECONCILE' as const, idempotencyKey: hashOnboardingValue(`reconcile-${randomUUID()}`) };
     const reconciliation = await recovery.queue(reconcileInput);
-    recoveryJobIds.push(reconciliation.id);
     assert.equal(reconciliation.duplicate, false);
     assert.deepEqual(await recovery.queue(reconcileInput), { id: reconciliation.id, duplicate: true });
     await assert.rejects(recovery.queue({ ...reconcileInput, stage: 'projection' }), OnboardingRecoveryConflictError,
@@ -331,7 +359,6 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     assert.equal(resumeRecord?.nextAction, 'RESUME');
     const resume = await recovery.queue({ ...reconcileInput, record: resumeRecord!, action: 'RESUME',
       idempotencyKey: hashOnboardingValue(`resume-${randomUUID()}`) });
-    recoveryJobIds.push(resume.id);
     assert.equal(resume.duplicate, false);
     const resumedJob = await dataSource.query(
       'SELECT payload_json FROM ca_meta_jobs WHERE tenant_id = ? AND id = ?', [tenantId, resume.id],
@@ -367,28 +394,54 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
       idempotencyKey: hashOnboardingValue(`revoked-${randomUUID()}`) }), OnboardingRecoveryNotFoundError,
     'a revoked CONNECT membership cannot queue recovery work');
 
-    await dataSource.query(`ALTER TABLE ca_meta_onboarding_sessions
+    await executeMigrationDdl(`ALTER TABLE ca_meta_onboarding_sessions
       MODIFY COLUMN status VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT 'AWAITING_PROVIDER'`);
     onboardingStatusDrifted = true;
     await assert.rejects(() => deployMigrations(migrationEnvironment),
       /unexpected definition for ca_meta_onboarding_sessions\.status/,
     'an incompatible change to a prior tenant-session column must block migration recovery');
-    await dataSource.query(`ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN status
+    await executeMigrationDdl(`ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN status
       ENUM('CREATED','AWAITING_PROVIDER','CODE_RECEIVED','EXCHANGING','ASSETS_VERIFIED','PROVISIONING','READY','PARTIAL','CANCELLED','EXPIRED','FAILED')
       NOT NULL DEFAULT 'AWAITING_PROVIDER'`);
     onboardingStatusDrifted = false;
     await deployMigrations(migrationEnvironment);
+
+    onboardingReadyCheckDrifted = true;
+    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'ready' OR readiness = 'ready'");
+    await assert.rejects(() => deployMigrations(migrationEnvironment), /unexpected onboarding CHECK constraint/,
+      'case-sensitive enum literals in a CHECK constraint must be preserved');
+    await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'READY' OR readiness = 'READY'");
+    onboardingReadyCheckDrifted = false;
+    await deployMigrations(migrationEnvironment);
+
+    onboardingSagaJsonCheckDrifted = true;
+    const migrationDdlConnection = await getMigrationConnection();
+    const [sagaJsonCheck] = await migrationDdlConnection.query<Array<{ constraint_name: string }>>(
+      `SELECT constraint_name FROM information_schema.table_constraints
+       WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions'
+         AND constraint_type = 'CHECK' AND constraint_name = 'saga_checkpoint_json'`,
+    );
+    assert.equal(sagaJsonCheck.length, 1, 'MariaDB JSON alias exposes its JSON_VALID constraint');
+    await executeMigrationDdl('ALTER TABLE ca_meta_onboarding_sessions DROP CONSTRAINT `saga_checkpoint_json`');
+    await assert.rejects(() => deployMigrations(migrationEnvironment), /JSON alias column without its JSON_VALID constraint/,
+      'a MariaDB LONGTEXT JSON alias without JSON_VALID must block migration recovery');
+    await resetMigrationCheck('saga_checkpoint_json', 'JSON_VALID(saga_checkpoint_json)');
+    onboardingSagaJsonCheckDrifted = false;
+    await deployMigrations(migrationEnvironment);
   } finally {
+    if (onboardingSagaJsonCheckDrifted) {
+      await resetMigrationCheck('saga_checkpoint_json', 'JSON_VALID(saga_checkpoint_json)');
+    }
+    if (onboardingReadyCheckDrifted) {
+      await resetMigrationCheck('ck_ca_meta_onboarding_ready', "status <> 'READY' OR readiness = 'READY'");
+    }
     if (onboardingStatusDrifted) {
-      await dataSource.query(`ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN status
+      await executeMigrationDdl(`ALTER TABLE ca_meta_onboarding_sessions MODIFY COLUMN status
         ENUM('CREATED','AWAITING_PROVIDER','CODE_RECEIVED','EXCHANGING','ASSETS_VERIFIED','PROVISIONING','READY','PARTIAL','CANCELLED','EXPIRED','FAILED')
         NOT NULL DEFAULT 'AWAITING_PROVIDER'`);
     }
-    if (recoveryJobIds.length > 0) {
-      await dataSource.query(`DELETE FROM ca_meta_jobs WHERE tenant_id = ? AND id IN (${recoveryJobIds.map(() => '?').join(', ')})`,
-        [tenantId, ...recoveryJobIds]);
-    }
-    if (jobId) await dataSource.query('DELETE FROM ca_meta_jobs WHERE tenant_id = ? AND id = ?', [tenantId, jobId]);
+    await dataSource.query('DELETE FROM ca_meta_job_attempts WHERE tenant_id = ?', [tenantId]);
+    await dataSource.query('DELETE FROM ca_meta_jobs WHERE tenant_id = ?', [tenantId]);
     await dataSource.query('DELETE FROM ca_meta_onboarding_codes WHERE tenant_id = ?', [tenantId]);
     await dataSource.query('DELETE FROM ca_meta_onboarding_sessions WHERE tenant_id = ?', [tenantId]);
     await dataSource.query('DELETE FROM ca_meta_asset_authorizations WHERE tenant_id = ?', [tenantId]);
@@ -401,6 +454,7 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     await dataSource.query('DELETE FROM ca_meta_tenants WHERE id = ?', [tenantId]);
     await codes.onModuleDestroy();
     await sessionStore.onApplicationShutdown();
+    await migrationConnection?.end();
     await database.close();
   }
 });

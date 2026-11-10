@@ -89,7 +89,8 @@ function normalizeOnboardingColumnType(value: string): string {
 }
 
 function normalizeCheckClause(value: string): string {
-  return value.toLowerCase().replaceAll('`', '').replaceAll(/\s+/gu, '').replace(/^\((.*)\)$/u, '$1');
+  return value.replace(/'[^']*'|[^']+/gu, (part) => part.startsWith("'") ? part : part.toLowerCase())
+    .replaceAll('`', '').replaceAll(/\s+/gu, '').replace(/^\((.*)\)$/u, '$1');
 }
 const priorOnboardingIndexes = [
   { name: 'PRIMARY', columns: ['id'], unique: true },
@@ -248,6 +249,11 @@ async function verifyCompatibleOnboardingSessionPriorShape(context: MigrationSte
      WHERE tc.table_schema = DATABASE() AND tc.table_name = 'ca_meta_onboarding_sessions'
        AND tc.constraint_type = 'CHECK'`,
   ) as Array<{ name: string; clause: string | null }>;
+  const jsonTypeRows = await queryRunner.query(
+    `SELECT column_name, data_type FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions'
+       AND column_name IN ('requested_capabilities', 'steps_json', 'saga_checkpoint_json')`,
+  ) as Array<{ column_name: string; data_type: string }>;
   const expectedChecks = new Map([
     ['ck_ca_meta_onboarding_route', "return_route in ('connections','setup')"],
     ['ck_ca_meta_onboarding_version', 'version > 0'],
@@ -257,7 +263,11 @@ async function verifyCompatibleOnboardingSessionPriorShape(context: MigrationSte
   ].map(([name, clause]) => [name, normalizeCheckClause(clause)]));
   const jsonColumnNames = new Set(['requested_capabilities', 'steps_json',
     ...(actualColumns.includes('saga_checkpoint_json') ? ['saga_checkpoint_json'] : [])]);
+  const requiredJsonChecks = new Set(jsonTypeRows
+    .filter((column) => column.data_type.toLowerCase() === 'longtext')
+    .map((column) => column.column_name));
   const observedChecks = new Map<string, string>();
+  const observedJsonChecks = new Set<string>();
   for (const row of checkRows) {
     if (!row.clause) throw new Error(`M4.03 migration found an unverifiable onboarding CHECK constraint (${row.name}).`);
     const clause = normalizeCheckClause(row.clause);
@@ -268,12 +278,16 @@ async function verifyCompatibleOnboardingSessionPriorShape(context: MigrationSte
       continue;
     }
     const jsonCheck = /^json_valid\(([a-z0-9_]+)\)$/u.exec(clause)?.[1];
-    if (!jsonCheck || !jsonColumnNames.has(jsonCheck)) {
+    if (!jsonCheck || !jsonColumnNames.has(jsonCheck) || observedJsonChecks.has(jsonCheck)) {
       throw new Error(`M4.03 migration found an unexpected onboarding CHECK constraint (${row.name}).`);
     }
+    observedJsonChecks.add(jsonCheck);
   }
   if (observedChecks.size !== expectedChecks.size) {
     throw new Error('M4.03 migration found missing onboarding CHECK constraints.');
+  }
+  if ([...requiredJsonChecks].some((column) => !observedJsonChecks.has(column))) {
+    throw new Error('M4.03 migration found a JSON alias column without its JSON_VALID constraint.');
   }
 
   return true;
