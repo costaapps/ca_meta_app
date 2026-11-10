@@ -27,6 +27,11 @@ import type { OnboardingFlowConfigurationResolver } from './onboarding-session.t
 import type { OnboardingSagaAdapter } from './onboarding-saga.types.js';
 import { MysqlOnboardingSagaRecoveryStore, ONBOARDING_SAGA_RECOVERY_STORE, OnboardingSagaRecoveryService,
   type OnboardingSagaRecoveryStore } from './onboarding-saga-recovery.js';
+import { AuditEventWriter } from '../privacy/audit.service.js';
+import { CONNECTION_LIFECYCLE_REPOSITORY } from '../meta-lifecycle/connection-lifecycle.types.js';
+import { ConnectionLifecycleController } from '../meta-lifecycle/connection-lifecycle.controller.js';
+import { ConnectionLifecycleService } from '../meta-lifecycle/connection-lifecycle.service.js';
+import { MysqlConnectionLifecycleCommandRepository } from '../meta-lifecycle/mysql-connection-lifecycle.repository.js';
 
 @Module({})
 export class OnboardingStatusModule {
@@ -34,7 +39,8 @@ export class OnboardingStatusModule {
     return {
       module: OnboardingStatusModule,
       imports: [identityModule, metaAppConfigModule, JobsModule.register(environment)],
-      controllers: [OnboardingStatusController, OnboardingCodeSubmissionController, MetaProviderCallbackController, OnboardingSagaRecoveryController],
+      controllers: [OnboardingStatusController, OnboardingCodeSubmissionController, MetaProviderCallbackController,
+        OnboardingSagaRecoveryController, ConnectionLifecycleController],
       providers: [
         {
           provide: PortalSessionGuard,
@@ -42,6 +48,18 @@ export class OnboardingStatusModule {
           inject: [PortalSessionVerifier],
         },
         { provide: ONBOARDING_SESSION_STORE, useFactory: () => new MysqlOnboardingSessionStore(environment.database) },
+        {
+          provide: CONNECTION_LIFECYCLE_REPOSITORY,
+          useFactory: (database: DurableWorkDatabase) => new MysqlConnectionLifecycleCommandRepository(database, new AuditEventWriter(database)),
+          inject: [DURABLE_WORK_DATABASE],
+        },
+        {
+          provide: ConnectionLifecycleService,
+          useFactory: (repository: MysqlConnectionLifecycleCommandRepository, contexts: TenantContextService,
+            authorization: TenantAuthorizationService, onboarding: OnboardingSessionService) =>
+            new ConnectionLifecycleService(repository, contexts, authorization, onboarding),
+          inject: [CONNECTION_LIFECYCLE_REPOSITORY, TenantContextService, TenantAuthorizationService, OnboardingSessionService],
+        },
         { provide: OnboardingStateSigner, useValue: new OnboardingStateSigner(environment.onboardingStateSigningKey) },
         { provide: ONBOARDING_CODE_PROTECTOR, useValue: new OnboardingCodeProtector(environment.onboardingStateSigningKey) },
         { provide: META_ONBOARDING_SAGA_ADAPTER, useValue: undefined },

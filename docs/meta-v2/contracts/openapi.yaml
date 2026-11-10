@@ -47,6 +47,9 @@ x-public-routes:
   - method: POST
     path: /api/v1/webhooks/meta/{appConfigRef}
     purpose: Signature-verified, size-bounded provider webhook ingress; routing is resolved server-side.
+  - method: POST
+    path: /api/v1/webhooks/meta-lifecycle/{appConfigRef}
+    purpose: Provider lifecycle callback transport without a portal session; only a configured fail-closed verifier and server-side target resolver may accept it. Signature details and subject mapping remain Not confirmed.
   - method: GET
     path: /health
     purpose: Non-sensitive liveness only.
@@ -1154,7 +1157,7 @@ paths:
                   summary: Sanitized success example
                   value:
                     items:
-                      - id: conn_example_01
+                      - id: 10000000-0000-4000-8000-000000000002
                         flowVariant: WHATSAPP_COEXISTENCE
                         status: PARTIAL
                         readiness: PARTIAL
@@ -1191,13 +1194,11 @@ paths:
       - name: connectionId
         in: path
         required: true
-        description: Opaque resource identifier; authorization is always checked against the server-derived
-          tenant.
+        description: UUID connection reference from the tenant-scoped catalog. The server always resolves and
+          authorizes it within the active tenant context.
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
-          pattern: ^[A-Za-z0-9_-]+$
+          format: uuid
     get:
       operationId: getConnection
       tags:
@@ -1224,7 +1225,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
-                    id: conn_example_01
+                    id: 10000000-0000-4000-8000-000000000002
                     flowVariant: WHATSAPP_COEXISTENCE
                     status: PARTIAL
                     readiness: PARTIAL
@@ -1244,7 +1245,7 @@ paths:
                       subscriptionState: UNKNOWN
                       projectionState: UNKNOWN
                     assets:
-                      - id: asset_example_01
+                      - id: 10000000-0000-4000-8000-000000000004
                         kind: PHONE_NUMBER
                         status: ACTIVE
                         authorizationStatus: VERIFIED
@@ -1285,8 +1286,9 @@ paths:
       tags:
         - Connections
       summary: Start a connection disconnect
-      description: Requires operator/owner scope and CSRF. Local desired state is recorded first; provider
-        revocation/cleanup is a separate bounded job. A provider success is not assumed.
+      description: Requires owner/admin scope and CSRF. This is a local disconnect request; it does not call
+        Meta or claim provider offboarding. If the authorization has multiple active verified asset bindings,
+        this broad route conflicts and the caller must select one asset on the asset-scoped route.
       security: *a10
       parameters: *a23
       responses:
@@ -1301,10 +1303,16 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
-                    jobId: job_example_02
+                    jobId: "10000000-0000-4000-8000-000000000009"
                     status: PENDING
-                    location: /api/v1/jobs/job_example_02
+                    location: /api/v1/jobs/10000000-0000-4000-8000-000000000009
                     requestId: req_example_25
+                    connectionLifecycle:
+                      commandId: 10000000-0000-4000-8000-000000000009
+                      localState: DISCONNECTED
+                      cleanupState: BLOCKED
+                      reasonCode: PROVIDER_OFFBOARDING_NOT_CONFIRMED
+                      requestId: req_example_25
         "400": *a11
         "401": *a12
         "403": *a13
@@ -1316,23 +1324,64 @@ paths:
         "429": *a19
         "503": *a20
         default: *a21
-      x-external-effect: May request revocation or cleanup at the provider and update local grants.
+      x-external-effect: No provider call is made by this request. Cleanup remains BLOCKED until a reviewed flow-specific adapter and evidence are available.
       x-idempotency-scope: tenant + operation + Idempotency-Key and request payload hash.
-      x-retry-policy: One automatic attempt including the initial request; zero automatic retries. A
-        proven no-effect result may permit a new explicit user request with a new idempotency key. An
-        ambiguous provider result is UNKNOWN; reconcile grant state before another request.
+      x-retry-policy: Local idempotency returns the existing command for the same request hash. No provider retry is scheduled.
+  /api/v1/connections/{connectionId}/assets/{assetId}:
+    parameters:
+      - name: connectionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: assetId
+        in: path
+        required: true
+        description: Tenant-owned resource reference selected from the server connection catalog.
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: disconnectConnectionAsset
+      tags:
+        - Connections
+      summary: Disconnect one asset binding without affecting sibling resources
+      description: Requires owner/admin scope and CSRF. Only the selected tenant/authorization/asset binding is disabled locally. Shared credentials, other asset bindings, and provider subscriptions remain untouched unless a later reviewed operation proves they can be changed safely.
+      security: *a10
+      parameters: *a23
+      responses:
+        "202":
+          description: Local disconnect recorded; provider cleanup is not confirmed.
+          headers: *a24
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionLifecycleResult"
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-external-effect: None. Local access is revoked for the exact binding; provider unsubscribe/offboarding is separately gated.
+      x-idempotency-scope: tenant + operation + Idempotency-Key and request payload hash.
+      x-retry-policy: Local idempotency returns the existing command for the same request hash. No provider retry is scheduled.
   /api/v1/connections/{connectionId}/reauthorizations:
     parameters:
       - name: connectionId
         in: path
         required: true
-        description: Opaque resource identifier; authorization is always checked against the server-derived
-          tenant.
+        description: UUID connection reference from the tenant-scoped catalog. The server always resolves and
+          authorizes it within the active tenant context.
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
-          pattern: ^[A-Za-z0-9_-]+$
+          format: uuid
     post:
       operationId: createReauthorization
       tags:
@@ -1346,7 +1395,7 @@ paths:
       parameters: *a23
       responses:
         "202":
-          description: Sanitized success example
+          description: Reauthorization work accepted; its prior grant remains active.
           headers: *a24
           content:
             application/json:
@@ -1354,12 +1403,18 @@ paths:
                 $ref: "#/components/schemas/JobAccepted"
               examples:
                 sanitized:
-                  summary: Sanitized success example
+                  summary: Reauthorization session accepted
                   value:
-                    jobId: job_example_03
+                    jobId: "10000000-0000-4000-8000-000000000005"
                     status: PENDING
-                    location: /api/v1/jobs/job_example_03
+                    location: /api/v1/jobs/10000000-0000-4000-8000-000000000005
                     requestId: req_example_26
+                    reauthorization:
+                      id: "10000000-0000-4000-8000-000000000005"
+                      status: AWAITING_PROVIDER
+                      expiresAt: "2026-11-10T12:10:00Z"
+                      launchUrl: "https://provider.example/authorize?state=synthetic"
+                      requestId: req_example_26
         "400": *a11
         "401": *a12
         "403": *a13
@@ -1373,10 +1428,54 @@ paths:
         default: *a21
       x-external-effect: Creates local onboarding and launch state; provider authorization and follow-up
         grant reconciliation occur in later user/callback steps.
+      x-retry-policy: Retry with the same Idempotency-Key and body to return the same local onboarding session. No provider state changes occur in this operation.
       x-idempotency-scope: tenant + operation + Idempotency-Key and request payload hash.
-      x-retry-policy: This local creation may be retried only with the same Idempotency-Key and body, which
-        returns the recorded job. Provider authorization/callback are separate single-use steps; never
-        discard the prior grant on an ambiguous result.
+  /api/v1/webhooks/meta-lifecycle/{appConfigRef}:
+    post:
+      operationId: receiveMetaLifecycleCallback
+      tags:
+        - Webhooks
+      summary: Receive a provider lifecycle callback through a fail-closed verifier boundary
+      description: The current Meta deauthorization/data-deletion wire schema, signature requirements, replay window, and subject mapping are Not confirmed. The default verifier rejects callbacks with 403; processor/configuration failure returns 503; reuse of an event identity with a different normalized kind or subject digest returns 409. Raw callback bytes are never returned or persisted.
+      security: []
+      parameters:
+        - name: appConfigRef
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 96
+            pattern: ^[A-Za-z0-9._-]+$
+      requestBody:
+        required: true
+        description: Opaque raw bytes interpreted only by the configured server-side provider verifier. The provider's current media type is Not confirmed.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+            examples:
+              fail_closed_fixture:
+                summary: Synthetic placeholder rejected by the default verifier; not a provider signature or real event.
+                value: synthetic-untrusted-callback
+      responses:
+        "200":
+          description: Verified callback durably applied, deduplicated, or safely retained as unmapped.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaLifecycleCallbackAccepted"
+        "400": *a11
+        "403":
+          description: Callback signature or flow-specific validation failed.
+        "409":
+          description: A verified event identity was already recorded with a different normalized callback kind or subject digest; the conflicting receipt is rejected and no further cleanup is applied.
+        "503": *a20
+        default: *a21
+      x-external-effect: No destructive provider operation is invoked. Only a verified callback with an unambiguous server mapping can revoke local credentials or create a deletion tombstone.
+      x-idempotency-scope: App configuration + verified event identity digest; exact repeated callbacks do not repeat local effects.
+      x-retry-policy: Provider redelivery behavior is Not confirmed. Exact repeated normalized kind/subject data returns DUPLICATE after application; a different normalized kind or subject digest under the same event identity returns 409. UNMAPPED receipts are acknowledged and stored, but no automatic cleanup worker or internal reprocess route is enabled; identical normalized data can be resubmitted after a server-owned target mapping is corrected.
   /api/v1/facebook/pages/authorizations/{authorizationId}/selection:
     parameters:
       - name: authorizationId
@@ -1489,7 +1588,7 @@ paths:
                   summary: Sanitized success example
                   value:
                     items:
-                      - id: asset_example_01
+                      - id: 10000000-0000-4000-8000-000000000004
                         kind: PHONE_NUMBER
                         status: ACTIVE
                         authorizationStatus: VERIFIED
@@ -1563,7 +1662,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
-                    id: asset_example_01
+                    id: 10000000-0000-4000-8000-000000000004
                     kind: PHONE_NUMBER
                     status: ACTIVE
                     authorizationStatus: VERIFIED
@@ -1676,7 +1775,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
-                    assetId: asset_example_01
+                    assetId: 10000000-0000-4000-8000-000000000004
                     enabled: true
                     replyText: Thanks for contacting our team.
                     version: 7
@@ -1737,7 +1836,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
-                    assetId: asset_example_01
+                    assetId: 10000000-0000-4000-8000-000000000004
                     enabled: false
                     replyText: ""
                     version: 8
@@ -1842,9 +1941,8 @@ paths:
       tags:
         - Jobs
       summary: Read asynchronous work status
-      description: Tenant-scoped job status. UNKNOWN means an external effect may have occurred; it is not
-        retryable until reconciliation supplies evidence. Job responses never include raw provider
-        error bodies or credentials.
+      description: Tenant-scoped status for durable jobs, lifecycle commands, and reauthorization onboarding sessions. UNKNOWN means an external
+        effect may have occurred; it is not retryable until reconciliation supplies evidence. Job responses never include raw provider error bodies or credentials.
       security: *a10
       parameters: *a22
       responses:
@@ -2063,7 +2161,7 @@ paths:
                     items:
                       - id: notice_example_01
                         kind: MESSAGE_RECEIVED
-                        assetRef: asset_example_01
+                        assetRef: 10000000-0000-4000-8000-000000000004
                         messageRef: message_example_01
                         status: UNREAD
                         safeSummary: A new message is available.
@@ -3062,6 +3160,38 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+    ConnectionLifecycleResult:
+      type: object
+      additionalProperties: false
+      required: [commandId, localState, cleanupState, reasonCode, requestId]
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        localState:
+          type: string
+          const: DISCONNECTED
+        cleanupState:
+          type: string
+          enum: [BLOCKED, PENDING, FAILED, UNKNOWN, CONFIRMED]
+        reasonCode:
+          type: string
+          enum: [PROVIDER_OFFBOARDING_NOT_CONFIRMED, EXTERNAL_CLEANUP_PENDING, EXTERNAL_CLEANUP_FAILED]
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    MetaLifecycleCallbackAccepted:
+      type: object
+      additionalProperties: false
+      required: [received, result]
+      properties:
+        received:
+          type: boolean
+          const: true
+        result:
+          type: string
+          enum: [APPLIED, DUPLICATE, UNMAPPED]
     JobAccepted:
       type: object
       additionalProperties: false
@@ -3085,6 +3215,10 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        connectionLifecycle:
+          $ref: "#/components/schemas/ConnectionLifecycleResult"
+        reauthorization:
+          $ref: "#/components/schemas/OnboardingCreated"
     StepStatus:
       type: object
       additionalProperties: false
@@ -3898,6 +4032,8 @@ components:
           anyOf:
             - $ref: "#/components/schemas/ErrorEnvelope"
             - type: "null"
+        connectionLifecycle:
+          $ref: "#/components/schemas/ConnectionLifecycleResult"
         requestId:
           type: string
           minLength: 1
