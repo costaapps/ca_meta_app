@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-test",
+    "declaration": false,
+    "sourceMap": false,
+    "incremental": false
+  },
+  "include": [
+    "src/meta-instagram/instagram-onboarding.adapter.ts",
+    "test/m4-09-instagram-flow.spec.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}
