@@ -1,5 +1,5 @@
 import type { DdlStep, MigrationStepContext, VersionedMigration } from './migration.types.js';
-import { assertExpectedColumns, tableExists } from './schema-inspection.js';
+import { assertExpectedColumns, tableColumns, tableExists } from './schema-inspection.js';
 import { migrationChecksum } from './migration-fingerprint.js';
 
 const onboardingColumns = [
@@ -8,6 +8,29 @@ const onboardingColumns = [
   'auth_variant', 'capability_manifest_version', 'graph_api_version', 'saga_checkpoint_json', 'requested_capabilities', 'return_route',
   'idempotency_key_hash', 'request_hash', 'provider_state_hash', 'expires_at', 'status', 'readiness', 'steps_json',
   'next_action', 'created_at', 'last_updated_at', 'provider_state_consumed_at', 'version',
+] as const;
+
+const priorOnboardingColumns = [
+  'id', 'tenant_id', 'principal_id', 'portal_session_id', 'tenant_context_hash', 'flow_variant',
+  'requested_capabilities', 'return_route', 'idempotency_key_hash', 'request_hash', 'provider_state_hash',
+  'expires_at', 'status', 'readiness', 'steps_json', 'next_action', 'created_at', 'last_updated_at',
+  'provider_state_consumed_at', 'version',
+] as const;
+const priorOnboardingIndexes = [
+  { name: 'PRIMARY', columns: ['id'], unique: true },
+  { name: 'uq_ca_meta_onboarding_idempotency', columns: ['tenant_id', 'idempotency_key_hash'], unique: true },
+  { name: 'uq_ca_meta_onboarding_provider_state', columns: ['provider_state_hash'], unique: true },
+  { name: 'ix_ca_meta_onboarding_owner', columns: ['tenant_id', 'portal_session_id', 'principal_id'], unique: false },
+  { name: 'ix_ca_meta_onboarding_expiry', columns: ['status', 'expires_at'], unique: false },
+] as const;
+const priorOnboardingForeignKeyIndexes = [
+  { name: 'fk_ca_meta_onboarding_principal', columns: ['principal_id'], unique: false },
+  { name: 'fk_ca_meta_onboarding_portal_session', columns: ['portal_session_id'], unique: false },
+] as const;
+const priorOnboardingForeignKeys = [
+  { name: 'fk_ca_meta_onboarding_tenant', columns: ['tenant_id'], table: 'ca_meta_tenants', referencedColumns: ['id'] },
+  { name: 'fk_ca_meta_onboarding_principal', columns: ['principal_id'], table: 'ca_meta_principals', referencedColumns: ['id'] },
+  { name: 'fk_ca_meta_onboarding_portal_session', columns: ['portal_session_id'], table: 'ca_meta_portal_sessions', referencedColumns: ['id'] },
 ] as const;
 
 async function verifyAddedOnboardingColumn(context: MigrationStepContext, column: string, type: string): Promise<boolean> {
@@ -29,17 +52,117 @@ async function verifyAddedOnboardingColumn(context: MigrationStepContext, column
   return true;
 }
 
-function addOnboardingColumn(column: string, type: string, after: string): DdlStep {
+function addOnboardingColumn(
+  column: string,
+  type: string,
+  after: string,
+  compatiblePriorSteps?: DdlStep['compatiblePriorSteps'],
+): DdlStep {
   return {
     id: `add-onboarding-${column.replaceAll('_', '-')}`,
     phase: 'expand',
     sql: `ALTER TABLE ca_meta_onboarding_sessions ADD COLUMN ${column} ${type} AFTER ${after}`,
     definitionVersion: 'v1',
-    definition: JSON.stringify({ table: 'ca_meta_onboarding_sessions', column, type, after, immutablePriorMigration: '202611030010-persisted-onboarding-sessions' }),
+    definition: JSON.stringify({ table: 'ca_meta_onboarding_sessions', column, type, after,
+      immutablePriorMigration: '202611030010-persisted-onboarding-sessions',
+      compatiblePriorSteps: compatiblePriorSteps?.map(({ migrationId, stepId, verify }) => ({ migrationId, stepId, verify: verify.toString() })) }),
     retryWhenAbsent: true,
     verify: (context) => verifyAddedOnboardingColumn(context, column, type),
+    ...(compatiblePriorSteps ? { compatiblePriorSteps } : {}),
   };
 }
+
+async function verifyCompatibleOnboardingSessionPriorShape(context: MigrationStepContext): Promise<boolean> {
+  const { queryRunner } = context;
+  if (!(await tableExists(queryRunner, 'ca_meta_onboarding_sessions'))) return false;
+
+  const actualColumns = await tableColumns(queryRunner, 'ca_meta_onboarding_sessions');
+  const additions = new Map([
+    ['configuration_ref', 'VARCHAR(96)'], ['provider_app_id', 'VARCHAR(512)'],
+    ['provider_environment', 'VARCHAR(16)'], ['auth_variant', 'VARCHAR(48)'],
+    ['capability_manifest_version', 'VARCHAR(96)'], ['graph_api_version', 'VARCHAR(16)'],
+    ['saga_checkpoint_json', 'JSON'],
+  ]);
+  const priorColumnSet = new Set<string>(priorOnboardingColumns);
+  const additionalColumns = actualColumns.filter((column) => !priorColumnSet.has(column));
+  const priorColumnsRemainOrdered = actualColumns
+    .filter((column) => priorColumnSet.has(column)).join('\0') === priorOnboardingColumns.join('\0');
+  if (!priorColumnsRemainOrdered || additionalColumns.some((column) => !additions.has(column))) {
+    throw new Error('M4.03 migration found an incompatible additive onboarding session shape.');
+  }
+  for (const column of additionalColumns) {
+    await verifyAddedOnboardingColumn(context, column, additions.get(column)!);
+  }
+
+  const indexRows = await queryRunner.query(
+    `SELECT index_name AS name, column_name, non_unique
+     FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions'
+     ORDER BY index_name, seq_in_index`,
+  ) as Array<{ name: string; column_name: string; non_unique: number | string }>;
+  const actualIndexes = new Map<string, { columns: string[]; unique: boolean }>();
+  for (const row of indexRows) {
+    const index = actualIndexes.get(row.name) ?? { columns: [], unique: Number(row.non_unique) === 0 };
+    index.columns.push(row.column_name);
+    actualIndexes.set(row.name, index);
+  }
+  const tenantKey = actualIndexes.get('uq_ca_meta_onboarding_tenant_id');
+  const expectedIndexes = [...priorOnboardingIndexes, ...priorOnboardingForeignKeyIndexes];
+  if (actualIndexes.size !== expectedIndexes.length + (tenantKey ? 1 : 0) ||
+      expectedIndexes.some((expected) => {
+        const actual = actualIndexes.get(expected.name);
+        return !actual || actual.unique !== expected.unique || actual.columns.join('\0') !== expected.columns.join('\0');
+      }) || (tenantKey && (!tenantKey.unique || tenantKey.columns.join('\0') !== 'tenant_id\0id'))) {
+    throw new Error('M4.03 migration found an incompatible additive onboarding index shape.');
+  }
+
+  const foreignKeyRows = await queryRunner.query(
+    `SELECT constraint_name AS name, column_name, referenced_table_name AS referenced_table,
+            referenced_column_name AS referenced_column
+     FROM information_schema.key_column_usage
+     WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions'
+       AND referenced_table_name IS NOT NULL
+     ORDER BY constraint_name, ordinal_position`,
+  ) as Array<{ name: string; column_name: string; referenced_table: string; referenced_column: string }>;
+  const actualForeignKeys = new Map<string, { columns: string[]; table: string; referencedColumns: string[] }>();
+  for (const row of foreignKeyRows) {
+    const foreignKey = actualForeignKeys.get(row.name) ?? {
+      columns: [], table: row.referenced_table, referencedColumns: [],
+    };
+    foreignKey.columns.push(row.column_name);
+    foreignKey.referencedColumns.push(row.referenced_column);
+    actualForeignKeys.set(row.name, foreignKey);
+  }
+  if (actualForeignKeys.size !== priorOnboardingForeignKeys.length || priorOnboardingForeignKeys.some((expected) => {
+    const actual = actualForeignKeys.get(expected.name);
+    return !actual || actual.table !== expected.table || actual.columns.join('\0') !== expected.columns.join('\0') ||
+      actual.referencedColumns.join('\0') !== expected.referencedColumns.join('\0');
+  })) {
+    throw new Error('M4.03 migration found an incompatible additive onboarding foreign key shape.');
+  }
+
+  const nextActionRows = await queryRunner.query(
+    `SELECT column_type, is_nullable, column_default FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'ca_meta_onboarding_sessions' AND column_name = 'next_action'`,
+  ) as Array<{ column_type: string; is_nullable: string; column_default: string | null }>;
+  const nextAction = nextActionRows[0];
+  const nextActionDefault = "'WAIT'";
+  const acceptedNextActions = [
+    "enum('wait','check_status','reauthorize','reconcile','resolve_conflict','none')",
+    "enum('wait','check_status','reauthorize','reconcile','resume','resolve_conflict','none')",
+  ];
+  if (!nextAction || !acceptedNextActions.includes(nextAction.column_type.toLowerCase()) ||
+      nextAction.is_nullable !== 'NO' || nextAction.column_default !== nextActionDefault) {
+    throw new Error('M4.03 migration found an incompatible onboarding next_action definition.');
+  }
+  return true;
+}
+
+const compatibleOnboardingSessionPriorSteps: NonNullable<DdlStep['compatiblePriorSteps']> = [{
+  migrationId: '202611030010-persisted-onboarding-sessions',
+  stepId: 'create-persisted-onboarding-sessions',
+  verify: verifyCompatibleOnboardingSessionPriorShape,
+}];
 
 async function verifyOnboardingTenantKey(context: MigrationStepContext): Promise<boolean> {
   if (!(await tableExists(context.queryRunner, 'ca_meta_onboarding_sessions'))) return false;
@@ -85,10 +208,14 @@ const extendOnboardingRecoveryActions: DdlStep = {
     const column = rows[0];
     if (!column) return false;
     const expected = "enum('wait','check_status','reauthorize','reconcile','resume','resolve_conflict','none')";
-    if (column.column_type.toLowerCase() !== expected || column.is_nullable !== 'NO' || column.column_default !== 'WAIT') {
+    const actual = column.column_type.toLowerCase();
+    const prior = "enum('wait','check_status','reauthorize','reconcile','resolve_conflict','none')";
+    if (column.is_nullable !== 'NO' || column.column_default !== "'WAIT'") {
       throw new Error('M4.03 migration found an unexpected onboarding next_action definition.');
     }
-    return true;
+    if (actual === expected) return true;
+    if (actual === prior) return false;
+    throw new Error('M4.03 migration found an unexpected onboarding next_action definition.');
   },
 };
 
@@ -208,7 +335,8 @@ const definition = {
   schemaVersion: 16,
   minimumSupportedApiVersion: 1,
   steps: [
-    addOnboardingColumn('configuration_ref', 'VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT \'unbound\'', 'flow_variant'),
+    addOnboardingColumn('configuration_ref', 'VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT \'unbound\'', 'flow_variant',
+      compatibleOnboardingSessionPriorSteps),
     addOnboardingColumn('provider_app_id', "VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL DEFAULT 'unbound'", 'configuration_ref'),
     addOnboardingColumn('provider_environment', "VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'unbound'", 'provider_app_id'),
     addOnboardingColumn('auth_variant', "VARCHAR(48) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'FACEBOOK_LOGIN_FOR_BUSINESS'", 'provider_environment'),

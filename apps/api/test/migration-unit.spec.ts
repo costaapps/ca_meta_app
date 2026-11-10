@@ -134,6 +134,11 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   ]);
   const recoveryActionsStep = ONBOARDING_SAGA_MIGRATION.steps.find((step) => step.id === 'extend-onboarding-next-actions');
   assert.ok(recoveryActionsStep && 'sql' in recoveryActionsStep && recoveryActionsStep.sql.includes("'RESUME'"));
+  const compatibleOnboardingStep = ONBOARDING_SAGA_MIGRATION.steps.find((step) => step.id === 'add-onboarding-configuration-ref');
+  assert.deepEqual(compatibleOnboardingStep && 'sql' in compatibleOnboardingStep ?
+    compatibleOnboardingStep.compatiblePriorSteps?.map(({ migrationId, stepId }) => ({ migrationId, stepId })) : [], [{
+      migrationId: '202611030010-persisted-onboarding-sessions', stepId: 'create-persisted-onboarding-sessions',
+    }]);
   const codeEnvelopeStep = ONBOARDING_SAGA_MIGRATION.steps.at(-1);
   assert.ok(codeEnvelopeStep && 'sql' in codeEnvelopeStep);
   assert.ok(codeEnvelopeStep.sql.includes('nonce BINARY(12) NULL'));
