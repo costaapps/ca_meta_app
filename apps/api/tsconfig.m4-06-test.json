@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-test",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/onboarding/coexistence-saga.adapter.ts",
+    "test/m4-06-coexistence-finalization.spec.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}
