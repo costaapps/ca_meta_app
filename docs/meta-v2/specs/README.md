@@ -15,6 +15,7 @@ These specs turn accepted M1 contracts into bounded implementation slices. They 
 | [Internal Meta Graph client](meta-graph-client.md) | #44 | M3.08 one-use resolver; M4.01 verified config/capability; ADR-011 | `apps/api/test/m4-02-meta-graph.spec.ts`, `tools/m4-02/` |
 | [Meta onboarding saga](onboarding-saga.md) | #45 | M3.05 sessions; M3.06 asset catalog; M3.07 vault; M4.01 flow config; M4.02 Graph transport; ADR-012 | `apps/api/test/m4-03-onboarding-saga.spec.ts`, `tools/m4-03/` |
 | [Coexistence server finalization](coexistence-server-finalization.md) | #52 | M4.03 onboarding saga; M3.06 asset catalog; M3.07 vault; M3.08 credential resolver; M4.11 subscriptions; ADR-014 | `apps/api/test/m4-06-coexistence-finalization.spec.ts`, `tools/m4-06/` |
+| [Coexistence history, state and echo processing](coexistence-event-processing.md) | #53 | M4.06 finalization; M4.10 webhook inbox; M2.05 persistence; M3.10 retention; ADR-018 | `apps/api/test/m4-07-coexistence-events.spec.ts`, `tools/m4-07/` |
 | [Meta onboarding](meta-onboarding.md) | #12, #15, #17 | capability matrix; OpenAPI onboarding operations; event schemas | `tools/m1-03/`, `tools/m1-07/` |
 | [Webhooks](webhooks.md) | #14, #17 | inbox/outbox event schemas; OpenAPI webhook ingress | `tools/m1-05/`, `tools/m1-07/` |
 | [Portal](portal.md) | #18 | M1.08 journey, status-copy, screen/API map | `tools/m1-08/walkthrough.mjs` |
