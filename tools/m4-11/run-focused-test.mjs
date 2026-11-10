@@ -17,11 +17,13 @@ function run(command, args) {
 }
 
 try {
-  process.stdout.write(`M4.11 synthetic subscription reconciliation tests — Node ${process.version}\n`);
+  process.stdout.write(`M4.11 focused subscription checks — Node ${process.version}\n`);
   if (!run(process.execPath, [compiler, '--project', project, '--pretty', 'false', '--outDir', temporaryOutput])) {
     process.exitCode ||= 1;
   } else {
-    run(process.execPath, ['--test', join(temporaryOutput, 'test', 'm4-11-meta-subscriptions.spec.js')]);
+    run(process.execPath, ['--test',
+      join(temporaryOutput, 'test', 'm4-11-meta-subscriptions.spec.js'),
+      join(temporaryOutput, 'test', 'm4-11-meta-subscriptions.integration.spec.js')]);
   }
 } finally {
   await rm(temporaryOutput, { recursive: true, force: true });

@@ -15,7 +15,8 @@
     "src/identity/**/*.ts",
     "src/jobs/durable-work-database.ts",
     "src/config/environment.ts",
-    "test/m4-11-meta-subscriptions.spec.ts"
+    "test/m4-11-meta-subscriptions.spec.ts",
+    "test/m4-11-meta-subscriptions.integration.spec.ts"
   ],
   "exclude": ["node_modules", "dist", "dist-test"]
 }

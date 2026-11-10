@@ -101,11 +101,11 @@ try {
   $sourceLedgerSummary = & docker compose -p $composeProject -f $composeFile exec -T -e "MYSQL_PWD=$rootPassword" mariadb mariadb --user=root --database=ca_meta_m203 --batch --skip-column-names --execute $ledgerSummaryQuery
   if ($LASTEXITCODE -ne 0) { throw "Synthetic source migration-ledger verification failed with exit code $LASTEXITCODE." }
   $sourceLedgerValues = (($sourceLedgerSummary -join '').Trim() -split '\|')
-  if ($sourceLedgerValues.Count -ne 6 -or [int]$sourceLedgerValues[0] -ne 17 -or
+  if ($sourceLedgerValues.Count -ne 6 -or [int]$sourceLedgerValues[0] -ne 18 -or
       [int]$sourceLedgerValues[0] -ne [int]$sourceLedgerValues[1] -or
-      [int]$sourceLedgerValues[0] -ne [int]$sourceLedgerValues[2] -or [int]$sourceLedgerValues[3] -ne 17 -or
-      $sourceLedgerValues[4] -ne '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17') {
-    throw 'Synthetic source database does not have the complete ordered 1–17 applied migration chain.'
+      [int]$sourceLedgerValues[0] -ne [int]$sourceLedgerValues[2] -or [int]$sourceLedgerValues[3] -ne 18 -or
+      $sourceLedgerValues[4] -ne '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18') {
+    throw 'Synthetic source database does not have the complete ordered 1–18 applied migration chain.'
   }
   $restoreQuery = "SET SESSION group_concat_max_len = 65535; SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_assets),'|',(SELECT COUNT(*) FROM ca_meta_assets WHERE HEX(external_id)='3030302d3132337c5a61c5bcc3b3c582c48720f09fa7aa'),'|',(SELECT COUNT(*) FROM ca_meta_assets WHERE id='00000000-0000-4000-8000-000000010000' AND DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s.%f')='2026-10-29 12:34:56.123456'),'|',(SELECT CONCAT(COUNT(*),'|',COALESCE(SUM(state='APPLIED'),0),'|',COUNT(DISTINCT schema_version),'|',COALESCE(MAX(schema_version),0),'|',COALESCE(GROUP_CONCAT(schema_version ORDER BY schema_version SEPARATOR ','),''),'|',COALESCE(SHA2(GROUP_CONCAT(CONCAT_WS(':',schema_version,migration_id,checksum,state) ORDER BY schema_version,migration_id SEPARATOR ','),256),'empty')) FROM ca_meta_schema_migrations))"
   $restoreSummary = & docker compose -p $composeProject -f $composeFile exec -T -e "MYSQL_PWD=$rootPassword" mariadb mariadb --user=root --database=ca_meta_m203_restore --batch --skip-column-names --execute $restoreQuery

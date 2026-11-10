@@ -230,7 +230,7 @@ const audit = tableStep('create-meta-subscription-audit', 'ca_meta_subscription_
       REFERENCES ca_meta_app_configurations (tenant_id, id, provider, environment) ON UPDATE RESTRICT ON DELETE RESTRICT
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`);
 
-const definition = { id: '202611060014-meta-subscriptions', schemaVersion: 14, minimumSupportedApiVersion: 1,
+const definition = { id: '202611060014-meta-subscriptions', schemaVersion: 18, minimumSupportedApiVersion: 1,
   steps: [target, binding, appWebhook, audit, appendOnlyTrigger('UPDATE'), appendOnlyTrigger('DELETE')] } as const;
 
 export const META_SUBSCRIPTIONS_MIGRATION: VersionedMigration = { ...definition, checksum: migrationChecksum(definition) };
