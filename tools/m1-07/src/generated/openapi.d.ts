@@ -364,7 +364,7 @@ export interface paths {
             readonly query?: never;
             readonly header?: never;
             readonly path: {
-                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                /** @description UUID connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
                 readonly connectionId: string;
             };
             readonly cookie?: never;
@@ -378,9 +378,33 @@ export interface paths {
         readonly post?: never;
         /**
          * Start a connection disconnect
-         * @description Requires operator/owner scope and CSRF. Local desired state is recorded first; provider revocation/cleanup is a separate bounded job. A provider success is not assumed.
+         * @description Requires owner/admin scope and CSRF. This is a local disconnect request; it does not call Meta or claim provider offboarding. If the authorization has multiple active verified asset bindings, this broad route conflicts and the caller must select one asset on the asset-scoped route.
          */
         readonly delete: operations["disconnectConnection"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/connections/{connectionId}/assets/{assetId}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly connectionId: string;
+                /** @description Tenant-owned resource reference selected from the server connection catalog. */
+                readonly assetId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /**
+         * Disconnect one asset binding without affecting sibling resources
+         * @description Requires owner/admin scope and CSRF. Only the selected tenant/authorization/asset binding is disabled locally. Shared credentials, other asset bindings, and provider subscriptions remain untouched unless a later reviewed operation proves they can be changed safely.
+         */
+        readonly delete: operations["disconnectConnectionAsset"];
         readonly options?: never;
         readonly head?: never;
         readonly patch?: never;
@@ -391,7 +415,7 @@ export interface paths {
             readonly query?: never;
             readonly header?: never;
             readonly path: {
-                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                /** @description UUID connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
                 readonly connectionId: string;
             };
             readonly cookie?: never;
@@ -403,6 +427,26 @@ export interface paths {
          * @description Creates a new local onboarding session for the selected connection. Provider authorization starts only after the user follows its launch URL; this request changes no provider state. The prior grant remains usable while verified and eligible under current policy; rotation is explicit.
          */
         readonly post: operations["createReauthorization"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/webhooks/meta-lifecycle/{appConfigRef}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Receive a provider lifecycle callback through a fail-closed verifier boundary
+         * @description The current Meta deauthorization/data-deletion wire schema, signature requirements, replay window, and subject mapping are Not confirmed. The default verifier rejects callbacks with 403; processor/configuration failure returns 503. Raw callback bytes are never returned or persisted.
+         */
+        readonly post: operations["receiveMetaLifecycleCallback"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -890,6 +934,23 @@ export interface components {
              */
             readonly launchUrl: string;
             readonly requestId: string;
+        };
+        readonly ConnectionLifecycleResult: {
+            /** Format: uuid */
+            readonly commandId: string;
+            /** @constant */
+            readonly localState: "DISCONNECTED";
+            /** @enum {string} */
+            readonly cleanupState: "BLOCKED" | "PENDING" | "FAILED" | "UNKNOWN" | "CONFIRMED";
+            /** @enum {string} */
+            readonly reasonCode: "PROVIDER_OFFBOARDING_NOT_CONFIRMED" | "EXTERNAL_CLEANUP_PENDING" | "EXTERNAL_CLEANUP_FAILED";
+            readonly requestId: string;
+        };
+        readonly MetaLifecycleCallbackAccepted: {
+            /** @constant */
+            readonly received: true;
+            /** @enum {string} */
+            readonly result: "APPLIED" | "DUPLICATE" | "UNMAPPED";
         };
         readonly JobAccepted: {
             readonly jobId: string;
@@ -2105,7 +2166,7 @@ export interface operations {
                 readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
             };
             readonly path: {
-                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                /** @description UUID connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
                 readonly connectionId: string;
             };
             readonly cookie?: never;
@@ -2158,7 +2219,7 @@ export interface operations {
                 readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             readonly path: {
-                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                /** @description UUID connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
                 readonly connectionId: string;
             };
             readonly cookie?: never;
@@ -2173,7 +2234,61 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["JobAccepted"];
+                    readonly "application/json": components["schemas"]["ConnectionLifecycleResult"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 404: components["responses"]["NotFound"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 412: components["responses"]["PreconditionFailed"];
+            readonly 413: components["responses"]["PayloadTooLarge"];
+            readonly 422: components["responses"]["Unprocessable"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly disconnectConnectionAsset: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /**
+                 * @description Exact configured browser Origin; wildcard matching is forbidden.
+                 * @example https://portal.example.invalid
+                 */
+                readonly Origin: components["parameters"]["Origin"];
+                /** @description Must match the configured exact-origin topology; cross-site, missing or invalid values fail. */
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                /** @description Session-bound anti-CSRF value; not a DTO property and not sufficient without the session cookie. */
+                readonly "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+                /**
+                 * @description Random caller-generated request key; server scope is current tenant + operation + key. Same payload hash replays prior acceptance; different payload hash returns 409 with no new effect.
+                 * @example idem_example_key_01
+                 */
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            readonly path: {
+                readonly connectionId: string;
+                /** @description Tenant-owned resource reference selected from the server connection catalog. */
+                readonly assetId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Local disconnect recorded; provider cleanup is not confirmed. */
+            readonly 202: {
+                headers: {
+                    /** @description Relative URI of the tenant-scoped accepted job; poll it for the outcome. */
+                    readonly Location?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ConnectionLifecycleResult"];
                 };
             };
             readonly 400: components["responses"]["BadRequest"];
@@ -2211,22 +2326,22 @@ export interface operations {
                 readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             readonly path: {
-                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                /** @description UUID connection reference from the tenant-scoped catalog. The server always resolves and authorizes it within the active tenant context. */
                 readonly connectionId: string;
             };
             readonly cookie?: never;
         };
         readonly requestBody?: never;
         readonly responses: {
-            /** @description Sanitized success example */
-            readonly 202: {
+            /** @description New local onboarding session associated with the existing connection; its prior grant remains active. */
+            readonly 201: {
                 headers: {
                     /** @description Relative URI of the tenant-scoped accepted job; poll it for the outcome. */
                     readonly Location?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["JobAccepted"];
+                    readonly "application/json": components["schemas"]["OnboardingCreated"];
                 };
             };
             readonly 400: components["responses"]["BadRequest"];
@@ -2238,6 +2353,43 @@ export interface operations {
             readonly 413: components["responses"]["PayloadTooLarge"];
             readonly 422: components["responses"]["Unprocessable"];
             readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly receiveMetaLifecycleCallback: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly appConfigRef: string;
+            };
+            readonly cookie?: never;
+        };
+        /** @description Opaque raw bytes interpreted only by the configured server-side provider verifier. The provider's current media type is Not confirmed. */
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/octet-stream": string;
+            };
+        };
+        readonly responses: {
+            /** @description Verified callback durably applied, deduplicated, or safely retained as unmapped. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MetaLifecycleCallbackAccepted"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            /** @description Callback signature or flow-specific validation failed. */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
             readonly 503: components["responses"]["Unavailable"];
             readonly default: components["responses"]["UnexpectedError"];
         };

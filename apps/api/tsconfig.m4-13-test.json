@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/meta-lifecycle/**/*.ts",
+    "src/database/migrations/connection-lifecycle.ts",
+    "src/database/migrations/migrations.ts",
+    "src/onboarding/onboarding-status.module.ts",
+    "src/meta-webhooks/meta-webhooks.module.ts",
+    "src/meta-webhooks/meta-webhook-validation.ts",
+    "src/common/security/portal-request-security.ts",
+    "src/http-boundaries.ts",
+    "test/m4-13-connection-lifecycle.spec.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}
