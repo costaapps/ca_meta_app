@@ -408,6 +408,12 @@ test('M4.10 MariaDB webhook routes, quarantine replay, status serialization and 
       tenant_id: null, app_configuration_id: null, asset_id: null });
   } finally {
     try {
+      const quarantineEvidenceRows = await dataSource.query(
+        `SELECT id FROM ca_meta_asset_claim_quarantine
+         WHERE tenant_id = ? AND app_configuration_id = ? AND external_id = ?`,
+        [tenantB, appB, phoneConflict],
+      ) as Array<{ id: string }>;
+      const retainQuarantineEvidence = quarantineEvidenceRows.length > 0;
       const immutableReplayRows = replayEventId
         ? await dataSource.query('SELECT id FROM ca_meta_webhook_replay_audit WHERE webhook_event_id = ?', [replayEventId]) as Array<{ id: string }>
         : [];
@@ -437,14 +443,16 @@ test('M4.10 MariaDB webhook routes, quarantine replay, status serialization and 
       if (retainReplayEvidence) {
         await dataSource.query('DELETE FROM ca_meta_assets WHERE tenant_id IN (?, ?) AND id <> ?', [tenantA, tenantB, assetReplay]);
         await dataSource.query('DELETE FROM ca_meta_authorizations WHERE tenant_id = ?', [tenantB]);
-        // The cross-tenant quarantine claim is append-only and references tenantB's app configuration.
-        // Preserve that minimal synthetic mapping alongside the replay evidence.
+        // If inserted, the cross-tenant quarantine claim is append-only and references tenantB's app configuration.
       } else {
         await dataSource.query('DELETE FROM ca_meta_assets WHERE tenant_id IN (?, ?)', [tenantA, tenantB]);
         await dataSource.query('DELETE FROM ca_meta_authorizations WHERE tenant_id IN (?, ?)', [tenantA, tenantB]);
-        // The cross-tenant quarantine claim is append-only and references tenantB's app configuration.
         await dataSource.query('DELETE FROM ca_meta_app_configurations WHERE tenant_id = ?', [tenantA]);
         await dataSource.query('DELETE FROM ca_meta_tenants WHERE id = ?', [tenantA]);
+      }
+      if (!retainQuarantineEvidence) {
+        await dataSource.query('DELETE FROM ca_meta_app_configurations WHERE tenant_id = ?', [tenantB]);
+        await dataSource.query('DELETE FROM ca_meta_tenants WHERE id = ?', [tenantB]);
       }
     } finally {
       await database.close();
