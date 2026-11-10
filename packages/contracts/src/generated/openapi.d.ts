@@ -975,6 +975,7 @@ export interface components {
             readonly stale?: boolean;
             readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
             readonly capabilities?: components["schemas"]["AssetCapabilities"];
+            readonly statusObservation?: components["schemas"]["AssetStatusObservation"];
         };
         readonly ConnectionDetail: {
             readonly id: string;
@@ -1017,6 +1018,7 @@ export interface components {
             readonly stale: boolean;
             readonly capabilities?: components["schemas"]["AssetCapabilities"];
             readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
+            readonly statusObservation?: components["schemas"]["AssetStatusObservation"];
             readonly requestId: string;
         };
         readonly AssetListItem: {
@@ -1036,6 +1038,7 @@ export interface components {
             readonly stale: boolean;
             readonly capabilities?: components["schemas"]["AssetCapabilities"];
             readonly diagnostics?: components["schemas"]["AssetDiagnostics"];
+            readonly statusObservation?: components["schemas"]["AssetStatusObservation"];
         };
         /** @description Safe summaries from tenant-scoped read models. Onboarding is UNKNOWN because no persisted asset or authorization binding exists; raw provider diagnostics are never returned. */
         readonly AssetDiagnostics: {
@@ -1065,6 +1068,32 @@ export interface components {
             readonly canSubscribe: boolean;
             readonly canReauthorize: boolean;
             readonly canDisconnect: boolean;
+        };
+        /** @description Tenant-scoped normalized observation. It does not authorize operations or change authorization/credential state. Unsupported provider-specific fields remain Not confirmed. */
+        readonly AssetStatusObservation: {
+            /** @enum {string} */
+            readonly status: "ACTIVE" | "INACTIVE" | "UNKNOWN" | "STALE";
+            /** @enum {string} */
+            readonly availability: "OBSERVED" | "MISSING" | "UNKNOWN" | "UNAVAILABLE";
+            /** Format: date-time */
+            readonly observedAt: string | null;
+            /** Format: date-time */
+            readonly fetchedAt: string;
+            /** Format: date-time */
+            readonly staleAfter: string;
+            /** @enum {string} */
+            readonly source: "META_API" | "SIGNED_WEBHOOK";
+            readonly version: number;
+            /** @enum {string} */
+            readonly permissionAvailability: "OBSERVED" | "UNKNOWN" | "UNAVAILABLE";
+            /** @enum {string} */
+            readonly subscriptionState: "UNKNOWN" | "PENDING" | "ACTIVE" | "FAILED" | "REMOVED";
+            /** @enum {string} */
+            readonly projectionState: "UNKNOWN" | "PENDING" | "SYNCED" | "STALE" | "FAILED";
+            readonly driftCodes: readonly ("ASSET_STATUS_CHANGED" | "PERMISSIONS_CHANGED" | "SUBSCRIPTION_CHANGED" | "PROJECTION_STALE")[];
+            /** @enum {string} */
+            readonly actionableReason: "REAUTHORIZE" | "CHECK_STATUS" | "RECONCILE" | "NONE";
+            readonly providerCode: string | null;
         };
         readonly AssetListPage: {
             readonly items: readonly components["schemas"]["AssetListItem"][];

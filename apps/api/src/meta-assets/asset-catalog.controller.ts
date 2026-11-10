@@ -11,6 +11,7 @@ import {
   Query,
   Req,
   ServiceUnavailableException,
+  TooManyRequestsException,
   UseGuards,
 } from '@nestjs/common';
 import { PublicRoute } from '../common/security/public-route.decorator.js';
@@ -23,7 +24,7 @@ import {
   AssetCatalogService,
   AssetNotFoundError,
 } from './asset-catalog.service.js';
-import { AssetRefreshUnavailableError } from './asset-refresh.service.js';
+import { AssetRefreshRateLimitError, AssetRefreshUnavailableError } from './asset-refresh.service.js';
 
 const CHANNELS = new Set(['FACEBOOK', 'INSTAGRAM', 'WHATSAPP']);
 const STATUSES = new Set(['ACTIVE', 'INACTIVE', 'UNKNOWN', 'STALE']);
@@ -168,6 +169,7 @@ export class AssetCatalogController {
       return await this.catalog.refreshAsset(request.portalSession, tenantContextRef(request, headerContext), assetId, requestId(request));
     } catch (error) {
       if (error instanceof AssetCatalogInputError) throw new BadRequestException();
+      if (error instanceof AssetRefreshRateLimitError) throw new TooManyRequestsException();
       if (error instanceof AssetRefreshUnavailableError) throw new ServiceUnavailableException();
       if (error instanceof AssetNotFoundError) throw new NotFoundException();
       throw error;

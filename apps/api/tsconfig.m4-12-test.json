@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/config/environment.ts",
+    "src/credentials/credential-resolver.types.ts",
+    "src/database/migrations/asset-observations.ts",
+    "src/database/migrations/migration-fingerprint.ts",
+    "src/database/migrations/migration.types.ts",
+    "src/database/migrations/schema-inspection.ts",
+    "src/jobs/durable-work-database.ts",
+    "src/jobs/event-validation.ts",
+    "src/jobs/job-store.ts",
+    "src/meta-assets/asset-observation.service.ts",
+    "src/meta-assets/asset-refresh.service.ts",
+    "src/meta-assets/meta-assets.types.ts",
+    "src/meta-assets/mysql-asset-observation.repository.ts",
+    "test/m4-12-asset-observation.spec.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}

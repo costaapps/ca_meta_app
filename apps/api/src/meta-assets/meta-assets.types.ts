@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { MetaAuthVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
+import type { AssetObservationSnapshot } from './asset-observation.service.js';
 
 export type MetaEnvironment = 'development' | 'test' | 'staging' | 'production';
 export type AuthorizationState = 'ACTIVE' | 'PARTIAL' | 'REAUTH_REQUIRED' | 'UNKNOWN' | 'REVOKED' | 'DISCONNECTED';
@@ -181,6 +182,7 @@ export interface AssetCatalogReadModel {
   readonly stale: boolean;
   readonly capabilityEvidence: readonly AssetCapabilityEvidence[];
   readonly diagnostics: AssetDiagnostics;
+  readonly statusObservation?: AssetObservationSnapshot | null;
   readonly reauthorizationRequired: boolean;
 }
 
