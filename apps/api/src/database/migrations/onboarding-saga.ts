@@ -69,7 +69,7 @@ const priorOnboardingColumnShapes: Readonly<Record<string, OnboardingColumnShape
   ], 'NO', "'WAIT'", 'utf8mb4', 'utf8mb4_bin'),
   created_at: onboardingColumnShape('datetime(6)', 'NO', null),
   last_updated_at: onboardingColumnShape('datetime(6)', 'NO', null),
-  provider_state_consumed_at: onboardingColumnShape('datetime(6)', 'YES', null),
+  provider_state_consumed_at: onboardingColumnShape('datetime(6)', 'YES', 'NULL'),
   version: onboardingColumnShape(['bigint unsigned', 'bigint(20) unsigned'], 'NO', '1'),
 };
 
