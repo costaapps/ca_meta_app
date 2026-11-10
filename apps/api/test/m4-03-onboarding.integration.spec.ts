@@ -285,8 +285,8 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     const adapter: OnboardingSagaAdapter = {
       async exchangeAuthorizationCode() { providerEffects += 1; return { authorizationRef: 'unexpected' }; },
       async discoverAndPersistAssets() { providerEffects += 1; return { assetRefs: [assetRef] }; },
-      async ensureSubscriptions() { providerEffects += 1; return { subscriptionRef: 'unexpected' }; },
-      async publishProjection() { providerEffects += 1; return { projectionRef: 'unexpected' }; },
+      async ensureSubscriptions() { providerEffects += 1; },
+      async publishProjection() { providerEffects += 1; },
     };
     const sagaHandler = createOnboardingSagaHandler(database, {
       async consumeOnce() { codeReads += 1; return undefined; },
