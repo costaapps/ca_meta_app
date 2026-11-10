@@ -17,9 +17,9 @@ export interface OnboardingPhoneReadiness {
 }
 
 const REASONS: Readonly<Record<OnboardingPhoneReadinessState, readonly OnboardingPhoneReadinessReason[]>> = Object.freeze({
-  READY: Object.freeze(['REGISTERED', 'ALREADY_REGISTERED']),
-  ACTION_REQUIRED: Object.freeze(['PHONE_REGISTRATION_REQUIRED', 'PIN_NOT_AVAILABLE', 'TOKEN_ELIGIBILITY_NOT_CONFIRMED', 'REGISTRATION_REJECTED']),
-  UNKNOWN: Object.freeze(['PHONE_STATE_NOT_CONFIRMED', 'REGISTRATION_RESULT_UNKNOWN']),
+  READY: Object.freeze(['REGISTERED', 'ALREADY_REGISTERED'] as const),
+  ACTION_REQUIRED: Object.freeze(['PHONE_REGISTRATION_REQUIRED', 'PIN_NOT_AVAILABLE', 'TOKEN_ELIGIBILITY_NOT_CONFIRMED', 'REGISTRATION_REJECTED'] as const),
+  UNKNOWN: Object.freeze(['PHONE_STATE_NOT_CONFIRMED', 'REGISTRATION_RESULT_UNKNOWN'] as const),
 });
 
 /** Rejects provider IDs, PINs and arbitrary fields; only tenant-owned internal asset refs can cross this boundary. */

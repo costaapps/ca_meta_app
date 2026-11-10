@@ -63,7 +63,7 @@ class MemorySagaCheckpointPort implements OnboardingSagaCheckpointPort {
     this.status = input.status ?? 'CODE_RECEIVED';
   }
 
-  async read(): Promise<OnboardingSagaSnapshot> {
+  async read(_tenantId: string, _onboardingId: string): Promise<OnboardingSagaSnapshot> {
     const row: SagaRow = {
       id: onboardingId, tenant_id: tenantId, principal_id: '112c8fc8-6284-419a-92f3-0a2584b4ecf0',
       portal_session_id: 'ab4ab85c-40d7-432f-b79c-7c2a5f14e7de', flow_variant: 'WHATSAPP_CLOUD_API',
@@ -175,7 +175,7 @@ test('a proven no-effect subscription failure retries only that pending stage; c
   assert.equal(assetCalls, 1);
   assert.equal(subscriptionCalls, 2);
   assert.equal(projectionCalls, 1);
-  assert.equal((await checkpoints.read()).row.status, 'READY');
+  assert.equal((await checkpoints.read(tenantId, onboardingId)).row.status, 'READY');
 });
 
 test('revoked portal session or membership blocks provider effects after enqueue', async () => {
@@ -217,7 +217,7 @@ test('empty asset discovery ends PARTIAL and never attempts subscriptions or REA
   const handler = createOnboardingSagaHandler({} as DurableWorkDatabase, codeConsumer, adapter, checkpoints);
   const outcome = await handler(makeJob(), new AbortController().signal, {} as never);
   assert.deepEqual(outcome, { kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' });
-  const final = await checkpoints.read();
+  const final = await checkpoints.read(tenantId, onboardingId);
   assert.equal(final?.row.status, 'PARTIAL');
   assert.equal(final?.steps.find((step) => step.name === 'asset-verification')?.status, 'FAILED');
   assert.equal(subscriptions, 0);
@@ -242,11 +242,11 @@ test('exclusive WhatsApp with a number requiring action checkpoints per-number r
     async publishProjection() {},
   };
   const handler = createOnboardingSagaHandler({} as DurableWorkDatabase, codeConsumer, adapter, checkpoints);
-  const result = await handler(makeJob(), new AbortController().signal);
+  const result = await handler(makeJob(), new AbortController().signal, {} as never);
   const snapshot = await checkpoints.read(tenantId, onboardingId);
   assert.equal(result.kind, 'SUCCEEDED');
   assert.equal(snapshot?.row.status, 'PARTIAL');
-  assert.equal(snapshot?.row.steps_json.find((step) => step.name === 'asset-verification')?.status, 'RETRY_PENDING');
+  assert.equal(snapshot?.steps.find((step) => step.name === 'asset-verification')?.status, 'RETRY_PENDING');
   assert.deepEqual(snapshot?.evidence.phoneReadiness?.[0], { assetRef, state: 'ACTION_REQUIRED',
     reasonCode: 'TOKEN_ELIGIBILITY_NOT_CONFIRMED', observedAt: '2026-11-10T12:00:00.000Z' });
   assert.equal(subscriptionCalls, 0);
@@ -291,5 +291,5 @@ test('reconcile no-effect exposes RESUME and an explicit resume never repeats au
   assert.equal(exchangeCalls, 0);
   assert.equal(subscriptionCalls, 1);
   assert.equal(projectionCalls, 1);
-  assert.equal((await checkpoints.read()).row.status, 'READY');
+  assert.equal((await checkpoints.read(tenantId, onboardingId)).row.status, 'READY');
 });
