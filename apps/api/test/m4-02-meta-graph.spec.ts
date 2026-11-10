@@ -88,6 +88,24 @@ function client(transport: MetaGraphTransport, credentials = new FakeCredentials
   return { instance, credentials, metrics };
 }
 
+function exclusiveClient(transport: MetaGraphTransport, credentials = new FakeCredentials(),
+  options: ConstructorParameters<typeof MetaGraphClient>[4] = {}) {
+  const profile = exclusiveProfile();
+  const baseRegistry = new MetaAppConfigRegistry([profile]);
+  const baseBootstrap = baseRegistry.bootstrap();
+  const operations = new Set<MetaOperation>(['ASSET_DISCOVERY', 'PHONE_REGISTRATION_CONVENTIONAL']);
+  // Test-only enablement exercises the exclusive routes without asserting production grants.
+  const bootstrap = Object.freeze({ ...baseBootstrap, profiles: Object.freeze(baseBootstrap.profiles.map((item) =>
+    item.flowVariant === 'WHATSAPP_EXCLUSIVE' && item.authVariant === 'WHATSAPP_EMBEDDED_SIGNUP'
+      ? Object.freeze({ ...item, enabled: true, reasonCode: null, capabilities: Object.freeze(item.capabilities.map((capability) =>
+        operations.has(capability.operation) ? Object.freeze({ ...capability, enabled: true, reasonCode: null }) : capability)) })
+      : item)) });
+  const registry = Object.freeze({ resolve: () => profile, bootstrap: () => bootstrap }) as unknown as MetaAppConfigRegistry;
+  const metrics = new InMemoryMetaGraphMetrics();
+  const instance = new MetaGraphClient(registry, credentials, transport, metrics, options);
+  return { instance, credentials, metrics };
+}
+
 function facebookDiscoveryClient(transport: MetaGraphTransport, credentials = new FakeCredentials(),
   options: ConstructorParameters<typeof MetaGraphClient>[4] = {}) {
   const profile = facebookProfile();
@@ -239,7 +257,7 @@ test('exclusive WhatsApp registration uses the exact route/body and scrubs PIN e
   const pin = '123456';
   const transport = new SequenceTransport([response(200, { success: true, pin, message: `registration used ${pin}` })]);
   const credentials = new FakeCredentials();
-  const runtime = client(transport, credentials, {}, exclusiveProfile());
+  const runtime = exclusiveClient(transport, credentials);
   const result = await runtime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin }));
 
   assert.equal(result.outcome, 'SUCCEEDED');
@@ -261,7 +279,7 @@ test('registration rejects Coexistence, invalid PIN and additional body fields b
   assert.equal(coexistence.error?.category, 'REQUEST_INVALID');
   assert.equal(runtime.credentials.callbacks, 0);
 
-  const exclusiveRuntime = client(transport, new FakeCredentials(), {}, exclusiveProfile());
+  const exclusiveRuntime = exclusiveClient(transport);
   const invalidPin = await exclusiveRuntime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin: '12345' }));
   const extraField = await exclusiveRuntime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin: '123456', assetId }));
   assert.equal(invalidPin.error?.category, 'REQUEST_INVALID');
@@ -272,7 +290,7 @@ test('registration rejects Coexistence, invalid PIN and additional body fields b
 
 test('ambiguous registration POST is not retried', async () => {
   const transport = new SequenceTransport([new MetaGraphTransportFailure('OVERALL_TIMEOUT')]);
-  const runtime = client(transport, new FakeCredentials(), {}, exclusiveProfile());
+  const runtime = exclusiveClient(transport);
   const result = await runtime.instance.execute(exclusiveRequest({ messaging_product: 'whatsapp', pin: '123456' }));
   assert.equal(result.outcome, 'UNKNOWN');
   assert.equal(result.ambiguous, true);
@@ -286,7 +304,7 @@ test('exclusive phone_numbers discovery consumes every bounded Graph page', asyn
       paging: { next: `https://graph.facebook.com/v27.0/${providerObjectId}/phone_numbers?limit=100&after=cursor-two` } }),
     response(200, { data: [{ id: '1913623884432103', verified_name: 'Synthetic Two', display_phone_number: '+15550000002' }] }),
   ]);
-  const runtime = client(transport, new FakeCredentials(), {}, exclusiveProfile());
+  const runtime = exclusiveClient(transport);
   const result = await runtime.instance.collect(exclusivePhoneListRequest(), { maxPages: 100, maxItems: 100 });
   assert.equal(result.outcome, 'SUCCEEDED');
   assert.deepEqual(result.data.map((item) => isRecord(item) ? item['id'] : undefined),
@@ -298,7 +316,7 @@ test('exclusive phone_numbers discovery consumes every bounded Graph page', asyn
 
 test('owned WABA discovery is exclusive-only and uses the server-resolved business ID', async () => {
   const transport = new SequenceTransport([response(200, { data: [{ id: 'waba-123' }] })]);
-  const exclusive = client(transport, new FakeCredentials(), {}, exclusiveProfile());
+  const exclusive = exclusiveClient(transport);
   const result = await exclusive.instance.collect(exclusiveOwnedWabaRequest());
   assert.equal(result.outcome, 'SUCCEEDED');
   assert.equal(transport.calls[0]?.path, `/v27.0/${providerObjectId}/owned_whatsapp_business_accounts`);

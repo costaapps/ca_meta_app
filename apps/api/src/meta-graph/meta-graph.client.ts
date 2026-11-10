@@ -360,7 +360,11 @@ export class MetaGraphClient {
     }
     const { result: collected, pages: safePages } = execution;
     if (options.signal?.aborted) return facebookPageDiscoveryCancelled(collected);
-    if (collected.outcome !== 'SUCCEEDED') return facebookPageDiscoveryResult(collected);
+    if (collected.outcome !== 'SUCCEEDED') {
+      // Do not report a resumable partial inventory when no Page credentials were enrolled.
+      const incomplete = collected.outcome === 'PARTIAL' ? Object.freeze({ ...collected, outcome: 'FAILED' as const }) : collected;
+      return facebookPageDiscoveryResult(incomplete);
+    }
 
     if (new Set(safePages.map((page) => page.providerPageId)).size !== safePages.length) {
       return facebookPageDiscoveryFailure(collected, 'RESPONSE_INVALID');

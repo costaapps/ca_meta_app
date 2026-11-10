@@ -154,7 +154,8 @@ test('a proven no-effect subscription failure retries only that pending stage; c
   let projectionCalls = 0;
   const adapter: OnboardingSagaAdapter = {
     async exchangeAuthorizationCode() { exchangeCalls += 1; return { authorizationRef }; },
-    async discoverAndPersistAssets() { assetCalls += 1; return { assetRefs: [assetRef] }; },
+    async discoverAndPersistAssets() { assetCalls += 1; return { assetRefs: [assetRef], phoneReadiness: [{ assetRef,
+      state: 'READY', reasonCode: 'ALREADY_REGISTERED', observedAt: '2026-11-10T12:00:00.000Z' }] }; },
     async ensureSubscriptions() {
       subscriptionCalls += 1;
       if (subscriptionCalls === 1) throw new OnboardingSagaEffectError('NO_EFFECT');
@@ -259,7 +260,8 @@ test('reconcile no-effect exposes RESUME and an explicit resume never repeats au
       { name: 'authorization', status: 'SUCCEEDED' }, { name: 'asset-verification', status: 'SUCCEEDED' },
       { name: 'subscription', status: 'UNKNOWN' }, { name: 'projection', status: 'PENDING' },
     ],
-    evidence: { authorizationRef, verifiedAssetRefs: [assetRef] },
+    evidence: { authorizationRef, verifiedAssetRefs: [assetRef], phoneReadiness: [{ assetRef, state: 'READY',
+      reasonCode: 'ALREADY_REGISTERED', observedAt: '2026-11-10T12:00:00.000Z' }] },
   });
   let exchangeCalls = 0;
   let subscriptionCalls = 0;
