@@ -103,6 +103,7 @@ export class OnboardingSessionService {
     if (record) {
       if (record.requestHash !== requestHash || record.principalId !== session.principalId ||
         record.portalSessionId !== session.sessionId || record.configurationRef !== configuration.configurationRef ||
+        record.providerAppId !== configuration.providerAppId || record.providerEnvironment !== configuration.providerEnvironment ||
         record.authVariant !== configuration.authVariant || record.capabilityManifestVersion !== configuration.capabilityManifestVersion ||
         record.graphApiVersion !== configuration.graphApiVersion) throw new OnboardingConflictError();
       if (record.stateConsumed || record.status !== 'AWAITING_PROVIDER') throw new OnboardingConflictError();
@@ -129,6 +130,8 @@ export class OnboardingSessionService {
         createdAt,
         flowVariant: normalized.flowVariant,
         configurationRef: configuration.configurationRef,
+        providerAppId: configuration.providerAppId,
+        providerEnvironment: configuration.providerEnvironment,
         authVariant: configuration.authVariant,
         capabilityManifestVersion: configuration.capabilityManifestVersion,
         graphApiVersion: configuration.graphApiVersion,
@@ -142,6 +145,7 @@ export class OnboardingSessionService {
       record = await this.store.createOrReplay(command);
       if (record.requestHash !== requestHash || record.principalId !== session.principalId ||
         record.portalSessionId !== session.sessionId || record.configurationRef !== configuration.configurationRef ||
+        record.providerAppId !== configuration.providerAppId || record.providerEnvironment !== configuration.providerEnvironment ||
         record.authVariant !== configuration.authVariant || record.capabilityManifestVersion !== configuration.capabilityManifestVersion ||
         record.graphApiVersion !== configuration.graphApiVersion) throw new OnboardingConflictError();
     }

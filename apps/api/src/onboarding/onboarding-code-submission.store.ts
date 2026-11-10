@@ -36,6 +36,8 @@ interface OnboardingRow {
   readonly portal_session_id: string;
   readonly flow_variant: string;
   readonly configuration_ref: string;
+  readonly provider_app_id: string;
+  readonly provider_environment: string;
   readonly auth_variant: string;
   readonly capability_manifest_version: string;
   readonly graph_api_version: string;
@@ -122,7 +124,8 @@ export class MysqlOnboardingCodeSubmissionStore implements OnModuleDestroy {
       }
 
       const records = await manager.query(
-        `SELECT id, tenant_id, principal_id, portal_session_id, flow_variant, configuration_ref, auth_variant,
+        `SELECT id, tenant_id, principal_id, portal_session_id, flow_variant, configuration_ref,
+                provider_app_id, provider_environment, auth_variant,
                 capability_manifest_version, graph_api_version, provider_state_hash, status,
                 provider_state_consumed_at, expires_at, version
          FROM ca_meta_onboarding_sessions
@@ -132,6 +135,7 @@ export class MysqlOnboardingCodeSubmissionStore implements OnModuleDestroy {
       const record = records[0];
       if (!record || record.id !== input.record.id || record.tenant_id !== input.record.tenantId ||
         record.flow_variant !== input.record.flowVariant || record.configuration_ref !== input.record.configurationRef ||
+        record.provider_app_id !== input.record.providerAppId || record.provider_environment !== input.record.providerEnvironment ||
         record.auth_variant !== input.record.authVariant ||
         record.capability_manifest_version !== input.record.capabilityManifestVersion ||
         record.graph_api_version !== input.record.graphApiVersion ||

@@ -5,6 +5,8 @@ import type { OnboardingStep } from './onboarding-session.types.js';
 import type { OnboardingFlowConfigurationResolver } from './onboarding-session.types.js';
 import type { OnboardingCodeConsumer } from './onboarding-code-submission.store.js';
 import { OnboardingSagaEffectError, type OnboardingSagaAdapter, type OnboardingSagaContext } from './onboarding-saga.types.js';
+import { assertOwnedOnboardingSagaEvidence, assertSafeOnboardingSagaEvidence, onboardingSagaStageReceipt,
+  type OnboardingSagaEvidenceContext } from './onboarding-saga-evidence.js';
 
 type Stage = 'authorization' | 'asset-verification' | 'subscription' | 'projection';
 type StepStatus = OnboardingStep['status'];
@@ -17,6 +19,8 @@ export interface SagaRow {
   readonly flow_variant: OnboardingSagaContext['flowVariant'];
   readonly auth_variant: string;
   readonly configuration_ref: string;
+  readonly provider_app_id: string;
+  readonly provider_environment: string;
   readonly capability_manifest_version: string;
   readonly graph_api_version: string;
   readonly expires_at: string | Date;
@@ -57,7 +61,6 @@ export interface OnboardingSagaCheckpointPort {
 }
 
 const STEPS: readonly Stage[] = ['authorization', 'asset-verification', 'subscription', 'projection'];
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function decodeJson<T>(value: string | Buffer | T): T {
   if (typeof value === 'string') return JSON.parse(value) as T;
@@ -65,7 +68,11 @@ function decodeJson<T>(value: string | Buffer | T): T {
   return value as T;
 }
 
-function validReference(value: string): boolean { return /^[A-Za-z0-9:_-]{1,128}$/.test(value); }
+function evidenceContext(row: SagaRow): OnboardingSagaEvidenceContext {
+  return { tenantId: row.tenant_id, onboardingId: row.id, configurationRef: row.configuration_ref,
+    providerAppId: row.provider_app_id, providerEnvironment: row.provider_environment,
+    flowVariant: row.flow_variant, authVariant: row.auth_variant };
+}
 
 function timestamp(value: string | Date): number {
   if (value instanceof Date) return value.getTime();
@@ -97,6 +104,7 @@ export class MysqlOnboardingSagaCheckpoints implements OnboardingSagaCheckpointP
     const dataSource = await this.database.getDataSource();
     const rows = await dataSource.query(
       `SELECT id, tenant_id, principal_id, portal_session_id, flow_variant, auth_variant, configuration_ref,
+              provider_app_id, provider_environment,
               capability_manifest_version, graph_api_version, expires_at, status, steps_json, saga_checkpoint_json
        FROM ca_meta_onboarding_sessions WHERE tenant_id = ? AND id = ? LIMIT 1`, [tenantId, onboardingId],
     ) as SagaRow[];
@@ -113,9 +121,12 @@ export class MysqlOnboardingSagaCheckpoints implements OnboardingSagaCheckpointP
     const dataSource = await this.database.getDataSource();
     await dataSource.transaction('READ COMMITTED', async (manager) => {
       const rows = await manager.query(
-        `SELECT steps_json, saga_checkpoint_json FROM ca_meta_onboarding_sessions
+        `SELECT id, tenant_id, configuration_ref, flow_variant, auth_variant, provider_app_id, provider_environment,
+                steps_json, saga_checkpoint_json
+         FROM ca_meta_onboarding_sessions
          WHERE tenant_id = ? AND id = ? LIMIT 1 FOR UPDATE`, [input.tenantId, input.onboardingId],
-      ) as Array<{ steps_json: SagaRow['steps_json']; saga_checkpoint_json: SagaRow['saga_checkpoint_json'] }>;
+      ) as Array<Pick<SagaRow, 'id' | 'tenant_id' | 'configuration_ref' | 'flow_variant' | 'auth_variant' | 'provider_app_id' | 'provider_environment'> &
+        { steps_json: SagaRow['steps_json']; saga_checkpoint_json: SagaRow['saga_checkpoint_json'] }>;
       const row = rows[0];
       if (!row) throw new Error('Onboarding saga target is unavailable.');
       const steps = makeSteps(row.steps_json);
@@ -124,7 +135,7 @@ export class MysqlOnboardingSagaCheckpoints implements OnboardingSagaCheckpointP
       steps[index] = Object.freeze({ name: input.stage, status: input.stepStatus });
       const currentEvidence = makeCheckpoint(row.saga_checkpoint_json);
       const mergedEvidence = Object.freeze({ ...currentEvidence, ...input.evidence });
-      assertSafeEvidence(mergedEvidence);
+      await assertOwnedOnboardingSagaEvidence(manager, mergedEvidence, evidenceContext(row as SagaRow));
       await manager.query(
         `UPDATE ca_meta_onboarding_sessions
          SET status = ?, readiness = ?, steps_json = ?, saga_checkpoint_json = ?, next_action = ?,
@@ -181,18 +192,21 @@ export class MysqlOnboardingSagaCheckpoints implements OnboardingSagaCheckpointP
          AND s.status NOT IN ('CANCELLED', 'EXPIRED', 'FAILED') LIMIT 1`,
       [tenantId, onboardingId],
     ) as Array<{ id: string }>;
-    return rows.length === 1;
+    if (rows.length !== 1) return false;
+    const snapshot = await this.read(tenantId, onboardingId);
+    if (!snapshot) return false;
+    try {
+      const dataSource = await this.database.getDataSource();
+      await assertOwnedOnboardingSagaEvidence(dataSource.manager, snapshot.evidence, evidenceContext(snapshot.row));
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
-function assertSafeEvidence(evidence: SagaCheckpoint): void {
-  if (evidence.authorizationRef !== undefined && !validReference(evidence.authorizationRef)) throw new Error('Unsafe authorization evidence reference.');
-  if (evidence.subscriptionRef !== undefined && !validReference(evidence.subscriptionRef)) throw new Error('Unsafe subscription evidence reference.');
-  if (evidence.projectionRef !== undefined && !validReference(evidence.projectionRef)) throw new Error('Unsafe projection evidence reference.');
-  if (evidence.verifiedAssetRefs !== undefined && (evidence.verifiedAssetRefs.length < 1 || evidence.verifiedAssetRefs.length > 100 ||
-    new Set(evidence.verifiedAssetRefs).size !== evidence.verifiedAssetRefs.length || !evidence.verifiedAssetRefs.every((ref) => UUID.test(ref)))) {
-    throw new Error('Unsafe verified asset evidence.');
-  }
+function assertSafeEvidence(evidence: SagaCheckpoint, row: SagaRow): void {
+  assertSafeOnboardingSagaEvidence(evidence, evidenceContext(row));
 }
 
 /** All provider effects execute between short durable checkpoints, never inside a database transaction. */
@@ -213,7 +227,7 @@ export function createOnboardingSagaHandler(
     if (!current || timestamp(current.row.expires_at) <= Date.now()) {
       return { kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' };
     }
-    try { assertSafeEvidence(current.evidence); } catch {
+    try { assertSafeEvidence(current.evidence, current.row); } catch {
       return { kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' };
     }
     if (current.row.status === 'CANCELLED' || current.row.status === 'EXPIRED' ||
@@ -267,7 +281,7 @@ export function createOnboardingSagaHandler(
           nextAction: authorizationStage ? 'REAUTHORIZE' : 'RESUME' });
         return { kind: 'SUCCEEDED' };
       }
-      const evidence = reconciledEvidence && stageEvidence(stage, reconciledEvidence);
+      const evidence = reconciledEvidence && stageEvidence(stage, reconciledEvidence, current.row, current.evidence);
       if (!evidence) {
         await repository.checkpoint({ tenantId: job.tenantId, onboardingId, stage, stepStatus: 'UNKNOWN',
           status: 'PROVISIONING', readiness: 'UNKNOWN', nextAction: 'RECONCILE' });
@@ -315,7 +329,7 @@ export function createOnboardingSagaHandler(
       try {
         const exchanged = await adapter.exchangeAuthorizationCode({ ...context, code: consumed.code,
           idempotencyKey: `${onboardingId}:authorization`, signal });
-        if (!validReference(exchanged.authorizationRef)) throw new Error('Unverified authorization reference.');
+        assertSafeEvidence({ authorizationRef: exchanged.authorizationRef }, current.row);
         authorizationRef = exchanged.authorizationRef;
         await repository.checkpoint({ tenantId: job.tenantId, onboardingId, stage: 'authorization', stepStatus: 'SUCCEEDED',
           status: 'EXCHANGING', readiness: 'UNKNOWN', nextAction: 'WAIT', evidence: { authorizationRef } });
@@ -368,7 +382,7 @@ export function createOnboardingSagaHandler(
             status: 'PARTIAL', readiness: 'PARTIAL', nextAction: 'REAUTHORIZE' });
           return { kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' };
         }
-        assertSafeEvidence({ verifiedAssetRefs: assetRefs });
+        assertSafeEvidence({ verifiedAssetRefs: assetRefs }, current.row);
         await repository.checkpoint({ tenantId: job.tenantId, onboardingId, stage: 'asset-verification', stepStatus: 'SUCCEEDED',
           status: 'ASSETS_VERIFIED', readiness: 'UNKNOWN', nextAction: 'WAIT', evidence: { verifiedAssetRefs: assetRefs } });
       } catch (error) {
@@ -408,10 +422,9 @@ export function createOnboardingSagaHandler(
             status: 'PARTIAL', readiness: 'PARTIAL', nextAction: 'REAUTHORIZE' });
           return { kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' };
         }
-        const subscription = await adapter.ensureSubscriptions({ ...baseContext, authorizationRef, assetRefs,
+        await adapter.ensureSubscriptions({ ...baseContext, authorizationRef, assetRefs,
           idempotencyKey: `${onboardingId}:subscription`, signal });
-        if (!validReference(subscription.subscriptionRef)) throw new Error('Unverified subscription reference.');
-        subscriptionRef = subscription.subscriptionRef;
+        subscriptionRef = onboardingSagaStageReceipt('subscription', evidenceContext(current.row), authorizationRef, assetRefs);
         await repository.checkpoint({ tenantId: job.tenantId, onboardingId, stage: 'subscription', stepStatus: 'SUCCEEDED',
           status: 'PROVISIONING', readiness: 'UNKNOWN', nextAction: 'WAIT', evidence: { subscriptionRef } });
       } catch (error) {
@@ -451,10 +464,9 @@ export function createOnboardingSagaHandler(
             status: 'PARTIAL', readiness: 'PARTIAL', nextAction: 'REAUTHORIZE' });
           return { kind: 'PERMANENT_FAILURE', safeErrorCode: 'INVALID_REFERENCE' };
         }
-        const projection = await adapter.publishProjection({ ...baseContext, authorizationRef, assetRefs, subscriptionRef,
+        await adapter.publishProjection({ ...baseContext, authorizationRef, assetRefs, subscriptionRef,
           idempotencyKey: `${onboardingId}:projection`, signal });
-        if (!validReference(projection.projectionRef)) throw new Error('Unverified projection reference.');
-        projectionRef = projection.projectionRef;
+        projectionRef = onboardingSagaStageReceipt('projection', evidenceContext(current.row), authorizationRef, assetRefs);
       } catch (error) {
         if (error instanceof OnboardingSagaEffectError && error.disposition === 'NO_EFFECT') {
           const automaticRetriesExhausted = job.attempt >= job.maxAttempts;
@@ -475,27 +487,30 @@ export function createOnboardingSagaHandler(
   return run;
 }
 
-function stageEvidence(stage: Stage, evidence: SagaCheckpoint): SagaCheckpoint | undefined {
+function stageEvidence(stage: Stage, evidence: SagaCheckpoint, row: SagaRow, currentEvidence: SagaCheckpoint): SagaCheckpoint | undefined {
+  const context = evidenceContext(row);
   switch (stage) {
     case 'authorization':
-      if (typeof evidence.authorizationRef !== 'string' || !validReference(evidence.authorizationRef)) return undefined;
+      if (typeof evidence.authorizationRef !== 'string') return undefined;
+      try { assertSafeOnboardingSagaEvidence({ authorizationRef: evidence.authorizationRef }, context); } catch { return undefined; }
       return { authorizationRef: evidence.authorizationRef };
     case 'asset-verification':
       if (!Array.isArray(evidence.verifiedAssetRefs)) return undefined;
-      try { assertSafeEvidence({ verifiedAssetRefs: evidence.verifiedAssetRefs }); } catch { return undefined; }
+      try { assertSafeEvidence({ verifiedAssetRefs: evidence.verifiedAssetRefs }, row); } catch { return undefined; }
       return { verifiedAssetRefs: evidence.verifiedAssetRefs };
     case 'subscription':
-      if (typeof evidence.subscriptionRef !== 'string' || !validReference(evidence.subscriptionRef)) return undefined;
-      return { subscriptionRef: evidence.subscriptionRef };
+      if (!currentEvidence.authorizationRef || !currentEvidence.verifiedAssetRefs?.length) return undefined;
+      return { subscriptionRef: onboardingSagaStageReceipt('subscription', context, currentEvidence.authorizationRef, currentEvidence.verifiedAssetRefs) };
     case 'projection':
-      if (typeof evidence.projectionRef !== 'string' || !validReference(evidence.projectionRef)) return undefined;
-      return { projectionRef: evidence.projectionRef };
+      if (!currentEvidence.authorizationRef || !currentEvidence.verifiedAssetRefs?.length || !currentEvidence.subscriptionRef) return undefined;
+      return { projectionRef: onboardingSagaStageReceipt('projection', context, currentEvidence.authorizationRef, currentEvidence.verifiedAssetRefs) };
   }
 }
 
 function configurationMatches(configurations: OnboardingFlowConfigurationResolver, row: SagaRow): boolean {
   const current = configurations.resolve(row.flow_variant);
   return !!current && current.configurationRef === row.configuration_ref && current.authVariant === row.auth_variant &&
+    current.providerAppId === row.provider_app_id && current.providerEnvironment === row.provider_environment &&
     current.capabilityManifestVersion === row.capability_manifest_version && current.graphApiVersion === row.graph_api_version;
 }
 

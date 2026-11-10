@@ -96,6 +96,7 @@ export class OnboardingCodeSubmissionService {
     if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw new OnboardingCodeConflictError();
     const configuration = this.configurations.resolve(record.flowVariant);
     if (!configuration || configuration.configurationRef !== record.configurationRef ||
+      configuration.providerAppId !== record.providerAppId || configuration.providerEnvironment !== record.providerEnvironment ||
       configuration.authVariant !== record.authVariant ||
       configuration.capabilityManifestVersion !== record.capabilityManifestVersion ||
       configuration.graphApiVersion !== record.graphApiVersion) throw new OnboardingConfigurationUnavailableError();

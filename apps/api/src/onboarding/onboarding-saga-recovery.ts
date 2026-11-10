@@ -7,6 +7,8 @@ import { TenantAuthorizationService, TenantContextService } from '../identity/id
 import { hashOnboardingValue, OnboardingConfigurationUnavailableError, type OnboardingFlowConfigurationResolver,
   type OnboardingSessionStore, type OnboardingStoredRecord } from './onboarding-session.types.js';
 import type { OnboardingSagaAdapter } from './onboarding-saga.types.js';
+import { assertOwnedOnboardingSagaEvidence, assertSafeOnboardingSagaEvidence,
+  type OnboardingSagaEvidenceContext, type OnboardingSagaEvidenceValues } from './onboarding-saga-evidence.js';
 
 export const ONBOARDING_SAGA_RECOVERY_STORE = Symbol('ONBOARDING_SAGA_RECOVERY_STORE');
 
@@ -40,7 +42,10 @@ interface LockedSessionRow {
   readonly principal_id: string;
   readonly portal_session_id: string;
   readonly configuration_ref: string;
+  readonly flow_variant: OnboardingStoredRecord['flowVariant'];
   readonly auth_variant: string;
+  readonly provider_app_id: string;
+  readonly provider_environment: string;
   readonly capability_manifest_version: string;
   readonly graph_api_version: string;
   readonly status: string;
@@ -111,7 +116,8 @@ export class MysqlOnboardingSagaRecoveryStore implements OnboardingSagaRecoveryS
       if (prior.length > 0) return enqueueRecoveryJob(this.jobs, manager, job);
 
       const rows = await manager.query(
-        `SELECT id, tenant_id, principal_id, portal_session_id, configuration_ref, auth_variant,
+        `SELECT id, tenant_id, principal_id, portal_session_id, configuration_ref, flow_variant, auth_variant,
+                provider_app_id, provider_environment,
                 capability_manifest_version, graph_api_version, status, steps_json, saga_checkpoint_json
          FROM ca_meta_onboarding_sessions
          WHERE tenant_id = ? AND id = ? AND principal_id = ? AND portal_session_id = ?
@@ -120,9 +126,17 @@ export class MysqlOnboardingSagaRecoveryStore implements OnboardingSagaRecoveryS
         [input.record.tenantId, input.record.id, input.principalId, input.portalSessionId],
       ) as LockedSessionRow[];
       const row = rows[0];
-      if (!row || row.configuration_ref !== input.record.configurationRef || row.auth_variant !== input.record.authVariant ||
+      if (!row || row.configuration_ref !== input.record.configurationRef || row.provider_app_id !== input.record.providerAppId ||
+        row.provider_environment !== input.record.providerEnvironment || row.auth_variant !== input.record.authVariant ||
         row.capability_manifest_version !== input.record.capabilityManifestVersion ||
         row.graph_api_version !== input.record.graphApiVersion) throw new OnboardingRecoveryNotFoundError();
+      const evidence = recoveryEvidence(row.saga_checkpoint_json);
+      const evidenceContext: OnboardingSagaEvidenceContext = { tenantId: row.tenant_id, onboardingId: row.id,
+        configurationRef: row.configuration_ref, providerAppId: row.provider_app_id,
+        providerEnvironment: row.provider_environment, flowVariant: row.flow_variant, authVariant: row.auth_variant };
+      try { await assertOwnedOnboardingSagaEvidence(manager, evidence as OnboardingSagaEvidenceValues, evidenceContext); } catch {
+        throw new OnboardingRecoveryConflictError();
+      }
 
       const activeJobs = await manager.query(
         `SELECT id FROM ca_meta_jobs WHERE tenant_id = ? AND job_type = 'ONBOARDING_STEP'
@@ -140,7 +154,7 @@ export class MysqlOnboardingSagaRecoveryStore implements OnboardingSagaRecoveryS
       let nextSteps = steps;
       if (input.action === 'RESUME') {
         if (input.stage === 'authorization' || target.status !== 'RETRY_PENDING') throw new OnboardingRecoveryConflictError();
-        assertResumePrerequisites(input.stage, recoveryEvidence(row.saga_checkpoint_json));
+        assertResumePrerequisites(input.stage, evidence, evidenceContext);
         nextSteps = steps.map((step) => step.name === input.stage ? { ...step, status: 'PENDING' } : step);
       } else {
         if (target.status !== 'UNKNOWN' && target.status !== 'RUNNING') throw new OnboardingRecoveryConflictError();
@@ -193,14 +207,16 @@ async function assertCurrentActor(manager: EntityManager, input: QueueOnboarding
     rows[0]?.portal_session_id !== input.portalSessionId) throw new OnboardingRecoveryNotFoundError();
 }
 
-function assertResumePrerequisites(stage: OnboardingSagaStage, evidence: Record<string, unknown>): void {
-  const safeRef = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9:_-]{1,128}$/.test(value);
+function assertResumePrerequisites(
+  stage: OnboardingSagaStage,
+  evidence: Record<string, unknown>,
+  context: OnboardingSagaEvidenceContext,
+): void {
+  assertSafeOnboardingSagaEvidence(evidence as OnboardingSagaEvidenceValues, context);
   const assetRefs = evidence.verifiedAssetRefs;
-  const hasAssets = Array.isArray(assetRefs) && assetRefs.length > 0 && assetRefs.length <= 100 &&
-    new Set(assetRefs).size === assetRefs.length && assetRefs.every((ref) => typeof ref === 'string' &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref));
-  if (stage !== 'authorization' && !safeRef(evidence.authorizationRef)) throw new OnboardingRecoveryConflictError();
-  if (stage === 'projection' && (!hasAssets || !safeRef(evidence.subscriptionRef))) throw new OnboardingRecoveryConflictError();
+  const hasAssets = Array.isArray(assetRefs) && assetRefs.length > 0;
+  if (stage !== 'authorization' && typeof evidence.authorizationRef !== 'string') throw new OnboardingRecoveryConflictError();
+  if (stage === 'projection' && (!hasAssets || typeof evidence.subscriptionRef !== 'string')) throw new OnboardingRecoveryConflictError();
   if (stage === 'subscription' && !hasAssets) throw new OnboardingRecoveryConflictError();
 }
 
@@ -233,7 +249,8 @@ export class OnboardingSagaRecoveryService {
       ['CANCELLED', 'EXPIRED', 'FAILED', 'READY'].includes(record.status)) throw new OnboardingRecoveryNotFoundError();
 
     const current = this.configurations.resolve(record.flowVariant);
-    if (!current || current.configurationRef !== record.configurationRef || current.authVariant !== record.authVariant ||
+    if (!current || current.configurationRef !== record.configurationRef || current.providerAppId !== record.providerAppId ||
+      current.providerEnvironment !== record.providerEnvironment || current.authVariant !== record.authVariant ||
       current.capabilityManifestVersion !== record.capabilityManifestVersion || current.graphApiVersion !== record.graphApiVersion) {
       throw new OnboardingConfigurationUnavailableError();
     }

@@ -23,10 +23,10 @@ export interface OnboardingSagaAdapter {
   exchangeAuthorizationCode(input: OnboardingSagaContext & { readonly code: string; readonly idempotencyKey: string; readonly signal: AbortSignal }): Promise<{ readonly authorizationRef: string }>;
   /** Resolves provider IDs from a server-side catalog and persists verified assets and grants. */
   discoverAndPersistAssets(input: OnboardingSagaContext & { readonly authorizationRef: string; readonly idempotencyKey: string; readonly signal: AbortSignal }): Promise<{ readonly assetRefs: readonly string[] }>;
-  /** Applies the exact app/asset subscriptions for this flow; shared targets are coordinated by the subscription adapter. */
-  ensureSubscriptions(input: OnboardingSagaContext & { readonly authorizationRef: string; readonly assetRefs: readonly string[]; readonly idempotencyKey: string; readonly signal: AbortSignal }): Promise<{ readonly subscriptionRef: string }>;
-  /** Emits the bounded connection projection only after its local source records commit. */
-  publishProjection(input: OnboardingSagaContext & { readonly authorizationRef: string; readonly assetRefs: readonly string[]; readonly subscriptionRef: string; readonly idempotencyKey: string; readonly signal: AbortSignal }): Promise<{ readonly projectionRef: string }>;
+  /** Applies exact subscriptions; a local context-bound receipt is checkpointed after success. */
+  ensureSubscriptions(input: OnboardingSagaContext & { readonly authorizationRef: string; readonly assetRefs: readonly string[]; readonly idempotencyKey: string; readonly signal: AbortSignal }): Promise<void>;
+  /** Emits the bounded connection projection; its local context-bound receipt is checkpointed after success. */
+  publishProjection(input: OnboardingSagaContext & { readonly authorizationRef: string; readonly assetRefs: readonly string[]; readonly subscriptionRef: string; readonly idempotencyKey: string; readonly signal: AbortSignal }): Promise<void>;
   /** Reads provider state only; it must never repeat the uncertain mutation or submit an authorization code. */
   reconcileStage?(input: OnboardingSagaContext & {
     readonly stage: 'authorization' | 'asset-verification' | 'subscription' | 'projection';

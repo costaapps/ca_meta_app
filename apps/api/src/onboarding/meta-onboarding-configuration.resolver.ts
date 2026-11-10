@@ -16,6 +16,8 @@ export class MetaOnboardingConfigurationResolver implements OnboardingFlowConfig
     if (!publicProfile?.enabled) return undefined;
     return Object.freeze({
       configurationRef: configuration.configurationRef,
+      providerAppId: configuration.providerAppId,
+      providerEnvironment: configuration.environment,
       authVariant: profile.authVariant,
       capabilityManifestVersion: configuration.capabilityManifestVersion,
       graphApiVersion: configuration.versions.graphApi.value,

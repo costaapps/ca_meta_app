@@ -42,7 +42,14 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
   const portalSessionId = randomUUID();
   const onboardingId = randomUUID();
   const codeRef = randomUUID();
+  const appConfigurationId = randomUUID();
+  const otherAppConfigurationId = randomUUID();
+  const authorizationRef = randomUUID();
+  const otherAuthorizationRef = randomUUID();
   const assetRef = randomUUID();
+  const providerAppId = 'synthetic-meta-app';
+  const providerEnvironment = 'test' as const;
+  const configurationRef = 'synthetic-whatsapp-config-v1';
   const idempotencyHash = hashOnboardingValue(`m4-03-idempotency-${randomUUID()}`);
   const stateRef = `synthetic-state-${randomUUID()}`;
   const requestHash = hashOnboardingValue('synthetic-m4-03-session-request');
@@ -53,11 +60,11 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
   const idempotencyKey = `onboarding-code:${idempotencyHash}`;
   const recoveryJobIds: string[] = [];
   const requestCodeHash = hashOnboardingValue(JSON.stringify({
-    onboardingId, flowVariant: 'WHATSAPP_CLOUD_API', configurationRef: 'synthetic-whatsapp-config-v1',
+    onboardingId, flowVariant: 'WHATSAPP_CLOUD_API', configurationRef,
     stateHash: providerStateHash, codeHash: hashOnboardingValue(rawCode),
   }));
   const codeContext = { tenantId, onboardingId, flowVariant: 'WHATSAPP_CLOUD_API' as const,
-    authVariant: 'WHATSAPP_EMBEDDED_SIGNUP' as const, configurationRef: 'synthetic-whatsapp-config-v1' };
+    authVariant: 'WHATSAPP_EMBEDDED_SIGNUP' as const, configurationRef };
   const sealedCode = protector.seal(codeContext, rawCode);
   let jobId: string | undefined;
 
@@ -66,6 +73,49 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     await dataSource.query(
       `INSERT INTO ca_meta_tenants (id, status, version, created_at, updated_at)
        VALUES (?, 'ACTIVE', 1, ?, ?)`, [tenantId, timestamp, timestamp],
+    );
+    await dataSource.query(
+      `INSERT INTO ca_meta_app_configurations
+       (id, tenant_id, provider, app_external_id, environment, created_at, updated_at)
+       VALUES (?, ?, 'META', ?, ?, ?, ?)`,
+      [appConfigurationId, tenantId, providerAppId, providerEnvironment, timestamp, timestamp],
+    );
+    await dataSource.query(
+      `INSERT INTO ca_meta_authorizations
+       (id, tenant_id, app_configuration_id, provider, environment, flow_variant, auth_variant,
+        provider_authorization_id, authorization_state, version, observed_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'META', ?, 'WHATSAPP_EXCLUSIVE', 'WHATSAPP_EMBEDDED_SIGNUP',
+        NULL, 'ACTIVE', 1, ?, ?, ?)`,
+      [authorizationRef, tenantId, appConfigurationId, providerEnvironment, timestamp, timestamp, timestamp],
+    );
+    await dataSource.query(
+      `INSERT INTO ca_meta_app_configurations
+       (id, tenant_id, provider, app_external_id, environment, created_at, updated_at)
+       VALUES (?, ?, 'META', ?, ?, ?, ?)`,
+      [otherAppConfigurationId, tenantId, 'synthetic-other-meta-app', providerEnvironment, timestamp, timestamp],
+    );
+    await dataSource.query(
+      `INSERT INTO ca_meta_authorizations
+       (id, tenant_id, app_configuration_id, provider, environment, flow_variant, auth_variant,
+        provider_authorization_id, authorization_state, version, observed_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'META', ?, 'WHATSAPP_EXCLUSIVE', 'WHATSAPP_EMBEDDED_SIGNUP',
+        NULL, 'ACTIVE', 1, ?, ?, ?)`,
+      [otherAuthorizationRef, tenantId, otherAppConfigurationId, providerEnvironment, timestamp, timestamp, timestamp],
+    );
+    await dataSource.query(
+      `INSERT INTO ca_meta_assets
+       (id, tenant_id, app_configuration_id, provider, environment, asset_kind, external_id,
+        display_name, external_name, version, created_at, updated_at)
+       VALUES (?, ?, ?, 'META', ?, 'WHATSAPP_BUSINESS_ACCOUNT', ?, NULL, NULL, 1, ?, ?)`,
+      [assetRef, tenantId, appConfigurationId, providerEnvironment, `synthetic-asset-${assetRef}`, timestamp, timestamp],
+    );
+    await dataSource.query(
+      `INSERT INTO ca_meta_asset_authorizations
+       (tenant_id, authorization_id, asset_id, app_configuration_id, provider, environment, credential_id,
+        state, verification_state, verification_source, verification_ref_hash, verified_at,
+        subscription_state, projection_state, version, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'META', ?, NULL, 'ACTIVE', 'VERIFIED', 'META_API', ?, ?, 'UNKNOWN', 'UNKNOWN', 1, ?, ?)`,
+      [tenantId, authorizationRef, assetRef, appConfigurationId, providerEnvironment, 'e'.repeat(64), timestamp, timestamp, timestamp],
     );
     await dataSource.query(
       `INSERT INTO ca_meta_principals (id, kind, issuer, subject, status, version, created_at, updated_at)
@@ -93,6 +143,7 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     const record = await sessionStore.createOrReplay({
       id: onboardingId, tenantId, principalId, portalSessionId, tenantContextHash: 'c'.repeat(64),
       createdAt: new Date(), flowVariant: 'WHATSAPP_CLOUD_API', configurationRef: codeContext.configurationRef,
+      providerAppId, providerEnvironment,
       authVariant: codeContext.authVariant, capabilityManifestVersion: 'meta-capability-manifest-v1', graphApiVersion: 'v27.0',
       requestedCapabilities: ['READ_STATUS'], returnRoute: 'connections', idempotencyHash: hashOnboardingValue(`session-idem-${randomUUID()}`),
       requestHash, providerStateHash, expiresAt,
@@ -140,18 +191,49 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     assert.equal(erased[0]?.ciphertext, null);
     assert.equal(erased[0]?.authentication_tag, null);
 
+    const checkpoints = new MysqlOnboardingSagaCheckpoints(database);
+    const checkpointInput = { tenantId, onboardingId, status: 'EXCHANGING', readiness: 'UNKNOWN' as const,
+      nextAction: 'WAIT' as const, stage: 'authorization' as const, stepStatus: 'SUCCEEDED' as const };
+    await assert.rejects(checkpoints.checkpoint({ ...checkpointInput, evidence: { authorizationRef: 'EAAGsynthetic-provider-token' } }));
+    await assert.rejects(checkpoints.checkpoint({ ...checkpointInput, evidence: { authorizationRef: otherAuthorizationRef } }),
+      /not owned by this tenant and flow/);
+    await checkpoints.checkpoint({ ...checkpointInput, evidence: { authorizationRef } });
+    await checkpoints.checkpoint({ ...checkpointInput, stage: 'asset-verification', evidence: { verifiedAssetRefs: [assetRef] } });
+
     await dataSource.query(
       `UPDATE ca_meta_jobs SET status = 'SUCCEEDED', completed_at = UTC_TIMESTAMP(6)
        WHERE tenant_id = ? AND id = ?`, [tenantId, jobId],
     );
     await dataSource.query(
-      `UPDATE ca_meta_onboarding_sessions SET status = 'PROVISIONING', readiness = 'UNKNOWN', next_action = 'RECONCILE',
+      `UPDATE ca_meta_onboarding_sessions SET status = 'PROVISIONING', readiness = 'UNKNOWN', next_action = 'WAIT',
        steps_json = JSON_ARRAY(JSON_OBJECT('name','authorization','status','SUCCEEDED'),
-         JSON_OBJECT('name','asset-verification','status','SUCCEEDED'), JSON_OBJECT('name','subscription','status','UNKNOWN'),
+         JSON_OBJECT('name','asset-verification','status','SUCCEEDED'), JSON_OBJECT('name','subscription','status','RUNNING'),
          JSON_OBJECT('name','projection','status','PENDING')),
-       saga_checkpoint_json = JSON_OBJECT('authorizationRef','synthetic-auth-ref',
-         'verifiedAssetRefs', JSON_ARRAY(?)) WHERE tenant_id = ? AND id = ?`, [assetRef, tenantId, onboardingId],
+       saga_checkpoint_json = JSON_OBJECT('authorizationRef', ?,
+         'verifiedAssetRefs', JSON_ARRAY(?)) WHERE tenant_id = ? AND id = ?`, [authorizationRef, assetRef, tenantId, onboardingId],
     );
+
+    const expiredLease = await jobs.enqueue({ tenantId, type: 'ONBOARDING_STEP',
+      idempotencyKey: `m4-03-expired-${randomUUID()}`, correlationId: onboardingId, resourceScopeRef: onboardingId,
+      payload: { kind: 'ONBOARDING_STEP', onboardingRef: onboardingId, stepRef: 'subscription' },
+    });
+    recoveryJobIds.push(expiredLease.id);
+    const expiredClaim = await jobs.claimNext('m4-03-expiring-worker', 1_000, ['ONBOARDING_STEP']);
+    assert.equal(expiredClaim?.id, expiredLease.id);
+    await dataSource.query('UPDATE ca_meta_jobs SET lease_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE tenant_id = ? AND id = ?',
+      [tenantId, expiredLease.id]);
+    assert.equal(await jobs.claimNext('m4-03-replacement-worker', 1_000, ['ONBOARDING_STEP']), null);
+    const expiredJobRows = await dataSource.query(
+      'SELECT status, last_safe_error_code FROM ca_meta_jobs WHERE tenant_id = ? AND id = ?', [tenantId, expiredLease.id],
+    ) as Array<{ status: string; last_safe_error_code: string }>;
+    assert.equal(expiredJobRows[0]?.status, 'UNKNOWN');
+    assert.equal(expiredJobRows[0]?.last_safe_error_code, 'LEASE_EXPIRED');
+    const expiredSession = await sessionStore.findForSession(onboardingId, portalSessionId, principalId);
+    assert.equal(expiredSession?.nextAction, 'RECONCILE', 'status surfaces reconciliation for an expired ambiguous worker lease');
+    assert.equal(expiredSession?.steps.find((step) => step.name === 'subscription')?.status, 'RUNNING',
+      'the recovery endpoint can reconcile the exact stage without claiming the effect was absent');
+    assert.equal(erased[0]?.ciphertext, null, 'the expired lease cannot restore or replay the consumed code');
+
     const recoveryRecord = await sessionStore.findForSession(onboardingId, portalSessionId, principalId);
     assert.ok(recoveryRecord);
     const recovery = new MysqlOnboardingSagaRecoveryStore(database, jobs);
@@ -169,6 +251,7 @@ test('M4.03 stages authorization code ciphertext and atomically consumes it once
     const reconcilePayload = decodeJson(reconcileJob[0]?.payload_json);
     assert.equal(reconcilePayload.operation, 'RECONCILE');
     assert.equal(reconcilePayload.stepRef, 'subscription');
+    assert.equal('codeRef' in reconcilePayload, false, 'lease recovery does not enqueue a second authorization exchange');
     assert.equal(JSON.stringify(reconcilePayload).includes(rawCode), false);
 
     await dataSource.query(

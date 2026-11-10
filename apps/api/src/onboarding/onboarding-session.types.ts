@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { components } from '@ca-meta/contracts';
+import type { RuntimeEnvironment } from '../config/environment.js';
 
 export type OnboardingFlowVariant = components['schemas']['FlowVariant'];
 export type OnboardingStatusName = components['schemas']['OnboardingStatus']['status'];
@@ -19,6 +20,8 @@ export interface OnboardingCreateCommand {
   readonly createdAt: Date;
   readonly flowVariant: OnboardingFlowVariant;
   readonly configurationRef: string;
+  readonly providerAppId: string;
+  readonly providerEnvironment: RuntimeEnvironment;
   readonly authVariant: 'FACEBOOK_LOGIN_FOR_BUSINESS' | 'INSTAGRAM_VIA_FACEBOOK_LOGIN' | 'INSTAGRAM_LOGIN' |
     'WHATSAPP_EMBEDDED_SIGNUP' | 'WHATSAPP_BUSINESS_APP_ONBOARDING';
   readonly capabilityManifestVersion: string;
@@ -39,6 +42,8 @@ export interface OnboardingStoredRecord {
   readonly tenantContextHash: string;
   readonly flowVariant: OnboardingFlowVariant;
   readonly configurationRef: string;
+  readonly providerAppId?: string;
+  readonly providerEnvironment?: RuntimeEnvironment;
   readonly authVariant: OnboardingCreateCommand['authVariant'];
   readonly capabilityManifestVersion: string;
   readonly graphApiVersion: string;
@@ -85,6 +90,8 @@ export interface OnboardingProviderLaunchPort {
 /** Server-selected exact flow configuration; callers never supply this context. */
 export interface OnboardingFlowConfiguration {
   readonly configurationRef: string;
+  readonly providerAppId: string;
+  readonly providerEnvironment: RuntimeEnvironment;
   readonly authVariant: OnboardingCreateCommand['authVariant'];
   readonly capabilityManifestVersion: string;
   readonly graphApiVersion: string;

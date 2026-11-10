@@ -4,6 +4,7 @@ import { migrationChecksum } from './migration-fingerprint.js';
 
 const onboardingColumns = [
   'id', 'tenant_id', 'principal_id', 'portal_session_id', 'tenant_context_hash', 'flow_variant', 'configuration_ref',
+  'provider_app_id', 'provider_environment',
   'auth_variant', 'capability_manifest_version', 'graph_api_version', 'saga_checkpoint_json', 'requested_capabilities', 'return_route',
   'idempotency_key_hash', 'request_hash', 'provider_state_hash', 'expires_at', 'status', 'readiness', 'steps_json',
   'next_action', 'created_at', 'last_updated_at', 'provider_state_consumed_at', 'version',
@@ -208,7 +209,9 @@ const definition = {
   minimumSupportedApiVersion: 1,
   steps: [
     addOnboardingColumn('configuration_ref', 'VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT \'unbound\'', 'flow_variant'),
-    addOnboardingColumn('auth_variant', "VARCHAR(48) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'FACEBOOK_LOGIN_FOR_BUSINESS'", 'configuration_ref'),
+    addOnboardingColumn('provider_app_id', "VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_nopad_bin NOT NULL DEFAULT 'unbound'", 'configuration_ref'),
+    addOnboardingColumn('provider_environment', "VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'unbound'", 'provider_app_id'),
+    addOnboardingColumn('auth_variant', "VARCHAR(48) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'FACEBOOK_LOGIN_FOR_BUSINESS'", 'provider_environment'),
     addOnboardingColumn('capability_manifest_version', "VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'unbound'", 'auth_variant'),
     addOnboardingColumn('graph_api_version', "VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'v0.0'", 'capability_manifest_version'),
     addOnboardingColumn('saga_checkpoint_json', "JSON NOT NULL DEFAULT ('{}')", 'graph_api_version'),

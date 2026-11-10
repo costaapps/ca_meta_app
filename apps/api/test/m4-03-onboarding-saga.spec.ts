@@ -9,12 +9,17 @@ import { createOnboardingSagaHandler, type OnboardingSagaCheckpointInput, type O
 import { OnboardingSagaEffectError, type OnboardingSagaAdapter } from '../src/onboarding/onboarding-saga.types.js';
 import type { OnboardingStep } from '../src/onboarding/onboarding-session.types.js';
 import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
+import { assertSafeOnboardingSagaEvidence, onboardingSagaStageReceipt } from '../src/onboarding/onboarding-saga-evidence.js';
 
 const signingKey = Buffer.alloc(32, 0x4c).toString('base64url');
 const code = 'synthetic-authorization-code-never-persist';
 const tenantId = 'a406aaf4-837a-45d7-9f93-4db17920668d';
 const onboardingId = '11de9f8d-efdf-46c9-84b1-9d474a5a35dc';
 const assetRef = 'f1c90208-010c-48b0-90e3-ef28f825efdd';
+const authorizationRef = '6a191a66-8cc3-4e65-89eb-5af25cb898a6';
+const evidenceContext = { tenantId, onboardingId, configurationRef: 'synthetic-config-v1',
+  providerAppId: 'synthetic-meta-app', providerEnvironment: 'test',
+  flowVariant: 'WHATSAPP_CLOUD_API' as const, authVariant: 'WHATSAPP_EMBEDDED_SIGNUP' };
 
 test('callback route slugs match one exact flow and auth variant', () => {
   const profiles = [
@@ -63,6 +68,7 @@ class MemorySagaCheckpointPort implements OnboardingSagaCheckpointPort {
       id: onboardingId, tenant_id: tenantId, principal_id: '112c8fc8-6284-419a-92f3-0a2584b4ecf0',
       portal_session_id: 'ab4ab85c-40d7-432f-b79c-7c2a5f14e7de', flow_variant: 'WHATSAPP_CLOUD_API',
       auth_variant: 'WHATSAPP_EMBEDDED_SIGNUP', configuration_ref: 'synthetic-config-v1',
+      provider_app_id: 'synthetic-meta-app', provider_environment: 'test',
       capability_manifest_version: 'meta-capability-manifest-v1', graph_api_version: 'v27.0',
       expires_at: new Date(Date.now() + 60_000), status: this.status, steps_json: this.steps,
       saga_checkpoint_json: JSON.stringify(this.evidence),
@@ -71,6 +77,7 @@ class MemorySagaCheckpointPort implements OnboardingSagaCheckpointPort {
   }
 
   async checkpoint(input: OnboardingSagaCheckpointInput): Promise<void> {
+    assertSafeOnboardingSagaEvidence({ ...this.evidence, ...input.evidence }, evidenceContext);
     this.checkpoints.push(input);
     this.status = input.status;
     this.steps = this.steps.map((step) => step.name === input.stage ? { name: step.name, status: input.stepStatus } : step);
@@ -87,6 +94,23 @@ class MemorySagaCheckpointPort implements OnboardingSagaCheckpointPort {
 
   async canContinue(): Promise<boolean> { return this.allowed; }
 }
+
+test('worker checkpoints reject credential-shaped values and accept context-bound internal references', async () => {
+  const checkpoints = new MemorySagaCheckpointPort();
+  await assert.rejects(checkpoints.checkpoint({ tenantId, onboardingId, status: 'PARTIAL', readiness: 'PARTIAL',
+    nextAction: 'REAUTHORIZE', stage: 'authorization', stepStatus: 'FAILED', evidence: { authorizationRef: 'EAAGsynthetic-provider-token' } }));
+  await checkpoints.checkpoint({ tenantId, onboardingId, status: 'EXCHANGING', readiness: 'UNKNOWN',
+    nextAction: 'WAIT', stage: 'authorization', stepStatus: 'SUCCEEDED', evidence: { authorizationRef } });
+  const subscriptionRef = onboardingSagaStageReceipt('subscription', evidenceContext, authorizationRef, [assetRef]);
+  assert.match(subscriptionRef, /^internal:subscription:[a-f0-9]{64}$/);
+  assertSafeOnboardingSagaEvidence({ authorizationRef, verifiedAssetRefs: [assetRef], subscriptionRef }, evidenceContext);
+  const otherTenantReceipt = onboardingSagaStageReceipt('subscription',
+    { ...evidenceContext, tenantId: 'c406aaf4-837a-45d7-9f93-4db17920668d' }, authorizationRef, [assetRef]);
+  assert.throws(() => assertSafeOnboardingSagaEvidence({ authorizationRef, verifiedAssetRefs: [assetRef],
+    subscriptionRef: otherTenantReceipt }, evidenceContext));
+  assert.throws(() => assertSafeOnboardingSagaEvidence({ authorizationRef, subscriptionRef }, evidenceContext),
+    /Unsafe subscription evidence reference/);
+});
 
 function makeJob(): ClaimedJob {
   return {
@@ -117,14 +141,14 @@ test('a proven no-effect subscription failure retries only that pending stage; c
   let subscriptionCalls = 0;
   let projectionCalls = 0;
   const adapter: OnboardingSagaAdapter = {
-    async exchangeAuthorizationCode() { exchangeCalls += 1; return { authorizationRef: 'authorization-opaque-ref' }; },
+    async exchangeAuthorizationCode() { exchangeCalls += 1; return { authorizationRef }; },
     async discoverAndPersistAssets() { assetCalls += 1; return { assetRefs: [assetRef] }; },
     async ensureSubscriptions() {
       subscriptionCalls += 1;
       if (subscriptionCalls === 1) throw new OnboardingSagaEffectError('NO_EFFECT');
-      return { subscriptionRef: 'subscription-opaque-ref' };
+      return;
     },
-    async publishProjection() { projectionCalls += 1; return { projectionRef: 'projection-opaque-ref' }; },
+    async publishProjection() { projectionCalls += 1; },
   };
   const handler = createOnboardingSagaHandler({} as DurableWorkDatabase, codeConsumer, adapter, checkpoints);
   const job = makeJob();
@@ -149,10 +173,10 @@ test('revoked portal session or membership blocks provider effects after enqueue
   let providerEffects = 0;
   const codeConsumer: OnboardingCodeConsumer = { async consumeOnce() { codeReads += 1; return undefined; } };
   const adapter = {
-    async exchangeAuthorizationCode() { providerEffects += 1; return { authorizationRef: 'unused' }; },
+    async exchangeAuthorizationCode() { providerEffects += 1; return { authorizationRef }; },
     async discoverAndPersistAssets() { providerEffects += 1; return { assetRefs: [assetRef] }; },
-    async ensureSubscriptions() { providerEffects += 1; return { subscriptionRef: 'unused' }; },
-    async publishProjection() { providerEffects += 1; return { projectionRef: 'unused' }; },
+    async ensureSubscriptions() { providerEffects += 1; },
+    async publishProjection() { providerEffects += 1; },
   } as OnboardingSagaAdapter;
   const handler = createOnboardingSagaHandler({} as DurableWorkDatabase, codeConsumer, adapter, checkpoints);
   const outcome = await handler(makeJob(), new AbortController().signal, {} as never);
@@ -173,10 +197,10 @@ test('empty asset discovery ends PARTIAL and never attempts subscriptions or REA
   };
   let subscriptions = 0;
   const adapter: OnboardingSagaAdapter = {
-    async exchangeAuthorizationCode() { return { authorizationRef: 'authorization-opaque-ref' }; },
+    async exchangeAuthorizationCode() { return { authorizationRef }; },
     async discoverAndPersistAssets() { return { assetRefs: [] }; },
-    async ensureSubscriptions() { subscriptions += 1; return { subscriptionRef: 'subscription-opaque-ref' }; },
-    async publishProjection() { return { projectionRef: 'projection-opaque-ref' }; },
+    async ensureSubscriptions() { subscriptions += 1; },
+    async publishProjection() {},
   };
   const handler = createOnboardingSagaHandler({} as DurableWorkDatabase, codeConsumer, adapter, checkpoints);
   const outcome = await handler(makeJob(), new AbortController().signal, {} as never);
@@ -194,19 +218,19 @@ test('reconcile no-effect exposes RESUME and an explicit resume never repeats au
       { name: 'authorization', status: 'SUCCEEDED' }, { name: 'asset-verification', status: 'SUCCEEDED' },
       { name: 'subscription', status: 'UNKNOWN' }, { name: 'projection', status: 'PENDING' },
     ],
-    evidence: { authorizationRef: 'authorization-opaque-ref', verifiedAssetRefs: [assetRef] },
+    evidence: { authorizationRef, verifiedAssetRefs: [assetRef] },
   });
   let exchangeCalls = 0;
   let subscriptionCalls = 0;
   let projectionCalls = 0;
   const adapter: OnboardingSagaAdapter = {
-    async exchangeAuthorizationCode() { exchangeCalls += 1; return { authorizationRef: 'unexpected' }; },
+    async exchangeAuthorizationCode() { exchangeCalls += 1; return { authorizationRef }; },
     async discoverAndPersistAssets() { throw new Error('existing assets must not be rediscovered'); },
-    async ensureSubscriptions() { subscriptionCalls += 1; return { subscriptionRef: 'subscription-opaque-ref' }; },
-    async publishProjection() { projectionCalls += 1; return { projectionRef: 'projection-opaque-ref' }; },
+    async ensureSubscriptions() { subscriptionCalls += 1; },
+    async publishProjection() { projectionCalls += 1; },
     async reconcileStage(input) {
       assert.equal(input.stage, 'subscription');
-      assert.equal(input.evidence.authorizationRef, 'authorization-opaque-ref');
+      assert.equal(input.evidence.authorizationRef, authorizationRef);
       return { disposition: 'NO_EFFECT' };
     },
   };

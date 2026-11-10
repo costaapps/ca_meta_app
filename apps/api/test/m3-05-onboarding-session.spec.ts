@@ -166,7 +166,8 @@ function makeService(
         : flowVariant === 'INSTAGRAM_VIA_FACEBOOK_LOGIN' ? 'INSTAGRAM_VIA_FACEBOOK_LOGIN'
           : flowVariant === 'INSTAGRAM_LOGIN' ? 'INSTAGRAM_LOGIN'
             : flowVariant === 'WHATSAPP_COEXISTENCE' ? 'WHATSAPP_BUSINESS_APP_ONBOARDING' : 'WHATSAPP_EMBEDDED_SIGNUP';
-      return { configurationRef: `synthetic-${flowVariant.toLowerCase()}-v1`, authVariant,
+      return { configurationRef: `synthetic-${flowVariant.toLowerCase()}-v1`, providerAppId: 'synthetic-meta-app',
+        providerEnvironment: 'test' as const, authVariant,
         capabilityManifestVersion: 'meta-capability-manifest-v1', graphApiVersion: 'v27.0' };
     },
   };
@@ -216,7 +217,8 @@ test('missing state-signing configuration fails before creating an onboarding ro
   const authorization = { async authorize() {} } as unknown as TenantAuthorizationService;
   const service = new OnboardingSessionService(
     store, contexts, authorization, new OnboardingStateSigner(undefined), launch, () => now,
-    { resolve: () => ({ configurationRef: 'synthetic-config-v1', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP',
+    { resolve: () => ({ configurationRef: 'synthetic-config-v1', providerAppId: 'synthetic-meta-app',
+      providerEnvironment: 'test', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP',
       capabilityManifestVersion: 'meta-capability-manifest-v1', graphApiVersion: 'v27.0' }) },
   );
   const session = await makeSession({ contextRef: initialContext });

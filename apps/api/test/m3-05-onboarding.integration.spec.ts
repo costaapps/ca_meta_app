@@ -72,6 +72,8 @@ test('M3.05 MariaDB onboarding rows are session scoped, idempotent by tenant and
       createdAt: new Date(Date.now()),
       flowVariant: 'WHATSAPP_CLOUD_API' as const,
       configurationRef: 'synthetic-whatsapp-config-v1',
+      providerAppId: 'synthetic-meta-app',
+      providerEnvironment: 'test' as const,
       authVariant: 'WHATSAPP_EMBEDDED_SIGNUP' as const,
       capabilityManifestVersion: 'meta-capability-manifest-v1',
       graphApiVersion: 'v27.0',

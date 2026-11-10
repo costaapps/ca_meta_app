@@ -127,7 +127,8 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(ONBOARDING_SAGA_MIGRATION.id, '202611060014-m4-03-onboarding-saga');
   assert.equal(ONBOARDING_SAGA_MIGRATION.schemaVersion, 16);
   assert.deepEqual(ONBOARDING_SAGA_MIGRATION.steps.map((step) => step.id), [
-    'add-onboarding-configuration-ref', 'add-onboarding-auth-variant', 'add-onboarding-capability-manifest-version',
+    'add-onboarding-configuration-ref', 'add-onboarding-provider-app-id', 'add-onboarding-provider-environment',
+    'add-onboarding-auth-variant', 'add-onboarding-capability-manifest-version',
     'add-onboarding-graph-api-version', 'add-onboarding-saga-checkpoint-json',
     'add-onboarding-tenant-candidate-key', 'extend-onboarding-next-actions', 'create-onboarding-code-envelopes',
   ]);
