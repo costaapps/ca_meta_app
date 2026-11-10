@@ -24,11 +24,11 @@ const authorizationRef = '6a191a66-8cc3-4e65-89eb-5af25cb898a6';
 const accountRef = 'f1c90208-010c-48b0-90e3-ef28f825efdd';
 const secondAccountRef = 'd82046e2-3c09-4bfe-b7de-99c7a8c7ca72';
 const pageRef = 'fb5941a7-3220-4d8a-bbdd-21581a714833';
-const credentialRef = '38cdb87d-b1f8-4702-bbd2-095f44a0f478';
-const secondCredentialRef = '9f4e2a7b-4c68-4aa1-87dd-8e5d2a4a8731';
+const credentialRef = '00000000-0000-4000-8000-000000000027';
+const secondCredentialRef = '00000000-0000-4000-8000-000000000028';
 const subscriptionRef = 'f3831bb3-05b1-4a2d-8a60-a717c706963d';
 const correlationId = '8c4a3a46-0230-4dc8-9570-c0c34cbaacbb';
-const idempotencyKey = 'm4-09-synthetic-idempotency-key';
+const idempotencyKey = '00000000-0000-4000-8000-000000000031';
 const syntheticCode = 'synthetic-instagram-code-never-a-real-credential';
 
 function context(variant: 'INSTAGRAM_VIA_FACEBOOK_LOGIN' | 'INSTAGRAM_LOGIN' = 'INSTAGRAM_VIA_FACEBOOK_LOGIN'): InstagramOnboardingContext {
