@@ -21,10 +21,10 @@ const observedAt = '2026-11-10T12:00:00.000Z';
 
 function observation(overrides: Partial<AssetObservationInput> = {}): AssetObservationInput {
   return Object.freeze({
-    kind: 'FACEBOOK_PAGE', source: 'META_API', observedAt,
-    status: { value: 'ACTIVE', availability: 'OBSERVED' },
-    permissions: { availability: 'OBSERVED', grantNames: ['pages_show_list'] },
-    subscriptionState: 'ACTIVE', projectionState: 'SYNCED',
+    kind: 'FACEBOOK_PAGE' as const, source: 'META_API' as const, observedAt,
+    status: { value: 'ACTIVE' as const, availability: 'OBSERVED' as const },
+    permissions: { availability: 'OBSERVED' as const, grantNames: ['pages_show_list'] },
+    subscriptionState: 'ACTIVE' as const, projectionState: 'SYNCED' as const,
     ...overrides,
   });
 }
@@ -38,7 +38,7 @@ test('M4.12 keeps status unavailable distinct from negative and retains last kno
   const first = snapshot();
   assert.ok(first);
   const failed = snapshot({
-    source: 'META_API', observedAt: null,
+    kind: 'FACEBOOK_PAGE', source: 'META_API', observedAt: null,
     status: { value: 'UNAVAILABLE', availability: 'UNAVAILABLE', providerCode: 'DEPENDENCY_UNAVAILABLE' },
     permissions: { availability: 'UNAVAILABLE' },
   }, first, 2);

@@ -1,5 +1,4 @@
 import { isMetaAssetKind, type EvidenceSource, type MetaAssetKind, type ProjectionState, type SubscriptionState } from './meta-assets.types.js';
-import type { components } from '@ca-meta/contracts';
 
 export const ASSET_OBSERVATION_SCHEMA_VERSION = 1;
 export const ASSET_OBSERVATION_STALE_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -52,6 +51,22 @@ export interface AssetObservationSnapshot {
   readonly subscriptionState: SubscriptionState;
   readonly projectionState: ProjectionState;
   readonly driftCodes: readonly AssetDriftCode[];
+}
+
+export interface PublicAssetStatusObservation {
+  readonly status: 'ACTIVE' | 'INACTIVE' | 'UNKNOWN' | 'STALE';
+  readonly availability: ObservationAvailability;
+  readonly observedAt: string | null;
+  readonly fetchedAt: string;
+  readonly staleAfter: string;
+  readonly source: EvidenceSource;
+  readonly version: number;
+  readonly permissionAvailability: PermissionAvailability;
+  readonly subscriptionState: SubscriptionState;
+  readonly projectionState: ProjectionState;
+  readonly driftCodes: readonly AssetDriftCode[];
+  readonly actionableReason: 'REAUTHORIZE' | 'CHECK_STATUS' | 'RECONCILE' | 'NONE';
+  readonly providerCode: string | null;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -166,7 +181,7 @@ export function isAssetObservationStale(snapshot: AssetObservationSnapshot, now:
 }
 
 export function toPublicAssetStatusObservation(snapshot: AssetObservationSnapshot,
-  authorizationStatus: 'VERIFIED' | 'REVOKED' | 'UNKNOWN', now: string): components['schemas']['AssetStatusObservation'] {
+  authorizationStatus: 'VERIFIED' | 'REVOKED' | 'UNKNOWN', now: string): PublicAssetStatusObservation {
   const stale = isAssetObservationStale(snapshot, now);
   const status = stale ? 'STALE' : snapshot.status.availability === 'OBSERVED' ? snapshot.status.value : 'UNKNOWN';
   const actionableReason = authorizationStatus === 'REVOKED' ? 'REAUTHORIZE'
@@ -197,8 +212,12 @@ export class AssetObservationNotFoundError extends Error {
   constructor() { super('Asset not found in the tenant scope.'); this.name = 'AssetObservationNotFoundError'; }
 }
 
-function isIsoUtc(value: string): boolean {
-  return ISO_UTC.test(value) && Number.isFinite(Date.parse(value));
+function isIsoUtc(value: unknown): value is string {
+  return typeof value === 'string' && ISO_UTC.test(value) && Number.isFinite(Date.parse(value));
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID.test(value);
 }
 
 function canonicalUtc(value: string): string {
@@ -219,8 +238,8 @@ export function parseAssetObservationSnapshot(value: unknown): AssetObservationS
     try { parsed = JSON.parse(value) as unknown; } catch { return undefined; }
   }
   if (!isRecord(parsed) || parsed.schemaVersion !== ASSET_OBSERVATION_SCHEMA_VERSION ||
-      !Number.isSafeInteger(parsed.version) || Number(parsed.version) < 1 || typeof parsed.authorizationRef !== 'string' ||
-      !UUID.test(parsed.authorizationRef) || !isMetaAssetKind(parsed.kind) ||
+      !Number.isSafeInteger(parsed.version) || Number(parsed.version) < 1 || !isUuid(parsed.authorizationRef) ||
+      !isMetaAssetKind(parsed.kind) ||
       !['META_API', 'SIGNED_WEBHOOK'].includes(String(parsed.source)) ||
       !isNullableIsoUtc(parsed.observedAt) || !isIsoUtc(parsed.fetchedAt) || !isIsoUtc(parsed.staleAfter) ||
       !isRecord(parsed.status) || !['ACTIVE', 'INACTIVE', 'UNKNOWN'].includes(String(parsed.status.value)) ||
