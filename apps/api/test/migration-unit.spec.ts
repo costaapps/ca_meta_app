@@ -58,9 +58,9 @@ test('migration configuration rejects runtime account reuse and privileged built
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
   const schemaVersions = MIGRATIONS.map((migration) => migration.schemaVersion);
-  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-  assert.equal(schemaVersions.at(-1), 16);
-  assert.equal(MIGRATIONS.length, 16);
+  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+  assert.equal(schemaVersions.at(-1), 17);
+  assert.equal(MIGRATIONS.length, 17);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
