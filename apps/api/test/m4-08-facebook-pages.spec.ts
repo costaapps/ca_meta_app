@@ -8,6 +8,7 @@ import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { FacebookPageSelectionService } from '../src/meta-facebook/facebook-page-selection.service.js';
 import { FacebookPagesOnboardingAdapter } from '../src/meta-facebook/facebook-pages-onboarding.adapter.js';
 import { MetaGraphFacebookPagesProvider, type FacebookPagesGraphDiscoveryClient } from '../src/meta-facebook/facebook-pages-graph.provider.js';
+import type { CredentialResolutionContext } from '../src/credentials/credential-resolver.types.js';
 import { facebookPageCapabilitySnapshot, type FacebookManagedPage, type FacebookPageAssetStore,
   type FacebookPageProjectionPort, type FacebookPageSelectionContext, type FacebookPagesContext,
   type FacebookPagesProvider } from '../src/meta-facebook/facebook-pages.types.js';
@@ -114,7 +115,7 @@ test('typed Graph adapter resolves a server-owned user handle and sends Page tok
     },
   };
   const provider = new MetaGraphFacebookPagesProvider(
-    { resolve: async (context) => { resolvedAsset = context.assetId; return { status: 'READY', capability: 'ASSET_DISCOVERY',
+    { resolve: async (context: CredentialResolutionContext) => { resolvedAsset = context.assetId; return { status: 'READY', capability: 'ASSET_DISCOVERY',
       purpose: 'CUSTOMER_OPERATION', family: 'SYNTHETIC', handle: {} as never }; } } as never,
     { resolve: async () => ({ authorizationRef: AUTHORIZATION, resolutionContext: { tenantId: TENANT, provider: 'META',
       appConfigurationId: CONFIG, environment: 'test', assetId: PAGE_A, operation: 'ASSET_DISCOVERY' },

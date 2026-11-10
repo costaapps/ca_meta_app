@@ -182,12 +182,17 @@ function mapSafePages(result: FacebookPagesGraphDiscoveryResult): FacebookPageLi
         !PAGE_ID.test(page.providerPageId) || ids.has(page.providerPageId) || typeof page.credentialRef !== 'string' || !UUID.test(page.credentialRef) ||
         credentials.has(page.credentialRef) || (page.pageName !== null && (typeof page.pageName !== 'string' ||
           page.pageName.length > 255 || /[\u0000-\u001f\u007f]/.test(page.pageName))) || !Array.isArray(page.pageTasks) ||
-        page.pageTasks.length > 64 || page.pageTasks.some((task) => typeof task !== 'string' || !TASK.test(task)) ||
-        new Set(page.pageTasks).size !== page.pageTasks.length) return undefined;
+        page.pageTasks.length > 64) return undefined;
+    const pageTasks: string[] = [];
+    for (const task of page.pageTasks as readonly unknown[]) {
+      if (typeof task !== 'string' || !TASK.test(task)) return undefined;
+      pageTasks.push(task);
+    }
+    if (new Set(pageTasks).size !== pageTasks.length) return undefined;
     ids.add(page.providerPageId);
     credentials.add(page.credentialRef);
     pages.push(Object.freeze({ id: page.providerPageId, name: page.pageName, credentialRef: page.credentialRef,
-      tasks: Object.freeze([...page.pageTasks]) }));
+      tasks: Object.freeze(pageTasks) }));
   }
   return Object.freeze(pages);
 }

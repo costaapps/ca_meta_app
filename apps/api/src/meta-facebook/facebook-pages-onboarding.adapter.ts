@@ -175,7 +175,8 @@ function selectionContextFor(context: FacebookPagesContext, authorizationRef: st
     correlationId: context.correlationId });
 }
 
-function subscriptionRequest(context: ReturnType<typeof selectionContextFor>): Omit<MetaSubscriptionRequest, 'assetId' | 'desiredFields'> {
+function subscriptionRequest(context: ReturnType<typeof selectionContextFor>):
+  Omit<MetaSubscriptionRequest, 'assetId' | 'desiredFields' | 'authorizationId'> & { readonly authorizationId: string } {
   return Object.freeze({ tenantId: context.tenantId, appConfigurationId: context.appConfigurationRef,
     environment: context.environment, authorizationId: context.authorizationRef, correlationId: context.correlationId });
 }
