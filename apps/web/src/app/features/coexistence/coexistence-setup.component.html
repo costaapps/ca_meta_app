@@ -1,0 +1,69 @@
+<main class="coexistence-shell">
+  <header class="page-header">
+    <a routerLink="/setup" class="back-link">Voltar para canais</a>
+    <p class="eyebrow">WhatsApp Business App</p>
+    <h1>Adicionar número com coexistência</h1>
+    <p class="intro">
+      Cada número inicia uma sessão independente. O WhatsApp Business permanece no aplicativo; o portal
+      só confirma a etapa depois que o servidor validar o resultado.
+    </p>
+  </header>
+
+  <section class="availability" aria-live="polite" aria-atomic="true">
+    <h2>Disponibilidade do fluxo</h2>
+    <p>{{ snapshot.message }}</p>
+    <p class="evidence-note">
+      O contrato atual da Meta para versão do SDK, versão do Embedded Signup, featureType e mensagens de
+      Coexistence está <strong>Not confirmed</strong>. Enquanto faltar evidência revisada, nenhuma janela ou
+      sessão de provedor será iniciada.
+    </p>
+    <button type="button" class="primary-action" [disabled]="!snapshot.canStart" (click)="addNumber()">
+      Adicionar próximo número
+    </button>
+  </section>
+
+  <section class="attempt-history" *ngIf="snapshot.attempts.length > 0" aria-labelledby="history-heading">
+    <h2 id="history-heading">Etapas iniciadas nesta aba</h2>
+    <ol>
+      <li *ngFor="let attempt of snapshot.attempts">
+        <article class="attempt-card" [attr.data-state]="attempt.state">
+          <div class="attempt-heading">
+            <h3>Número {{ attempt.ordinal }}</h3>
+            <span class="state-label">{{ stateLabel(attempt) }}</span>
+          </div>
+          <p>{{ attempt.message }}</p>
+          <section *ngIf="attempt.recoveryOptions.length > 0 || hasServerAction(attempt)" class="recovery-panel" aria-live="polite">
+            <h4>Próxima ação do servidor</h4>
+            <p>{{ nextActionLabel(attempt) }}</p>
+            <p *ngIf="attempt.pendingRecovery" class="recovery-pending">
+              A ação {{ recoveryLabel(attempt.pendingRecovery) }} está em andamento. O portal aguardará um novo status do servidor.
+            </p>
+            <div class="recovery-actions" *ngIf="attempt.recoveryOptions.length > 0">
+              <button
+                *ngFor="let option of attempt.recoveryOptions"
+                type="button"
+                class="secondary-action"
+                [disabled]="isRecoveryDisabled(attempt)"
+                (click)="recover(attempt, option)"
+              >
+                {{ recoveryLabel(option) }}
+              </button>
+            </div>
+            <button type="button" class="secondary-action" (click)="checkStatus(attempt)">
+              Consultar status novamente
+            </button>
+          </section>
+          <time [attr.datetime]="attempt.startedAt">Iniciada em {{ attempt.startedAt | date:'short' }}</time>
+          <button *ngIf="isInProgress(attempt)" type="button" class="secondary-action" (click)="closeStep(attempt)">
+            Fechar esta etapa e consultar o servidor
+          </button>
+        </article>
+      </li>
+    </ol>
+  </section>
+
+  <footer>
+    QR, código do navegador, fechamento de janela e retorno do provedor não confirmam conexão pronta.
+    As etapas anteriores permanecem separadas e não são removidas ao adicionar outro número.
+  </footer>
+</main>

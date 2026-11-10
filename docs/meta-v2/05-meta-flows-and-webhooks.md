@@ -68,6 +68,8 @@ Cada número cria uma OnboardingSession. O adaptador usa configuração/featureT
 
 Eventos de janela exigem schema/type/event, limites e origem exata documentada. `event.source` deve ser verificado quando o SDK expõe vínculo útil e comprovado. Não aceitar um sufixo genérico de domínio ou payload que declare tenant. Mesmo evento esperado não comprova os grants no backend.
 
+O limite implementado para M4.05 está descrito em [Coexistence browser onboarding](specs/coexistence-embedded-signup.md) e [ADR-013](adrs/ADR-013-m4-05-coexistence-browser-correlation.md): a rota separada mantém o adapter desativado enquanto versão, `featureType`, schema e semântica origin/source não tiverem evidência oficial revisada. Fixtures locais normalizam apenas a interface interna; não representam mensagem Meta.
+
 Quando o usuário conclui QR, UI informa que está verificando a conexão. FINISH não equivale a READY. Campos opcionais de evento não devem ser exigidos cegamente: IDs faltantes podem ser descobertos pelo backend dentro do escopo autorizado; ambiguidade exige seleção/prova e não “primeiro recurso retornado”.
 
 ### Servidor
