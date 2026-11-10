@@ -1,6 +1,6 @@
 # SPEC — Exclusive WhatsApp Cloud API onboarding
 
-Status: M4.04 implementation candidate; issue [#48](https://github.com/costaapps/ca_meta_app/issues/48). This specification covers only `WHATSAPP_CLOUD_API` / `WHATSAPP_EXCLUSIVE + WHATSAPP_EMBEDDED_SIGNUP`. WhatsApp Business App Coexistence stays on its own callback, adapter and configuration.
+Status: M4.04 implementation candidate; issue [#48](https://github.com/costaapps/ca_meta_app/issues/48). Decision: [ADR-017](../adrs/ADR-017-m4-04-whatsapp-exclusive.md). This specification covers only `WHATSAPP_CLOUD_API` / `WHATSAPP_EXCLUSIVE + WHATSAPP_EMBEDDED_SIGNUP`. WhatsApp Business App Coexistence stays on its own callback, adapter and configuration.
 
 ## Server-owned authorization and asset discovery
 

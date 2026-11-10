@@ -1,4 +1,4 @@
-# ADR-013 — M4.04 exclusive WhatsApp registration boundary
+# ADR-017 — M4.04 exclusive WhatsApp registration boundary
 
 Status: Accepted for the M4.04 implementation candidate. Date: 2026-11-10.
 
