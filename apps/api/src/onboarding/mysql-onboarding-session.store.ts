@@ -258,7 +258,7 @@ export class MysqlOnboardingSessionStore implements OnboardingSessionStore, OnAp
       `UPDATE ca_meta_onboarding_sessions
        SET status = ?, readiness = ?, steps_json = ?, next_action = ?,
            provider_state_consumed_at = UTC_TIMESTAMP(6), last_updated_at = UTC_TIMESTAMP(6), version = version + 1
-       WHERE provider_state_hash = ? AND expires_at > UTC_TIMESTAMP(6)
+       WHERE provider_state_hash = ? AND provider_state_consumed_at IS NULL AND expires_at > UTC_TIMESTAMP(6)
          AND status IN ('AWAITING_PROVIDER', 'CODE_RECEIVED', 'EXCHANGING', 'ASSETS_VERIFIED', 'PROVISIONING')`,
       [outcome.status, outcome.readiness, JSON.stringify(outcome.steps), outcome.nextAction, providerStateHash],
     );
