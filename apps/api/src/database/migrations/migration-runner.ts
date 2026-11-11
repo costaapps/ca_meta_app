@@ -75,26 +75,47 @@ async function assertMariaDb(queryRunner: QueryRunner, environment: MigrationEnv
   return row.version;
 }
 
-async function assertMigrationGrants(queryRunner: QueryRunner, databaseName: string): Promise<void> {
-  const rows = await queryRunner.query('SHOW GRANTS') as Array<Record<string, string>>;
-  const grants = rows.flatMap((row) => Object.values(row)).filter((value) => typeof value === 'string');
+const COEXISTENCE_LOCK_TABLE = 'ca_meta_onboarding_coexistence_locks';
+
+/** Validate the migration identity's database scope and the one trigger-definer table privilege. */
+export function assertMigrationGrantRecords(grants: readonly string[], databaseName: string): void {
   const privileges = new Set<string>();
   let hasDatabaseGrant = false;
+  let hasCoexistenceLockDelete = false;
   for (const grant of grants) {
     const normalized = grant.toUpperCase();
-    if (/\bON\s+\*\.\*/.test(normalized) && !/\bGRANT\s+USAGE\b/.test(normalized)) {
-      throw new Error('Migration preflight rejects global database privileges.');
-    }
     if (/\bWITH\s+GRANT\s+OPTION\b/.test(normalized)) {
       throw new Error('Migration preflight rejects GRANT OPTION.');
     }
-    const objectMatch = grant.match(/\bON\s+`?([^`\s]+)`?\.\*\s+TO\b/i);
-    if (!objectMatch || objectMatch[1]?.toLowerCase() !== databaseName.toLowerCase()) continue;
-    hasDatabaseGrant = true;
     const privilegeMatch = grant.match(/^\s*GRANT\s+(.+?)\s+ON\b/i);
-    for (const privilege of (privilegeMatch?.[1] ?? '').split(',').map((item) => item.trim().toUpperCase())) {
-      if (privilege) privileges.add(privilege);
+    const grantPrivileges = (privilegeMatch?.[1] ?? '').split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
+    if (/\bON\s+\*\.\*/.test(normalized)) {
+      if (grantPrivileges.length === 1 && grantPrivileges[0] === 'USAGE') continue;
+      throw new Error('Migration preflight rejects global database privileges.');
     }
+
+    const databaseGrant = grant.match(/\bON\s+`?([^`\s]+)`?\.\*\s+TO\b/i);
+    if (databaseGrant) {
+      if (databaseGrant[1]?.toLowerCase() !== databaseName.toLowerCase()) {
+        throw new Error('Migration preflight found an unexpected database-scoped migration grant.');
+      }
+      hasDatabaseGrant = true;
+      for (const privilege of grantPrivileges) privileges.add(privilege);
+      continue;
+    }
+
+    const tableGrant = grant.match(/\bON\s+`?([^`\s]+)`?\.`?([^`\s]+)`?\s+TO\b/i);
+    if (tableGrant) {
+      if (tableGrant[1]?.toLowerCase() === databaseName.toLowerCase() &&
+          tableGrant[2]?.toLowerCase() === COEXISTENCE_LOCK_TABLE &&
+          grantPrivileges.length === 1 && grantPrivileges[0] === 'DELETE') {
+        hasCoexistenceLockDelete = true;
+        continue;
+      }
+      throw new Error('Migration preflight found unexpected table-scoped migration privileges.');
+    }
+
+    throw new Error('Migration preflight found an unexpected migration grant scope.');
   }
   const required = ['SELECT', 'INSERT', 'UPDATE', 'CREATE', 'ALTER', 'INDEX', 'REFERENCES', 'TRIGGER'];
   const unexpected = [...privileges].filter((privilege) => !required.includes(privilege));
@@ -104,6 +125,15 @@ async function assertMigrationGrants(queryRunner: QueryRunner, databaseName: str
   if (!hasDatabaseGrant || required.some((privilege) => !privileges.has(privilege))) {
     throw new Error('Migration preflight found insufficient database-scoped migration privileges.');
   }
+  if (!hasCoexistenceLockDelete) {
+    throw new Error('Migration preflight found insufficient table-scoped migration privileges.');
+  }
+}
+
+async function assertMigrationGrants(queryRunner: QueryRunner, databaseName: string): Promise<void> {
+  const rows = await queryRunner.query('SHOW GRANTS') as Array<Record<string, string>>;
+  const grants = rows.flatMap((row) => Object.values(row)).filter((value) => typeof value === 'string');
+  assertMigrationGrantRecords(grants, databaseName);
 }
 
 async function ensureLedger(queryRunner: QueryRunner): Promise<void> {

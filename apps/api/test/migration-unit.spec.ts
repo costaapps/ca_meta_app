@@ -21,6 +21,7 @@ import { ASSET_OBSERVATIONS_MIGRATION, ASSET_OBSERVATION_TABLES } from '../src/d
 import { CONNECTION_LIFECYCLE_MIGRATION } from '../src/database/migrations/connection-lifecycle.js';
 import { INTERNAL_ASSET_OPERATIONS_MIGRATION } from '../src/database/migrations/internal-asset-operations.js';
 import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION, ONBOARDING_COEXISTENCE_LOCK_TABLES } from '../src/database/migrations/onboarding-coexistence-lock.js';
+import { assertMigrationGrantRecords } from '../src/database/migrations/migration-runner.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -58,6 +59,36 @@ test('migration configuration rejects runtime account reuse and privileged built
     ...validEnvironment,
     MIGRATION_DATABASE_USER: 'root',
   }), (error: unknown) => error instanceof MigrationEnvironmentError && error.fields.includes('MIGRATION_DATABASE_USER'));
+});
+
+test('migration grants require the lock-trigger definer privilege only on its exact table', () => {
+  const database = 'ca_meta_m5_03';
+  const schemaGrant = `GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES, TRIGGER ON \`${database}\`.* TO 'migrator'@'%'`;
+  const lockDeleteGrant = `GRANT DELETE ON \`${database}\`.\`ca_meta_onboarding_coexistence_locks\` TO 'migrator'@'%'`;
+  const usageGrant = "GRANT USAGE ON *.* TO 'migrator'@'%'";
+
+  assert.doesNotThrow(() => assertMigrationGrantRecords([usageGrant, schemaGrant, lockDeleteGrant], database));
+  assert.throws(() => assertMigrationGrantRecords([usageGrant, schemaGrant], database), /insufficient table-scoped/);
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant.replace('TRIGGER ON', 'DELETE, TRIGGER ON'),
+    lockDeleteGrant,
+  ], database), /unexpected database-scoped migration privileges/);
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant,
+    lockDeleteGrant.replace('ca_meta_onboarding_coexistence_locks', 'ca_meta_onboarding_sessions'),
+  ], database), /unexpected table-scoped migration privileges/);
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant,
+    lockDeleteGrant.replace('GRANT DELETE ON', 'GRANT DELETE, SELECT ON'),
+  ], database), /unexpected table-scoped migration privileges/);
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant,
+    lockDeleteGrant.replace(`\`${database}\``, '`another_schema`'),
+  ], database), /unexpected table-scoped migration privileges/);
 });
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
