@@ -12,6 +12,7 @@ const NON_TENANT_SCOPED_POST_ENDPOINTS = new Set([
   '/auth/magic-links/consume',
   '/session/logout',
 ]);
+const NON_MUTATING_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 function apiPath(url: string, origin: string): string | null {
   try {
@@ -41,15 +42,11 @@ function pathForApiEndpoint(url: string, origin: string): string | null {
   return endpoint.startsWith('/') || endpoint === '' ? endpoint : null;
 }
 
-function nonTenantScopedMutation(url: string, method: string, origin: string): boolean {
-  const endpoint = pathForApiEndpoint(url, origin);
-  const normalizedMethod = method.toUpperCase();
-  if (endpoint === null || ['GET', 'HEAD', 'OPTIONS'].includes(normalizedMethod)) return true;
-  return normalizedMethod === 'POST' && NON_TENANT_SCOPED_POST_ENDPOINTS.has(endpoint);
-}
-
 function tenantScopedMutation(url: string, method: string, origin: string): boolean {
-  return apiRequest(url, origin) && !nonTenantScopedMutation(url, method, origin);
+  const normalizedMethod = method.toUpperCase();
+  if (NON_MUTATING_METHODS.has(normalizedMethod)) return false;
+  const endpoint = pathForApiEndpoint(url, origin);
+  return normalizedMethod !== 'POST' || endpoint === null || !NON_TENANT_SCOPED_POST_ENDPOINTS.has(endpoint);
 }
 
 function errorCode(error: HttpErrorResponse): string | undefined {
@@ -61,8 +58,7 @@ function errorCode(error: HttpErrorResponse): string | undefined {
 
 export const portalApiInterceptor: HttpInterceptorFn = (request, next) => {
   const documentRef = inject(DOCUMENT);
-  const origin = documentRef.location?.origin;
-  if (!origin || !apiRequest(request.url, origin)) return next(request);
+  const origin = documentRef.location?.origin ?? '';
 
   if (tenantScopedMutation(request.url, request.method, origin)) {
     const capability = inject(PortalTenantIdentityService).current;
@@ -78,6 +74,8 @@ export const portalApiInterceptor: HttpInterceptorFn = (request, next) => {
       }));
     }
   }
+
+  if (!origin || !apiRequest(request.url, origin)) return next(request);
 
   const context = inject(PortalContextStore);
   const headers = request.headers;

@@ -26,10 +26,11 @@ describe('portalApiInterceptor tenant identity boundary', () => {
 
   afterEach(() => http.verify());
 
-  it('blocks tenant-scoped mutations before transport when identity is unconfirmed', async () => {
+  it('blocks tenant-scoped and legacy external mutations before transport when identity is unconfirmed', async () => {
     context.setContextRef('synthetic-current-context-reference-01');
     const onboarding = firstValueFrom(client.post('/api/v1/onboarding-sessions', { flowVariant: 'WHATSAPP_COEXISTENCE' }));
     const tenantSwitch = firstValueFrom(client.post('/api/v1/session/tenant-switch', { tenantRef: 'synthetic-other-tenant' }));
+    const legacyMutation = firstValueFrom(client.post('https://msg4.app/meta/auth/save_auto_reply', { synthetic: true }));
 
     const blockedError = {
       status: 403,
@@ -37,8 +38,10 @@ describe('portalApiInterceptor tenant identity boundary', () => {
     };
     await expect(onboarding).rejects.toMatchObject(blockedError);
     await expect(tenantSwitch).rejects.toMatchObject(blockedError);
+    await expect(legacyMutation).rejects.toMatchObject(blockedError);
     http.expectNone('/api/v1/onboarding-sessions');
     http.expectNone('/api/v1/session/tenant-switch');
+    http.expectNone('https://msg4.app/meta/auth/save_auto_reply');
   });
 
   it('keeps authenticated server-scoped reads available', async () => {
