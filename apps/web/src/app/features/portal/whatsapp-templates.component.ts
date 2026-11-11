@@ -154,6 +154,11 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
       });
       this.currentAttemptScope = attemptScope;
       this.createIdempotencyKey = attempt.idempotencyKey;
+      if (attempt.succeeded) {
+        this.jobId = attempt.jobId ?? null;
+        this.statusMessage = 'Este pedido já foi encaminhado ao provedor. Edite o modelo para iniciar um novo pedido.';
+        return;
+      }
       dispatched = true;
       const accepted = await this.service.create(assetId, request, this.createIdempotencyKey);
       if (generation !== this.accountGeneration || assetId !== this.selectedAssetId) return;
@@ -198,7 +203,9 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
       } else {
         this.statusMessage = 'O pedido continua em processamento.';
       }
-      if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(this.jobStatus.status) && this.currentAttemptScope) {
+      if (this.jobStatus.status === 'SUCCEEDED' && this.currentAttemptScope) {
+        try { this.pendingAttempts.markSucceeded(this.currentAttemptScope); } catch { /* Keep the existing key if storage is unavailable. */ }
+      } else if (['FAILED', 'CANCELLED'].includes(this.jobStatus.status) && this.currentAttemptScope) {
         this.resolveTemplateAttempt(this.currentAttemptScope);
       }
       this.requestId = this.jobStatus.requestId;

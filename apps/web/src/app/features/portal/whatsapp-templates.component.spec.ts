@@ -139,7 +139,7 @@ describe('WhatsAppTemplatesComponent', () => {
     const create = vi.fn(async (_assetId: string, _request: components['schemas']['TemplateCreateRequest'], key: string) => {
       let jobId = jobs.get(key);
       if (!jobId) {
-        jobId = 'job_template_01';
+        jobId = `job_template_${String(jobs.size + 1).padStart(2, '0')}`;
         jobs.set(key, jobId);
       }
       calls += 1;
@@ -172,7 +172,26 @@ describe('WhatsAppTemplatesComponent', () => {
     expect(JSON.parse(persisted ?? '{}')[currentScope ?? '']?.jobId).toBe('job_template_01');
     await secondMount.component.checkJobStatus();
     expect(secondMount.component.jobStatus?.status).toBe('SUCCEEDED');
-    expect(sessionStorage.getItem(PENDING_WHATSAPP_TEMPLATE_ATTEMPTS_STORAGE_KEY)).toBeNull();
+    const succeededRecord = JSON.parse(sessionStorage.getItem(PENDING_WHATSAPP_TEMPLATE_ATTEMPTS_STORAGE_KEY) ?? '{}')[currentScope ?? ''];
+    expect(succeededRecord).toMatchObject({ jobId: 'job_template_01', succeeded: true });
+    await secondMount.component.createTemplate();
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(secondMount.component.jobStatus?.status).toBe('SUCCEEDED');
     secondMount.component.ngOnDestroy();
+
+    const thirdMount = await createFixture({ create: create as never });
+    thirdMount.component.form = { name: 'order_update', language: 'en', category: 'UTILITY', bodyText: 'Ready.' };
+    await thirdMount.component.createTemplate();
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(thirdMount.component.jobId).toBe('job_template_01');
+    expect(thirdMount.component.statusMessage).toContain('já foi encaminhado');
+
+    thirdMount.component.form.bodyText = 'Ready for {{1}}.';
+    thirdMount.component.examplesText = 'Ana';
+    await thirdMount.component.createTemplate();
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(create.mock.calls[2]?.[2]).not.toBe(firstKey);
+    expect(jobs.size).toBe(2);
+    thirdMount.component.ngOnDestroy();
   });
 });

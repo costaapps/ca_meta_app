@@ -9,6 +9,7 @@ const SHA256 = /^[a-f0-9]{64}$/;
 export interface PendingWhatsAppTemplateAttempt {
   readonly idempotencyKey: string;
   readonly jobId?: string;
+  readonly succeeded?: boolean;
 }
 
 /** Persists only hashes, idempotency keys and opaque job IDs; request text/examples never reach storage. */
@@ -46,7 +47,21 @@ export class PendingWhatsAppTemplateAttempts {
     const attempts = this.read();
     const current = attempts.get(scope);
     if (!current) return;
-    attempts.set(scope, Object.freeze({ idempotencyKey: current.idempotencyKey, jobId }));
+    attempts.set(scope, Object.freeze({ idempotencyKey: current.idempotencyKey, jobId,
+      ...(current.succeeded ? { succeeded: true } : {}) }));
+    this.write(attempts);
+  }
+
+  markSucceeded(scope: string): void {
+    if (!SHA256.test(scope)) return;
+    const attempts = this.read();
+    const current = attempts.get(scope);
+    if (!current) return;
+    attempts.set(scope, Object.freeze({
+      idempotencyKey: current.idempotencyKey,
+      ...(current.jobId ? { jobId: current.jobId } : {}),
+      succeeded: true,
+    }));
     this.write(attempts);
   }
 
@@ -70,16 +85,20 @@ export class PendingWhatsAppTemplateAttempts {
     }
     const attempts = new Map<string, PendingWhatsAppTemplateAttempt>();
     for (const [scope, value] of Object.entries(parsed)) {
-      if (!SHA256.test(scope) || !record(value) || typeof value['idempotencyKey'] !== 'string' ||
+      if (!SHA256.test(scope) || !record(value) || Object.keys(value).some((key) =>
+          !['idempotencyKey', 'jobId', 'succeeded'].includes(key)) || typeof value['idempotencyKey'] !== 'string' ||
           !IDEMPOTENCY_KEY.test(value['idempotencyKey'])) {
         throw new Error('Pending template attempt storage is invalid.');
       }
       const jobId = value['jobId'];
-      if (jobId !== undefined && (typeof jobId !== 'string' || !JOB_ID.test(jobId))) {
+      const succeeded = value['succeeded'];
+      if ((jobId !== undefined && (typeof jobId !== 'string' || !JOB_ID.test(jobId))) ||
+          (succeeded !== undefined && typeof succeeded !== 'boolean')) {
         throw new Error('Pending template attempt storage is invalid.');
       }
       attempts.set(scope, Object.freeze({ idempotencyKey: value['idempotencyKey'],
-        ...(typeof jobId === 'string' ? { jobId } : {}) }));
+        ...(typeof jobId === 'string' ? { jobId } : {}),
+        ...(succeeded === true ? { succeeded: true } : {}) }));
     }
     return attempts;
   }
