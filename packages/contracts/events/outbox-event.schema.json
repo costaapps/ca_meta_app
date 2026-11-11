@@ -25,7 +25,7 @@
     "schemaVersion": { "const": 1 },
     "eventType": {
       "type": "string",
-      "enum": ["onboarding.changed", "connection.changed", "asset.refresh.requested", "reply.requested", "notification.changed", "asset.drift.detected", "template.creation.requested"]
+      "enum": ["onboarding.changed", "connection.changed", "asset.refresh.requested", "reply.requested", "notification.changed", "asset.drift.detected", "template.creation.requested", "automation.config.changed"]
     },
     "aggregateRef": { "type": "string", "minLength": 1, "maxLength": 128 },
     "aggregateVersion": { "type": "integer", "minimum": 1 },
@@ -125,6 +125,16 @@
             "templateRef": { "type": "string", "minLength": 1, "maxLength": 128 },
             "operationRef": { "type": "string", "minLength": 1, "maxLength": 128 }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "assetRef", "configurationVersion"],
+          "properties": {
+            "kind": { "const": "AUTOMATION_CONFIG_CHANGED" },
+            "assetRef": { "type": "string", "format": "uuid" },
+            "configurationVersion": { "type": "integer", "minimum": 1 }
+          }
         }
       ]
     }
@@ -157,6 +167,10 @@
     {
       "if": { "properties": { "eventType": { "const": "template.creation.requested" } }, "required": ["eventType"] },
       "then": { "properties": { "data": { "properties": { "kind": { "const": "TEMPLATE_CREATION_REQUESTED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "automation.config.changed" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "AUTOMATION_CONFIG_CHANGED" } } } } }
     }
   ],
   "examples": [

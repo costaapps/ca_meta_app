@@ -1,0 +1,19 @@
+:host { display: block; }
+.automation-config { margin-top: 1.25rem; padding: 1.1rem; border: 1px solid #e1e6ea; border-radius: 9px; background: #fff; }
+h2 { margin: 0; font-size: 1.2rem; }
+.intro, .note, .projection, .state, .field small, details { color: #53616c; line-height: 1.5; }
+.field { display: grid; gap: .4rem; margin: 1rem 0; }
+label { color: #263640; font-weight: 650; }
+textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid #aebbc5; border-radius: 6px; padding: .65rem; color: #253640; background: #fff; font: inherit; line-height: 1.45; }
+textarea:focus-visible, button:focus-visible, summary:focus-visible { outline: 3px solid #145da0; outline-offset: 2px; }
+textarea:disabled { color: #59666f; background: #f3f5f6; }
+.field small { font-size: .82rem; }
+button { min-height: 42px; border: 1px solid #0a5eb7; border-radius: 6px; padding: .55rem .9rem; color: #fff; background: #0866c6; font: inherit; font-weight: 650; cursor: pointer; }
+button:disabled { border-color: #c5cdd3; color: #697681; background: #edf0f2; cursor: not-allowed; }
+.warning { padding: .7rem .8rem; border-left: 3px solid #a56b00; color: #624110; background: #fff9e8; line-height: 1.45; }
+.error { padding: .7rem .8rem; border: 1px solid #f0c7c7; border-radius: 6px; color: #8f2525; background: #fff3f3; }
+.saved { padding: .65rem .75rem; border-left: 3px solid #237443; color: #175931; background: #edf8f0; }
+.projection { margin-top: 1rem; }
+.note { font-size: .87rem; }
+summary { width: fit-content; cursor: pointer; }
+details p { font-size: .85rem; overflow-wrap: anywhere; }

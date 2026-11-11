@@ -1782,10 +1782,18 @@ paths:
                   summary: Sanitized success example
                   value:
                     assetId: 10000000-0000-4000-8000-000000000004
-                    enabled: true
-                    replyText: Thanks for contacting our team.
+                    assetKind: WHATSAPP_PHONE_NUMBER
+                    inheritanceMode: ASSET_ONLY
+                    supportedFields: [privateWelcomeMessage]
+                    privateWelcomeMessage: Olá! Como podemos ajudar?
+                    commentPublicReply: null
+                    commentPrivateReply: null
+                    capabilities:
+                      canEdit: true
+                      executable: false
                     version: 7
                     updatedAt: 2026-10-29T11:00:00Z
+                    projectionState: PENDING
                     requestId: req_example_30
         "400": *a11
         "401": *a12
@@ -1798,11 +1806,11 @@ paths:
         "429": *a19
         "503": *a20
         default: *a21
-    put:
+    patch:
       operationId: replaceAutomationConfig
       tags:
         - Configuration
-      summary: Replace automation/reply configuration conditionally
+      summary: Update channel-supported automation/reply fields conditionally
       description: Requires exact Origin, CSRF, current tenant context and If-Match from the latest
         representation. Unknown fields are rejected. This changes local configuration; delivery of a
         reply is a separate external effect.
@@ -1821,11 +1829,11 @@ paths:
             schema:
               $ref: "#/components/schemas/AutomationConfigUpdate"
             examples:
-              sanitized:
-                summary: Sanitized request example
+              whatsapp:
+                summary: Sanitized WhatsApp phone update
                 value:
-                  enabled: false
-                  replyText: ""
+                  version: 7
+                  privateWelcomeMessage: ""
       responses:
         "200":
           description: Sanitized success example
@@ -1843,10 +1851,18 @@ paths:
                   summary: Sanitized success example
                   value:
                     assetId: 10000000-0000-4000-8000-000000000004
-                    enabled: false
-                    replyText: ""
+                    assetKind: WHATSAPP_PHONE_NUMBER
+                    inheritanceMode: ASSET_ONLY
+                    supportedFields: [privateWelcomeMessage]
+                    privateWelcomeMessage: ""
+                    commentPublicReply: null
+                    commentPrivateReply: null
+                    capabilities:
+                      canEdit: true
+                      executable: false
                     version: 8
                     updatedAt: 2026-10-29T12:02:00Z
+                    projectionState: PENDING
                     requestId: req_example_31
         "400": *a11
         "401": *a12
@@ -4109,43 +4125,97 @@ components:
       additionalProperties: false
       required:
         - assetId
-        - enabled
-        - replyText
+        - assetKind
+        - inheritanceMode
+        - supportedFields
+        - privateWelcomeMessage
+        - commentPublicReply
+        - commentPrivateReply
+        - capabilities
         - version
         - updatedAt
+        - projectionState
         - requestId
       properties:
         assetId:
           type: string
-          minLength: 1
-          maxLength: 128
-        enabled:
-          type: boolean
-        replyText:
+          format: uuid
+        assetKind:
+          $ref: "#/components/schemas/AutomationConfigAssetKind"
+        inheritanceMode:
           type: string
+          const: ASSET_ONLY
+          description: Each resource owns independent values. No account-level default is applied.
+        supportedFields:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AutomationConfigField"
+        privateWelcomeMessage:
+          type: [string, "null"]
           maxLength: 4096
+        commentPublicReply:
+          type: [string, "null"]
+          maxLength: 4096
+        commentPrivateReply:
+          type: [string, "null"]
+          maxLength: 4096
+        capabilities:
+          type: object
+          additionalProperties: false
+          required: [canEdit, executable]
+          properties:
+            canEdit:
+              type: boolean
+            executable:
+              type: boolean
+              const: false
+              description: The API stores settings only; message execution is a separate fail-closed capability.
         version:
           type: integer
-          minimum: 1
+          minimum: 0
         updatedAt:
-          type: string
+          type: [string, "null"]
           format: date-time
+        projectionState:
+          $ref: "#/components/schemas/AutomationConfigProjectionState"
         requestId:
           type: string
           minLength: 1
           maxLength: 128
+    AutomationConfigAssetKind:
+      type: string
+      enum: [WHATSAPP_PHONE_NUMBER, FACEBOOK_PAGE, INSTAGRAM_BUSINESS_ACCOUNT, INSTAGRAM_CREATOR_ACCOUNT]
+    AutomationConfigField:
+      type: string
+      enum: [privateWelcomeMessage, commentPublicReply, commentPrivateReply]
+    AutomationConfigProjectionState:
+      type: string
+      enum: [UNKNOWN, PENDING, SYNCED, STALE, FAILED]
     AutomationConfigUpdate:
       type: object
       additionalProperties: false
-      required:
-        - enabled
-        - replyText
+      minProperties: 2
+      required: [version]
       properties:
-        enabled:
-          type: boolean
-        replyText:
+        version:
+          type: integer
+          minimum: 0
+        privateWelcomeMessage:
           type: string
           maxLength: 4096
+          description: Empty text clears the local value for this asset.
+          pattern: "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$"
+        commentPublicReply:
+          type: string
+          maxLength: 4096
+          description: Empty text clears the local value for this asset.
+          pattern: "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$"
+        commentPrivateReply:
+          type: string
+          maxLength: 4096
+          description: Empty text clears the local value for this asset.
+          pattern: "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$"
     ReplyRequest:
       type: object
       additionalProperties: false

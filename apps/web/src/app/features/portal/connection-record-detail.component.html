@@ -80,6 +80,8 @@
             Última confirmação {{ asset.lastVerifiedAt || asset.observedAt }}. O status pode ter mudado; isso não confirma perda do recurso.
           </p>
 
+          <a *ngIf="canShowAutomationConfig(asset)" class="config-link" [routerLink]="['/assets', asset.id]">Configurar mensagens e respostas deste recurso</a>
+
           <div *ngIf="canShowReauthorization(asset) || canShowDisconnect(asset)" class="asset-actions" aria-label="Ações indisponíveis">
             <button *ngIf="canShowReauthorization(asset)" type="button" [disabled]="!writesAllowed" [attr.aria-describedby]="'writes-disabled-' + index">Solicitar reautorização</button>
             <button *ngIf="canShowDisconnect(asset)" type="button" [disabled]="!writesAllowed" [attr.aria-describedby]="'writes-disabled-' + index">Desconectar este recurso</button>

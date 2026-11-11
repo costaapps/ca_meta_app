@@ -569,16 +569,16 @@ export interface paths {
          * @description Tenant and asset authorization are checked for the requested capability. ETag is returned for conditional updates.
          */
         readonly get: operations["getAutomationConfig"];
-        /**
-         * Replace automation/reply configuration conditionally
-         * @description Requires exact Origin, CSRF, current tenant context and If-Match from the latest representation. Unknown fields are rejected. This changes local configuration; delivery of a reply is a separate external effect.
-         */
-        readonly put: operations["replaceAutomationConfig"];
+        readonly put?: never;
         readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
-        readonly patch?: never;
+        /**
+         * Update channel-supported automation/reply fields conditionally
+         * @description Requires exact Origin, CSRF, current tenant context and If-Match from the latest representation. Unknown fields are rejected. This changes local configuration; delivery of a reply is a separate external effect.
+         */
+        readonly patch: operations["replaceAutomationConfig"];
         readonly trace?: never;
     };
     readonly "/api/v1/assets/{assetId}/replies": {
@@ -1187,17 +1187,46 @@ export interface components {
             readonly requestId: string;
         };
         readonly AutomationConfig: {
+            /** Format: uuid */
             readonly assetId: string;
-            readonly enabled: boolean;
-            readonly replyText: string;
+            readonly assetKind: components["schemas"]["AutomationConfigAssetKind"];
+            /**
+             * @description Each resource owns independent values. No account-level default is applied.
+             * @constant
+             */
+            readonly inheritanceMode: "ASSET_ONLY";
+            readonly supportedFields: readonly components["schemas"]["AutomationConfigField"][];
+            readonly privateWelcomeMessage: string | null;
+            readonly commentPublicReply: string | null;
+            readonly commentPrivateReply: string | null;
+            readonly capabilities: {
+                readonly canEdit: boolean;
+                /**
+                 * @description The API stores settings only; message execution is a separate fail-closed capability.
+                 * @constant
+                 */
+                readonly executable: false;
+            };
             readonly version: number;
             /** Format: date-time */
-            readonly updatedAt: string;
+            readonly updatedAt: string | null;
+            readonly projectionState: components["schemas"]["AutomationConfigProjectionState"];
             readonly requestId: string;
         };
+        /** @enum {string} */
+        readonly AutomationConfigAssetKind: "WHATSAPP_PHONE_NUMBER" | "FACEBOOK_PAGE" | "INSTAGRAM_BUSINESS_ACCOUNT" | "INSTAGRAM_CREATOR_ACCOUNT";
+        /** @enum {string} */
+        readonly AutomationConfigField: "privateWelcomeMessage" | "commentPublicReply" | "commentPrivateReply";
+        /** @enum {string} */
+        readonly AutomationConfigProjectionState: "UNKNOWN" | "PENDING" | "SYNCED" | "STALE" | "FAILED";
         readonly AutomationConfigUpdate: {
-            readonly enabled: boolean;
-            readonly replyText: string;
+            readonly version: number;
+            /** @description Empty text clears the local value for this asset. */
+            readonly privateWelcomeMessage?: string;
+            /** @description Empty text clears the local value for this asset. */
+            readonly commentPublicReply?: string;
+            /** @description Empty text clears the local value for this asset. */
+            readonly commentPrivateReply?: string;
         };
         readonly ReplyRequest: {
             readonly inReplyToRef: string;

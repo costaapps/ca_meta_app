@@ -5,6 +5,7 @@ import { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import { DurableJobStore } from '../jobs/job-store.js';
 import { OutboxService } from '../outbox/outbox-service.js';
 import { META_ASSETS_REPOSITORY, MysqlMetaAssetsRepository } from './mysql-meta-assets.repository.js';
+import type { MetaAssetsRepository } from './mysql-meta-assets.repository.js';
 import { ConfiguredCredentialKeyProvider } from '../credentials/credential-key-provider.js';
 import { CREDENTIAL_KEY_PROVIDER, CREDENTIAL_VAULT_AUTHORIZATION, CREDENTIAL_VAULT_REPOSITORY } from '../credentials/credential-vault.types.js';
 import { CredentialVaultService, FailClosedCredentialVaultAuthorization } from '../credentials/credential-vault.service.js';
@@ -31,6 +32,11 @@ import { TenantAuthorizationService, TenantContextService } from '../identity/id
 import { PortalSessionGuard } from '../identity/portal-session.guard.js';
 import { AssetCatalogController } from './asset-catalog.controller.js';
 import { AssetCatalogService, META_FLOW_ADAPTER_VARIANTS } from './asset-catalog.service.js';
+import { AutomationConfigController } from '../automation-config/automation-config.controller.js';
+import { AutomationConfigService } from '../automation-config/automation-config.service.js';
+import { MysqlAutomationConfigRepository } from '../automation-config/mysql-automation-config.repository.js';
+import { AUTOMATION_CONFIG_REPOSITORY } from '../automation-config/automation-config.tokens.js';
+import type { AutomationConfigRepository } from '../automation-config/automation-config.types.js';
 import { AssetRefreshCoordinator, META_ASSET_REFRESH_ADAPTER, type MetaAssetRefreshAdapter } from './asset-refresh.service.js';
 import type { FlowCatalogVariant } from './meta-assets.types.js';
 import { WhatsAppTemplatesController } from '../whatsapp-templates/whatsapp-templates.controller.js';
@@ -46,7 +52,7 @@ export class MetaAssetsModule {
     return {
       module: MetaAssetsModule,
       imports: [identityModule, JobsModule.register(environment), PrivacyModule.register(environment)],
-      controllers: [AssetCatalogController, WhatsAppTemplatesController],
+      controllers: [AssetCatalogController, WhatsAppTemplatesController, AutomationConfigController],
       providers: [
         {
           provide: PortalSessionGuard,
@@ -94,6 +100,18 @@ export class MetaAssetsModule {
           useFactory: (database: DurableWorkDatabase, outbox: OutboxService, audit: AuditEventWriter) =>
             new MysqlMetaAssetsRepository(database, outbox, audit),
           inject: [DURABLE_WORK_DATABASE, OutboxService, PRIVACY_AUDIT_WRITER],
+        },
+        {
+          provide: AUTOMATION_CONFIG_REPOSITORY,
+          useFactory: (database: DurableWorkDatabase, outbox: OutboxService) => new MysqlAutomationConfigRepository(database, outbox),
+          inject: [DURABLE_WORK_DATABASE, OutboxService],
+        },
+        {
+          provide: AutomationConfigService,
+          useFactory: (repository: AutomationConfigRepository, assets: MetaAssetsRepository,
+            contexts: TenantContextService, authorization: TenantAuthorizationService) =>
+            new AutomationConfigService(repository, assets, contexts, authorization, environment.nodeEnv),
+          inject: [AUTOMATION_CONFIG_REPOSITORY, META_ASSETS_REPOSITORY, TenantContextService, TenantAuthorizationService],
         },
         { provide: CREDENTIAL_KEY_PROVIDER, useFactory: () => new ConfiguredCredentialKeyProvider(environment.credentialKeyRing) },
         { provide: CREDENTIAL_VAULT_AUTHORIZATION, useClass: FailClosedCredentialVaultAuthorization },

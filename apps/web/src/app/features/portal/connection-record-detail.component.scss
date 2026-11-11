@@ -30,6 +30,9 @@ h3 { margin: .2rem 0 0; overflow-wrap: anywhere; font-size: 1.05rem; }
 .dimension-state { color: #66737e; font-size: .82rem; }
 .dimension-list small { display: block; color: #63717c; line-height: 1.4; overflow-wrap: anywhere; }
 .stale-note { margin: .9rem 0 0; padding: .65rem .75rem; border-left: 3px solid #a56b00; color: #60420d; background: #fff9e8; line-height: 1.45; }
+.config-link { display: inline-block; margin-top: .85rem; color: #0067d8; font-weight: 650; text-decoration: none; }
+.config-link:hover { text-decoration: underline; }
+.config-link:focus-visible { outline: 3px solid #145da0; outline-offset: 2px; }
 .asset-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; margin-top: 1rem; padding-top: .8rem; border-top: 1px solid #e6ebee; }
 .asset-actions button { min-height: 40px; border: 1px solid #c5cdd3; border-radius: 6px; padding: .45rem .7rem; color: #59666f; background: #edf0f2; font: inherit; font-weight: 600; cursor: not-allowed; }
 .asset-actions p { flex-basis: 100%; margin: 0; color: #624110; font-size: .85rem; line-height: 1.45; }
