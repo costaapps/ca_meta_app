@@ -11,7 +11,7 @@
 
 | Pacote | Branch | Worktree | Estado inicial |
 |---|---|---|---|
-| M5.01 / #43 | `desktop/m5-01` | `C:\Users\user\.codex\worktrees\m5-01-portal\ca_meta_app` | SHA `6eaad93` recebeu FAIL funcional; implementador corrigindo catálogo, reason codes, retorno seguro e interceptor. Middleware de cookie stale depende do merge M5.07. |
+| M5.01 / #43 | `desktop/m5-01` | `C:\Users\user\.codex\worktrees\m5-01-portal\ca_meta_app` | Nova correção commitada em `ce3ccd99fab46ef4017a767fa2cff14e3bfc5f32`; autor typecheck, 26 focados e build passaram; coordenador repetiu 26/26 no detached SHA. Review funcional em curso. Middleware de cookie stale depende do merge M5.07. |
 | M5.07 / #62 | `desktop/m5-07` | `C:\Users\user\.codex\worktrees\m5-07-service-bridge\ca_meta_app` | SHA `9d9218a` recebeu FAIL funcional; implementador corrige replay/M1.07, adiciona matriz flow/auth, verifica migration MariaDB e avalia migração segura dos PHPs versionados. |
 
 Os dois branches começaram em `c3e9baa`. Um escritor por worktree. O coordenador é o único responsável por push/PR/CI/squash e commits na integração. Junctions `node_modules` reutilizam o install do checkout base, com symlinks `@ca-meta/*` direcionados a cada worktree.
@@ -27,7 +27,7 @@ Os dois branches começaram em `c3e9baa`. Um escritor por worktree. O coordenado
 ## Etapa e próxima ação
 
 - Onda 1: revisão independente reprovou os dois primeiros SHAs; correções estão ativas nos worktrees M5.01 e M5.07. Nenhum package PR foi criado ou integrado.
-- Próximo: obter SHAs revisados, rodar um ciclo focado por SHA em detached validation worktrees, re-review somente os SHAs novos, abrir os package PRs e squash após checks reais. Integrar M5.07 antes de aplicar o middleware de cookie stale em M5.01, evitando disputa no arquivo de segurança.
+- Próximo: aguardar reviews e M5.07 follow-up; a validação detached de M5.01 `ce3ccd9` passou. Abrir os package PRs e squash após checks reais. Integrar M5.07 antes de aplicar o middleware de cookie stale em M5.01, evitando disputa no arquivo de segurança.
 - Depois de ambos os PRs na milestone, iniciar M5.02 e seguir pelas waves do prompt. Atualizar comentário/status da issue sem fechar.
 - Antes de qualquer interrupção futura, atualizar este handoff, estados e checks observados.
 
