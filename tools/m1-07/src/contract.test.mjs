@@ -343,12 +343,19 @@ test('proposed payload and retry bounds are explicit and UNKNOWN external writes
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.maxAutomaticRetries, 0);
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.onAmbiguousOutcome, 'UNKNOWN');
   assert.equal(retry.externalMutationsWithoutVerifiedProviderIdempotency.messageSend, 'no automatic retry');
-  for (const id of ['requestMagicLink', 'disconnectConnection', 'submitProviderAuthorizationCode', 'sendReply', 'createTemplate', 'actOnNotification']) {
+  for (const id of ['requestMagicLink', 'submitProviderAuthorizationCode', 'sendReply', 'createTemplate', 'actOnNotification']) {
     const operation = operationList().find(({ operation: candidate }) => candidate.operationId === id)?.operation;
     assert.ok(operation, `missing externally visible operation ${id}`);
     const policy = operation['x-retry-policy'].toLowerCase();
     assert.match(policy, /one automatic|at most one automatic/, `${id} includes one initial automatic attempt`);
     assert.match(policy, /zero automatic retries|no automatic retry|do not automatically retry/, `${id} forbids automatic retries`);
+  }
+  for (const id of ['disconnectConnection', 'disconnectConnectionAsset']) {
+    const operation = operationList().find(({ operation: candidate }) => candidate.operationId === id)?.operation;
+    assert.ok(operation, `missing local disconnect operation ${id}`);
+    assert.match(operation['x-idempotency-scope'], /Idempotency-Key/i);
+    assert.match(operation['x-retry-policy'], /same request hash/i);
+    assert.match(operation['x-retry-policy'], /no provider retry/i);
   }
   const reauthorization = operationList().find(({ operation }) => operation.operationId === 'createReauthorization').operation;
   assert.match(reauthorization.description, /changes no provider state/i);

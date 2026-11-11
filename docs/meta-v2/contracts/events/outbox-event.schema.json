@@ -25,7 +25,7 @@
     "schemaVersion": { "const": 1 },
     "eventType": {
       "type": "string",
-      "enum": ["onboarding.changed", "connection.changed", "asset.refresh.requested", "reply.requested", "notification.changed", "template.creation.requested"]
+      "enum": ["onboarding.changed", "connection.changed", "asset.refresh.requested", "reply.requested", "notification.changed", "asset.drift.detected", "template.creation.requested"]
     },
     "aggregateRef": { "type": "string", "minLength": 1, "maxLength": 128 },
     "aggregateVersion": { "type": "integer", "minimum": 1 },
@@ -99,6 +99,25 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["kind", "notificationRef", "assetRef", "status", "driftCodes", "actionableReason"],
+          "properties": {
+            "kind": { "const": "ASSET_DRIFT_DETECTED" },
+            "notificationRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "assetRef": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "status": { "const": "UNREAD" },
+            "driftCodes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4,
+              "uniqueItems": true,
+              "items": { "type": "string", "enum": ["ASSET_STATUS_CHANGED", "PERMISSIONS_CHANGED", "SUBSCRIPTION_CHANGED", "PROJECTION_STALE"] }
+            },
+            "actionableReason": { "type": "string", "enum": ["REAUTHORIZE", "CHECK_STATUS", "RECONCILE"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["kind", "accountAssetRef", "templateRef", "operationRef"],
           "properties": {
             "kind": { "const": "TEMPLATE_CREATION_REQUESTED" },
@@ -130,6 +149,10 @@
     {
       "if": { "properties": { "eventType": { "const": "notification.changed" } }, "required": ["eventType"] },
       "then": { "properties": { "data": { "properties": { "kind": { "const": "NOTIFICATION_CHANGED" } } } } }
+    },
+    {
+      "if": { "properties": { "eventType": { "const": "asset.drift.detected" } }, "required": ["eventType"] },
+      "then": { "properties": { "data": { "properties": { "kind": { "const": "ASSET_DRIFT_DETECTED" } } } } }
     },
     {
       "if": { "properties": { "eventType": { "const": "template.creation.requested" } }, "required": ["eventType"] },

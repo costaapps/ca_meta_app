@@ -9,6 +9,7 @@ import type {
 } from './meta-assets.types.js';
 import type { MetaAssetsRepository } from './mysql-meta-assets.repository.js';
 import { AssetRefreshCoordinator, AssetRefreshUnavailableError } from './asset-refresh.service.js';
+import { isAssetObservationStale, toPublicAssetStatusObservation } from './asset-observation.service.js';
 
 export const META_FLOW_ADAPTER_VARIANTS = Symbol('META_FLOW_ADAPTER_VARIANTS');
 
@@ -86,16 +87,23 @@ function canOperate(roles: readonly MembershipRole[]): boolean {
 function capabilitySnapshot(item: AssetCatalogReadModel, roles: readonly MembershipRole[]): components['schemas']['AssetCapabilities'] {
   // Mappings remain advisory; unsupported variant/operation pairs stay false until confirmed.
   const now = Date.now();
-  const active = item.status === 'ACTIVE' && item.authorizationStatus === 'VERIFIED' && !item.stale;
+  const observation = item.statusObservation ?? null;
+  const observationFreshActive = !observation || (!isAssetObservationStale(observation, new Date(now).toISOString()) &&
+    observation.status.availability === 'OBSERVED' && observation.status.value === 'ACTIVE');
+  const observationPermissionsKnown = !observation || (observation.permissions.availability === 'OBSERVED' &&
+    observation.permissions.grantNames !== null);
+  const active = item.status === 'ACTIVE' && item.authorizationStatus === 'VERIFIED' && !item.stale &&
+    observationFreshActive && observationPermissionsKnown;
   const operator = canOperate(roles);
   const verifiedEvidence = item.capabilityEvidence.filter((evidence) =>
     evidence.authorizationState === 'ACTIVE' && evidence.assetAuthorizationState === 'ACTIVE' &&
     evidence.verificationState === 'VERIFIED' && evidence.verifiedAt !== null && evidence.verificationSource !== null &&
     hasFreshObservation(evidence.verifiedAt, now) && hasUsableTokenEvidence(evidence, now) &&
-    item.status === 'ACTIVE' && !item.stale,
+    item.status === 'ACTIVE' && !item.stale && observationFreshActive && observationPermissionsKnown,
   );
   const hasGrant = (flow: string, auth: string, grantName: string): boolean => verifiedEvidence.some((evidence) =>
-    evidence.flowVariant === flow && evidence.authVariant === auth && evidence.grantNames.includes(grantName),
+    evidence.flowVariant === flow && evidence.authVariant === auth && evidence.grantNames.includes(grantName) &&
+      (!observation || observation.permissions.grantNames?.includes(grantName) === true),
   );
   const whatsapp = item.kind === 'WHATSAPP_PHONE_NUMBER';
   const instagram = item.kind === 'INSTAGRAM_BUSINESS_ACCOUNT' || item.kind === 'INSTAGRAM_CREATOR_ACCOUNT';
@@ -122,6 +130,8 @@ function toAssetListItem(item: AssetCatalogReadModel, roles: readonly Membership
     stale: item.stale,
     diagnostics: item.diagnostics,
     capabilities: capabilitySnapshot(item, roles),
+    ...(item.statusObservation ? { statusObservation: toPublicAssetStatusObservation(item.statusObservation,
+      item.authorizationStatus, new Date().toISOString()) } : {}),
   });
 }
 
@@ -152,6 +162,8 @@ function toConnectionAsset(item: AssetCatalogReadModel, roles: readonly Membersh
     stale: item.stale,
     diagnostics: item.diagnostics,
     capabilities: capabilitySnapshot(item, roles),
+    ...(item.statusObservation ? { statusObservation: toPublicAssetStatusObservation(item.statusObservation,
+      item.authorizationStatus, new Date().toISOString()) } : {}),
   });
 }
 

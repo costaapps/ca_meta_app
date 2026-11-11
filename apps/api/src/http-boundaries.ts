@@ -1,7 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { RequestMethod } from '@nestjs/common';
-import { json, urlencoded } from 'express';
+import { json, raw, urlencoded } from 'express';
 import type { ApiEnvironment } from './config/environment.js';
 import { allowedHostMiddleware } from './common/http/allowed-host.middleware.js';
 import { bodyParserErrorMiddleware } from './common/http/body-parser-error.middleware.js';
@@ -11,6 +11,7 @@ import { REQUEST_DRAIN, type RequestDrain } from './common/http/request-drain.js
 import { CLOCK, type MonotonicClock } from './common/time/clock.port.js';
 import { portalRequestSecurityMiddleware } from './common/security/portal-request-security.js';
 import { PortalSessionVerifier } from './identity/identity.trust.js';
+import { META_LIFECYCLE_RAW_POST_PATH, META_WEBHOOK_MAX_BODY_BYTES, META_WEBHOOK_RAW_POST_PATH } from './meta-webhooks/meta-webhook-validation.js';
 
 export const API_BODY_LIMIT_BYTES = 65_536;
 
@@ -40,6 +41,19 @@ export function configureHttpBoundaries(app: INestApplication, environment: ApiE
   }
   app.use(portalRequestSecurityMiddleware(environment, sessionVerifier));
   app.use(requestDrain.middleware());
+  const metaWebhookRawParser = raw({ type: 'application/json', limit: META_WEBHOOK_MAX_BODY_BYTES, inflate: false });
+  const metaLifecycleRawParser = raw({ type: '*/*', limit: META_WEBHOOK_MAX_BODY_BYTES, inflate: false });
+  app.use((request: import('express').Request, response: import('express').Response, next: import('express').NextFunction) => {
+    if (request.method === 'POST' && META_LIFECYCLE_RAW_POST_PATH.test(request.path)) {
+      metaLifecycleRawParser(request, response, next);
+      return;
+    }
+    if (request.method === 'POST' && META_WEBHOOK_RAW_POST_PATH.test(request.path)) {
+      metaWebhookRawParser(request, response, next);
+      return;
+    }
+    next();
+  });
   app.use(json({ limit: API_BODY_LIMIT_BYTES, strict: true }));
   app.use(urlencoded({ limit: API_BODY_LIMIT_BYTES, extended: false, parameterLimit: 100 }));
   app.use(bodyParserErrorMiddleware(logger));

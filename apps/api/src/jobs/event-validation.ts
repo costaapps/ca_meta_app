@@ -41,7 +41,7 @@ export type JobType = 'INBOX_PROCESS' | 'OUTBOX_DELIVER' | 'ONBOARDING_STEP' | '
 export type JobPayload =
   | { readonly kind: 'INBOX_PROCESS'; readonly inboxEventRef: string }
   | { readonly kind: 'OUTBOX_DELIVER'; readonly outboxEventRef: string }
-  | { readonly kind: 'ONBOARDING_STEP'; readonly onboardingRef: string; readonly stepRef: string }
+  | { readonly kind: 'ONBOARDING_STEP'; readonly onboardingRef: string; readonly stepRef: string; readonly codeRef?: string; readonly operation?: 'RECONCILE' }
   | { readonly kind: 'PROJECTION_RECONCILE'; readonly projectionRef: string; readonly sourceVersion: number }
   | { readonly kind: 'HISTORY_SYNC'; readonly checkpointRef: string }
   | {
@@ -81,7 +81,9 @@ export const JOB_POLICIES: Readonly<Record<JobType, JobPolicy>> = Object.freeze(
     maxElapsedMs: 15 * 60_000, maxHandlerMs: 15_000, retryBaseMs: 1_000, retryMaxMs: 60_000,
   },
   ONBOARDING_STEP: {
-    lane: 'ONBOARDING', effectMode: 'AMBIGUOUS', maxAttempts: 3,
+    // The authorization exchange is one-use and never retries. Later stages may
+    // use one bounded retry only when the adapter proves that no effect occurred.
+    lane: 'ONBOARDING', effectMode: 'AMBIGUOUS', maxAttempts: 2,
     maxElapsedMs: 15 * 60_000, maxHandlerMs: 60_000, retryBaseMs: 2_000, retryMaxMs: 60_000,
   },
   PROJECTION_RECONCILE: {
@@ -130,6 +132,8 @@ const jobPayloadSchemas: Readonly<Record<JobType, object>> = {
       kind: { const: 'ONBOARDING_STEP' },
       onboardingRef: { type: 'string', minLength: 1, maxLength: 128 },
       stepRef: { type: 'string', minLength: 1, maxLength: 128 },
+      codeRef: { type: 'string', format: 'uuid' },
+      operation: { enum: ['RECONCILE'] },
     },
   },
   PROJECTION_RECONCILE: {

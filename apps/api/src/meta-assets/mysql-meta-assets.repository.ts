@@ -6,6 +6,7 @@ import type { OutboxEventEnvelope } from '../jobs/event-validation.js';
 import type { OutboxService } from '../outbox/outbox-service.js';
 import { privacyRefHash, type AuditEventWriter } from '../privacy/audit.service.js';
 import { isSafeOpaqueReference } from '../privacy/redaction.js';
+import { isAssetObservationStale, parseAssetObservationSnapshot, type AssetObservationSnapshot } from './asset-observation.service.js';
 import {
   assetIdentityHash,
   isMetaAssetKind,
@@ -484,6 +485,39 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     const pageRows = hasMore ? rows.slice(0, input.limit) : rows;
     const assetIds = pageRows.map((row) => row.id);
     const appConfigurationIds = [...new Set(pageRows.map((row) => row.app_configuration_id))];
+    const observationBindings = assetIds.length === 0 ? [] : await dataSource.query(
+      `SELECT aa.asset_id, aa.authorization_id, latest.snapshot_json
+       FROM ca_meta_asset_authorizations aa
+       INNER JOIN ca_meta_authorizations auth
+         ON auth.tenant_id = aa.tenant_id AND auth.id = aa.authorization_id
+        AND auth.app_configuration_id = aa.app_configuration_id AND auth.environment = aa.environment
+       LEFT JOIN (
+         SELECT observation.tenant_id, observation.authorization_id, observation.asset_id, observation.snapshot_json
+         FROM ca_meta_asset_observations observation
+         INNER JOIN (
+           SELECT tenant_id, authorization_id, asset_id, MAX(version) AS version FROM ca_meta_asset_observations
+           WHERE tenant_id = ? AND asset_id IN (${assetIds.map(() => '?').join(', ')})
+           GROUP BY tenant_id, authorization_id, asset_id
+         ) latest_version
+           ON latest_version.tenant_id = observation.tenant_id
+          AND latest_version.authorization_id = observation.authorization_id
+          AND latest_version.asset_id = observation.asset_id AND latest_version.version = observation.version
+       ) latest ON latest.tenant_id = aa.tenant_id AND latest.authorization_id = aa.authorization_id AND latest.asset_id = aa.asset_id
+       WHERE aa.tenant_id = ? AND aa.asset_id IN (${assetIds.map(() => '?').join(', ')})
+         AND aa.state = 'ACTIVE' AND aa.verification_state = 'VERIFIED'
+         AND auth.authorization_state IN ('ACTIVE', 'PARTIAL')
+         ${input.authorizationRef ? 'AND aa.authorization_id = ?' : ''}
+       ORDER BY aa.asset_id, aa.authorization_id`,
+      [input.tenantId, ...assetIds, input.tenantId, ...assetIds, ...(input.authorizationRef ? [input.authorizationRef] : [])],
+    ) as Array<{ asset_id: string; authorization_id: string; snapshot_json: string | AssetObservationSnapshot | null }>;
+    const observationBindingsByAsset = new Map<string, { count: number; snapshots: AssetObservationSnapshot[] }>();
+    for (const row of observationBindings) {
+      const group = observationBindingsByAsset.get(row.asset_id) ?? { count: 0, snapshots: [] };
+      group.count += 1;
+      const snapshot = row.snapshot_json ? parseAssetObservationSnapshot(row.snapshot_json) : undefined;
+      if (snapshot?.authorizationRef === row.authorization_id) group.snapshots.push(snapshot);
+      observationBindingsByAsset.set(row.asset_id, group);
+    }
     const capabilityRows = assetIds.length === 0 ? [] : await dataSource.query(
       `SELECT aa.asset_id, aa.authorization_id, aa.state AS asset_authorization_state,
               aa.verification_state, aa.verified_at, aa.verification_source,
@@ -569,6 +603,16 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     }
     const items = pageRows.flatMap((row) => {
       if (!isMetaAssetKind(row.asset_kind)) return [];
+      const observationBindingGroup = observationBindingsByAsset.get(row.id);
+      const statusObservation = observationBindingGroup?.count === 1 ? observationBindingGroup.snapshots[0] ?? null : null;
+      const observationAmbiguous = !input.authorizationRef && (observationBindingGroup?.count ?? 0) > 1 &&
+        (observationBindingGroup?.snapshots.length ?? 0) > 0;
+      const observationStale = statusObservation ? isAssetObservationStale(statusObservation, new Date().toISOString()) : false;
+      const status = observationAmbiguous ? 'UNKNOWN' as const
+        : row.authorization_status === 'REVOKED' ? 'INACTIVE' as const
+        : statusObservation ? observationStale ? 'STALE' as const
+          : statusObservation.status.availability === 'OBSERVED' ? statusObservation.status.value : 'UNKNOWN' as const
+          : row.status;
       const evidence = [...(evidenceByAsset.get(row.id)?.values() ?? [])].map((entry) => Object.freeze({
         ...entry.evidence, grantNames: Object.freeze([...entry.grants].sort()),
       }));
@@ -578,12 +622,13 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
         assetRef: row.id,
         appConfigurationId: row.app_configuration_id,
         kind: row.asset_kind,
-        status: row.status,
+        status,
         authorizationStatus: row.authorization_status,
-        observedAt: formatDate(row.observed_at),
-        lastVerifiedAt: row.last_verified_at ? formatDate(row.last_verified_at) : null,
-        verificationSource: verified[0]?.verificationSource ?? null,
-        stale: row.status === 'STALE',
+        observedAt: statusObservation?.status.observedAt ?? formatDate(row.observed_at),
+        lastVerifiedAt: statusObservation?.status.observedAt ?? (row.last_verified_at ? formatDate(row.last_verified_at) : null),
+        verificationSource: statusObservation?.status.observedAt ? statusObservation.source : verified[0]?.verificationSource ?? null,
+        stale: observationAmbiguous || (statusObservation ? observationStale : row.status === 'STALE'),
+        statusObservation,
         capabilityEvidence: Object.freeze(evidence),
         diagnostics: summarizeDiagnostics(evidence, formatDate(row.observed_at)),
         reauthorizationRequired: Number(row.reauthorization_required) === 1,

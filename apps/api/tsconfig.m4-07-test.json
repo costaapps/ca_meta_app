@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-test",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/meta-webhooks/meta-webhook.types.ts",
+    "src/meta-webhooks/coexistence-webhook-processor.ts",
+    "test/m4-07-coexistence-events.spec.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}

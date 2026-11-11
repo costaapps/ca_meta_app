@@ -1,0 +1,187 @@
+:host {
+  display: block;
+  min-height: 100vh;
+  color: #1c2b36;
+  background: #f5f6f7;
+}
+
+.coexistence-shell {
+  width: min(860px, 100% - 2rem);
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+}
+
+.page-header,
+.availability,
+.attempt-card {
+  padding: 1.5rem;
+  border: 1px solid #e0e5ea;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgb(15 23 42 / 6%);
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 1.5rem;
+  color: #005ecb;
+  font-weight: 600;
+}
+
+.eyebrow {
+  margin: 0 0 0.45rem;
+  color: #287c48;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0.75rem;
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+}
+
+h2 {
+  font-size: 1.15rem;
+}
+
+.intro,
+.availability p,
+.attempt-card p,
+footer {
+  color: #59636e;
+  line-height: 1.6;
+}
+
+.availability {
+  margin-top: 1rem;
+}
+
+.evidence-note {
+  padding: 0.85rem 1rem;
+  border-left: 4px solid #a77b19;
+  background: #fff8e6;
+}
+
+.primary-action,
+.secondary-action {
+  min-height: 42px;
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 650;
+}
+
+.primary-action {
+  border: 1px solid #1e7542;
+  color: #fff;
+  background: #1e7542;
+}
+
+.primary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.secondary-action {
+  border: 1px solid #697782;
+  color: #34414b;
+  background: #fff;
+  cursor: pointer;
+}
+
+.attempt-history {
+  margin-top: 1.5rem;
+}
+
+.attempt-history ol {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attempt-card {
+  box-shadow: none;
+}
+
+.recovery-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #e5d5a6;
+  border-radius: 8px;
+  background: #fffaf0;
+
+  h4 {
+    margin: 0 0 0.4rem;
+    font-size: 0.95rem;
+  }
+
+  p {
+    margin-bottom: 0.75rem;
+  }
+}
+
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.attempt-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.attempt-heading h3 {
+  margin-bottom: 0.35rem;
+}
+
+.state-label {
+  color: #59636e;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+
+time {
+  display: block;
+  margin: 0.65rem 0 1rem;
+  color: #737e88;
+  font-size: 0.82rem;
+}
+
+footer {
+  margin-top: 1.5rem;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 560px) {
+  .coexistence-shell {
+    width: min(100% - 1rem, 860px);
+    padding-top: 0.5rem;
+  }
+
+  .page-header,
+  .availability,
+  .attempt-card {
+    padding: 1rem;
+  }
+
+  .attempt-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+}

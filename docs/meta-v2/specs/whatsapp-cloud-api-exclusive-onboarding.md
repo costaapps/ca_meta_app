@@ -1,0 +1,31 @@
+# SPEC — Exclusive WhatsApp Cloud API onboarding
+
+Status: M4.04 implementation candidate; issue [#48](https://github.com/costaapps/ca_meta_app/issues/48). Decision: [ADR-017](../adrs/ADR-017-m4-04-whatsapp-exclusive.md). This specification covers only `WHATSAPP_CLOUD_API` / `WHATSAPP_EXCLUSIVE + WHATSAPP_EMBEDDED_SIGNUP`. WhatsApp Business App Coexistence stays on its own callback, adapter and configuration.
+
+## Server-owned authorization and asset discovery
+
+The browser submits only the one-use authorization code and onboarding state already protected by M4.03. Provider WABA/phone IDs are not accepted as authorization evidence. The exclusive operations port must resolve the exact app configuration and tenant authorization, enumerate only assets that the exchanged authorization can access, follow all pages through M4.02's bounded Graph collector, and persist selected WABAs/phones with M3.06's `VerifiedMetaEvidence`, asset grants and `PHONE_TO_ACCOUNT` relation. The Meta-maintained collection documents `/{Business-ID}/owned_whatsapp_business_accounts`; M4.02 now exposes that edge only under the exclusive Cloud API auth variant. Its business ID must be resolved by the server catalog, never taken from the browser. Phone discovery uses paginated `/{WABA-ID}/phone_numbers`. Selection must be checked against that server-side discovery before upsert. It must never fall back to a Meta root/service token. The adapter returns only internal UUID asset refs.
+
+The operations port is deliberately injected into [`WhatsAppExclusiveOnboardingAdapter`](../../../apps/api/src/whatsapp-exclusive/whatsapp-exclusive-onboarding.adapter.ts) and is not registered in the shared onboarding module by default. This leaves the production route fail-closed until code exchange, grant/catalog resolution, M4.11 WABA subscriptions and projection adapters are connected by the coordinator.
+
+## Per-number registration and readiness
+
+The internal Graph client has a closed `PHONE_REGISTER` route for `POST /{server-resolved-phone-id}/register`. It accepts exactly `messaging_product=whatsapp` and a six-digit PIN, and requires the conventional registration operation. The route refuses Coexistence before credential use. It uses M3.08's one-use resolver handle for the exact tenant, app, environment and internal phone asset. POSTs are never retried after an ambiguous outcome; callers must reconcile first. PIN fields and echoed PIN values are removed from safe responses.
+
+M4.04 does not expose a PIN endpoint or persist/queue a PIN. There is no confirmed tenant-scoped protected PIN source in the current M3.07/M4.03 interfaces. If verified phone state says registration is already complete, the operations port records `READY / ALREADY_REGISTERED` without a POST. If state is not confirmed, it records `UNKNOWN / PHONE_STATE_NOT_CONFIRMED`; if registration is required but a protected PIN source or registration-eligible exact credential is missing, it records `ACTION_REQUIRED` with `PIN_NOT_AVAILABLE` or `TOKEN_ELIGIBILITY_NOT_CONFIRMED`. It does not perform a conventional registration by guessing state or using a root token.
+
+Phone readiness is checkpointed as only `{ assetRef, state, reasonCode, observedAt }` in the existing M4.03 `saga_checkpoint_json`. The checkpoint validates that every ref is a verified `WHATSAPP_PHONE_NUMBER` owned by the exact tenant, authorization and exclusive flow. It contains no provider ID, phone number, access token, OAuth code or PIN. No schema migration is needed. The public onboarding status returns this bounded safe readiness array. On `ACTION_REQUIRED`, the asset-verification step remains resumable and subscription/projection do not run. On an ambiguous registration result, status becomes `UNKNOWN / RECONCILE`, and recovery performs read-only reconciliation before another write. The resumed discovery must return the exact same internal asset set; it cannot silently add a newly discovered number.
+
+After all selected numbers are ready, WABA subscriptions delegate to M4.11's per-WABA reconciliation and the normal M4.03 projection stage. Neither operation deletes or replaces previous company connections.
+
+## Confirmed behavior and open evidence
+
+**Confirmed in Meta-maintained Postman collections:** Cloud API has `GET /{WABA-ID}/phone_numbers` and the collection documents paginated list responses; conventional registration is `POST /{Phone-Number-ID}/register` with `messaging_product=whatsapp` and a six-digit PIN; the call sets two-step verification, requires phone ownership verification by SMS/voice beforehand, and the collection says to register an Embedded Signup number within 14 days. The collection states that registration endpoints require a system-user access token with `whatsapp_business_messaging`.
+
+**Not confirmed:** whether this app's Embedded Signup exchange yields or can provision that token type; its registration grant, app review, advanced access and eligibility; current app-configured Graph/SDK/Embedded Signup versions; a provider field/contract that reliably distinguishes registered from unregistered numbers; and live subscription/webhook behavior. The Postman system-user note does not prove the exchanged token is eligible. Until that app-specific authorization and protected PIN lifecycle are verified, onboarding may finish only as `PARTIAL`/`ACTION_REQUIRED` or `UNKNOWN`, never as false `READY`.
+
+Sources: [Meta WhatsApp Cloud API collection](https://www.postman.com/meta/whatsapp-business-platform/documentation/wlk6lh4/whatsapp-cloud-api), [Meta registration folder](https://www.postman.com/meta/whatsapp-business-platform/folder/zuoeksl/registration), and [Meta Embedded Signup collection](https://www.postman.com/meta/whatsapp-business-platform/documentation/du6gzjv/embedded-signup). Research supports adapter shape and published examples only; it does not certify an app, grant or real account.
+
+## Local evidence
+
+The synthetic, no-network harness is described in [`tools/m4-04/README.md`](../../../tools/m4-04/README.md). It covers exact-flow route restrictions, six-digit body validation, ambiguous POST handling, secret redaction, per-number checkpoint validation, safe portal status projection, and resumable partial state. It does not exercise Meta, a database, an app token or real assets.

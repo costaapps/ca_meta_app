@@ -68,6 +68,10 @@ Cada número cria uma OnboardingSession. O adaptador usa configuração/featureT
 
 Eventos de janela exigem schema/type/event, limites e origem exata documentada. `event.source` deve ser verificado quando o SDK expõe vínculo útil e comprovado. Não aceitar um sufixo genérico de domínio ou payload que declare tenant. Mesmo evento esperado não comprova os grants no backend.
 
+O limite implementado para M4.05 está descrito em [Coexistence browser onboarding](specs/coexistence-embedded-signup.md) e [ADR-013](adrs/ADR-013-m4-05-coexistence-browser-correlation.md): a rota separada mantém o adapter desativado enquanto versão, `featureType`, schema e semântica origin/source não tiverem evidência oficial revisada. Fixtures locais normalizam apenas a interface interna; não representam mensagem Meta.
+
+A fronteira server-side de M4.06 está descrita em [Coexistence server finalization](specs/coexistence-server-finalization.md) e [ADR-014](adrs/ADR-014-m4-06-coexistence-server-finalization.md). Ela reutiliza os checkpoints do M4.03 e a reconciliação do M4.11, mas não instala um adapter de provedor sem contrato atual confirmado para troca, grants, ativos e subscriptions Coexistence.
+
 Quando o usuário conclui QR, UI informa que está verificando a conexão. FINISH não equivale a READY. Campos opcionais de evento não devem ser exigidos cegamente: IDs faltantes podem ser descobertos pelo backend dentro do escopo autorizado; ambiguidade exige seleção/prova e não “primeiro recurso retornado”.
 
 ### Servidor
@@ -81,6 +85,8 @@ Subscription e sincronização são etapas explícitas. Sincronização de hist�
 ### Estado, histórico e echoes
 
 Preparar parsers versionados para famílias de eventos `history`, `smb_app_state_sync`, `smb_message_echoes`, `account_update` conforme disponibilidade confirmada. Não afirmar que todos são obrigatórios ou idênticos em qualquer versão.
+
+O limite local de M4.07 está descrito em [Coexistence history, state and echo processing](specs/coexistence-event-processing.md) e [ADR-018](adrs/ADR-018-m4-07-coexistence-event-processing.md). O processor é opt-in, permanece desativado e aceita apenas folhas normalizadas pelo M4.10 que já tenham tenant/app/ativo de telefone confiáveis. Ele exige consentimento e expiração de retenção server-side, preserva `eventRef` para idempotência e marca histórico/echo para suprimir automação. Não há sink persistente registrado. `smb_app_state_sync` continua tenantless/quarentenado porque seu schema e rota de telefone não foram confirmados. A consulta às páginas oficiais de onboarding Business App e Graph Webhooks retornou HTTP 429 em 2026-11-10; schema, trigger, janela/cursor, semântica de consentimento e elegibilidade seguem **Not confirmed**. Esta fronteira não declara suporte completo de histórico, estado ou echoes.
 
 Cada stream possui checkpoint por tenant/número, identidade de lote/item e controle de ordem. Guardar consentimento, import time e provider timestamp separadamente. Duplicata de lote não cria outra conversa/mensagem. Echo do app e envio API com identidade equivalente não disparam automação em loop. Status de entrega pode ter várias mudanças para o mesmo message ID; dedupe não pode descartá-las como “mensagem repetida”.
 

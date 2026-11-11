@@ -29,6 +29,7 @@ $instagram: #c13584;
 
 .intro-panel,
 .operation-panel,
+.coexistence-entry,
 .flow-grid {
   width: min(1180px, 100%);
   margin: 0 auto;
@@ -36,6 +37,7 @@ $instagram: #c13584;
 
 .intro-panel,
 .operation-panel,
+.coexistence-entry,
 .flow-card {
   background: $card-bg;
   border: 1px solid $line;
@@ -137,6 +139,27 @@ p {
   p {
     max-width: 800px;
     margin-top: 0.55rem;
+  }
+}
+
+.coexistence-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  margin: 1rem auto 0;
+  padding: 1.25rem 1.5rem;
+
+  h2 {
+    margin-top: 0.75rem;
+  }
+
+  p {
+    max-width: 760px;
+    margin-top: 0.5rem;
+    color: $muted;
+    font-size: 0.92rem;
+    line-height: 1.55;
   }
 }
 
@@ -317,6 +340,11 @@ p {
     grid-template-columns: 1fr;
   }
 
+  .coexistence-entry {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .operation-panel {
     align-items: stretch;
     flex-direction: column;
@@ -338,6 +366,7 @@ p {
 
   .intro-panel,
   .operation-panel,
+  .coexistence-entry,
   .flow-card {
     padding: 1rem;
   }

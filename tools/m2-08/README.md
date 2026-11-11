@@ -43,6 +43,8 @@ The release and development Dockerfiles pin Node `24.22.2-alpine3.24` to `sha256
 
 The M2.08 remediation scope (`Refs #30`) pins the NGINX runtime's `libexpat` package to Alpine v3.24's patched `2.10.0-r0`. This addresses Trivy findings `CVE-2026-117610` and `CVE-2026-118370` reported against `2.9.0-r0`; the HIGH/CRITICAL gate remains unchanged. The package version is listed by the [official Alpine v3.24 package index](https://pkgs.alpinelinux.org/package/v3.24/main/x86_64/libexpat). The Dockerfile still uses its digest-pinned NGINX base. The image build and Trivy scan must pass in CI; a local Docker daemon was unavailable for this remediation.
 
+The consolidated M4 validation on 2026-11-11 found two HIGH findings in the pinned Alpine 3.24.3 web runtime: `libxslt 1.1.43-r3` was affected by `CVE-2026-87636` and `CVE-2026-9947`. The image now pins patched `libxslt=1.1.43-r4` alongside the existing `libexpat` fix. Alpine v3.24 publishes the r4 package in its [official package index](https://pkgs.alpinelinux.org/package/v3.24/main/x86_64/libxslt). The HIGH/CRITICAL Trivy gate remains unchanged; the exact updated image is rechecked in the consolidated PR CI.
+
 ## Secret and dependency scans
 
 ```powershell

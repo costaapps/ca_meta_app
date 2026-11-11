@@ -3,12 +3,19 @@ import type { components } from '@ca-meta/contracts';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { DurableJobStore } from '../jobs/job-store.js';
 import type { MetaEnvironment } from './meta-assets.types.js';
+import type { AssetObservationInput } from './asset-observation.service.js';
 
 export const META_ASSET_REFRESH_ADAPTER = Symbol('META_ASSET_REFRESH_ADAPTER');
+export const ASSET_REFRESH_MIN_INTERVAL_SECONDS = 60;
+
+export interface AssetRefreshObservation {
+  readonly authorizationId: string;
+  readonly observation: AssetObservationInput;
+}
 
 export interface MetaAssetRefreshAdapter {
   refresh(input: { readonly tenantId: string; readonly assetId: string; readonly appConfigurationId: string;
-    readonly environment: MetaEnvironment }, signal: AbortSignal): Promise<void>;
+    readonly environment: MetaEnvironment }, signal: AbortSignal): Promise<readonly AssetRefreshObservation[] | void>;
 }
 
 /** Serializes admissions by tenant and asset. The adapter is absent until a real provider implementation is installed. */
@@ -17,7 +24,12 @@ export class AssetRefreshCoordinator {
     private readonly database: DurableWorkDatabase,
     private readonly jobs: DurableJobStore,
     readonly adapter: MetaAssetRefreshAdapter | null | undefined,
-  ) {}
+    private readonly minRefreshIntervalSeconds = ASSET_REFRESH_MIN_INTERVAL_SECONDS,
+  ) {
+    if (!Number.isSafeInteger(minRefreshIntervalSeconds) || minRefreshIntervalSeconds < 0 || minRefreshIntervalSeconds > 3600) {
+      throw new RangeError('minRefreshIntervalSeconds must be an integer in [0, 3600].');
+    }
+  }
 
   get available(): boolean { return Boolean(this.adapter); }
 
@@ -45,6 +57,15 @@ export class AssetRefreshCoordinator {
       ) as Array<{ id: string }>;
       if (active[0]) return { id: active[0].id };
 
+      const budget = await manager.query(
+        `SELECT id FROM ca_meta_jobs
+         WHERE tenant_id = ? AND job_type = 'ASSET_REFRESH' AND resource_scope_ref = ?
+           AND created_at > DATE_SUB(UTC_TIMESTAMP(6), INTERVAL ${this.minRefreshIntervalSeconds} SECOND)
+         ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE`,
+        [input.tenantId, input.assetId],
+      ) as Array<{ id: string }>;
+      if (budget[0]) throw new AssetRefreshRateLimitError();
+
       const queued = await this.jobs.enqueueWithin(manager, {
         tenantId: input.tenantId,
         type: 'ASSET_REFRESH',
@@ -64,4 +85,8 @@ export class AssetRefreshCoordinator {
 
 export class AssetRefreshUnavailableError extends Error {
   constructor() { super('Asset refresh is unavailable.'); this.name = 'AssetRefreshUnavailableError'; }
+}
+
+export class AssetRefreshRateLimitError extends Error {
+  constructor() { super('Asset refresh budget is temporarily exhausted.'); this.name = 'AssetRefreshRateLimitError'; }
 }

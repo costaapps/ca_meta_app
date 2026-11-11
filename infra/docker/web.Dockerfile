@@ -18,7 +18,7 @@ FROM ${NGINX_IMAGE} AS runtime
 ARG OCI_VERSION
 ARG OCI_REVISION
 USER root
-RUN apk add --no-cache libexpat=2.10.0-r0
+RUN apk add --no-cache libexpat=2.10.0-r0 libxslt=1.1.43-r4
 RUN test -n "${OCI_VERSION}" && test -n "${OCI_REVISION}"
 LABEL org.opencontainers.image.title="CA Meta Web" \
       org.opencontainers.image.source="https://github.com/costaapps/ca_meta_app" \
