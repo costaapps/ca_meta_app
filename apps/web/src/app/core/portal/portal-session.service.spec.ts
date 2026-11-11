@@ -83,6 +83,18 @@ describe('PortalSessionService', () => {
     await expect(response).resolves.toEqual(session);
   });
 
+  it('does not attach session cookies, tenant context or CSRF to an external API-looking URL', async () => {
+    context.setContextRef('synthetic-current-context-reference-01');
+    const response = firstValueFrom(client.get('https://external.example.invalid/api/v1/session'));
+    const request = http.expectOne('https://external.example.invalid/api/v1/session');
+
+    expect(request.request.withCredentials).toBe(false);
+    expect(request.request.headers.has('X-Tenant-Context')).toBe(false);
+    expect(request.request.headers.has('X-CSRF-Token')).toBe(false);
+    request.flush({ ok: true });
+    await expect(response).resolves.toEqual({ ok: true });
+  });
+
   it('does not treat a missing session as authenticated', async () => {
     const result = service.ensureCurrentSession(true);
     http.expectOne('/api/v1/session').flush({ code: 'AUTH_REQUIRED' }, { status: 401, statusText: 'Unauthorized' });

@@ -8,7 +8,7 @@ export function safeReturnUrl(value: string): string {
   if (!safePaths) return '/connections';
   const parameters = new URLSearchParams(query);
   const safeParameters = new URLSearchParams();
-  const allowedKeys = new Set(['authVariant', 'filter', 'page', 'pageSize', 'product', 'sort', 'state']);
+  const allowedKeys = new Set(['authVariant', 'filter', 'page', 'pageSize', 'product', 'sort']);
   const instagramVariants = new Set(['INSTAGRAM_LOGIN', 'INSTAGRAM_VIA_FACEBOOK_LOGIN']);
   for (const [key, parameterValue] of parameters) {
     if (!allowedKeys.has(key) || parameterValue.length > 128) continue;

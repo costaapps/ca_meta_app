@@ -4,12 +4,14 @@ describe('PortalEntryReturnStore', () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => localStorage.clear());
 
-  it('preserves one sanitized deep link across tabs only after the matching request is accepted', () => {
+  it('keeps an unaccepted attempt from consuming the intended return path', () => {
     const firstTab = new PortalEntryReturnStore();
-    const attemptRef = firstTab.stage('/assets/asset_ref_123?filter=active&cUUID=old-tenant&ticket=synthetic');
+    const attemptRef = firstTab.stage('/assets/asset_ref_123?filter=active&state=synthetic-state&cUUID=old-tenant&ticket=synthetic');
 
     expect(attemptRef).toBeTruthy();
     expect(firstTab.hasAccepted()).toBe(false);
+    expect(firstTab.takeForAuthenticatedSession()).toBeNull();
+    expect(firstTab.currentReturnUrl()).toBe('/assets/asset_ref_123?filter=active');
     firstTab.markAccepted(attemptRef);
 
     const confirmationTab = new PortalEntryReturnStore();
@@ -23,6 +25,7 @@ describe('PortalEntryReturnStore', () => {
     const attemptRef = store.stage('/connections/new/instagram?authVariant=INSTAGRAM_LOGIN');
     store.markAccepted('another-attempt-reference-123');
     expect(store.hasAccepted()).toBe(false);
+    store.discard(attemptRef);
 
     localStorage.setItem('ca.meta.portal.pending-return.v1', '{malformed');
     expect(store.takeForAuthenticatedSession()).toBeNull();

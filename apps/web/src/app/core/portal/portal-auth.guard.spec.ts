@@ -17,4 +17,8 @@ describe('safeReturnUrl', () => {
     expect(safeReturnUrl('https://attacker.invalid/')).toBe('/connections');
     expect(safeReturnUrl('/oauth/return?onboardingRef=synthetic-reference-123456')).toBe('/connections');
   });
+
+  it('drops opaque state parameters from return navigation', () => {
+    expect(safeReturnUrl('/connections?filter=active&state=synthetic-state')).toBe('/connections?filter=active');
+  });
 });

@@ -19,6 +19,7 @@ export class PortalAccessComponent implements OnInit {
   isChecking = true;
   isRequesting = false;
   requestAccepted = false;
+  hasUnacceptedAttempt = false;
   errorMessage = '';
   errorRequestId: string | null = null;
   noticeMessage = '';
@@ -39,7 +40,13 @@ export class PortalAccessComponent implements OnInit {
       : '';
     const session = await this.sessions.ensureCurrentSession(true);
     this.isChecking = false;
-    if (session) await this.router.navigateByUrl(this.returnTargets.takeForAuthenticatedSession() ?? this.returnUrl);
+    if (session) {
+      const returnUrl = this.returnTargets.takeForAuthenticatedSession();
+      this.hasUnacceptedAttempt = this.returnTargets.hasUnacceptedAttempt();
+      if (returnUrl) await this.router.navigateByUrl(returnUrl);
+      else if (!this.hasUnacceptedAttempt) await this.router.navigateByUrl('/connections');
+      else this.noticeMessage = 'A sessão está ativa, mas a solicitação de link ainda não foi confirmada. Você pode abrir as conexões diretamente.';
+    }
     else if (!this.noticeMessage && this.sessions.entryNotice === 'membership') {
       this.noticeMessage = 'Esta sessão não tem uma empresa ativa autorizada. Use um convite válido ou abra o portal pelo Suite4.';
     }

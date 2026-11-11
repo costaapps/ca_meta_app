@@ -4,21 +4,23 @@ import { inject } from '@angular/core';
 import { catchError, throwError } from 'rxjs';
 import { PortalContextStore, readCsrfCookie } from './portal-context.store';
 
-function apiPath(url: string): string {
+function apiPath(url: string, origin: string): string | null {
   try {
-    return new URL(url, 'https://portal.invalid').pathname;
+    const parsed = new URL(url, origin);
+    return parsed.origin === origin ? parsed.pathname : null;
   } catch {
-    return url;
+    return null;
   }
 }
 
-function apiRequest(url: string): boolean {
-  return /(?:^|\/)api\/v1(?:\/|$)/.test(apiPath(url));
+function apiRequest(url: string, origin: string): boolean {
+  const path = apiPath(url, origin);
+  return path !== null && /(?:^|\/)api\/v1(?:\/|$)/.test(path);
 }
 
-function portalSessionRequest(url: string): boolean {
-  const path = apiPath(url);
-  return /(?:^|\/)api\/v1\/(?!auth\/)/.test(path);
+function portalSessionRequest(url: string, origin: string): boolean {
+  const path = apiPath(url, origin);
+  return path !== null && /(?:^|\/)api\/v1\/(?!auth\/)/.test(path);
 }
 
 function errorCode(error: HttpErrorResponse): string | undefined {
@@ -29,14 +31,15 @@ function errorCode(error: HttpErrorResponse): string | undefined {
 }
 
 export const portalApiInterceptor: HttpInterceptorFn = (request, next) => {
-  if (!apiRequest(request.url)) return next(request);
+  const documentRef = inject(DOCUMENT);
+  const origin = documentRef.location?.origin;
+  if (!origin || !apiRequest(request.url, origin)) return next(request);
 
   const context = inject(PortalContextStore);
-  const documentRef = inject(DOCUMENT);
   const headers = request.headers;
   let updatedHeaders = headers;
 
-  if (portalSessionRequest(request.url)) {
+  if (portalSessionRequest(request.url, origin)) {
     const contextRef = context.contextRef;
     if (contextRef && !updatedHeaders.has('X-Tenant-Context')) {
       updatedHeaders = updatedHeaders.set('X-Tenant-Context', contextRef);

@@ -8,6 +8,7 @@
     <p *ngIf="isChecking" class="status" role="status">Verificando sua sessão…</p>
     <ng-container *ngIf="!isChecking">
       <p *ngIf="noticeMessage" class="notice" role="status">{{ noticeMessage }}</p>
+      <a *ngIf="hasUnacceptedAttempt" class="suite-link" routerLink="/connections">Abrir conexões</a>
       <form (ngSubmit)="requestLink()" #entryForm="ngForm">
         <label for="email">E-mail do convite</label>
         <input id="email" name="email" type="email" [(ngModel)]="email" autocomplete="email" required maxlength="254" />

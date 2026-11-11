@@ -18,7 +18,7 @@ describe('PortalAccessComponent return path', () => {
     const route = { snapshot: { queryParamMap: { get: () => null } } } as unknown as ActivatedRoute;
     const router = { navigateByUrl: vi.fn().mockResolvedValue(true) } as unknown as Router;
     const store = new PortalEntryReturnStore();
-    store.remember(`${safePath}&cUUID=old-tenant&ticket=synthetic`);
+    store.remember(`${safePath}&state=synthetic-state&cUUID=old-tenant&ticket=synthetic`);
     const component = new PortalAccessComponent(sessions, store, route, router);
 
     await component.ngOnInit();
@@ -31,6 +31,26 @@ describe('PortalAccessComponent return path', () => {
     const savedState = localStorage.getItem('ca.meta.portal.pending-return.v1') ?? '';
     expect(savedState).not.toContain('cUUID');
     expect(savedState).not.toContain('ticket');
+    expect(savedState).not.toContain('synthetic-state');
     expect(store.takeForAuthenticatedSession()).toBe(safeReturnUrl(safePath));
+  });
+
+  it('does not consume an unaccepted entry attempt or auto-navigate when a session exists', async () => {
+    const sessions = {
+      ensureCurrentSession: vi.fn().mockResolvedValue({ tenantRef: 'synthetic-tenant-ref-01' }),
+      entryNotice: null,
+    } as unknown as PortalSessionService;
+    const route = { snapshot: { queryParamMap: { get: () => null } } } as unknown as ActivatedRoute;
+    const router = { navigateByUrl: vi.fn().mockResolvedValue(true) } as unknown as Router;
+    const store = new PortalEntryReturnStore();
+    const returnPath = '/assets/asset_ref_123';
+    store.stage(returnPath);
+    const component = new PortalAccessComponent(sessions, store, route, router);
+
+    await component.ngOnInit();
+
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
+    expect(component.hasUnacceptedAttempt).toBe(true);
+    expect(store.currentReturnUrl()).toBe(returnPath);
   });
 });
