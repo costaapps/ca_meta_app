@@ -1,4 +1,4 @@
-import { safeReturnUrl } from './portal-auth.guard';
+import { safeReturnUrl } from './safe-return-url';
 
 describe('safeReturnUrl', () => {
   it('keeps only a local supported route and an explicit Instagram auth variant', () => {

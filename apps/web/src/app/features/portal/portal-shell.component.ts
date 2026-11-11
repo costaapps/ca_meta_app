@@ -3,6 +3,7 @@ import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/co
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import { PortalContextStore } from '../../core/portal/portal-context.store';
+import { PortalEntryReturnStore } from '../../core/portal/portal-entry-return.store';
 import { PortalSession, PortalSessionService } from '../../core/portal/portal-session.service';
 import { safeRequestId } from '../../core/portal/safe-api-error';
 import { EmbedBridgeService, type EmbedBridgeSnapshot } from '../../core/embed/embed-bridge.service';
@@ -31,6 +32,7 @@ export class PortalShellComponent implements OnInit, OnDestroy {
   constructor(
     private readonly sessions: PortalSessionService,
     private readonly context: PortalContextStore,
+    private readonly returnTargets: PortalEntryReturnStore,
     private readonly router: Router,
     private readonly bridge: EmbedBridgeService,
   ) {
@@ -40,14 +42,16 @@ export class PortalShellComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.session = this.sessions.current;
     this.sessions.session$.pipe(takeUntil(this.destroy$)).subscribe((session) => { this.session = session; });
+    const returnUrl = this.returnTargets.takeForAuthenticatedSession();
+    if (returnUrl && returnUrl !== this.router.url) void this.router.navigateByUrl(returnUrl);
     this.context.contextChanged$.pipe(takeUntil(this.destroy$)).subscribe(() => {
       this.notice = 'A empresa ativa mudou em outra aba. Atualizamos o contexto; confira a seleção antes de continuar.';
       this.noticeRequestId = null;
       void this.refreshAfterContextChange();
     });
     this.context.sessionExpired$.pipe(takeUntil(this.destroy$)).subscribe(() => {
-      const returnUrl = this.router.url;
-      void this.router.navigate(['/access'], { queryParams: { returnUrl } });
+      this.returnTargets.remember(this.router.url);
+      void this.router.navigate(['/access']);
     });
     if (typeof window !== 'undefined' && window.parent !== window && this.embedSnapshot.state === 'ready') {
       this.stopEmbedState = this.bridge.subscribe((snapshot) => { this.embedSnapshot = snapshot; });
@@ -64,6 +68,10 @@ export class PortalShellComponent implements OnInit, OnDestroy {
 
   get roleLabel(): string {
     return this.session?.roles.join(' · ') ?? '';
+  }
+
+  get activeTenantRef(): string {
+    return this.session?.tenantRef ?? '';
   }
 
   async signOut(): Promise<void> {
@@ -90,7 +98,10 @@ export class PortalShellComponent implements OnInit, OnDestroy {
 
   private async refreshAfterContextChange(): Promise<void> {
     const refreshed = await this.sessions.refreshAfterContextChange();
-    if (!refreshed) await this.router.navigate(['/access'], { queryParams: { returnUrl: this.router.url } });
+    if (!refreshed) {
+      this.returnTargets.remember(this.router.url);
+      await this.router.navigate(['/access']);
+    }
   }
 
   private navigateFromSuite4(request: EmbedNavigationRequest): void {

@@ -24,10 +24,11 @@
       <span class="state-label" [class.available]="profile.enabled">{{ profile.enabled ? 'Configuração disponível' : 'Indisponível neste ambiente' }}</span>
       <p>{{ catalog.reasonFor(profile) }}</p>
       <p class="verification-note">A configuração não confirma uma autorização Meta nem a conexão de recursos. O servidor verifica esses estados antes de concluir qualquer conexão.</p>
-      <button type="button" [disabled]="!canContinue" title="A etapa assistida será disponibilizada no fluxo de onboarding">
+      <button type="button" [disabled]="!canContinue" aria-describedby="onboarding-pending"
+        title="A conexão assistida será disponibilizada no próximo passo do portal">
         Iniciar conexão
       </button>
-      <p class="pending-note" *ngIf="profile.enabled">A etapa assistida ainda não está disponível neste portal.</p>
+      <p id="onboarding-pending" class="pending-note">A conexão assistida ainda não está disponível. Esta configuração não inicia a autorização; o próximo passo será disponibilizado em M5.03.</p>
     </article>
     <ng-template #noProfile>
       <article class="availability-card">

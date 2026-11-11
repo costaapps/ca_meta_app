@@ -1,39 +1,31 @@
 import { Routes } from '@angular/router';
-import { EmbedShellComponent } from './features/embed/embed-shell.component';
-import { OAuthReturnComponent } from './features/embed/oauth-return.component';
-import { CoexistenceSetupComponent } from './features/coexistence/coexistence-setup.component';
 import { portalAuthGuard } from './core/portal/portal-auth.guard';
-import { AssetDetailComponent } from './features/portal/asset-detail.component';
-import { ConnectionDetailComponent } from './features/portal/connection-detail.component';
-import { ConnectionsHomeComponent } from './features/portal/connections-home.component';
-import { PortalAccessComponent } from './features/portal/portal-access.component';
-import { PortalSectionComponent } from './features/portal/portal-section.component';
-import { PortalShellComponent } from './features/portal/portal-shell.component';
 
 export const routes: Routes = [
-  { path: 'embed', component: EmbedShellComponent },
-  { path: 'oauth/return', component: OAuthReturnComponent },
-  { path: 'access', component: PortalAccessComponent },
+  { path: 'embed', loadComponent: () => import('./features/embed/embed-shell.component').then((m) => m.EmbedShellComponent) },
+  { path: 'oauth/return', loadComponent: () => import('./features/embed/oauth-return.component').then((m) => m.OAuthReturnComponent) },
+  { path: 'access', loadComponent: () => import('./features/portal/portal-access.component').then((m) => m.PortalAccessComponent) },
   {
     path: '',
-    component: PortalShellComponent,
+    loadComponent: () => import('./features/portal/portal-shell.component').then((m) => m.PortalShellComponent),
     canActivateChild: [portalAuthGuard],
     children: [
       { path: '', redirectTo: '/connections', pathMatch: 'full' },
-      { path: 'connections', component: ConnectionsHomeComponent },
-      { path: 'connections/new/:flow', component: ConnectionDetailComponent },
-      { path: 'assets/:id', component: AssetDetailComponent },
+      { path: 'connections', loadComponent: () => import('./features/portal/connections-home.component').then((m) => m.ConnectionsHomeComponent) },
+      { path: 'connections/new/:flow', loadComponent: () => import('./features/portal/connection-detail.component').then((m) => m.ConnectionDetailComponent) },
+      { path: 'assets/:id', loadComponent: () => import('./features/portal/asset-detail.component').then((m) => m.AssetDetailComponent) },
       {
         path: 'templates',
-        component: PortalSectionComponent,
+        loadComponent: () => import('./features/portal/portal-section.component').then((m) => m.PortalSectionComponent),
         data: { title: 'Modelos', description: 'Os modelos disponíveis serão exibidos após a confirmação dos recursos e permissões desta empresa.' },
       },
       {
         path: 'notifications',
-        component: PortalSectionComponent,
+        loadComponent: () => import('./features/portal/portal-section.component').then((m) => m.PortalSectionComponent),
         data: { title: 'Notificações', description: 'As notificações serão exibidas após a confirmação do contexto e da empresa pelo servidor.' },
       },
-      { path: 'setup/coexistence', component: CoexistenceSetupComponent },
+      { path: 'setup/coexistence', loadComponent: () => import('./features/coexistence/coexistence-setup.component').then((m) => m.CoexistenceSetupComponent) },
+      // Legacy entry points never carry authentication authority; the session guard still applies.
       { path: 'setup/whatsapp/callback', redirectTo: '/connections' },
       { path: 'setup/facebook/callback', redirectTo: '/connections' },
       { path: 'setup/instagram/callback', redirectTo: '/connections' },

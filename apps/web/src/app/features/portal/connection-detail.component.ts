@@ -45,7 +45,8 @@ export class ConnectionDetailComponent implements OnInit, OnDestroy {
   }
 
   get canContinue(): boolean {
-    return this.selectedProfile?.enabled === true;
+    // The onboarding action has no handler in M5.01; server configuration alone must never imply that it can start.
+    return false;
   }
 
   ngOnInit(): void {
