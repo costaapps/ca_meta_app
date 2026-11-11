@@ -362,6 +362,25 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
   const malformedWebhook = await invokeMiddleware(middleware, request({}, 'POST', '/api/v1/webhooks/meta/config/ref'));
   assert.equal(malformedWebhook.response.statusCodeValue(), 403);
 
+  const internalOperationPath = '/internal/v2/assets/50000000-0000-4000-8000-000000000001/operations';
+  const internalStatusPath = '/internal/v2/operations/50000000-0000-4000-8000-000000000002';
+  const serviceOperation = await invokeMiddleware(middleware, request({}, 'POST', internalOperationPath));
+  assert.equal(serviceOperation.continued, true);
+  for (const [method, path] of [
+    ['PUT', internalOperationPath],
+    ['PATCH', internalOperationPath],
+    ['DELETE', internalOperationPath],
+    ['POST', internalStatusPath],
+    ['PUT', internalStatusPath],
+    ['PATCH', internalStatusPath],
+    ['DELETE', internalStatusPath],
+    ['POST', '/internal/v1/assets/50000000-0000-4000-8000-000000000001/operations'],
+  ]) {
+    const unsupportedInternalMutation = await invokeMiddleware(middleware, request({}, method, path));
+    assert.equal(unsupportedInternalMutation.response.statusCodeValue(), 403, `${method} ${path}`);
+    assert.equal((unsupportedInternalMutation.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+  }
+
   const badOrigin = await invokeMiddleware(middleware, request({ ...baseHeaders, origin: 'https://attacker.example' }));
   assert.equal(badOrigin.response.statusCodeValue(), 403);
   assert.equal((badOrigin.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');

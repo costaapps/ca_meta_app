@@ -45,13 +45,11 @@ function matchesHash(value: string, digest: string): boolean {
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const PORTAL_ENTRY_EXCHANGE_PATH = '/api/v1/auth/exchanges';
 const MAGIC_LINK_CONSUME_PATH = '/api/v1/auth/magic-links/consume';
-const INTERNAL_SERVICE_PATHS = [
-  /^\/internal\/v2\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/operations$/i,
-  /^\/internal\/v2\/operations\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-] as const;
+const INTERNAL_SERVICE_OPERATION_POST_PATH =
+  /^\/internal\/v2\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/operations$/i;
 
-function isInternalServicePath(path: string): boolean {
-  return INTERNAL_SERVICE_PATHS.some((pattern) => pattern.test(path));
+function isInternalServiceOperationPost(method: string, path: string): boolean {
+  return method === 'POST' && INTERNAL_SERVICE_OPERATION_POST_PATH.test(path);
 }
 
 /** Exact-origin CORS plus same-origin Fetch Metadata and synchronizer-token checks on authenticated writes. */
@@ -99,9 +97,10 @@ export function portalRequestSecurityMiddleware(
     }
 
     if (MUTATING_METHODS.has(request.method)) {
-      // Only these two machine routes bypass browser Origin/CSRF checks; their controllers
-      // require a tenant-bound service proof before resolving an asset or operation.
-      if (origin === undefined && isInternalServicePath(request.path)) {
+      // Only the service operation POST bypasses browser Origin/CSRF checks; its controller
+      // requires a tenant-bound proof before resolving an asset or operation. Status is GET
+      // and follows normal safe-method handling; no other mutating method is exempt.
+      if (origin === undefined && isInternalServiceOperationPost(request.method, request.path)) {
         next();
         return;
       }
