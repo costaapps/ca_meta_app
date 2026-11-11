@@ -128,7 +128,9 @@ test('M5.03 serializes Coexistence starts per tenant and releases on terminal/ex
     assert.equal(afterTerminal.flowVariant, 'WHATSAPP_COEXISTENCE');
 
     await connection.execute(
-      `UPDATE ca_meta_onboarding_sessions SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)
+      `UPDATE ca_meta_onboarding_sessions
+       SET created_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 SECOND),
+           expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)
        WHERE tenant_id = ? AND id = ?`,
       [tenantB, tenantBRecord.id],
     );
