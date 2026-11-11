@@ -69,7 +69,7 @@ const BOOTSTRAP_REASONS = new Set<string>([
 ]);
 const CAPABILITY_OPERATIONS = new Set<string>([
   'ASSET_DISCOVERY', 'SEND_MESSAGE', 'MANAGE_COMMENTS', 'MANAGE_TEMPLATES', 'READ_STATUS',
-  'SUBSCRIBE_WEBHOOKS', 'SYNC_HISTORY',
+  'SUBSCRIBE_WEBHOOKS', 'SYNC_HISTORY', 'PHONE_REGISTRATION_CONVENTIONAL',
 ]);
 const PROFILE_KEYS = [
   'flowVariant', 'authVariant', 'enabled', 'reasonCode', 'capabilities', 'providerAppId',

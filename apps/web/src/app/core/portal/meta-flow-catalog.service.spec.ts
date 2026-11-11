@@ -15,6 +15,8 @@ describe('MetaFlowCatalogService', () => {
     expect(cards).toHaveLength(4);
     expect(cards[0].enabled).toBe(true);
     expect(cards[0].profiles).toHaveLength(1);
+    expect(cards[0].profiles[0].capabilities.map((capability) => capability.operation)).toContain('PHONE_REGISTRATION_CONVENTIONAL');
+    expect(catalog!.profiles.flatMap((profile) => profile.capabilities)).toHaveLength(26);
     expect(cards.slice(1).every((card) => !card.enabled)).toBe(true);
     expect(JSON.stringify(catalog)).not.toMatch(/providerAppId|publicConfigId|appDomain|javascriptSdkVersion|embeddedSignupVersion/);
   });

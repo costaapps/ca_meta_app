@@ -11,7 +11,10 @@ const availableCapabilities = (operations: readonly string[]) => operations.map(
 }));
 
 const facebookOperations = ['ASSET_DISCOVERY', 'SEND_MESSAGE', 'MANAGE_COMMENTS', 'READ_STATUS', 'SUBSCRIBE_WEBHOOKS'];
-const whatsappExclusiveOperations = ['ASSET_DISCOVERY', 'SEND_MESSAGE', 'MANAGE_TEMPLATES', 'READ_STATUS', 'SUBSCRIBE_WEBHOOKS'];
+const whatsappExclusiveOperations = [
+  'ASSET_DISCOVERY', 'SEND_MESSAGE', 'MANAGE_TEMPLATES', 'READ_STATUS', 'SUBSCRIBE_WEBHOOKS',
+  'PHONE_REGISTRATION_CONVENTIONAL',
+];
 const whatsappCoexistenceOperations = ['ASSET_DISCOVERY', 'SEND_MESSAGE', 'READ_STATUS', 'SUBSCRIBE_WEBHOOKS', 'SYNC_HISTORY'];
 
 /** Sanitized M4.04 OpenAPI DTO shape; public app identifiers are deliberately synthetic. */
