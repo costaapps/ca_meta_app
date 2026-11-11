@@ -6,7 +6,7 @@ import { Router } from '@angular/router';
 import { PortalShellComponent } from './portal-shell.component';
 
 describe('PortalShellComponent', () => {
-  it('identifies the active company from the server-issued session tenant reference', () => {
+  it('uses neutral session-context copy without presenting the tenant reference as a company name', () => {
     const session: PortalSession = {
       sessionRef: 'synthetic-session-ref-01',
       principalRef: 'synthetic-principal-ref-01',
@@ -28,6 +28,7 @@ describe('PortalShellComponent', () => {
     );
     component.session = session;
 
-    expect(component.activeTenantRef).toBe('synthetic-tenant-ref-01');
+    expect(component.contextLabel).toBe('Contexto da sessão ativo');
+    expect(component.contextLabel).not.toContain(session.tenantRef);
   });
 });

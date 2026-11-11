@@ -44,6 +44,7 @@ function matchesHash(value: string, digest: string): boolean {
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const PORTAL_ENTRY_EXCHANGE_PATH = '/api/v1/auth/exchanges';
+const MAGIC_LINK_REQUEST_PATH = '/api/v1/auth/magic-links';
 const MAGIC_LINK_CONSUME_PATH = '/api/v1/auth/magic-links/consume';
 
 /** Exact-origin CORS plus same-origin Fetch Metadata and synchronizer-token checks on authenticated writes. */
@@ -101,6 +102,15 @@ export function portalRequestSecurityMiddleware(
       // A deliberate one-use link POST is pre-authenticated by its token and exact Origin.
       // An existing portal cookie must not make a native HTML confirmation form require a CSRF header.
       if (request.method === 'POST' && request.path === MAGIC_LINK_CONSUME_PATH) {
+        next();
+        return;
+      }
+
+      // Magic-link initiation is a public, rate-limited entry point. Keep the
+      // Origin/Fetch Metadata checks above, but do not let a stale portal
+      // session cookie prevent a user from requesting a fresh link. Its route
+      // handler continues to enforce identity and delivery quotas.
+      if (request.method === 'POST' && request.path === MAGIC_LINK_REQUEST_PATH) {
         next();
         return;
       }

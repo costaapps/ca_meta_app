@@ -380,6 +380,9 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
   assert.equal(good.continued, true);
   assert.equal(good.response.headerValue('access-control-allow-origin'), 'https://portal.example');
 
+  const missingCsrf = await invokeMiddleware(middleware, request(baseHeaders, 'POST', '/api/v1/session/logout'));
+  assert.equal((missingCsrf.response.bodyValue() as { code: string }).code, 'CSRF_INVALID');
+
   const validDelete = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-csrf-token': csrf }, 'DELETE'));
   assert.equal(validDelete.continued, true);
 
@@ -396,6 +399,43 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
     'access-control-request-headers': 'x-meta-csrf',
   }, 'OPTIONS'));
   assert.equal(legacyPreflight.response.statusCodeValue(), 403);
+});
+
+test('public magic-link initiation tolerates stale portal cookies but retains browser origin checks', async () => {
+  const env = {
+    nodeEnv: 'test', port: 3000, bindAddress: '127.0.0.1', allowedHosts: ['portal.example'],
+    allowedOrigins: ['https://portal.example'], suite4EmbedOrigins: [], trustedProxyCidrs: false,
+    portalSessionRecoveryKey: recoveryKey,
+    portalSessionIdleTimeoutSeconds: 1800,
+    portalSessionAbsoluteTimeoutSeconds: 28800,
+    database: { host: '127.0.0.1', port: 3306, name: 'synthetic', user: 'synthetic', password: 'synthetic', connectTimeoutMs: 100 },
+  } satisfies ApiEnvironment;
+  let verifyCalls = 0;
+  const staleVerifier = { async verify() { verifyCalls += 1; return undefined; } } as unknown as PortalSessionVerifier;
+  const middleware = portalRequestSecurityMiddleware(env, staleVerifier);
+  const request = (headers: Record<string, string | string[] | undefined>, method = 'POST', path = '/api/v1/auth/magic-links') => ({
+    headers, method, path, protocol: 'https', get: (name: string) => name.toLowerCase() === 'host' ? 'portal.example' : undefined,
+  });
+  const staleCookie = `${PORTAL_SESSION_COOKIE}=expired-session-cookie-with-sufficient-entropy-123456`;
+  const sameOrigin = { origin: 'https://portal.example', 'sec-fetch-site': 'same-origin', cookie: staleCookie };
+
+  const publicEntry = await invokeMiddleware(middleware, request(sameOrigin));
+  assert.equal(publicEntry.continued, true);
+  assert.equal(publicEntry.response.statusCodeValue(), 200);
+  assert.equal(verifyCalls, 0);
+
+  const deniedOrigin = await invokeMiddleware(middleware, request({ ...sameOrigin, origin: 'https://attacker.example' }));
+  assert.equal(deniedOrigin.response.statusCodeValue(), 403);
+  assert.equal((deniedOrigin.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+
+  const deniedFetchMetadata = await invokeMiddleware(middleware, request({ ...sameOrigin, 'sec-fetch-site': 'same-site' }));
+  assert.equal(deniedFetchMetadata.response.statusCodeValue(), 403);
+  assert.equal((deniedFetchMetadata.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+
+  const authenticatedWrite = await invokeMiddleware(middleware, request(sameOrigin, 'POST', '/api/v1/session/logout'));
+  assert.equal(authenticatedWrite.response.statusCodeValue(), 401);
+  assert.equal((authenticatedWrite.response.bodyValue() as { code: string }).code, 'AUTH_REQUIRED');
+  assert.equal(verifyCalls, 1);
 });
 
 test('portal cookies are host-only, Secure, HttpOnly where required, and denial codes map to safe 403/409 envelopes', () => {

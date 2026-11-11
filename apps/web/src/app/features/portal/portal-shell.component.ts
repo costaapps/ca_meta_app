@@ -70,8 +70,8 @@ export class PortalShellComponent implements OnInit, OnDestroy {
     return this.session?.roles.join(' · ') ?? '';
   }
 
-  get activeTenantRef(): string {
-    return this.session?.tenantRef ?? '';
+  get contextLabel(): string {
+    return this.session ? 'Contexto da sessão ativo' : '';
   }
 
   async signOut(): Promise<void> {

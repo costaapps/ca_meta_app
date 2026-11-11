@@ -7,7 +7,7 @@
 
     <div class="session-summary" *ngIf="session as activeSession">
       <span class="session-state"><span class="state-dot" aria-hidden="true"></span>Sessão ativa</span>
-      <span class="tenant-label">Empresa autorizada · {{ activeTenantRef }}</span>
+      <span class="tenant-label">{{ contextLabel }}</span>
       <span class="role-label">{{ activeSession.roles.join(' · ') }}</span>
     </div>
 
