@@ -46,6 +46,7 @@ export class LegacyProjectionService {
   ): Promise<LegacyProjectionResult> {
     const seen = new Set<string>();
     const results: LegacyProjectionResult['destinations'][number][] = [];
+    const rebuildReports: NonNullable<LegacyProjectionResult['rebuildReports']>[number][] = [];
     for (const group of snapshot.targets) {
       validateProjectionTarget(group.target);
       const keyHash = destinationKeyHash(group.target);
@@ -57,6 +58,8 @@ export class LegacyProjectionService {
       let stale = 0;
       let prepared: Array<{ readonly record: LegacyProjectionRecord; readonly contentHash: string }> = [];
       try {
+        const priorCheckpoints = forceRebuild
+          ? await this.checkpoints.listByDestination(snapshot.tenantId, keyHash) : [];
         const seenRecords = new Set<string>();
         for (const input of group.records) {
           const record = validateProjectionRecord(input);
@@ -101,6 +104,38 @@ export class LegacyProjectionService {
             records: prepared.map((item) => item.record), projectionSchemaVersion: LEGACY_PROJECTION_SCHEMA_VERSION,
           });
         }
+        if (forceRebuild) {
+          if (!destination.reconcile) {
+            throw new LegacyProjectionError('REBUILD_UNSUPPORTED', 'Destination cannot safely report projector ownership for rebuild.');
+          }
+          const known = new Map(priorCheckpoints.map((checkpoint) => [checkpoint.centralRef, checkpoint]));
+          for (const item of prepared) known.set(item.record.centralRef, {
+            tenantId: snapshot.tenantId, destinationKeyHash: keyHash, centralRef: item.record.centralRef,
+            sourceVersion: item.record.sourceVersion, projectionSchemaVersion: LEGACY_PROJECTION_SCHEMA_VERSION,
+            contentHash: item.contentHash, tombstone: item.record.tombstone, state: 'PENDING', safeErrorCode: null,
+          });
+          const rebuild = await destination.reconcile({
+            target: group.target, tenantId: snapshot.tenantId, records: prepared.map((item) => item.record),
+            knownOwnedCheckpoints: [...known.values()], projectionSchemaVersion: LEGACY_PROJECTION_SCHEMA_VERSION,
+            destinationKeyHash: keyHash,
+          });
+          rebuildReports.push({
+            destinationKeyHash: keyHash, expectedCount: rebuild.expectedCount, actualCount: rebuild.actualCount,
+            reconciledExtraCount: rebuild.reconciledExtraCount, ambiguousExtraCount: rebuild.ambiguousExtraCount,
+            expectedHash: rebuild.expectedHash, actualHash: rebuild.actualHash, parity: rebuild.parity,
+          });
+          for (const tombstone of rebuild.tombstones) await this.checkpoints.record({
+            tenantId: snapshot.tenantId, destinationKeyHash: keyHash, centralRef: tombstone.centralRef,
+            sourceVersion: tombstone.sourceVersion, projectionSchemaVersion: LEGACY_PROJECTION_SCHEMA_VERSION,
+            contentHash: projectionContentHash(tombstone), tombstone: true, state: 'SYNCED', safeErrorCode: null,
+          });
+          if (rebuild.parity === 'AMBIGUOUS') {
+            throw new LegacyProjectionError('REBUILD_OWNERSHIP_AMBIGUOUS', 'Destination contains extras without a tenant-owned checkpoint.');
+          }
+          if (rebuild.parity === 'MISMATCH') {
+            throw new LegacyProjectionError('REBUILD_PARITY_MISMATCH', 'Destination rows do not match the trusted projection snapshot.');
+          }
+        }
         for (const item of prepared) await this.checkpoints.record({
           tenantId: snapshot.tenantId, destinationKeyHash: keyHash, centralRef: item.record.centralRef,
           sourceVersion: item.record.sourceVersion, projectionSchemaVersion: LEGACY_PROJECTION_SCHEMA_VERSION,
@@ -120,6 +155,9 @@ export class LegacyProjectionService {
       }
       prepared = [];
     }
-    return Object.freeze({ destinations: Object.freeze(results) });
+    return Object.freeze({
+      destinations: Object.freeze(results),
+      ...(forceRebuild ? { rebuildReports: Object.freeze(rebuildReports) } : {}),
+    });
   }
 }

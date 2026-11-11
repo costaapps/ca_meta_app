@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { compareProjectionVersion, destinationKeyHash, projectionContentHash, validateProjectionRecord, validateProjectionTarget } from '../src/legacy-projection/legacy-projection.mapper.js';
 import { LegacyProjectionService } from '../src/legacy-projection/legacy-projection.service.js';
 import type {
   LegacyProjectionCheckpoint, LegacyProjectionCheckpointStore, LegacyProjectionDestination,
-  LegacyProjectionDestinationCatalog, LegacyProjectionRecord, LegacyProjectionSnapshot, LegacyProjectionTargetKey,
+  LegacyProjectionDestinationCatalog, LegacyProjectionRecord, LegacyProjectionRebuildResult,
+  LegacyProjectionSnapshot, LegacyProjectionTargetKey,
 } from '../src/legacy-projection/legacy-projection.types.js';
 import type { OutboxEventEnvelope } from '../src/jobs/event-validation.js';
 
@@ -42,6 +44,9 @@ class MemoryCheckpointStore implements LegacyProjectionCheckpointStore {
   readonly rows = new Map<string, LegacyProjectionCheckpoint>();
   private key(tenant: string, destination: string, ref: string): string { return `${tenant}\0${destination}\0${ref}`; }
   async read(tenant: string, destination: string, ref: string) { return this.rows.get(this.key(tenant, destination, ref)); }
+  async listByDestination(tenant: string, destination: string) {
+    return [...this.rows.values()].filter((row) => row.tenantId === tenant && row.destinationKeyHash === destination);
+  }
   async record(checkpoint: LegacyProjectionCheckpoint) {
     this.rows.set(this.key(checkpoint.tenantId, checkpoint.destinationKeyHash, checkpoint.centralRef), checkpoint);
   }
@@ -54,8 +59,44 @@ class MemoryDestination implements LegacyProjectionDestination {
     if (this.fail) throw new Error('synthetic destination outage');
     for (const row of input.records) {
       const key = `${input.target.legacyDatabaseId}\0${input.target.legacyCompanyId}\0${row.legacyAssetRef}`;
-      this.rows.set(key, row);
+      const existing = this.rows.get(key);
+      if (!existing || row.sourceVersion > existing.sourceVersion) this.rows.set(key, row);
     }
+  }
+
+  async reconcile(input: {
+    target: LegacyProjectionTargetKey; tenantId: string; records: readonly LegacyProjectionRecord[];
+    knownOwnedCheckpoints: readonly LegacyProjectionCheckpoint[]; projectionSchemaVersion: number; destinationKeyHash: string;
+  }): Promise<LegacyProjectionRebuildResult> {
+    const prefix = `${input.target.legacyDatabaseId}\0${input.target.legacyCompanyId}\0`;
+    const expected = new Map(input.records.map((record) => [record.centralRef, record]));
+    const known = new Map(input.knownOwnedCheckpoints.map((checkpoint) => [checkpoint.centralRef, checkpoint]));
+    const tombstones: LegacyProjectionRecord[] = [];
+    let reconciledExtraCount = 0;
+    let ambiguousExtraCount = 0;
+    for (const [key, row] of this.rows) {
+      if (!key.startsWith(prefix) || expected.has(row.centralRef)) continue;
+      const checkpoint = known.get(row.centralRef);
+      if (!checkpoint) { ambiguousExtraCount += 1; continue; }
+      const tombstone = validateProjectionRecord({ ...row, status: 'REMOVED', tombstone: true,
+        sourceVersion: row.tombstone ? row.sourceVersion : Math.max(row.sourceVersion, checkpoint.sourceVersion) + 1 });
+      this.rows.set(key, tombstone);
+      tombstones.push(tombstone);
+      reconciledExtraCount += 1;
+    }
+    const expectedRows = input.records.map((row) => `${row.centralRef}:${projectionContentHash(row)}`).sort();
+    const actualRows = [...this.rows.entries()]
+      .filter(([key, row]) => key.startsWith(prefix) && expected.has(row.centralRef))
+      .map(([, row]) => `${row.centralRef}:${projectionContentHash(row)}`).sort();
+    const expectedHash = createHash('sha256').update(JSON.stringify(expectedRows)).digest('hex');
+    const actualHash = createHash('sha256').update(JSON.stringify(actualRows)).digest('hex');
+    const actualCount = actualRows.length;
+    return Object.freeze({
+      destinationKeyHash: input.destinationKeyHash, expectedCount: input.records.length, actualCount,
+      reconciledExtraCount, ambiguousExtraCount, expectedHash, actualHash,
+      parity: ambiguousExtraCount > 0 ? 'AMBIGUOUS' : expectedHash === actualHash ? 'MATCHED' : 'MISMATCH',
+      tombstones: Object.freeze(tombstones),
+    });
   }
 }
 
@@ -132,6 +173,27 @@ test('full rebuild repairs a missing legacy row from the trusted current snapsho
   assert.equal(rebuilt.destinations[0]?.applied, 1);
   assert.equal(destination.rows.size, 1);
   assert.equal(destination.rows.get('synthetic-db\0company-a\0legacy-page-1')?.externalId, 'meta-page-id-1');
+});
+
+test('rebuild tombstones checkpoint-owned extras and reports unknown rows as ambiguous without changing them', async () => {
+  const destination = new MemoryDestination();
+  const store = new MemoryCheckpointStore();
+  const projection = new LegacyProjectionService(store, new MemoryCatalog([{ target: dbACompanyA, destination }]));
+  const stale = record({ centralRef: 'stale-owned-ref', legacyAssetRef: 'stale-owned-asset' });
+  await projection.project(snapshot(event('outbox-stale', 1), [{ target: dbACompanyA, records: [stale] }]));
+  const unknown = record({ centralRef: 'unknown-legacy-ref', legacyAssetRef: 'unknown-legacy-asset' });
+  destination.rows.set('synthetic-db\0company-a\0unknown-legacy-asset', unknown);
+
+  const report = await projection.rebuild({ tenantId, targets: [{ target: dbACompanyA, records: [record()] }] });
+  assert.equal(report.destinations[0]?.state, 'FAILED');
+  assert.equal(report.destinations[0]?.safeErrorCode, 'REBUILD_OWNERSHIP_AMBIGUOUS');
+  assert.equal(report.rebuildReports?.[0]?.expectedCount, 1);
+  assert.equal(report.rebuildReports?.[0]?.actualCount, 1);
+  assert.equal(report.rebuildReports?.[0]?.reconciledExtraCount, 1);
+  assert.equal(report.rebuildReports?.[0]?.ambiguousExtraCount, 1);
+  assert.equal(report.rebuildReports?.[0]?.parity, 'AMBIGUOUS');
+  assert.equal(destination.rows.get('synthetic-db\0company-a\0stale-owned-asset')?.tombstone, true);
+  assert.equal(destination.rows.get('synthetic-db\0company-a\0unknown-legacy-asset')?.tombstone, false);
 });
 
 test('unknown source version with a changed hash fails the monotonic comparator', () => {

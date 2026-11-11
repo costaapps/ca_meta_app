@@ -39,6 +39,18 @@ export class MysqlLegacyProjectionCheckpointStore implements LegacyProjectionChe
     return fromRow(rows[0]);
   }
 
+  async listByDestination(tenantId: string, destinationKeyHash: string): Promise<readonly LegacyProjectionCheckpoint[]> {
+    const source = await this.database.getDataSource();
+    const rows = await source.query(
+      `SELECT tenant_id, destination_key_hash, central_ref, source_version, projection_schema_version,
+              content_hash, tombstone, state, safe_error_code
+       FROM ca_meta_legacy_projection_checkpoints
+       WHERE tenant_id = ? AND destination_key_hash = ? ORDER BY central_ref`,
+      [tenantId, destinationKeyHash],
+    ) as CheckpointRow[];
+    return Object.freeze(rows.map((row) => fromRow(row)!).filter(Boolean));
+  }
+
   async record(checkpoint: LegacyProjectionCheckpoint): Promise<void> {
     const source = await this.database.getDataSource();
     await source.transaction(async (manager) => {

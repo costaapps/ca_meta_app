@@ -54,7 +54,24 @@ export interface LegacyProjectionCheckpoint {
 
 export interface LegacyProjectionCheckpointStore {
   read(tenantId: string, destinationKeyHash: string, centralRef: string): Promise<LegacyProjectionCheckpoint | undefined>;
+  listByDestination(tenantId: string, destinationKeyHash: string): Promise<readonly LegacyProjectionCheckpoint[]>;
   record(checkpoint: LegacyProjectionCheckpoint): Promise<void>;
+}
+
+export interface LegacyProjectionRebuildReport {
+  readonly destinationKeyHash: string;
+  readonly expectedCount: number;
+  readonly actualCount: number;
+  readonly reconciledExtraCount: number;
+  readonly ambiguousExtraCount: number;
+  readonly expectedHash: string;
+  readonly actualHash: string;
+  readonly parity: 'MATCHED' | 'MISMATCH' | 'AMBIGUOUS';
+}
+
+export interface LegacyProjectionRebuildResult extends LegacyProjectionRebuildReport {
+  /** Projector-owned tombstones to persist to the central checkpoint after the destination transaction. */
+  readonly tombstones: readonly LegacyProjectionRecord[];
 }
 
 export interface LegacyProjectionDestination {
@@ -65,6 +82,14 @@ export interface LegacyProjectionDestination {
     readonly records: readonly LegacyProjectionRecord[];
     readonly projectionSchemaVersion: number;
   }): Promise<void>;
+  reconcile(input: {
+    readonly target: LegacyProjectionTargetKey;
+    readonly tenantId: string;
+    readonly records: readonly LegacyProjectionRecord[];
+    readonly knownOwnedCheckpoints: readonly LegacyProjectionCheckpoint[];
+    readonly projectionSchemaVersion: number;
+    readonly destinationKeyHash: string;
+  }): Promise<LegacyProjectionRebuildResult>;
 }
 
 export interface LegacyProjectionDestinationCatalog {
@@ -86,6 +111,7 @@ export interface LegacyProjectionResult {
     readonly state: 'SYNCED' | 'PENDING' | 'FAILED';
     readonly safeErrorCode: string | null;
   }[];
+  readonly rebuildReports?: readonly LegacyProjectionRebuildReport[];
 }
 
 export class LegacyProjectionError extends Error {
