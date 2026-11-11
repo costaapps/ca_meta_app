@@ -447,6 +447,82 @@ test('public magic-link initiation tolerates stale portal cookies but retains br
   assert.equal(verifyCalls, 3);
 });
 
+test('pre-auth POST bypasses prior-session CSRF only for its exact origin-checked route', async () => {
+  const env = {
+    nodeEnv: 'test', port: 3000, bindAddress: '127.0.0.1', allowedHosts: ['portal.example'],
+    allowedOrigins: ['https://portal.example'], suite4EmbedOrigins: [], trustedProxyCidrs: false,
+    portalSessionRecoveryKey: recoveryKey,
+    portalSessionIdleTimeoutSeconds: 1800,
+    portalSessionAbsoluteTimeoutSeconds: 28800,
+    database: { host: '127.0.0.1', port: 3306, name: 'synthetic', user: 'synthetic', password: 'synthetic', connectTimeoutMs: 100 },
+  } satisfies ApiEnvironment;
+  const activeCookie = 'active-session-cookie-with-sufficient-entropy-12345';
+  const staleCookie = 'expired-session-cookie-with-sufficient-entropy-123456';
+  const csrf = 'csrf-token-with-sufficient-entropy-123456';
+  let verifyCalls = 0;
+  const activeSession = {
+    sessionId: 'session-1', principalId, tenantId: tenantA, contextVersion: 1,
+    contextRefHash: 'a'.repeat(64), csrfTokenHash: hash(csrf), entryMode: 'PORTAL_TOP_LEVEL',
+  } as VerifiedPortalSession;
+  const verifier = { async verify(value: string | undefined) {
+    verifyCalls += 1;
+    return value === activeCookie ? activeSession : undefined;
+  } } as PortalSessionVerifier;
+  const middleware = portalRequestSecurityMiddleware(env, verifier);
+  const request = (headers: Record<string, string | string[] | undefined>, method = 'POST', path = '/api/v1/auth/preauth') => ({
+    headers, method, path, protocol: 'https', get: (name: string) => name.toLowerCase() === 'host' ? 'portal.example' : undefined,
+  });
+  const baseHeaders = { origin: 'https://portal.example', 'sec-fetch-site': 'same-origin' };
+
+  const activeCookiePreAuth = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    cookie: `${PORTAL_SESSION_COOKIE}=${activeCookie}`,
+  }));
+  assert.equal(activeCookiePreAuth.continued, true);
+  assert.equal(verifyCalls, 0);
+
+  const staleCookiePreAuth = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    cookie: `${PORTAL_SESSION_COOKIE}=${staleCookie}`,
+  }));
+  assert.equal(staleCookiePreAuth.continued, true);
+  assert.equal(verifyCalls, 0);
+
+  const deniedOrigin = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    origin: 'https://attacker.example',
+    cookie: `${PORTAL_SESSION_COOKIE}=${staleCookie}`,
+  }));
+  assert.equal(deniedOrigin.response.statusCodeValue(), 403);
+  assert.equal((deniedOrigin.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+  assert.equal(verifyCalls, 0);
+
+  const deniedFetchMetadata = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    'sec-fetch-site': 'same-site',
+    cookie: `${PORTAL_SESSION_COOKIE}=${staleCookie}`,
+  }));
+  assert.equal(deniedFetchMetadata.response.statusCodeValue(), 403);
+  assert.equal((deniedFetchMetadata.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+  assert.equal(verifyCalls, 0);
+
+  const activeCookieHeader = `${PORTAL_SESSION_COOKIE}=${activeCookie}`;
+  const deniedMethod = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    cookie: activeCookieHeader,
+  }, 'PUT'));
+  assert.equal(deniedMethod.response.statusCodeValue(), 403);
+  assert.equal((deniedMethod.response.bodyValue() as { code: string }).code, 'CSRF_INVALID');
+
+  const deniedNeighborPath = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    cookie: activeCookieHeader,
+  }, 'POST', '/api/v1/auth/preauth/extra'));
+  assert.equal(deniedNeighborPath.response.statusCodeValue(), 403);
+  assert.equal((deniedNeighborPath.response.bodyValue() as { code: string }).code, 'CSRF_INVALID');
+  assert.equal(verifyCalls, 2);
+});
+
 test('portal cookies are host-only, Secure, HttpOnly where required, and denial codes map to safe 403/409 envelopes', () => {
   const response = fakeResponse() as Response & { append(name: string, value: string): void; headerValue(name: string): unknown };
   const appended: string[] = [];

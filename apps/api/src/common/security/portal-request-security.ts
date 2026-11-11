@@ -44,6 +44,7 @@ function matchesHash(value: string, digest: string): boolean {
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const PORTAL_ENTRY_EXCHANGE_PATH = '/api/v1/auth/exchanges';
+const PORTAL_PREAUTH_PATH = '/api/v1/auth/preauth';
 const MAGIC_LINK_REQUEST_PATH = '/api/v1/auth/magic-links';
 const MAGIC_LINK_CONSUME_PATH = '/api/v1/auth/magic-links/consume';
 
@@ -111,6 +112,14 @@ export function portalRequestSecurityMiddleware(
       // session cookie prevent a user from requesting a fresh link. Its route
       // handler continues to enforce identity and delivery quotas.
       if (request.method === 'POST' && request.path === MAGIC_LINK_REQUEST_PATH) {
+        next();
+        return;
+      }
+
+      // Pre-auth creates a browser-bound challenge, not a portal session. Its
+      // controller retains the challenge cookie binding and abuse limits; a
+      // stale or active prior portal cookie must not require prior-session CSRF.
+      if (request.method === 'POST' && request.path === PORTAL_PREAUTH_PATH) {
         next();
         return;
       }
