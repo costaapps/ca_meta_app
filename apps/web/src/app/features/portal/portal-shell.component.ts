@@ -5,6 +5,7 @@ import { Subject, takeUntil } from 'rxjs';
 import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalEntryReturnStore } from '../../core/portal/portal-entry-return.store';
 import { PortalSession, PortalSessionService } from '../../core/portal/portal-session.service';
+import { PortalTenantIdentityService } from '../../core/portal/portal-tenant-identity.service';
 import { safeRequestId } from '../../core/portal/safe-api-error';
 import { EmbedBridgeService, type EmbedBridgeSnapshot } from '../../core/embed/embed-bridge.service';
 import { embedRoutePath, type EmbedNavigationRequest } from '../../core/embed/embed-contract';
@@ -31,6 +32,7 @@ export class PortalShellComponent implements OnInit, OnDestroy {
 
   constructor(
     private readonly sessions: PortalSessionService,
+    private readonly tenantIdentity: PortalTenantIdentityService,
     private readonly context: PortalContextStore,
     private readonly returnTargets: PortalEntryReturnStore,
     private readonly router: Router,
@@ -71,7 +73,9 @@ export class PortalShellComponent implements OnInit, OnDestroy {
   }
 
   get contextLabel(): string {
-    return this.session ? 'Contexto da sessão ativo' : '';
+    if (!this.session) return '';
+    const capability = this.tenantIdentity.forSession(this.session);
+    return capability.confirmed ? capability.tenantDisplayName : capability.message;
   }
 
   async signOut(): Promise<void> {

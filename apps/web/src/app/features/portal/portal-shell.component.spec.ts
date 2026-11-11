@@ -2,6 +2,7 @@ import { EmbedBridgeService } from '../../core/embed/embed-bridge.service';
 import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalEntryReturnStore } from '../../core/portal/portal-entry-return.store';
 import { PortalSession, PortalSessionService } from '../../core/portal/portal-session.service';
+import { PortalTenantIdentityService } from '../../core/portal/portal-tenant-identity.service';
 import { Router } from '@angular/router';
 import { PortalShellComponent } from './portal-shell.component';
 
@@ -21,6 +22,7 @@ describe('PortalShellComponent', () => {
     } as unknown as EmbedBridgeService;
     const component = new PortalShellComponent(
       { current: session } as PortalSessionService,
+      new PortalTenantIdentityService({ current: session } as PortalSessionService),
       {} as PortalContextStore,
       {} as PortalEntryReturnStore,
       {} as Router,
@@ -28,7 +30,7 @@ describe('PortalShellComponent', () => {
     );
     component.session = session;
 
-    expect(component.contextLabel).toBe('Contexto da sessão ativo');
+    expect(component.contextLabel).toBe('Identidade da empresa não confirmada');
     expect(component.contextLabel).not.toContain(session.tenantRef);
   });
 });
