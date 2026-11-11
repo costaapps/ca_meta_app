@@ -4,6 +4,7 @@
 
 - Develop start SHA: `b35e0ddae5ce09df2ca2ce09785be4332e653803` (M3 consolidated PR #127 is merged there).
 - Milestone branch: `desktop/milestone-m4`, current integrated source after M4.14 (#57) squash `79e52fd544288a27230b41ac5c4a0dca14322157`, integration worktree: `C:\Users\user\.codex\worktrees\m4-milestone\ca_meta_app`.
+- Consolidated PR [#151](https://github.com/costaapps/ca_meta_app/pull/151) is open as a draft from `desktop/milestone-m4` to `develop` for final acceptance; leave it unmerged until user approval.
 - M4.01 / #42 package PR #128 was squash-merged into the milestone branch. Package candidate: `513cddccb8dc5728f5d48fa1c3cd392b0a26284d`; squash commit: `65233723351432d5f49306666f7fe777f7ead8b3`.
 - M4.01 focused API validation passed on implementation SHA `95f2acaa9d43827b060a685972f7956bde147b50`: Node `v24.22.1`, npm `11.19.1`, `npm run test:m4-01 --workspace=@ca-meta/api` (API build + 10 tests). Final contract-only changes were validated on `513cddc`: from `tools/m1-07`, `npm run test:contract` (8 passed) and `npm run check:generated` (generated client and 53 compatibility rows current).
 - Code and security reviewers found no implementation blockers. Code review confirmed all five bootstrap examples match the runtime manifest. All applicable GitHub checks on #128 passed: baseline, plan, M1.07 contract, desktop candidate, M2.08 images/security/MariaDB and orchestrator; `structure` was skipped by workflow.
