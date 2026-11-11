@@ -12,7 +12,7 @@
 | Pacote | Branch | Worktree | Estado inicial |
 |---|---|---|---|
 | M5.01 / #43 | `desktop/m5-01` | `C:\Users\user\.codex\worktrees\m5-01-portal\ca_meta_app` | SHA base `389317a99932050112a31d002da565431003a943`; implementador executa follow-up de cookie stale no POST magic-link (sem enfraquecer Origin/Fetch Metadata) e remoção do `tenantRef` bruto do rótulo da empresa. Não rebasear sobre #62 até o integrador autorizar após gate. |
-| M5.07 / #62 | `desktop/m5-07` | `C:\Users\user\.codex\worktrees\m5-07-service-bridge\ca_meta_app` | PR #152 em `9314a002707d29e98dd343b9cb8775fa5a7edcce`; reviews funcional/security PASS. Build API, compile TS, focused 16/16 e harness M2.03/MariaDB 11.8.8 PASS no SHA atual; migrações 1–21 e backup/restore verificados. GitHub Actions foi bloqueado antes do runner por billing/spending limit; não squash. A rota v2 ainda requer aceite final; consumers PHP permanecem `NOT_MIGRATED`. |
+| M5.07 / #62 | `desktop/m5-07` | `C:\Users\user\.codex\worktrees\m5-07-service-bridge\ca_meta_app` | PR #152 em `9314a002707d29e98dd343b9cb8775fa5a7edcce`; reviews funcional/security PASS. Build API, compile TS, middleware/migration 16/16, harness M5.07 32/32 e harness M2.03/MariaDB 11.8.8 PASS no SHA atual; migrações 1–21 e backup/restore verificados. GitHub Actions foi bloqueado antes do runner por billing/spending limit; não squash. A rota v2 ainda requer aceite final; consumers PHP permanecem `NOT_MIGRATED`. |
 
 Os dois branches começaram em `c3e9baa`. Um escritor por worktree. O coordenador é o único responsável por push/PR/CI/squash e commits na integração. Junctions `node_modules` reutilizam o install do checkout base, com symlinks `@ca-meta/*` direcionados a cada worktree.
 
