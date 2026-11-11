@@ -67,6 +67,21 @@ function parseRow(row: OperationDbRow): InternalAssetOperationRow {
 export class MysqlInternalAssetOperationStore implements InternalAssetOperationStore {
   constructor(private readonly database: DurableWorkDatabase, private readonly audit: AuditEventWriter) {}
 
+  async findByIdempotency(input: Parameters<InternalAssetOperationStore['findByIdempotency']>[0]): Promise<InternalAssetOperationRow | undefined> {
+    const source = await this.database.getDataSource();
+    const rows = await source.query(
+      `SELECT id, tenant_id, service_principal_id, asset_id, operation, request_hash, status,
+              safe_reason_code, provider_reference_hash, created_at, updated_at
+       FROM ca_meta_internal_asset_operations
+       WHERE tenant_id = ? AND service_principal_id = ? AND asset_id = ? AND operation = ? AND idempotency_key_hash = ?
+       LIMIT 1`,
+      [input.tenantId, input.servicePrincipalId, input.assetId, input.operation, input.idempotencyKeyHash],
+    ) as OperationDbRow[];
+    if (!rows[0]) return undefined;
+    if (rows[0].request_hash !== input.payloadHash) throw new InternalAssetOperationIdempotencyConflictError();
+    return parseRow(rows[0]);
+  }
+
   async claim(input: Parameters<InternalAssetOperationStore['claim']>[0]): Promise<InternalAssetOperationClaim> {
     const source = await this.database.getDataSource();
     return source.transaction('READ COMMITTED', async (manager) => {

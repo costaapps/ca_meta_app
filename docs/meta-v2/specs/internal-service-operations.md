@@ -17,6 +17,10 @@ The versioned repository contains the PHP sources listed below. They establish s
 
 The checked-in endpoint and parity inventories in `docs/baseline/endpoint-matrix.csv`, `docs/baseline/inventory.md`, and `docs/baseline/parity-matrix.md` support the same source-level mapping. They are not production traffic evidence.
 
+No versioned PHP handler was switched in this package. The inspected template and notification routes select `CompanyUUID`, `phone_number_id`, or notification/comment IDs from legacy request/database context, but do not expose a verified M3 service principal or a current principal-to-tenant binding. Selecting a service proof from those values would let a request choose another tenant. The API also returns operation status only, so it cannot currently preserve the template-list response. `recipientRef`/`commentRef` resolution and the provider adapter remain fail-closed. The complete consumer → typed operation → asset/auth context → synthetic-equivalence/gap → activation condition matrix is in [`tools/m5-07/consumer-map.json`](../../../tools/m5-07/consumer-map.json).
+
+Before any handler can be enabled, its caller needs an authenticated server principal with current tenant membership; a server-owned principal-to-tenant and legacy company-to-internal asset mapping; a separately provisioned tenant-bound service proof from protected runtime configuration; current asset authorization/grants and flow/auth policy; a target resolver for any recipient/comment; output/error equivalence tests; and single-writer cutover evidence. None of those mappings may be inferred from caller-supplied `company_uuid` or provider IDs.
+
 ## Internal API contract
 
 - `POST /internal/v1/assets/{assetId}/operations` accepts a closed union: `SEND_MESSAGE`, `MANAGE_TEMPLATES`, `MANAGE_COMMENTS`, `READ_STATUS`, and `SUBSCRIBE_WEBHOOKS`.

@@ -67,6 +67,15 @@ export interface InternalAssetOperationClaim {
 }
 
 export interface InternalAssetOperationStore {
+  /** Find an existing result after identity/asset revalidation but before new-operation gates. */
+  findByIdempotency(input: {
+    readonly tenantId: string;
+    readonly servicePrincipalId: string;
+    readonly assetId: string;
+    readonly operation: InternalAssetOperation;
+    readonly idempotencyKeyHash: string;
+    readonly payloadHash: string;
+  }): Promise<InternalAssetOperationRow | undefined>;
   claim(input: {
     readonly tenantId: string;
     readonly servicePrincipalId: string;

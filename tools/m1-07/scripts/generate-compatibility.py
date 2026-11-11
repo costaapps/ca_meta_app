@@ -54,7 +54,7 @@ def mapping(row: dict[str, str]) -> tuple[str, str, str, str, str]:
             return "createOnboardingSession", "POST /api/v1/onboarding-sessions", "preserve-facebook-journey-separately", "M4 Facebook flow proof", "Operational entrypoint and provider permissions Not confirmed."
         return "createOnboardingSession", "POST /api/v1/onboarding-sessions", "preserve-page-discovery-separately", "M4 Instagram flow proof", "Current source discovery is not evidence of Instagram Login."
     if kind == "php_include":
-        return "internal-service-boundary", "POST /api/v1/internal/v1/assets/{assetId}/operations", "replace-internal-helper", "M2 service boundary review", "Shared helpers are not public API operations."
+        return "internal-service-boundary", "POST /internal/v1/assets/{assetId}/operations", "replace-internal-helper", "M5.07 service bridge review", "Shared helpers are not public API operations; legacy caller identity and asset mapping are Not confirmed."
     if kind == "php_function":
         routes = {
             "getLoginUrl": ("createOnboardingSession", "POST /api/v1/onboarding-sessions", "replace-with-server-state", "M4 provider flow proof"),
@@ -65,7 +65,7 @@ def mapping(row: dict[str, str]) -> tuple[str, str, str, str, str]:
             "actionNotification": ("actOnNotification", "POST /api/v1/notifications/{notificationId}/actions", "replace-with-typed-async-action", "M2/M4 external-effect evidence"),
             "getWhatsappTemplates": ("listTemplates", "GET /api/v1/whatsapp/accounts/{assetId}/templates", "preserve-with-scoped-grant", "M3.08 grant verification"),
             "createWhatsappTemplate": ("createTemplate", "POST /api/v1/whatsapp/accounts/{assetId}/templates", "replace-with-async-provider-job", "M3.08 provider scenario"),
-            "sendWhatsAppMessage": ("runInternalAssetOperation", "POST /api/v1/internal/v1/assets/{assetId}/operations (SEND_REPLY)", "internal-typed-operation", "M3/M4 external-effect evidence"),
+            "sendWhatsAppMessage": ("runInternalAssetOperation", "POST /internal/v1/assets/{assetId}/operations (SEND_MESSAGE)", "internal-typed-operation", "M3.08 grant + M4 provider-effect evidence"),
             "getCompanyContext": ("getSession", "GET /api/v1/session", "replace-company-uuid-lookup", "M3 identity integration"),
             "meta_get_company_context": ("getSession", "GET /api/v1/session", "replace-company-uuid-lookup", "M3 identity integration"),
             "getWabaExternalIdByPhoneNumber": ("resolveAssetInternally", "(tenant-scoped repository operation)", "internal-only", "M2 repository/BOLA review"),
@@ -81,7 +81,7 @@ def mapping(row: dict[str, str]) -> tuple[str, str, str, str, str]:
         if symbol in routes:
             operation, target, policy, gate = routes[symbol]
             return operation, target, policy, gate, "Versioned contract only; current PHP function body was not used to claim future provider behavior."
-        return "internal-service-boundary", "POST /api/v1/internal/v1/assets/{assetId}/operations", "internal-only", "M2/M3 service review", "Function has no direct browser route; enforce tenant and operation allowlists."
+        return "internal-service-boundary", "POST /internal/v1/assets/{assetId}/operations", "internal-only", "M5.07 service boundary review", "Function has no direct browser route; tenant and operation allowlists apply, while external caller mapping remains Not confirmed."
     if kind == "frontend_request":
         if path == "/channels":
             return "listConnections", "GET /api/v1/connections", "preserve-with-tenant-scoped-projection", "M2 web consumer integration", "Angular runtime remains unchanged in M1.07."

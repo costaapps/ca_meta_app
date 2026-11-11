@@ -26,6 +26,15 @@ if (existsSync(apiDist)) {
     });
     if (run.error) throw run.error;
     if (run.status !== 0) throw new Error(`M5.07 focused tests failed with exit ${run.status ?? 'signal'}.`);
+    if (process.argv.includes('--database')) {
+      const database = spawnSync(process.execPath, [join(root, 'tools', 'm5-07', 'migration-db.test.mjs')], {
+        cwd: root,
+        stdio: 'inherit',
+        env: { ...process.env, M5_07_API_DIST: apiDist },
+      });
+      if (database.error) throw database.error;
+      if (database.status !== 0) throw new Error(`M5.07 isolated migration check failed with exit ${database.status ?? 'signal'}.`);
+    }
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : 'M5.07 focused harness failed.'}\n`);
     process.exitCode = 1;

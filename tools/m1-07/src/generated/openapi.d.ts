@@ -868,7 +868,7 @@ export interface components {
         readonly MetaBootstrapReason: "CONFIGURATION_MISSING" | "CONFIGURATION_DISABLED" | "VERSION_EVIDENCE_REQUIRED" | "PERMISSION_MAPPING_NOT_CONFIRMED" | "CAPABILITY_EVIDENCE_MISSING" | "ACCESS_LEVEL_NOT_CONFIRMED" | "APP_REVIEW_NOT_CONFIRMED" | "SANDBOX_NOT_CONFIRMED";
         readonly MetaCapabilityStatus: {
             /** @enum {string} */
-            readonly operation: "ASSET_DISCOVERY" | "SEND_MESSAGE" | "MANAGE_COMMENTS" | "MANAGE_TEMPLATES" | "READ_STATUS" | "SUBSCRIBE_WEBHOOKS" | "SYNC_HISTORY";
+            readonly operation: "ASSET_DISCOVERY" | "SEND_MESSAGE" | "MANAGE_COMMENTS" | "MANAGE_TEMPLATES" | "READ_STATUS" | "SUBSCRIBE_WEBHOOKS" | "SYNC_HISTORY" | "PHONE_REGISTRATION_CONVENTIONAL";
             readonly enabled: boolean;
             readonly reasonCode: components["schemas"]["MetaBootstrapReason"] | null;
         };
@@ -1279,6 +1279,14 @@ export interface components {
             readonly status: "PENDING";
             readonly location: string;
             readonly requestId: string;
+        };
+        readonly InternalAssetOperationResult: {
+            /** Format: uuid */
+            readonly operationId: string;
+            /** @enum {string} */
+            readonly status: "UNKNOWN" | "SUCCEEDED" | "FAILED";
+            /** @enum {string} */
+            readonly reasonCode?: "OPERATION_ACCEPTED" | "PROVIDER_REJECTED" | "PROVIDER_RESULT_UNKNOWN" | "OPERATION_FAILED" | "OPERATION_UNSUPPORTED" | "CREDENTIAL_UNAVAILABLE";
         };
         readonly WebhookChallengeResponse: {
             readonly challenge: string;

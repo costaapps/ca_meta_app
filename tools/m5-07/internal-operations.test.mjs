@@ -47,6 +47,13 @@ class FakeOperationStore {
   claims = 0;
   audit = [];
 
+  async findByIdempotency(input) {
+    const key = [input.tenantId, input.servicePrincipalId, input.assetId, input.operation, input.idempotencyKeyHash].join('|');
+    const prior = this.rows.get(key);
+    if (prior && prior.payloadHash !== input.payloadHash) throw new InternalAssetOperationIdempotencyConflictError();
+    return prior;
+  }
+
   async claim(input) {
     const key = [input.tenantId, input.servicePrincipalId, input.assetId, input.operation, input.idempotencyKeyHash].join('|');
     const prior = this.rows.get(key);
@@ -83,50 +90,58 @@ class FakeOperationStore {
 }
 
 function setup(options = {}) {
-  const allowedScopes = options.scopes ?? ['META_CONNECTION_EXECUTE', 'CREDENTIAL_USE'];
+  const defaultScopes = ['META_CONNECTION_EXECUTE', 'CREDENTIAL_USE'];
   const proof = options.proof ?? PROOF_A;
   const tenant = options.tenant ?? TENANT_A;
+  const assetId = options.assetId ?? ASSET_A;
+  const appConfigurationId = options.appConfigurationId ?? '60000000-0000-4000-8000-000000000001';
+  const flowVariant = options.flowVariant ?? 'WHATSAPP_EXCLUSIVE';
+  const authVariant = options.authVariant ?? 'WHATSAPP_EMBEDDED_SIGNUP';
   const verifier = new ConfiguredServiceCredentialVerifier([{ principalId: PRINCIPAL_A, tenantId: tenant, credentialSha256: HASH(proof) }]);
   const authorization = new ServiceTenantAuthorizationService({
     async findServiceTenantGrant(principalId, tenantId) {
       if (principalId !== PRINCIPAL_A || tenantId !== tenant || options.grantRevoked) return undefined;
-      return { tenantId, principalId, principalKind: 'SERVICE', principalStatus: 'ACTIVE', tenantStatus: 'ACTIVE', scopes: allowedScopes };
+      return { tenantId, principalId, principalKind: 'SERVICE', principalStatus: 'ACTIVE', tenantStatus: 'ACTIVE', scopes: options.scopes ?? defaultScopes };
     },
   });
   const store = new FakeOperationStore();
-  const calls = { resolver: 0, targetResolver: 0, adapter: 0, command: undefined, resolverContext: undefined };
+  const calls = { resolver: 0, targetResolver: 0, adapter: 0, command: undefined, resolverContext: undefined, credentialHandle: undefined };
   const credentials = {
     async resolve(context) {
       calls.resolver += 1;
       calls.resolverContext = context;
       if (options.credentialDenied) throw new Error('synthetic-credential-grant-denied');
-      return { handle: Object.freeze({}), status: 'READY' };
+      return { handle: Object.freeze({ assetId: context.assetId, appConfigurationId: context.appConfigurationId }), status: 'READY' };
     },
   };
   const assets = {
     async findAuthorizedAsset(input) {
-      if (options.assetMissing || input.assetId !== ASSET_A) return undefined;
-      return { tenantId: options.assetTenant ?? tenant, assetId: ASSET_A, appConfigurationId: '60000000-0000-4000-8000-000000000001',
-        environment: 'test', flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP', providerObjectId: 'synthetic-provider-object' };
+      if (options.assetMissing || input.assetId !== assetId) return undefined;
+      return { tenantId: options.assetTenant ?? tenant, assetId, appConfigurationId,
+        environment: 'test', flowVariant, authVariant, providerObjectId: `synthetic-provider-object-${assetId}` };
     },
   };
-  const capabilityEnabled = options.capabilityEnabled !== false;
-  const profile = { configurationRef: 'synthetic-config', flowVariant: 'WHATSAPP_EXCLUSIVE', authVariant: 'WHATSAPP_EMBEDDED_SIGNUP', enabled: true };
+  const profile = { configurationRef: `synthetic-config-${appConfigurationId}`, flowVariant, authVariant, enabled: true };
   const registry = {
     resolve: () => options.configurationMissing ? undefined : profile,
     bootstrap: () => ({ profiles: [{ ...profile, capabilities: [
-      { operation: 'SEND_MESSAGE', enabled: capabilityEnabled },
-      { operation: 'MANAGE_TEMPLATES', enabled: capabilityEnabled },
-      { operation: 'MANAGE_COMMENTS', enabled: capabilityEnabled },
-      { operation: 'READ_STATUS', enabled: capabilityEnabled },
-      { operation: 'SUBSCRIBE_WEBHOOKS', enabled: capabilityEnabled },
+      { operation: 'SEND_MESSAGE', enabled: options.capabilityEnabled !== false },
+      { operation: 'MANAGE_TEMPLATES', enabled: options.capabilityEnabled !== false },
+      { operation: 'MANAGE_COMMENTS', enabled: options.capabilityEnabled !== false },
+      { operation: 'READ_STATUS', enabled: options.capabilityEnabled !== false },
+      { operation: 'SUBSCRIBE_WEBHOOKS', enabled: options.capabilityEnabled !== false },
     ] }] }),
   };
   const adapter = {
-    available: options.adapterAvailable !== false,
+    get available() { return options.adapterAvailable !== false; },
     async execute(input) {
       calls.adapter += 1;
       calls.command = input.command;
+      calls.credentialHandle = input.credentialHandle;
+      if (options.adapterGate) {
+        options.adapterGate.markStarted();
+        await options.adapterGate.wait;
+      }
       if (options.adapterThrows) throw new Error('synthetic-timeout-after-submit');
       const referenceHash = HASH('synthetic-provider-reference');
       return options.adapterOutcome ?? { status: 'SUCCEEDED', providerReferenceHash: referenceHash };
@@ -140,10 +155,10 @@ function setup(options = {}) {
     },
   };
   const service = new InternalAssetOperationsService(verifier, authorization, credentials, registry, assets, store, targets, adapter, { nodeEnv: 'test' });
-  const request = (payload = sendPayload(), key = IDEM, assetId = ASSET_A) => ({
-    authorization: `Bearer ${proof}`, assetId, idempotencyKey: key, payload,
+  const request = (payload = sendPayload(), key = IDEM, requestedAssetId = assetId) => ({
+    authorization: `Bearer ${proof}`, assetId: requestedAssetId, idempotencyKey: key, payload,
   });
-  return { service, store, calls, request, verifier, tenant, proof };
+  return { service, store, calls, request, verifier, tenant, proof, options, assetId, appConfigurationId, flowVariant, authVariant };
 }
 
 test('service proof rotation overlaps hashes; removing the old hash revokes it', async () => {
@@ -165,6 +180,41 @@ test('proof verification is tenant-bound and a missing proof is rejected', async
   assert.equal((await verifier.verifyCredential(PROOF_A))?.tenantId, TENANT_A);
   assert.equal(await verifier.verifyCredential(PROOF_B), undefined);
   assert.equal(await verifier.verifyCredential(undefined), undefined);
+});
+
+test('four flow/auth pairs resolve distinct M3.08 handles from tenant asset context', async () => {
+  const cases = [
+    ['FACEBOOK', 'FACEBOOK_LOGIN_FOR_BUSINESS'],
+    ['INSTAGRAM', 'INSTAGRAM_VIA_FACEBOOK_LOGIN'],
+    ['WHATSAPP_EXCLUSIVE', 'WHATSAPP_EMBEDDED_SIGNUP'],
+    ['WHATSAPP_COEXISTENCE', 'WHATSAPP_BUSINESS_APP_ONBOARDING'],
+  ];
+  const states = cases.map(([flowVariant, authVariant], index) => setup({
+    assetId: `30000000-0000-4000-8000-00000000000${index + 1}`,
+    appConfigurationId: `60000000-0000-4000-8000-00000000000${index + 1}`,
+    flowVariant,
+    authVariant,
+  }));
+  const handles = [];
+  for (let index = 0; index < states.length; index += 1) {
+    const state = states[index];
+    const result = await state.service.execute(state.request({ operation: 'READ_STATUS' }, `m5-flow-idempotency-${index}-0001`));
+    assert.equal(result.status, 'SUCCEEDED');
+    assert.deepEqual(state.calls.resolverContext, {
+      tenantId: TENANT_A,
+      provider: 'META',
+      appConfigurationId: state.appConfigurationId,
+      environment: 'test',
+      assetId: state.assetId,
+      operation: 'READ_STATUS',
+    });
+    assert.equal(state.calls.command.context.flowVariant, state.flowVariant);
+    assert.equal(state.calls.command.context.authVariant, state.authVariant);
+    assert.equal(state.calls.command.context.assetId, state.assetId);
+    assert.equal(state.calls.credentialHandle.assetId, state.assetId);
+    handles.push(state.calls.credentialHandle);
+  }
+  assert.equal(new Set(handles).size, 4);
 });
 
 test('closed operation payloads reject caller tenant, generic Graph URL and untyped fields', () => {
@@ -222,6 +272,61 @@ test('unresolved tenant/asset-bound recipient reference fails before idempotency
   assert.equal(state.calls.adapter, 0);
 });
 
+test('each supported typed operation performs one synthetic adapter call and replays without a second call', async (t) => {
+  const payloads = [
+    sendPayload(),
+    parseInternalAssetOperation({ operation: 'MANAGE_TEMPLATES', action: 'LIST' }),
+    parseInternalAssetOperation({ operation: 'MANAGE_TEMPLATES', action: 'CREATE', name: 'welcome', language: 'pt_BR', category: 'UTILITY', bodyText: 'Hello {{1}}', exampleValues: ['World'] }),
+    parseInternalAssetOperation({ operation: 'MANAGE_COMMENTS', action: 'LIST' }),
+    parseInternalAssetOperation({ operation: 'MANAGE_COMMENTS', action: 'REPLY', commentRef: '50000000-0000-4000-8000-000000000002', text: 'Synthetic reply' }),
+    parseInternalAssetOperation({ operation: 'READ_STATUS' }),
+    parseInternalAssetOperation({ operation: 'SUBSCRIBE_WEBHOOKS', action: 'READ' }),
+    parseInternalAssetOperation({ operation: 'SUBSCRIBE_WEBHOOKS', action: 'RECONCILE' }),
+  ];
+  for (let index = 0; index < payloads.length; index += 1) {
+    await t.test(payloads[index].operation + (payloads[index].action ? `/${payloads[index].action}` : ''), async () => {
+      const state = setup();
+      const key = `m5-supported-operation-${index}-0001`;
+      const first = await state.service.execute(state.request(payloads[index], key));
+      const replay = await state.service.execute(state.request(payloads[index], key));
+      assert.equal(first.status, 'SUCCEEDED');
+      assert.equal(replay.operationId, first.operationId);
+      assert.equal(replay.status, 'SUCCEEDED');
+      assert.equal(state.store.claims, 1);
+      assert.equal(state.calls.adapter, 1);
+      assert.equal(state.calls.resolver, 1);
+      const needsTarget = payloads[index].operation === 'SEND_MESSAGE' ||
+        (payloads[index].operation === 'MANAGE_COMMENTS' && payloads[index].action === 'REPLY');
+      assert.equal(state.calls.targetResolver, needsTarget ? 1 : 0);
+    });
+  }
+});
+
+test('completed idempotent replay survives changed execution gates after current tenant/asset revalidation', async () => {
+  const state = setup();
+  const original = await state.service.execute(state.request());
+  const previous = { resolver: state.calls.resolver, targetResolver: state.calls.targetResolver, adapter: state.calls.adapter };
+
+  state.options.scopes = ['META_CONNECTION_EXECUTE'];
+  state.options.capabilityEnabled = false;
+  state.options.configurationMissing = true;
+  state.options.adapterAvailable = false;
+  state.options.targetDenied = true;
+
+  const replay = await state.service.execute(state.request());
+  assert.equal(replay.operationId, original.operationId);
+  assert.equal(replay.status, 'SUCCEEDED');
+  assert.equal(state.calls.resolver, previous.resolver);
+  assert.equal(state.calls.targetResolver, previous.targetResolver);
+  assert.equal(state.calls.adapter, previous.adapter);
+  assert.equal(state.store.claims, 1);
+  await assert.rejects(
+    state.service.execute(state.request(sendPayload('different replay body'))),
+    InternalAssetOperationIdempotencyConflictError,
+  );
+  assert.equal(state.calls.adapter, previous.adapter);
+});
+
 test('concurrent identical requests produce one adapter execution and replay one operationId', async () => {
   const state = setup();
   const [first, second] = await Promise.all([state.service.execute(state.request()), state.service.execute(state.request())]);
@@ -236,6 +341,34 @@ test('concurrent identical requests produce one adapter execution and replay one
   assert.equal(completedReplay.operationId, first.operationId);
   assert.equal(completedReplay.status, 'SUCCEEDED');
   await assert.rejects(state.service.execute(state.request(sendPayload('different body'))), InternalAssetOperationIdempotencyConflictError);
+  assert.equal(state.calls.adapter, 1);
+});
+
+test('concurrent UNKNOWN observation transitions to terminal on the same operationId', async () => {
+  let signalStarted;
+  let releaseAdapter;
+  const adapterGate = {
+    started: new Promise((resolve) => { signalStarted = resolve; }),
+    wait: new Promise((resolve) => { releaseAdapter = resolve; }),
+    markStarted() { signalStarted(); },
+  };
+  const state = setup({ adapterGate });
+  const originalPromise = state.service.execute(state.request());
+  await adapterGate.started;
+
+  const inFlightReplay = await state.service.execute(state.request());
+  assert.equal(inFlightReplay.status, 'UNKNOWN');
+  assert.equal(state.calls.adapter, 1);
+
+  releaseAdapter();
+  const completed = await originalPromise;
+  assert.equal(completed.status, 'SUCCEEDED');
+  assert.equal(completed.operationId, inFlightReplay.operationId);
+
+  const terminalReplay = await state.service.execute(state.request());
+  assert.equal(terminalReplay.status, 'SUCCEEDED');
+  assert.equal(terminalReplay.operationId, inFlightReplay.operationId);
+  assert.equal(state.store.claims, 1);
   assert.equal(state.calls.adapter, 1);
 });
 
@@ -297,9 +430,20 @@ test('source-derived consumer map keeps external callers unconfirmed and all leg
   const consumerMap = JSON.parse(readFileSync(new URL('./consumer-map.json', import.meta.url), 'utf8'));
   assert.equal(consumerMap.externalConsumerInventory, 'NOT_CONFIRMED');
   assert.equal(consumerMap.providerTraffic, 'NOT_TESTED');
+  assert.match(consumerMap.activationInvariant, /company.*provider IDs alone never select/i);
+  assert.ok(consumerMap.consumers.length >= 8);
+  for (const consumer of consumerMap.consumers) {
+    for (const field of consumerMap.consumerFields) {
+      assert.ok(Object.hasOwn(consumer, field), `${consumer.id} is missing ${field}`);
+      if (field !== 'typedOperation') assert.ok(consumer[field], `${consumer.id} has an empty ${field}`);
+    }
+    assert.ok(['NOT_MIGRATED', 'NOT_CONFIRMED'].includes(consumer.migrationState));
+    assert.match(consumer.activationCondition, /principal|tenant|inventory/i);
+    assert.doesNotMatch(consumer.owner, /backend[\\/](?:connect|connect_old)\.php/i);
+  }
   assert.ok(consumerMap.consumers.some((consumer) => consumer.id === 'whatsapp-template-create' &&
-    consumer.typedOperation.operation === 'MANAGE_TEMPLATES'));
-  assert.ok(consumerMap.consumers.some((consumer) => consumer.id === 'whatsapp-template-notification-send' &&
-    consumer.typedOperation.operation === 'SEND_MESSAGE'));
-  assert.ok(consumerMap.consumers.every((consumer) => consumer.migrationState !== 'MIGRATED'));
+    consumer.typedOperation.operation === 'MANAGE_TEMPLATES' && consumer.assetResolution && consumer.authContext));
+  assert.ok(consumerMap.consumers.some((consumer) => consumer.id === 'whatsapp-notification-template-send' &&
+    consumer.typedOperation.operation === 'SEND_MESSAGE' && /replay/i.test(consumer.equivalenceTest)));
+  assert.ok(consumerMap.consumers.some((consumer) => consumer.id === 'facebook-comment-reply' && /commentRef resolver/i.test(consumer.blockReason)));
 });

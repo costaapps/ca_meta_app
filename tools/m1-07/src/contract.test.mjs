@@ -83,15 +83,16 @@ test('OpenAPI has explicit root-host routes, deny-by-default security and no dup
   assert.ok(contract.paths['/health']);
   assert.ok(contract.paths['/ready']);
   assert.deepEqual(contract.paths['/internal/v1/assets/{assetId}/operations'].post['x-internal-authorization'], {
-    requiredClaims: ['service_id', 'tenant_ref', 'asset_ref', 'operation'],
-    audience: 'msg4-meta-internal',
+    requiredProof: 'Authorization: Bearer <opaque service credential>',
+    serverMapping: 'API_INTERNAL_SERVICE_CREDENTIAL_HASHES_JSON -> one principalId + tenantId',
     bindings: {
-      tenant_ref: 'tenant owning the asset identified by path.assetId',
-      asset_ref: 'path.assetId',
-      operation: 'requestBody.kind',
+      tenantId: 'server-mapped service credential and current service grant',
+      assetId: 'path.assetId plus current verified tenant-owned asset authorization',
+      operation: 'requestBody.operation',
     },
     enforceCurrentTenantGrant: true,
-    allowlist: ['SEND_REPLY', 'MARK_READ', 'REFRESH_STATUS'],
+    requiredServiceScopes: ['META_CONNECTION_EXECUTE', 'CREDENTIAL_USE'],
+    allowlist: ['SEND_MESSAGE', 'MANAGE_TEMPLATES', 'MANAGE_COMMENTS', 'READ_STATUS', 'SUBSCRIBE_WEBHOOKS'],
   });
 
   const operations = operationList();
@@ -300,6 +301,35 @@ test('compatibility matrix accounts for every sanitized baseline row exactly onc
       `${row.source_kind} ${row.source_method} ${row.source_path_or_symbol} must map by HTTP method`,
     );
   }
+  const internalHelper = matrix.find((row) => row.source_kind === 'php_include' && row.source_file === 'backend/meta_auth_helper.php');
+  assert.ok(internalHelper, 'baseline includes the versioned shared PHP helper');
+  assert.equal(internalHelper.v1_target, 'POST /internal/v1/assets/{assetId}/operations');
+  const sendHelper = matrix.find((row) => row.source_symbol === 'sendWhatsAppMessage');
+  assert.ok(sendHelper, 'baseline includes the versioned WhatsApp send helper');
+  assert.deepEqual(
+    [sendHelper.v1_operation, sendHelper.v1_target, sendHelper.compatibility_policy],
+    ['runInternalAssetOperation', 'POST /internal/v1/assets/{assetId}/operations (SEND_MESSAGE)', 'internal-typed-operation'],
+  );
+});
+
+test('internal template locale schemas match the accepted language/locale syntax', () => {
+  const request = contract.components.schemas.InternalAssetOperationRequest;
+  const send = request.oneOf.find((branch) => branch.properties?.operation?.const === 'SEND_MESSAGE');
+  const createTemplate = request.oneOf.find((branch) => branch.properties?.operation?.const === 'MANAGE_TEMPLATES' && branch.properties?.action?.const === 'CREATE');
+  assert.ok(send && createTemplate);
+  const localePattern = '^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})?$';
+  assert.equal(send.properties.message.oneOf.find((branch) => branch.properties?.kind?.const === 'TEMPLATE').properties.language.pattern, localePattern);
+  assert.equal(createTemplate.properties.language.pattern, localePattern);
+});
+
+test('Meta capability contract includes the conventional phone registration operation from the runtime manifest', () => {
+  const operationEnum = contract.components.schemas.MetaCapabilityStatus.properties.operation.enum;
+  assert.ok(operationEnum.includes('PHONE_REGISTRATION_CONVENTIONAL'));
+  const bootstrap = operationList().find(({ operation }) => operation.operationId === 'readMetaConfigurationBootstrap').operation;
+  const example = bootstrap.responses['200'].content['application/json'].examples.unconfigured.value;
+  const whatsapp = example.profiles.find((profile) => profile.flowVariant === 'WHATSAPP_EXCLUSIVE');
+  assert.ok(whatsapp.capabilities.some((entry) => entry.operation === 'PHONE_REGISTRATION_CONVENTIONAL'));
+  assert.equal(whatsapp.capabilities.find((entry) => entry.operation === 'PHONE_REGISTRATION_CONVENTIONAL').enabled, false);
 });
 
 test('contract has bounded pagination, ETag preconditions and 202 Location for accepted jobs', () => {

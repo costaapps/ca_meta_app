@@ -79,7 +79,6 @@ export class InternalAssetOperationsService {
     if (!verified) throw new UnauthorizedException();
     const scope = await this.serviceAuthorization.resolveScope(verified);
     await this.serviceAuthorization.authorize(scope, 'META_CONNECTION_EXECUTE', scope.tenantId);
-    await this.serviceAuthorization.authorize(scope, 'CREDENTIAL_USE', scope.tenantId);
 
     const asset = await this.assets.findAuthorizedAsset({
       tenantId: scope.tenantId,
@@ -89,6 +88,27 @@ export class InternalAssetOperationsService {
     if (!asset || asset.tenantId !== scope.tenantId || asset.assetId !== assetId) {
       throw new InternalAssetOperationUnavailableError();
     }
+
+    let idempotencyKeyHash: string;
+    try {
+      idempotencyKeyHash = hashInternalServiceIdempotencyKey(input.idempotencyKey ?? '');
+    } catch {
+      throw new InternalAssetOperationInputError();
+    }
+    const payloadHash = hashInternalAssetOperation(input.payload);
+    const existing = await this.store.findByIdempotency({
+      tenantId: scope.tenantId,
+      servicePrincipalId: scope.principalId,
+      assetId: asset.assetId,
+      operation: input.payload.operation,
+      idempotencyKeyHash,
+      payloadHash,
+    });
+    if (existing) return resultFromRow(existing);
+
+    // These gates apply only to new operations. Existing outcomes remain readable after
+    // capability, target-resolution, adapter, or credential-use policy changes.
+    await this.serviceAuthorization.authorize(scope, 'CREDENTIAL_USE', scope.tenantId);
     const configuration = this.registry.resolve(asset.flowVariant, asset.authVariant, asset.environment);
     if (!configuration) throw new InternalAssetOperationUnavailableError();
     const profile = this.registry.bootstrap().profiles.find((entry) =>
@@ -113,13 +133,6 @@ export class InternalAssetOperationsService {
       throw new InternalAssetOperationUnavailableError();
     }
 
-    let idempotencyKeyHash: string;
-    try {
-      idempotencyKeyHash = hashInternalServiceIdempotencyKey(input.idempotencyKey ?? '');
-    } catch {
-      throw new InternalAssetOperationInputError();
-    }
-    const payloadHash = hashInternalAssetOperation(input.payload);
     const operationId = randomUUID();
     const correlationId = randomUUID();
     const claimed = await this.store.claim({
