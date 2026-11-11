@@ -42,11 +42,19 @@ function pathForApiEndpoint(url: string, origin: string): string | null {
   return endpoint.startsWith('/') || endpoint === '' ? endpoint : null;
 }
 
-function tenantScopedMutation(url: string, method: string, origin: string): boolean {
-  const normalizedMethod = method.toUpperCase();
-  if (NON_MUTATING_METHODS.has(normalizedMethod)) return false;
-  const endpoint = pathForApiEndpoint(url, origin);
-  return normalizedMethod !== 'POST' || endpoint === null || !NON_TENANT_SCOPED_POST_ENDPOINTS.has(endpoint);
+function unsupportedAuthMutation(endpoint: string): boolean {
+  const isAuthEndpoint = endpoint === '/auth' || endpoint.startsWith('/auth/');
+  const isSessionEndpoint = endpoint === '/session' || endpoint.startsWith('/session/');
+  return (isAuthEndpoint || isSessionEndpoint) && endpoint !== '/session/tenant-switch';
+}
+
+function blockedMutation(url: string, code: string, message: string) {
+  return throwError(() => new HttpErrorResponse({
+    status: 403,
+    statusText: 'Forbidden',
+    url,
+    error: { code, message },
+  }));
 }
 
 function errorCode(error: HttpErrorResponse): string | undefined {
@@ -60,18 +68,28 @@ export const portalApiInterceptor: HttpInterceptorFn = (request, next) => {
   const documentRef = inject(DOCUMENT);
   const origin = documentRef.location?.origin ?? '';
 
-  if (tenantScopedMutation(request.url, request.method, origin)) {
-    const capability = inject(PortalTenantIdentityService).current;
-    if (!capability.confirmed) {
-      return throwError(() => new HttpErrorResponse({
-        status: 403,
-        statusText: 'Forbidden',
-        url: request.url,
-        error: {
-          code: 'TENANT_IDENTITY_UNCONFIRMED',
-          message: TENANT_IDENTITY_UNCONFIRMED_MESSAGE,
-        },
-      }));
+  if (!NON_MUTATING_METHODS.has(request.method.toUpperCase())) {
+    const localPath = origin ? apiPath(request.url, origin) : null;
+    if (localPath === null) {
+      return blockedMutation(request.url, 'CROSS_ORIGIN_MUTATION_BLOCKED', 'Cross-origin mutations are blocked.');
+    }
+    if (!apiRequest(request.url, origin)) {
+      return blockedMutation(request.url, 'LEGACY_MUTATION_BLOCKED', 'Mutation destination is not a versioned portal API route.');
+    }
+    const endpoint = pathForApiEndpoint(request.url, origin);
+    if (endpoint === null) {
+      return blockedMutation(request.url, 'MUTATION_TARGET_INVALID', 'Mutation destination is not valid.');
+    }
+    const exactNonTenantPost = request.method.toUpperCase() === 'POST' &&
+      NON_TENANT_SCOPED_POST_ENDPOINTS.has(endpoint);
+    if (!exactNonTenantPost && unsupportedAuthMutation(endpoint)) {
+      return blockedMutation(request.url, 'AUTH_MUTATION_NOT_ALLOWLISTED', 'Authentication/session mutation route is not allowlisted.');
+    }
+    if (!exactNonTenantPost) {
+      const capability = inject(PortalTenantIdentityService).current;
+      if (!capability.confirmed) {
+        return blockedMutation(request.url, 'TENANT_IDENTITY_UNCONFIRMED', TENANT_IDENTITY_UNCONFIRMED_MESSAGE);
+      }
     }
   }
 

@@ -5,18 +5,27 @@ import { firstValueFrom } from 'rxjs';
 import { META_API_BASE_URL } from '../config/public-runtime-config';
 import { portalApiInterceptor } from './portal-api.interceptor';
 import { PortalContextStore } from './portal-context.store';
+import { PortalTenantIdentityService, type TenantMutationCapability } from './portal-tenant-identity.service';
 
 describe('portalApiInterceptor tenant identity boundary', () => {
   let client: HttpClient;
   let context: PortalContextStore;
   let http: HttpTestingController;
+  let currentCapability: TenantMutationCapability;
 
   beforeEach(() => {
+    currentCapability = Object.freeze({
+      confirmed: false,
+      reason: 'TENANT_IDENTITY_UNCONFIRMED',
+      message: 'Identidade da empresa não confirmada',
+    });
+    const identity = { get current(): TenantMutationCapability { return currentCapability; } };
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(withInterceptors([portalApiInterceptor])),
         provideHttpClientTesting(),
         { provide: META_API_BASE_URL, useValue: '/api' },
+        { provide: PortalTenantIdentityService, useValue: identity as unknown as PortalTenantIdentityService },
       ],
     });
     client = TestBed.inject(HttpClient);
@@ -26,11 +35,10 @@ describe('portalApiInterceptor tenant identity boundary', () => {
 
   afterEach(() => http.verify());
 
-  it('blocks tenant-scoped and legacy external mutations before transport when identity is unconfirmed', async () => {
+  it('blocks tenant-scoped mutations before transport when identity is unconfirmed', async () => {
     context.setContextRef('synthetic-current-context-reference-01');
     const onboarding = firstValueFrom(client.post('/api/v1/onboarding-sessions', { flowVariant: 'WHATSAPP_COEXISTENCE' }));
     const tenantSwitch = firstValueFrom(client.post('/api/v1/session/tenant-switch', { tenantRef: 'synthetic-other-tenant' }));
-    const legacyMutation = firstValueFrom(client.post('https://msg4.app/meta/auth/save_auto_reply', { synthetic: true }));
 
     const blockedError = {
       status: 403,
@@ -38,10 +46,8 @@ describe('portalApiInterceptor tenant identity boundary', () => {
     };
     await expect(onboarding).rejects.toMatchObject(blockedError);
     await expect(tenantSwitch).rejects.toMatchObject(blockedError);
-    await expect(legacyMutation).rejects.toMatchObject(blockedError);
     http.expectNone('/api/v1/onboarding-sessions');
     http.expectNone('/api/v1/session/tenant-switch');
-    http.expectNone('https://msg4.app/meta/auth/save_auto_reply');
   });
 
   it('keeps authenticated server-scoped reads available', async () => {
@@ -71,5 +77,47 @@ describe('portalApiInterceptor tenant identity boundary', () => {
     expect(logoutRequest.request.method).toBe('POST');
     logoutRequest.flush(null);
     await expect(logout).resolves.toBeNull();
+  });
+
+  it('allows exact preauth and exchange paths while blocking adjacent auth paths', async () => {
+    const preauth = firstValueFrom(client.post('/api/v1/auth/preauth', { synthetic: true }));
+    const exchange = firstValueFrom(client.post('/api/v1/auth/exchanges', { synthetic: true }));
+    const consume = firstValueFrom(client.post('/api/v1/auth/magic-links/consume', { synthetic: true }));
+    const adjacent = firstValueFrom(client.post('/api/v1/auth/magic-links/extra', { synthetic: true }));
+
+    const preauthRequest = http.expectOne('/api/v1/auth/preauth');
+    const exchangeRequest = http.expectOne('/api/v1/auth/exchanges');
+    const consumeRequest = http.expectOne('/api/v1/auth/magic-links/consume');
+    preauthRequest.flush({ accepted: true });
+    exchangeRequest.flush({ accepted: true });
+    consumeRequest.flush({ accepted: true });
+    await expect(preauth).resolves.toEqual({ accepted: true });
+    await expect(exchange).resolves.toEqual({ accepted: true });
+    await expect(consume).resolves.toEqual({ accepted: true });
+    await expect(adjacent).rejects.toMatchObject({
+      error: { code: 'AUTH_MUTATION_NOT_ALLOWLISTED' },
+    });
+    http.expectNone('/api/v1/auth/magic-links/extra');
+  });
+
+  it('permanently blocks cross-origin legacy writes even after tenant identity is confirmed', async () => {
+    currentCapability = Object.freeze({
+      confirmed: true,
+      tenantDisplayName: 'Synthetic company display name',
+      source: 'server-session',
+    });
+    const legacyMutation = firstValueFrom(client.post('https://msg4.app/meta/auth/save_auto_reply', { synthetic: true }));
+    const adjacentAuthMutation = firstValueFrom(client.post('/api/v1/auth/magic-links/extra', { synthetic: true }));
+
+    await expect(legacyMutation).rejects.toMatchObject({
+      status: 403,
+      error: { code: 'CROSS_ORIGIN_MUTATION_BLOCKED' },
+    });
+    await expect(adjacentAuthMutation).rejects.toMatchObject({
+      status: 403,
+      error: { code: 'AUTH_MUTATION_NOT_ALLOWLISTED' },
+    });
+    http.expectNone('https://msg4.app/meta/auth/save_auto_reply');
+    http.expectNone('/api/v1/auth/magic-links/extra');
   });
 });
