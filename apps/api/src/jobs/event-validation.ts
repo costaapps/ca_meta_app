@@ -37,7 +37,7 @@ export interface OutboxEventEnvelope {
   readonly data: Readonly<Record<string, unknown>>;
 }
 
-export type JobType = 'INBOX_PROCESS' | 'OUTBOX_DELIVER' | 'ONBOARDING_STEP' | 'PROJECTION_RECONCILE' | 'HISTORY_SYNC' | 'CREDENTIAL_INSPECTION' | 'ASSET_REFRESH' | 'TEMPLATE_CREATE';
+export type JobType = 'INBOX_PROCESS' | 'OUTBOX_DELIVER' | 'ONBOARDING_STEP' | 'PROJECTION_RECONCILE' | 'HISTORY_SYNC' | 'CREDENTIAL_INSPECTION' | 'ASSET_REFRESH' | 'TEMPLATE_CREATE' | 'NOTIFICATION_ACTION';
 
 export type JobPayload =
   | { readonly kind: 'INBOX_PROCESS'; readonly inboxEventRef: string }
@@ -60,6 +60,13 @@ export type JobPayload =
   | {
     readonly kind: 'TEMPLATE_CREATE'; readonly assetId: string; readonly appConfigurationId: string;
     readonly environment: 'development' | 'test' | 'staging' | 'production'; readonly request: TemplateCreateRequest;
+  }
+  | {
+    readonly kind: 'NOTIFICATION_ACTION'; readonly notificationId: string; readonly assetId: string;
+    readonly appConfigurationId: string; readonly environment: 'development' | 'test' | 'staging' | 'production';
+    readonly request:
+      | { readonly action: 'SEND_TEMPLATE'; readonly templateName: string; readonly language: string; readonly parameters: readonly string[] }
+      | { readonly action: 'REPLY_COMMENT'; readonly replyText: string };
   };
 
 export type JobLane = 'WEBHOOK_URGENT' | 'ONBOARDING' | 'HISTORICAL_PROJECTION';
@@ -109,6 +116,11 @@ export const JOB_POLICIES: Readonly<Record<JobType, JobPolicy>> = Object.freeze(
   },
   TEMPLATE_CREATE: {
     // A provider template submission is ambiguous after a timeout; the worker never repeats it.
+    lane: 'ONBOARDING', effectMode: 'AMBIGUOUS', maxAttempts: 1,
+    maxElapsedMs: 15 * 60_000, maxHandlerMs: 60_000, retryBaseMs: 1_000, retryMaxMs: 1_000,
+  },
+  NOTIFICATION_ACTION: {
+    // A single outbound attempt is permitted; ambiguity becomes UNKNOWN and is never retried.
     lane: 'ONBOARDING', effectMode: 'AMBIGUOUS', maxAttempts: 1,
     maxElapsedMs: 15 * 60_000, maxHandlerMs: 60_000, retryBaseMs: 1_000, retryMaxMs: 1_000,
   },
@@ -198,6 +210,23 @@ const jobPayloadSchemas: Readonly<Record<JobType, object>> = {
           exampleValues: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 1024 } },
         },
       },
+    },
+  },
+  NOTIFICATION_ACTION: {
+    type: 'object', additionalProperties: false,
+    required: ['kind', 'notificationId', 'assetId', 'appConfigurationId', 'environment', 'request'],
+    properties: {
+      kind: { const: 'NOTIFICATION_ACTION' }, notificationId: { type: 'string', format: 'uuid' },
+      assetId: { type: 'string', format: 'uuid' }, appConfigurationId: { type: 'string', format: 'uuid' },
+      environment: { enum: ['development', 'test', 'staging', 'production'] },
+      request: { oneOf: [
+        { type: 'object', additionalProperties: false, required: ['action', 'templateName', 'language', 'parameters'],
+          properties: { action: { const: 'SEND_TEMPLATE' }, templateName: { type: 'string', minLength: 1, maxLength: 128 },
+            language: { type: 'string', minLength: 2, maxLength: 16 },
+            parameters: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 1024 } } } },
+        { type: 'object', additionalProperties: false, required: ['action', 'replyText'],
+          properties: { action: { const: 'REPLY_COMMENT' }, replyText: { type: 'string', minLength: 1, maxLength: 4096 } } },
+      ] },
     },
   },
 };

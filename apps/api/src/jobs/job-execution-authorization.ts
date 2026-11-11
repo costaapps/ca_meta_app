@@ -60,6 +60,7 @@ const REQUIRED_JOB_SCOPES: Readonly<Partial<Record<JobType, ServiceScope>>> = Ob
   CREDENTIAL_INSPECTION: 'CREDENTIAL_USE',
   ASSET_REFRESH: 'META_CONNECTION_EXECUTE',
   TEMPLATE_CREATE: 'CREDENTIAL_USE',
+  NOTIFICATION_ACTION: 'CREDENTIAL_USE',
 } as const satisfies Readonly<Partial<Record<JobType, ServiceScope>>>);
 
 function resourceReference(type: JobType, payload: JobPayload): string | undefined {
@@ -73,6 +74,7 @@ function resourceReference(type: JobType, payload: JobPayload): string | undefin
     case 'CREDENTIAL_INSPECTION': return payload.credentialId;
     case 'ASSET_REFRESH': return payload.assetId;
     case 'TEMPLATE_CREATE': return payload.assetId;
+    case 'NOTIFICATION_ACTION': return payload.notificationId;
   }
 }
 
@@ -289,6 +291,26 @@ export class MysqlJobExecutionAuthorizationPort implements JobExecutionAuthoriza
           [tenantId, payload.assetId, payload.appConfigurationId, payload.environment],
         ) as Array<{ id: string }>;
         // The operation grant name is a candidate only; real Meta eligibility remains a release gate.
+        return rows.length === 1;
+      }
+      case 'NOTIFICATION_ACTION': {
+        const isCommentReply = payload.request.action === 'REPLY_COMMENT';
+        const compatibleAssetKinds = isCommentReply
+          ? ['FACEBOOK_PAGE', 'INSTAGRAM_BUSINESS_ACCOUNT', 'INSTAGRAM_CREATOR_ACCOUNT']
+          : ['WHATSAPP_PHONE_NUMBER'];
+        const kindPredicate = isCommentReply ? "n.kind = 'COMMENT_RECEIVED'" : '1 = 1';
+        const rows = await database.query(
+          `SELECT n.id
+           FROM ca_meta_notifications n
+           JOIN ca_meta_assets a ON a.tenant_id = n.tenant_id AND a.id = n.asset_id
+           WHERE n.tenant_id = ? AND n.id = ? AND n.asset_id = ?
+             AND a.app_configuration_id = ? AND a.environment = ? AND a.provider = 'META'
+             AND n.status = 'UNREAD' AND a.asset_kind IN (${compatibleAssetKinds.map(() => '?').join(',')})
+             AND ${kindPredicate}
+           LIMIT 1`,
+          [tenantId, payload.notificationId, payload.assetId, payload.appConfigurationId, payload.environment,
+            ...compatibleAssetKinds],
+        ) as Array<{ id: string }>;
         return rows.length === 1;
       }
     }

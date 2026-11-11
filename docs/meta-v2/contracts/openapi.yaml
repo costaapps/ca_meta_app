@@ -2151,7 +2151,7 @@ paths:
                   summary: Sanitized success example
                   value:
                     id: op_example_01
-                    kind: SEND_REPLY
+                    kind: REPLY_COMMENT
                     status: UNKNOWN
                     requestId: req_example_35
                     updatedAt: 2026-10-29T12:03:20Z
@@ -2304,8 +2304,6 @@ paths:
         - $ref: "#/components/parameters/TenantContext"
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/AssetCatalogChannel"
-        - $ref: "#/components/parameters/AssetCatalogNumber"
       responses:
         "200":
           description: Sanitized success example
@@ -2328,7 +2326,7 @@ paths:
                         actions:
                           - MARK_READ
                           - DISMISS
-                          - REPLY
+                          - SEND_TEMPLATE
                     nextCursor: null
                     requestId: req_example_38
         "400": *a11
@@ -2359,10 +2357,13 @@ paths:
       tags:
         - Notifications
       summary: Apply a notification action
-      description: The action is checked against current membership, asset grant and role.
-        MARK_READ/DISMISS are local; REPLY is an external message effect and enters the bounded
-        async job/reconciliation path. This endpoint never reports a provider send as complete on
-        HTTP acceptance.
+      description: The server derives the tenant from the verified session and current membership,
+        then resolves the notification and asset in that tenant. MARK_READ/DISMISS are local state
+        changes and return 200 only after persistence. When an eligible external adapter is available,
+        SEND_TEMPLATE/REPLY_COMMENT return a durable operation; HTTP acceptance is not provider success.
+        The current runtime has no confirmed credential or action adapter and returns 503 for those
+        external actions. SEND_MESSAGE is unavailable until current eligibility and supported message
+        context are confirmed. Browser input cannot select an asset/provider ID or tenant.
       security: *a10
       parameters: *a23
       requestBody:
@@ -2376,24 +2377,42 @@ paths:
               sanitized:
                 summary: Sanitized request example
                 value:
-                  action: REPLY
-                  replyText: Thanks, we will follow up shortly.
+                  action: MARK_READ
       responses:
+        "200":
+          description: Local READ/DISMISS state persisted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationActionResult"
+              examples:
+                read:
+                  summary: Local action result
+                  value:
+                    notificationId: 20000000-0000-4000-8000-000000000001
+                    action: MARK_READ
+                    status: READ
+                    requestId: req_example_39
         "202":
-          description: Sanitized success example
-          headers: *a24
+          description: Durable external action accepted for processing
+          headers:
+            Location:
+              description: Relative URI of the operation status resource.
+              schema:
+                type: string
+                pattern: ^/api/v1/operations/[A-Za-z0-9_-]+$
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/NotificationActionAccepted"
               examples:
                 sanitized:
-                  summary: Sanitized success example
+                  summary: Sanitized accepted operation
                   value:
-                    notificationId: notice_example_01
-                    jobId: job_example_07
+                    notificationId: 20000000-0000-4000-8000-000000000001
+                    operationId: 20000000-0000-4000-8000-000000000002
                     status: PENDING
-                    location: /api/v1/jobs/job_example_07
+                    location: /api/v1/operations/20000000-0000-4000-8000-000000000002
                     requestId: req_example_39
         "400": *a11
         "401": *a12
@@ -2406,12 +2425,13 @@ paths:
         "429": *a19
         "503": *a20
         default: *a21
-      x-external-effect: REPLY may send an outbound message. MARK_READ and DISMISS only update local
-        notification state.
-      x-idempotency-scope: tenant + operation + Idempotency-Key plus payload hash.
-      x-retry-policy: For REPLY, at most one automatic attempt including the initial send. A proven
-        pre-effect failure may permit a new explicit user request; an ambiguous outcome is UNKNOWN until
-        reconciled. Do not automatically retry.
+      x-external-effect: SEND_TEMPLATE and REPLY_COMMENT may send an outbound message when an adapter
+        is enabled; the current runtime has none. SEND_MESSAGE remains unavailable. MARK_READ and
+        DISMISS only update local notification state.
+      x-idempotency-scope: tenant + notification action + Idempotency-Key and canonical request payload hash.
+      x-retry-policy: External actions use one durable attempt. A null/error/timeout or ambiguous result
+        becomes UNKNOWN and is never blindly retried. A failed action does not mark the notification
+        read or dismissed.
   /internal/v1/assets/{assetId}/operations:
     parameters:
       - name: assetId
@@ -4631,6 +4651,7 @@ components:
           type: string
           enum:
             - MESSAGE_RECEIVED
+            - COMMENT_RECEIVED
             - ASSET_STATUS_CHANGED
             - ACTION_REQUIRED
         assetRef:
@@ -4663,8 +4684,9 @@ components:
             enum:
               - MARK_READ
               - DISMISS
-              - REPLY
-              - REFRESH
+              - SEND_TEMPLATE
+              - REPLY_COMMENT
+              - SEND_MESSAGE
     NotificationListPage:
       type: object
       additionalProperties: false
@@ -4703,22 +4725,90 @@ components:
           additionalProperties: false
           required:
             - action
+            - templateName
+            - language
+            - parameters
+          properties:
+            action:
+              type: string
+              const: SEND_TEMPLATE
+            templateName:
+              type: string
+              minLength: 1
+              maxLength: 128
+            language:
+              type: string
+              minLength: 2
+              maxLength: 16
+            parameters:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+                minLength: 1
+                maxLength: 1024
+                writeOnly: true
+        - type: object
+          additionalProperties: false
+          required:
+            - action
             - replyText
           properties:
             action:
               type: string
-              const: REPLY
+              const: REPLY_COMMENT
             replyText:
               type: string
               minLength: 1
               maxLength: 4096
               writeOnly: true
+        - type: object
+          additionalProperties: false
+          required:
+            - action
+            - messageText
+          properties:
+            action:
+              type: string
+              const: SEND_MESSAGE
+            messageText:
+              type: string
+              minLength: 1
+              maxLength: 4096
+              writeOnly: true
+    NotificationActionResult:
+      type: object
+      additionalProperties: false
+      required:
+        - notificationId
+        - action
+        - status
+        - requestId
+      properties:
+        notificationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        action:
+          type: string
+          enum:
+            - MARK_READ
+            - DISMISS
+        status:
+          type: string
+          enum:
+            - READ
+            - DISMISSED
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
     NotificationActionAccepted:
       type: object
       additionalProperties: false
       required:
         - notificationId
-        - jobId
+        - operationId
         - status
         - location
         - requestId
@@ -4727,16 +4817,21 @@ components:
           type: string
           minLength: 1
           maxLength: 128
-        jobId:
+        operationId:
           type: string
           minLength: 1
           maxLength: 128
         status:
           type: string
-          const: PENDING
+          enum:
+            - PENDING
+            - RUNNING
+            - SUCCEEDED
+            - FAILED
+            - UNKNOWN
         location:
           type: string
-          pattern: ^/api/v1/jobs/[A-Za-z0-9_-]+$
+          pattern: ^/api/v1/operations/[A-Za-z0-9_-]+$
         requestId:
           type: string
           minLength: 1

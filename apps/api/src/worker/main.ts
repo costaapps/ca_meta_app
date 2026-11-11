@@ -24,6 +24,8 @@ import { createOnboardingSagaHandler } from '../onboarding/onboarding-saga.worke
 import { MetaOnboardingConfigurationResolver } from '../onboarding/meta-onboarding-configuration.resolver.js';
 import { MetaAppConfigRegistry } from '../meta-config/meta-app-config.registry.js';
 import { createTemplateCreateJobHandler, type WhatsAppTemplateDispatchAdapter } from '../whatsapp-templates/template-create.worker.js';
+import { createNotificationActionJobHandler, notificationActionFinalizer } from '../notifications/notification-action.worker.js';
+import type { NotificationActionAdapter } from '../notifications/notification-action.worker.js';
 
 interface CredentialLifecycleAdapters {
   readonly policies: CredentialLifecyclePolicyPort;
@@ -48,6 +50,11 @@ function configuredMetaOnboardingSagaAdapter(): OnboardingSagaAdapter | undefine
 
 /** No reviewed template adapter is installed; create jobs are not claimed by the default worker. */
 function configuredWhatsAppTemplateDispatchAdapter(): WhatsAppTemplateDispatchAdapter | undefined {
+  return undefined;
+}
+
+/** External notification actions have no confirmed policy, credential profile or provider adapter. */
+function configuredNotificationActionAdapter(): NotificationActionAdapter | undefined {
   return undefined;
 }
 
@@ -115,6 +122,11 @@ export async function bootstrapWorker(): Promise<void> {
     }
     const templateAdapter = configuredWhatsAppTemplateDispatchAdapter();
     if (templateAdapter) handlers.set('TEMPLATE_CREATE', createTemplateCreateJobHandler(templateAdapter));
+    const notificationActionAdapter = configuredNotificationActionAdapter();
+    if (notificationActionAdapter) {
+      handlers.set('NOTIFICATION_ACTION', createNotificationActionJobHandler(notificationActionAdapter));
+      finalizers.set('NOTIFICATION_ACTION', notificationActionFinalizer);
+    }
     let authorization: JobExecutionAuthorizationPort = new FailClosedJobExecutionAuthorizationPort();
     if (handlers.size > 0) {
       const configuredIdentity = new WorkerServiceIdentityVerifier(environment.identity?.workerServiceCredentials ?? [])

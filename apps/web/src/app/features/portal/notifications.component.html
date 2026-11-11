@@ -1,0 +1,33 @@
+<section class="notifications-page" aria-labelledby="notifications-title">
+  <header class="page-heading">
+    <div>
+      <p class="eyebrow">Central da empresa</p>
+      <h1 id="notifications-title">Notificações</h1>
+      <p class="description">Acompanhe avisos disponíveis para o contexto atual da empresa.</p>
+    </div>
+    <button type="button" class="refresh-button" (click)="load()" [disabled]="isLoading">Atualizar</button>
+  </header>
+
+  <p *ngIf="message" class="notice success" role="status">{{ message }}</p>
+  <p *ngIf="error" class="notice error" role="alert">{{ error }}</p>
+  <p *ngIf="requestId" class="request-id">Referência: {{ requestId }}</p>
+  <div *ngIf="isLoading" class="empty-state" role="status">Carregando notificações…</div>
+  <div *ngIf="!isLoading && !error && items.length === 0" class="empty-state">Nenhuma notificação disponível.</div>
+
+  <ul *ngIf="!isLoading && items.length > 0" class="notification-list">
+    <li *ngFor="let item of items; trackBy: trackById" class="notification-card" [class.unread]="item.status === 'UNREAD'">
+      <div class="notification-copy">
+        <span class="status-pill">{{ item.status === 'UNREAD' ? 'Não lida' : 'Lida' }}</span>
+        <p>{{ item.safeSummary }}</p>
+        <time [attr.datetime]="item.createdAt">{{ item.createdAt | date:'short' }}</time>
+      </div>
+      <div class="notification-actions">
+        <button *ngIf="item.actions.includes('MARK_READ')" type="button" (click)="apply(item, 'MARK_READ')"
+          [disabled]="isActing(item.id)">Marcar como lida</button>
+        <button *ngIf="item.actions.includes('DISMISS')" type="button" class="secondary" (click)="apply(item, 'DISMISS')"
+          [disabled]="isActing(item.id)">Dispensar</button>
+      </div>
+    </li>
+  </ul>
+  <button *ngIf="nextCursor && !isLoading" type="button" class="next-button" (click)="nextPage()">Carregar mais</button>
+</section>

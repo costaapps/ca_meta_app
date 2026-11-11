@@ -22,6 +22,7 @@ import { CONNECTION_LIFECYCLE_MIGRATION, CONNECTION_LIFECYCLE_TABLES } from './c
 import { INTERNAL_ASSET_OPERATIONS_MIGRATION, INTERNAL_ASSET_OPERATION_TABLES } from './internal-asset-operations.js';
 import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION, ONBOARDING_COEXISTENCE_LOCK_TABLES } from './onboarding-coexistence-lock.js';
 import { AUTOMATION_CONFIG_MIGRATION, AUTOMATION_CONFIG_TABLES } from './automation-config.js';
+import { NOTIFICATIONS_MIGRATION, NOTIFICATION_TABLES } from './notifications.js';
 
 function ddl(
   id: string,
@@ -295,6 +296,7 @@ const migrationsWithoutChecksums = [
   INTERNAL_ASSET_OPERATIONS_MIGRATION,
   ONBOARDING_COEXISTENCE_LOCK_MIGRATION,
   AUTOMATION_CONFIG_MIGRATION,
+  NOTIFICATIONS_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -329,5 +331,6 @@ export const DOMAIN_TABLES = [
   ...INTERNAL_ASSET_OPERATION_TABLES,
   ...ONBOARDING_COEXISTENCE_LOCK_TABLES,
   ...AUTOMATION_CONFIG_TABLES,
+  ...NOTIFICATION_TABLES,
 ] as const;
 
