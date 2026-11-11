@@ -68,6 +68,11 @@ function configuredMetaWebhookWorkerAdapters(): MetaWebhookWorkerAdapters | unde
   return undefined;
 }
 
+/** Real enterprise DDL, connection catalog and destination credentials are not confirmed; no projection target is installed. */
+function configuredLegacyProjectionRuntime(): { readonly handler: JobHandler } | undefined {
+  return undefined;
+}
+
 export async function bootstrapWorker(): Promise<void> {
   let database: DurableWorkDatabase | undefined;
   let identityRepository: MysqlIdentityRepository | undefined;
@@ -78,6 +83,8 @@ export async function bootstrapWorker(): Promise<void> {
     const handlers = new Map<JobType, JobHandler>();
     const finalizers = new Map<JobType, JobFinalizer>();
     const webhookAdapters = configuredMetaWebhookWorkerAdapters();
+    const legacyProjectionRuntime = configuredLegacyProjectionRuntime();
+    if (legacyProjectionRuntime) handlers.set('PROJECTION_RECONCILE', legacyProjectionRuntime.handler);
     const webhookWorker = webhookAdapters
       ? new MetaWebhookWorker(new MetaWebhookRepository(database), webhookAdapters.payloadProtector,
         webhookAdapters.processor, `meta-webhook-worker:${process.pid}`)

@@ -69,7 +69,7 @@ function resourceReference(type: JobType, payload: JobPayload): string | undefin
     case 'INBOX_PROCESS': return payload.inboxEventRef;
     case 'OUTBOX_DELIVER': return payload.outboxEventRef;
     case 'ONBOARDING_STEP': return payload.onboardingRef;
-    case 'PROJECTION_RECONCILE': return undefined;
+    case 'PROJECTION_RECONCILE': return payload.projectionRef;
     case 'HISTORY_SYNC': return undefined;
     case 'CREDENTIAL_INSPECTION': return payload.credentialId;
     case 'ASSET_REFRESH': return payload.assetId;
@@ -221,9 +221,18 @@ export class MysqlJobExecutionAuthorizationPort implements JobExecutionAuthoriza
         // The session's persisted tenant/principal stay authoritative across tenant switches; a revoked CONNECT role blocks the next provider step.
         return !!rows[0] && onboardingStepExists(rows[0].steps_json, payload.stepRef);
       }
-      case 'PROJECTION_RECONCILE':
+      case 'PROJECTION_RECONCILE': {
+        const rows = await database.query(
+          `SELECT id FROM ca_meta_outbox_events
+           WHERE id = ? AND tenant_id = ? AND aggregate_version = ?
+             AND event_type IN ('connection.changed', 'automation.config.changed')
+           LIMIT 1`,
+          [payload.projectionRef, tenantId, payload.sourceVersion],
+        ) as Array<{ id: string }>;
+        return rows.length === 1;
+      }
       case 'HISTORY_SYNC':
-        // These refs currently have no tenant-owned persisted resource table or producer.
+        // Historical sync refs currently have no tenant-owned resource table or producer.
         return false;
       case 'CREDENTIAL_INSPECTION': {
         const rows = await database.query(

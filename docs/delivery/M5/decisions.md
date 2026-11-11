@@ -37,4 +37,9 @@
 - **Decisão:** manter inalterados o GET/PUT e os schemas v1 na rota base. Publicar a representação M5.05 com `GET/PATCH /api/v1/assets/{assetId}/automation-config/channels` e schemas `AutomationChannelConfig`/`AutomationChannelConfigUpdate`.
 - **Consequência:** os consumidores M5.05 usam explicitamente a rota `/channels`; consumidores v1 continuam podendo usar seu contrato original. A issue diverge do caminho base pedido para manter compatibilidade binária de contrato.
 - **Gate:** aceitar a rota após revisão do diff de contrato e `check:breaking`; qualquer consolidação futura na rota base requer uma versão compatível, migração dos consumidores identificados e gate próprio de breaking-change.
+## D-M5-07 — Projeção M5.08 permanece sintética e fail-closed
+
+- **Contexto:** #63 exige projeção por outbox e recuperação, mas este checkout não confirma o DDL empresarial, o catálogo/mapeamento real, as credenciais por destino nem a equivalência dos consumidores implantados.
+- **Decisão:** implementar uma projeção local de metadados com allowlist de conexões pré-construídas, checkpoint central por tenant/tupla completa/recurso, versão/hash, tombstone, retry e rebuild de snapshot confiável. Manter o runtime sem adapter registrado e não usar evento/request para selecionar database, company, DSN ou segredo. Preservar o envelope outbox v1 e não reclassificar `OUTBOX_DELIVER`.
+- **Consequência:** harness MariaDB usa somente schemas descartáveis e DDL de fixture provisório. Integração empresarial real, paridade de consumidores e rollout permanecem **Not confirmed**; a migration central foi reindexada como v25 após M5.06 v24.
 
