@@ -1,0 +1,379 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "LOCAL_SYNTHETIC_CONTRACT_CROSSWALK",
+  "releaseCertification": "BLOCKED_NOT_CONFIRMED",
+  "requiredFlows": [
+    "FACEBOOK",
+    "INSTAGRAM",
+    "WHATSAPP_EXCLUSIVE",
+    "WHATSAPP_COEXISTENCE"
+  ],
+  "requiredScenarios": [
+    "success",
+    "cancel",
+    "partial_permission",
+    "replay",
+    "timeout",
+    "reauth",
+    "disconnect"
+  ],
+  "authProfiles": [
+    { "flow": "FACEBOOK", "auth": "FACEBOOK_LOGIN_FOR_BUSINESS" },
+    { "flow": "INSTAGRAM", "auth": "INSTAGRAM_VIA_FACEBOOK_LOGIN" },
+    { "flow": "INSTAGRAM", "auth": "INSTAGRAM_LOGIN" },
+    { "flow": "WHATSAPP_EXCLUSIVE", "auth": "WHATSAPP_EMBEDDED_SIGNUP" },
+    { "flow": "WHATSAPP_COEXISTENCE", "auth": "WHATSAPP_BUSINESS_APP_ONBOARDING" }
+  ],
+  "matrix": [
+    {
+      "flow": "FACEBOOK",
+      "scenario": "success",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-08-facebook-pages.spec.ts", "name": "Facebook discovery persists the complete safe Graph result with per-Page vault credential refs", "assertion": "complete local Page discovery persists safe references" },
+        { "file": "apps/api/test/m4-08-facebook-pages.spec.ts", "name": "Page selection persists only exact Page assets through M4.11 service and does not select other flows", "assertion": "selected Page resources stay in the Facebook profile" }
+      ],
+      "gap": "No Facebook end-to-end onboarding case proves active subscription and READY together; Page subscription semantics remain unconfirmed."
+    },
+    {
+      "flow": "FACEBOOK",
+      "scenario": "cancel",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-02-meta-graph.spec.ts", "name": "Facebook Page discovery rejects generic collection, other flow variants, missing consumer and unsafe enrollment maps", "assertion": "the case aborts before Page token enrollment when discovery is cancelled" },
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 consumes provider cancellation only for the exact flow/auth pair and blocks replay for all five profiles", "assertion": "the exact Facebook callback consumes only its own pending state and later code replay is rejected" }
+      ],
+      "gap": "Callback/session contract is local; no browser/provider cancellation round trip or real authorization was exercised."
+    },
+    {
+      "flow": "FACEBOOK",
+      "scenario": "partial_permission",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 keeps every exact profile and prior authorization blocked when one required permission is unconfirmed", "assertion": "an unconfirmed required permission blocks exact profile reauthorization and leaves the existing authorization ACTIVE" },
+        { "file": "apps/api/test/m4-08-facebook-pages.spec.ts", "name": "Page tasks never grant message or comment capability", "assertion": "Page task metadata does not grant message/comment capability" }
+      ],
+      "gap": "Synthetic M4.01 capability/lifecycle boundary only; no Facebook partial-permission provider response or end-to-end recovery was exercised."
+    },
+    {
+      "flow": "FACEBOOK",
+      "scenario": "replay",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 consumes provider cancellation only for the exact flow/auth pair and blocks replay for all five profiles", "assertion": "the cancelled Facebook callback rejects a later code replay" },
+        { "file": "apps/api/test/m3-05-onboarding-session.spec.ts", "name": "expired onboarding idempotency replay cannot reissue provider state", "assertion": "shared onboarding idempotency expiry also prevents provider-state reissue" }
+      ],
+      "gap": "Cancellation replay is covered; duplicate successful Facebook callback delivery is not separately exercised."
+    },
+    {
+      "flow": "FACEBOOK",
+      "scenario": "timeout",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 persists expiry and prevents provider-state replay after timeout for all five profiles", "assertion": "Facebook session expiry is persisted and its provider state is not reissued" },
+        { "file": "apps/api/test/m4-02-meta-graph.spec.ts", "name": "ambiguous POST timeout is UNKNOWN and never resent", "assertion": "Graph transport timeout is ambiguous and not automatically resent" }
+      ],
+      "gap": "Local onboarding session expiry is covered; provider/network timeout and real Facebook recovery are not."
+    },
+    {
+      "flow": "FACEBOOK",
+      "scenario": "reauth",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 creates a reauthorization session for the exact auth profile and preserves prior authorizations", "assertion": "the Facebook Login profile maps to its exact onboarding variant and keeps the previous grant ACTIVE" }
+      ],
+      "gap": "Local lifecycle contract only; no live Facebook reauthorization or provider eligibility evidence."
+    },
+    {
+      "flow": "FACEBOOK",
+      "scenario": "disconnect",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-13-connection-lifecycle.spec.ts", "name": "M4.13 requires resource scope for a shared authorization and disconnects only the selected asset binding", "assertion": "the default synthetic Facebook binding disconnects one selected asset and leaves external cleanup blocked" },
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "the exact Facebook Page binding changes locally while provider cleanup stays blocked" }
+      ],
+      "gap": "Local command behavior only; no provider-side Facebook disconnect was exercised."
+    },
+    {
+      "flow": "INSTAGRAM",
+      "scenario": "success",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-09-instagram-flow.spec.ts", "name": "complete Facebook Login result persists atomically and returns internal account refs only", "assertion": "the Instagram-through-Facebook variant persists the complete local account set" },
+        { "file": "apps/api/test/m4-09-instagram-flow.spec.ts", "name": "exact active subscription permits projection for the same internal assets", "assertion": "projection follows only observed active subscription for the exact internal assets" }
+      ],
+      "gap": "Local profile cases only; no real Instagram login, permission, subscription or end-to-end Sandbox evidence."
+    },
+    {
+      "flow": "INSTAGRAM",
+      "scenario": "cancel",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 consumes provider cancellation only for the exact flow/auth pair and blocks replay for all five profiles", "assertion": "both exact Instagram login callback variants consume only their matching pending states" }
+      ],
+      "gap": "Callback/session contract is local; no browser/provider cancellation round trip or real authorization was exercised."
+    },
+    {
+      "flow": "INSTAGRAM",
+      "scenario": "partial_permission",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 keeps every exact profile and prior authorization blocked when one required permission is unconfirmed", "assertion": "an unconfirmed required permission blocks either exact Instagram profile and leaves its prior authorization ACTIVE" },
+        { "file": "apps/api/test/m4-09-instagram-flow.spec.ts", "name": "authorization result rejects known scope names from the other variant", "assertion": "cross-variant scope names are rejected" }
+      ],
+      "gap": "Synthetic capability/lifecycle boundary only; no Instagram partial-permission provider response or end-to-end recovery was exercised."
+    },
+    {
+      "flow": "INSTAGRAM",
+      "scenario": "replay",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 consumes provider cancellation only for the exact flow/auth pair and blocks replay for all five profiles", "assertion": "both Instagram auth variants reject code replay after their matching cancellation" },
+        { "file": "apps/api/test/m3-05-onboarding-session.spec.ts", "name": "expired onboarding idempotency replay cannot reissue provider state", "assertion": "shared onboarding idempotency expiry also prevents provider-state reissue" }
+      ],
+      "gap": "Cancellation replay is covered for both variants; duplicate successful Instagram callback delivery is not separately exercised."
+    },
+    {
+      "flow": "INSTAGRAM",
+      "scenario": "timeout",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 persists expiry and prevents provider-state replay after timeout for all five profiles", "assertion": "Instagram session expiry is persisted separately for each login profile and provider state is not reissued" },
+        { "file": "apps/api/test/m4-02-meta-graph.spec.ts", "name": "ambiguous POST timeout is UNKNOWN and never resent", "assertion": "Graph transport timeout is ambiguous and not automatically resent" }
+      ],
+      "gap": "Local onboarding session expiry is covered; provider/network timeout and live Instagram recovery are not."
+    },
+    {
+      "flow": "INSTAGRAM",
+      "scenario": "reauth",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 creates a reauthorization session for the exact auth profile and preserves prior authorizations", "assertion": "both Instagram login profiles map to their matching onboarding variants and keep prior grants ACTIVE" }
+      ],
+      "gap": "Local lifecycle contract only; no live Instagram reauthorization or provider eligibility evidence."
+    },
+    {
+      "flow": "INSTAGRAM",
+      "scenario": "disconnect",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "each Instagram auth profile changes only the selected local asset and keeps provider cleanup blocked" }
+      ],
+      "gap": "Local asset-scoped lifecycle only; no provider-side Instagram disconnect was exercised."
+    },
+    {
+      "flow": "WHATSAPP_EXCLUSIVE",
+      "scenario": "success",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-03-onboarding-saga.spec.ts", "name": "reconcile no-effect exposes RESUME and an explicit resume never repeats authorization exchange", "assertion": "a synthetic Cloud API onboarding resumes after a proven no-effect and reaches READY without repeating code exchange" },
+        { "file": "apps/api/test/m4-04-whatsapp-exclusive.spec.ts", "name": "exclusive adapter binds the exact Cloud API flow and returns only safe per-number readiness", "assertion": "exclusive adapter binds only the Cloud API flow and projects safe per-number readiness" }
+      ],
+      "gap": "Synthetic local behavior only; provider registration eligibility, protected PIN lifecycle and real Sandbox success remain unconfirmed."
+    },
+    {
+      "flow": "WHATSAPP_EXCLUSIVE",
+      "scenario": "cancel",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 consumes provider cancellation only for the exact flow/auth pair and blocks replay for all five profiles", "assertion": "the exact exclusive WhatsApp callback cancels its pending state and rejects a later code replay" }
+      ],
+      "gap": "Callback/session contract is local; no browser/provider cancellation round trip or real authorization was exercised."
+    },
+    {
+      "flow": "WHATSAPP_EXCLUSIVE",
+      "scenario": "partial_permission",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 keeps every exact profile and prior authorization blocked when one required permission is unconfirmed", "assertion": "an unconfirmed required permission blocks exclusive WhatsApp reauthorization and keeps the prior authorization ACTIVE" },
+        { "file": "apps/api/test/m4-04-whatsapp-exclusive.spec.ts", "name": "readiness must cover selected internal phone refs exactly and reject unsafe provider claims", "assertion": "readiness rejects incomplete/unsafe phone evidence" }
+      ],
+      "gap": "Synthetic capability/lifecycle boundary only; no provider partial-permission response or real registration eligibility was exercised."
+    },
+    {
+      "flow": "WHATSAPP_EXCLUSIVE",
+      "scenario": "replay",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-03-onboarding-saga.spec.ts", "name": "reconcile no-effect exposes RESUME and an explicit resume never repeats authorization exchange", "assertion": "resume preserves the completed authorization checkpoint and executes no second code exchange" },
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 consumes provider cancellation only for the exact flow/auth pair and blocks replay for all five profiles", "assertion": "a cancelled exclusive WhatsApp callback rejects a later code replay" }
+      ],
+      "gap": "This proves one no-effect resume case; duplicate callbacks and all replay variants are not covered here."
+    },
+    {
+      "flow": "WHATSAPP_EXCLUSIVE",
+      "scenario": "timeout",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 persists expiry and prevents provider-state replay after timeout for all five profiles", "assertion": "exclusive WhatsApp session expiry is persisted and its provider state is not reissued" },
+        { "file": "apps/api/test/m4-02-meta-graph.spec.ts", "name": "ambiguous POST timeout is UNKNOWN and never resent", "assertion": "Graph registration timeout is ambiguous and not automatically resent" }
+      ],
+      "gap": "Local onboarding session expiry is covered; provider registration timeout and real recovery remain unconfirmed."
+    },
+    {
+      "flow": "WHATSAPP_EXCLUSIVE",
+      "scenario": "reauth",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 creates a reauthorization session for the exact auth profile and preserves prior authorizations", "assertion": "exclusive WhatsApp maps to the Cloud API onboarding variant and keeps the prior grant ACTIVE" }
+      ],
+      "gap": "Local lifecycle contract only; no live exclusive WhatsApp reauthorization or registration eligibility evidence."
+    },
+    {
+      "flow": "WHATSAPP_EXCLUSIVE",
+      "scenario": "disconnect",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "exclusive WhatsApp changes only the selected phone asset and keeps provider cleanup blocked" }
+      ],
+      "gap": "Local asset-scoped lifecycle only; no provider-side WhatsApp disconnect was exercised."
+    },
+    {
+      "flow": "WHATSAPP_COEXISTENCE",
+      "scenario": "success",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-06-coexistence-finalization.spec.ts", "name": "projection requires both internal relation refs and a subscription receipt", "assertion": "final projection requires both verified internal relation references and the exact subscription receipt" },
+        { "file": "apps/api/test/m4-06-coexistence-finalization.spec.ts", "name": "four synthetic phone bindings keep distinct authorization refs under one account target", "assertion": "four synthetic phones retain distinct authorization bindings under a shared account target" }
+      ],
+      "gap": "Synthetic finalization/association only; real Embedded Signup, QR/consent, eligibility and Sandbox success remain unconfirmed."
+    },
+    {
+      "flow": "WHATSAPP_COEXISTENCE",
+      "scenario": "cancel",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 consumes provider cancellation only for the exact flow/auth pair and blocks replay for all five profiles", "assertion": "the exact Coexistence callback consumes only its matching state and rejects later code replay" }
+      ],
+      "gap": "Callback/session contract is local; no Embedded Signup QR/browser cancellation round trip was exercised."
+    },
+    {
+      "flow": "WHATSAPP_COEXISTENCE",
+      "scenario": "partial_permission",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-06-coexistence-finalization.spec.ts", "name": "ambiguous or grant-incomplete discovery cannot continue to subscription or projection", "assertion": "incomplete verified grant discovery cannot advance to subscription or projection" },
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 keeps every exact profile and prior authorization blocked when one required permission is unconfirmed", "assertion": "an unconfirmed required Coexistence permission keeps reauthorization unavailable and the prior authorization ACTIVE" }
+      ],
+      "gap": "Synthetic capability/lifecycle boundary only; no provider partial-permission response or eligibility was exercised."
+    },
+    {
+      "flow": "WHATSAPP_COEXISTENCE",
+      "scenario": "replay",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 consumes provider cancellation only for the exact flow/auth pair and blocks replay for all five profiles", "assertion": "a cancelled Coexistence callback rejects a later code replay" },
+        { "file": "apps/api/test/m4-13-connection-lifecycle.spec.ts", "name": "M4.13 callback capability contains only hashes and duplicate event identity is locally idempotent", "assertion": "lifecycle callback duplicate identity remains locally idempotent" }
+      ],
+      "gap": "Cancellation replay is covered; duplicate successful Embedded Signup callback delivery is not separately exercised."
+    },
+    {
+      "flow": "WHATSAPP_COEXISTENCE",
+      "scenario": "timeout",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 persists expiry and prevents provider-state replay after timeout for all five profiles", "assertion": "Coexistence session expiry is persisted and its provider state is not reissued" },
+        { "file": "apps/api/test/m4-02-meta-graph.spec.ts", "name": "ambiguous POST timeout is UNKNOWN and never resent", "assertion": "Graph transport timeout is ambiguous and not automatically resent" }
+      ],
+      "gap": "Local onboarding session expiry is covered; QR/browser timeout and real Coexistence recovery remain unconfirmed."
+    },
+    {
+      "flow": "WHATSAPP_COEXISTENCE",
+      "scenario": "reauth",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-13-connection-lifecycle.spec.ts", "name": "M4.13 creates a flow-matched reauthorization session and preserves the existing grant", "assertion": "the Coexistence auth pair creates a linked session while the prior grant remains unchanged" },
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 creates a reauthorization session for the exact auth profile and preserves prior authorizations", "assertion": "the Coexistence auth pair maps to its own session while the old grant remains ACTIVE" }
+      ],
+      "gap": "Local lifecycle contract only; no live Coexistence reauthorization or eligibility evidence."
+    },
+    {
+      "flow": "WHATSAPP_COEXISTENCE",
+      "scenario": "disconnect",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "Coexistence changes only the selected phone binding and leaves external cleanup blocked" }
+      ],
+      "gap": "Local asset-scoped lifecycle only; sibling-phone database behavior and provider cleanup are not exercised by this case."
+    }
+  ],
+  "additionalCases": [
+    {
+      "id": "coexistence-forbids-conventional-registration-and-deletion",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-06-coexistence-finalization.spec.ts", "name": "disabled provider ports fail closed and provide no registration or deletion method", "assertion": "the local Coexistence provider seam exposes no conventional registration or deletion operation" },
+        { "file": "apps/api/test/m4-04-whatsapp-exclusive.spec.ts", "name": "Coexistence context is rejected before any exclusive provider operation", "assertion": "exclusive registration rejects a Coexistence context before provider use" }
+      ],
+      "gap": "Local port contract only; real provider offboarding semantics remain Not confirmed."
+    },
+    {
+      "id": "coexistence-history-and-echo-no-loop",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-07-coexistence-events.spec.ts", "name": "business app echo requires consent and retention and is explicitly marked to suppress automation", "assertion": "echo requires consent/retention and explicitly suppresses automation" },
+        { "file": "apps/api/test/m4-07-coexistence-events.spec.ts", "name": "echo content identity suppresses duplicate rows when the inbox event reference differs", "assertion": "synthetic content identity prevents duplicate echo rows" },
+        { "file": "apps/api/test/m4-07-coexistence-events.spec.ts", "name": "scope mismatch and revoked authorization fail before storage", "assertion": "tenant/authorization mismatch or revocation blocks storage" }
+      ],
+      "gap": "Synthetic sink/contract only; no durable history store, real echo, or provider history protocol."
+    },
+    {
+      "id": "four-coexistence-phone-bindings",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-06-coexistence-finalization.spec.ts", "name": "four synthetic phone bindings keep distinct authorization refs under one account target", "assertion": "four numbers retain separate authorization references" },
+        { "file": "apps/api/test/m3-08-credential-resolver.spec.ts", "name": "resolves four synthetic phone numbers through exact grants, a shared WABA and partial reauthorization", "assertion": "four synthetic numbers resolve through exact grants and partial reauthorization" }
+      ],
+      "gap": "Synthetic contract fixtures; no real account or token was used."
+    },
+    {
+      "id": "facebook-pagination-and-atomic-token-enrollment",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-02-meta-graph.spec.ts", "name": "Facebook Page discovery uses exact me/accounts projection, paginates before atomic token enrollment, and returns refs only", "assertion": "all local pages are paged before atomic enrollment and only refs are returned" },
+        { "file": "apps/api/test/m4-02-meta-graph.spec.ts", "name": "Facebook Page discovery failure before pagination completes never calls the vault consumer or exposes tokens", "assertion": "incomplete pagination does not enroll Page tokens" }
+      ],
+      "gap": "Synthetic Graph transport only; provider paging and Page token eligibility remain unconfirmed."
+    },
+    {
+      "id": "instagram-login-variant-separation",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-09-instagram-flow.spec.ts", "name": "each onboarding callback variant maps to its own persisted authorization family", "assertion": "the two Instagram callback variants map to separate authorization families" },
+        { "file": "apps/api/test/m3-08-credential-resolver.spec.ts", "name": "keeps Instagram auth variants distinct and binds one-use handles to the exact context", "assertion": "resolver handles remain bound to exact Instagram auth context" }
+      ],
+      "gap": "Variant separation is local; only Facebook Login is represented by completed safe discovery, and no variant has live eligibility evidence."
+    },
+    {
+      "id": "drift-revocation-deletion-and-tenant-asset-isolation",
+      "coverage": "PARTIAL_LOCAL",
+      "cases": [
+        { "file": "apps/api/test/m4-12-asset-observation.spec.ts", "name": "M4.12 detects permission, subscription, and projection drift without repairing provider state", "assertion": "drift is detected without provider mutation" },
+        { "file": "apps/api/test/m3-08-credential-resolver.spec.ts", "name": "denies candidates from another tenant, app or environment without a global fallback", "assertion": "foreign tenant/app/environment credential candidates are rejected" },
+        { "file": "apps/api/test/m3-08-credential-resolver.spec.ts", "name": "revocation and version changes invalidate one-use handles; the resolver keeps no cache", "assertion": "revocation/version changes invalidate a selected one-use handle" },
+        { "file": "apps/api/test/m4-13-connection-lifecycle.spec.ts", "name": "M4.13 callback capability contains only hashes and duplicate event identity is locally idempotent", "assertion": "callback identity is locally fenced and sensitive raw values are absent" }
+      ],
+      "gap": "Local database/provider-contract coverage only; external asset deletion and cleanup are explicitly blocked/unconfirmed."
+    },
+    {
+      "id": "app-review-and-eligibility-release-gate",
+      "coverage": "LOCAL_SYNTHETIC_GATE",
+      "file": "apps/api/test/m4-14-certification-matrix.spec.ts",
+      "case": "M4.14 keeps every explicit Meta auth profile release-blocked while App Review and eligibility evidence are unconfirmed",
+      "assertion": "all five exact flow/auth profiles remain disabled and unresolved; Coexistence operation evidence with unconfirmed App Review returns APP_REVIEW_NOT_CONFIRMED"
+    },
+    {
+      "id": "credential-handle-selection-and-redaction",
+      "coverage": "LOCAL_SYNTHETIC_GATE",
+      "file": "apps/api/test/m4-14-certification-matrix.spec.ts",
+      "case": "M4.14 selects the preferred exact synthetic credential through an opaque handle and never exposes its secret",
+      "assertion": "the audit/vault identify the selected synthetic credential while the public result/handle has no IDs or secret material"
+    }
+  ],
+  "sandboxGates": [
+    { "id": "meta-app-review-and-permission-eligibility", "status": "NOT_CONFIRMED", "evidence": "No authorized Meta Sandbox/App Review operation was performed." },
+    { "id": "four-flow-end-to-end-sandbox-certification", "status": "NOT_CONFIRMED", "evidence": "No real Meta account, asset, credential, provider network request, message send, or external effect was used." },
+    { "id": "coexistence-history-schema-and-durable-import", "status": "NOT_CONFIRMED", "evidence": "Local history/echo contract fixtures do not confirm provider schema, consent, retention semantics, or durable sink behavior." },
+    { "id": "provider-side-disconnect-deletion-and-cleanup", "status": "NOT_CONFIRMED", "evidence": "M4.13 keeps cleanup blocked until exact provider offboarding semantics and authorized evidence exist." }
+  ]
+}
