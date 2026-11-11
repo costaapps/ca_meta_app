@@ -43,9 +43,9 @@ interface SyntheticOnboardingBackend {
   createCount: number;
 }
 
-function makeDocument(storage = new MemorySessionStorage()): { documentRef: Document; storage: MemorySessionStorage; listeners: Map<string, EventListener> } {
+function makeDocument(storage = new MemorySessionStorage(), keySeed = 0): { documentRef: Document; storage: MemorySessionStorage; listeners: Map<string, EventListener> } {
   const listeners = new Map<string, EventListener>();
-  let keyIndex = 0;
+  let keyIndex = keySeed;
   const windowRef = {
     sessionStorage: storage,
     crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++keyIndex).padStart(12, '0')}` },
@@ -155,8 +155,9 @@ function createHarness(options?: {
   statuses?: Map<string, OnboardingServerStatus>;
   storage?: MemorySessionStorage;
   backend?: SyntheticOnboardingBackend;
+  keySeed?: number;
 }) {
-  const { documentRef, storage, listeners } = makeDocument(options?.storage);
+  const { documentRef, storage, listeners } = makeDocument(options?.storage, options?.keySeed);
   const store = new OnboardingSessionStore(documentRef);
   for (const ref of options?.refs ?? []) store.remember(ref.id, ref.expiresAt, tenantContextRef);
   let createIndex = 0;
@@ -403,6 +404,62 @@ describe('PortalOnboardingService', () => {
     expect(popup.close).toHaveBeenCalledTimes(1);
     expect(store.read(tenantContextRef)).toEqual([]);
     expect(store.pendingCreate(tenantContextRef)).toBeUndefined();
+  });
+
+  it('keeps two-tab Coexistence starts independent and lets the server reject the competing tab', async () => {
+    const activeId = onboardingIds[0];
+    const statuses = new Map([[activeId, serverStatus(activeId, 'PROVISIONING', 'WHATSAPP_COEXISTENCE')]]);
+    const firstTab = createHarness({ statuses });
+    const secondTab = createHarness({ statuses, keySeed: 1000 });
+    await Promise.all([firstTab.service.initialize(), secondTab.service.initialize()]);
+    const firstProfile = firstTab.service.getSnapshot().profiles.find((item) => item.flowVariant === 'WHATSAPP_COEXISTENCE')!;
+    const secondProfile = secondTab.service.getSnapshot().profiles.find((item) => item.flowVariant === 'WHATSAPP_COEXISTENCE')!;
+
+    expect(await firstTab.service.start(firstProfile)).toBe(true);
+    secondTab.http.post.mockImplementationOnce(() => throwError(() => new HttpErrorResponse({
+      status: 409,
+      error: { code: 'COEXISTENCE_SESSION_ACTIVE', safeMessage: 'A WhatsApp Coexistence onboarding session is already active for this company.' },
+    })));
+    expect(await secondTab.service.start(secondProfile)).toBe(false);
+
+    const firstCreate = firstTab.http.post.mock.calls.find(([url]) => url.endsWith('/onboarding-sessions'))!;
+    const secondCreate = secondTab.http.post.mock.calls.find(([url]) => url.endsWith('/onboarding-sessions'))!;
+    expect(firstCreate[2]?.headers?.get('Idempotency-Key')).not.toBe(secondCreate[2]?.headers?.get('Idempotency-Key'));
+    expect(firstTab.store.read(tenantContextRef).map((ref) => ref.id)).toEqual([activeId]);
+    expect(secondTab.store.read(tenantContextRef)).toEqual([]);
+    expect(secondTab.store.pendingCreate(tenantContextRef)).toBeUndefined();
+    expect(secondTab.service.getSnapshot().notice).toContain('Já existe uma autorização WhatsApp Coexistence');
+  });
+
+  it('routes callbacks arriving in reverse order only to their matching onboarding session', async () => {
+    const firstId = onboardingIds[0];
+    const secondId = onboardingIds[1];
+    const statuses = new Map([
+      [firstId, serverStatus(firstId, 'PROVISIONING', 'FACEBOOK_LOGIN')],
+      [secondId, serverStatus(secondId, 'PROVISIONING', 'INSTAGRAM_LOGIN')],
+    ]);
+    const harness = createHarness({ statuses });
+    await harness.service.initialize();
+    const firstProfile = harness.service.getSnapshot().profiles.find((item) => item.flowVariant === 'FACEBOOK_LOGIN')!;
+    const secondProfile = harness.service.getSnapshot().profiles.find((item) => item.flowVariant === 'INSTAGRAM_LOGIN')!;
+    expect(await harness.service.start(firstProfile)).toBe(true);
+    expect(await harness.service.start(secondProfile)).toBe(true);
+    const countReads = (id: string) => harness.http.get.mock.calls.filter(([url]) => url.endsWith(`/onboarding-sessions/${id}`)).length;
+    const firstBefore = countReads(firstId);
+    const secondBefore = countReads(secondId);
+    const listener = harness.listeners.get('message') as ((event: MessageEvent<unknown>) => void) | undefined;
+
+    listener?.({ source: harness.popup.source, origin: 'https://portal.synthetic.invalid',
+      data: { type: 'OAUTH_RETURN_SIGNAL', onboardingRef: secondId } } as MessageEvent<unknown>);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(countReads(firstId)).toBe(firstBefore);
+    expect(countReads(secondId)).toBe(secondBefore + 1);
+
+    listener?.({ source: harness.popup.source, origin: 'https://portal.synthetic.invalid',
+      data: { type: 'OAUTH_RETURN_SIGNAL', onboardingRef: firstId } } as MessageEvent<unknown>);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(countReads(firstId)).toBe(firstBefore + 1);
+    expect(countReads(secondId)).toBe(secondBefore + 1);
   });
 
   it('replays an accepted create only after explicit same-flow action and reuses its pre-send key after reload', async () => {
