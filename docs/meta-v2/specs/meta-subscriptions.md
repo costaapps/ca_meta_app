@@ -1,6 +1,6 @@
 # M4.11 — subscription reconciliation
 
-**State:** Implemented candidate; awaiting integrated review and gate evidence
+**State:** Integrated on the M4 milestone; issue #47 remains open for final acceptance. Provider grants and remote subscription semantics remain **Not confirmed**.
 **Issue:** [#47](https://github.com/costaapps/ca_meta_app/issues/47)
 **Decision:** [ADR-020](../adrs/ADR-020-m4-11-subscription-reconciliation.md)
 

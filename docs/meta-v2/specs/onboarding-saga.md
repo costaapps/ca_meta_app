@@ -1,6 +1,6 @@
 # SPEC · Meta onboarding session and finalization saga
 
-Status: implementation gate passed; package PR acceptance pending. Issue: [#45](https://github.com/costaapps/ca_meta_app/issues/45). ADR: [ADR-012](../adrs/ADR-012-m4-03-onboarding-saga.md). Contracts: [OpenAPI onboarding routes](../contracts/openapi.yaml); [M4.01 flow configuration](meta-onboarding.md); [M4.02 Graph transport](meta-graph-client.md). Functional owner: Meta integration. Evidence SHA: `5df139e4e81e5f96194ea1fdcca6d724bb4166fe`.
+Status: package PR #132 accepted on the M4 milestone; final M4 acceptance remains pending. Issue: [#45](https://github.com/costaapps/ca_meta_app/issues/45). ADR: [ADR-012](../adrs/ADR-012-m4-03-onboarding-saga.md). Contracts: [OpenAPI onboarding routes](../contracts/openapi.yaml); [M4.01 flow configuration](meta-onboarding.md); [M4.02 Graph transport](meta-graph-client.md). Functional owner: Meta integration. Evidence SHA: `5df139e4e81e5f96194ea1fdcca6d724bb4166fe`.
 
 ## Problem and behavior
 
