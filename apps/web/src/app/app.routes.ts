@@ -12,6 +12,7 @@ export const routes: Routes = [
     children: [
       { path: '', redirectTo: '/connections', pathMatch: 'full' },
       { path: 'connections', loadComponent: () => import('./features/portal/connections-home.component').then((m) => m.ConnectionsHomeComponent) },
+      { path: 'onboarding', loadComponent: () => import('./features/portal/onboarding/portal-onboarding.component').then((m) => m.PortalOnboardingComponent) },
       { path: 'connections/new/:flow', loadComponent: () => import('./features/portal/connection-detail.component').then((m) => m.ConnectionDetailComponent) },
       { path: 'connections/:id', loadComponent: () => import('./features/portal/connection-record-detail.component').then((m) => m.ConnectionRecordDetailComponent) },
       { path: 'assets/:id', loadComponent: () => import('./features/portal/asset-detail.component').then((m) => m.AssetDetailComponent) },

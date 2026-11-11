@@ -1,4 +1,4 @@
-import type { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpErrorResponse, type HttpClient, type HttpHeaders } from '@angular/common/http';
 import { of, throwError } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
 import { parseOnboardingFlowCatalog, type OnboardingFlowProfile } from './onboarding-flow-catalog';
@@ -141,7 +141,7 @@ function createHarness(options?: {
 }) {
   const { documentRef, storage, listeners } = makeDocument();
   const store = new OnboardingSessionStore(documentRef);
-  for (const ref of options?.refs ?? []) store.remember(ref.id, ref.expiresAt);
+  for (const ref of options?.refs ?? []) store.remember(ref.id, ref.expiresAt, tenantContextRef);
   let createIndex = 0;
   const statuses = options?.statuses ?? new Map<string, OnboardingServerStatus>();
   const createdFlows = new Map<string, OnboardingServerStatus['flowVariant']>();
@@ -262,7 +262,7 @@ describe('PortalOnboardingService', () => {
     expect(http.post).not.toHaveBeenCalled();
     expect(providerLaunch.prepare).not.toHaveBeenCalled();
     expect(service.getSnapshot().attempts[0]?.status?.status).toBe('READY');
-    expect(store.read()).toEqual([{ id, expiresAt }]);
+    expect(store.read(tenantContextRef)).toEqual([{ id, expiresAt }]);
   });
 
   it('clears cached status after the server denies the current tenant context', async () => {
@@ -299,8 +299,8 @@ describe('PortalOnboardingService', () => {
     await harness.service.refreshStatus(id);
 
     expect(harness.http.get.mock.calls.filter(([url]) => url.includes('/onboarding-sessions/'))).toHaveLength(onboardingReadsBeforeSwitch);
-    expect(harness.service.getSnapshot().attempts[0]?.status).toBeUndefined();
-    expect(harness.service.getSnapshot().attempts[0]?.message).toContain('Volte ao contexto original');
+    expect(harness.service.getSnapshot().attempts).toEqual([]);
+    expect(harness.store.read('different-tenant-context-reference-456')).toEqual([]);
   });
 
   it('blocks every write with the exact M1.08 warning while company identity is unconfirmed', async () => {
@@ -356,7 +356,38 @@ describe('PortalOnboardingService', () => {
     expect(createCalls.map(([, body]) => body)).toEqual(Array.from({ length: 4 }, () => ({
       flowVariant: 'WHATSAPP_COEXISTENCE', requestedCapabilities: ['READ_STATUS'], returnRoute: 'connections',
     })));
-    expect(store.read().map((ref) => ref.id)).toEqual(onboardingIds.slice(0, 4));
+    expect(store.read(tenantContextRef).map((ref) => ref.id)).toEqual(onboardingIds.slice(0, 4));
+  });
+
+  it('treats a typed server Coexistence conflict as definitive and safe to resolve', async () => {
+    const { service, http, popup, store } = createHarness();
+    await service.initialize();
+    const coexistence = service.getSnapshot().profiles.find((item) => item.flowVariant === 'WHATSAPP_COEXISTENCE')!;
+    http.post.mockImplementationOnce(() => throwError(() => new HttpErrorResponse({
+      status: 409,
+      error: { code: 'COEXISTENCE_SESSION_ACTIVE', safeMessage: 'A WhatsApp Coexistence onboarding session is already active for this company.' },
+    })));
+
+    expect(await service.start(coexistence)).toBe(false);
+    expect(service.getSnapshot().notice).toContain('Já existe uma autorização WhatsApp Coexistence');
+    expect(popup.close).toHaveBeenCalledTimes(1);
+    expect(store.read(tenantContextRef)).toEqual([]);
+  });
+
+  it('does not let an unreadable non-Coexistence session block a server-authorized Coexistence start', async () => {
+    const existingId = onboardingIds[0];
+    const { service, http, statusFailures } = createHarness({
+      refs: [{ id: existingId, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() }],
+    });
+    statusFailures.set(existingId, 403);
+    await service.initialize();
+    const coexistence = service.getSnapshot().profiles.find((item) => item.flowVariant === 'WHATSAPP_COEXISTENCE')!;
+
+    expect(await service.start(coexistence)).toBe(true);
+    expect(http.post.mock.calls.filter(([url]) => url.endsWith('/onboarding-sessions'))).toHaveLength(1);
+    expect(http.post.mock.calls.find(([url]) => url.endsWith('/onboarding-sessions'))?.[1]).toMatchObject({
+      flowVariant: 'WHATSAPP_COEXISTENCE',
+    });
   });
 
   it('runs each product and both Instagram auth variants through distinct server sessions', async () => {
@@ -385,7 +416,7 @@ describe('PortalOnboardingService', () => {
       'WHATSAPP_COEXISTENCE',
     ]);
     expect(new Set(createCalls.map(([, , options]) => options?.headers?.get('Idempotency-Key'))).size).toBe(5);
-    expect(store.read().map((ref) => ref.id)).toEqual(onboardingIds);
+    expect(store.read(tenantContextRef).map((ref) => ref.id)).toEqual(onboardingIds);
     expect(service.getSnapshot().attempts.every((attempt) => attempt.status?.status === 'PARTIAL')).toBe(true);
 
     for (const attempt of service.getSnapshot().attempts) {
@@ -451,6 +482,27 @@ describe('PortalOnboardingService', () => {
     const actionCall = http.post.mock.calls.find(([url]) => url.endsWith('/actions'));
     expect(actionCall?.[1]).toEqual({ action: 'RESUME', stage: 'subscription' });
     expect(actionCall?.[2]?.headers?.get('Idempotency-Key')).toMatch(/^[A-Fa-f0-9-]{36}$/);
+  });
+
+  it('does not rehydrate or post a recovery action after the active tenant context changes', async () => {
+    const id = onboardingIds[0];
+    const { service, http, store } = createHarness({
+      refs: [{ id, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() }],
+      statuses: new Map([[id, serverStatus(id, 'PARTIAL')]]),
+    });
+    await service.initialize();
+    const option = service.getSnapshot().attempts[0]?.recoveryOptions[0];
+    expect(option).toBeDefined();
+
+    const originalGet = http.get.getMockImplementation();
+    http.get.mockImplementation((url, options) => url.endsWith('/session')
+      ? of({ tenantContextRef: 'different-tenant-context-reference-456' })
+      : originalGet!(url, options));
+    expect(await service.recover(id, option!)).toBe(false);
+
+    expect(http.post.mock.calls.filter(([url]) => url.endsWith('/actions'))).toHaveLength(0);
+    expect(service.getSnapshot().attempts).toEqual([]);
+    expect(store.read('different-tenant-context-reference-456')).toEqual([]);
   });
 
   it('rejects a browser READY payload without all server readiness checkpoints', () => {

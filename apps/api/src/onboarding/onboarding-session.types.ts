@@ -117,6 +117,13 @@ export class OnboardingConflictError extends Error {
   }
 }
 
+export class OnboardingCoexistenceActiveSessionConflictError extends Error {
+  constructor() {
+    super('A WhatsApp Coexistence onboarding session is already active for this company.');
+    this.name = 'OnboardingCoexistenceActiveSessionConflictError';
+  }
+}
+
 /** A completed provider result can only be minted by a trusted server adapter. */
 declare const providerOutcomeBrand: unique symbol;
 const verifiedProviderOutcomes = new WeakSet<object>();

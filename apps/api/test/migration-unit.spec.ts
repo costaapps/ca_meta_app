@@ -20,6 +20,7 @@ import { ONBOARDING_CODE_TABLES, ONBOARDING_SAGA_MIGRATION } from '../src/databa
 import { ASSET_OBSERVATIONS_MIGRATION, ASSET_OBSERVATION_TABLES } from '../src/database/migrations/asset-observations.js';
 import { CONNECTION_LIFECYCLE_MIGRATION } from '../src/database/migrations/connection-lifecycle.js';
 import { INTERNAL_ASSET_OPERATIONS_MIGRATION } from '../src/database/migrations/internal-asset-operations.js';
+import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION, ONBOARDING_COEXISTENCE_LOCK_TABLES } from '../src/database/migrations/onboarding-coexistence-lock.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -107,6 +108,17 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(CONNECTION_LIFECYCLE_MIGRATION.schemaVersion, 20);
   assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.id, '202611110021-internal-asset-operations');
   assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.schemaVersion, 21);
+  assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id, '202611110021-onboarding-coexistence-serialization');
+  assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.schemaVersion, 21);
+  const coexistenceLockTable = ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.find((step) => step.id === 'create-onboarding-coexistence-locks');
+  assert.ok(coexistenceLockTable && 'sql' in coexistenceLockTable);
+  assert.match(coexistenceLockTable.sql, /PRIMARY KEY \(tenant_id\)/);
+  assert.match(coexistenceLockTable.sql, /UNIQUE KEY uq_ca_meta_onboarding_coexistence_session/);
+  assert.match(coexistenceLockTable.sql, /FOREIGN KEY \(tenant_id, onboarding_session_id\)/);
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => step.id === 'validate-single-active-coexistence-session-per-tenant'));
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => 'runBatch' in step && step.id === 'backfill-active-onboarding-coexistence-locks'));
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => step.id === 'release-coexistence-lock-on-terminal-onboarding-status'));
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.deepEqual(ASSET_OBSERVATIONS_MIGRATION.steps.map((step) => step.id), [
     'create-meta-asset-observations', 'asset-observation-no-update', 'asset-observation-no-delete',
   ]);

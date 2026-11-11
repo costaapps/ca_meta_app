@@ -1,4 +1,4 @@
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { DOCUMENT } from '@angular/common';
 import { Inject, Injectable } from '@angular/core';
 import { BehaviorSubject, firstValueFrom, type Observable } from 'rxjs';
@@ -302,11 +302,19 @@ export class PortalOnboardingService {
   }
 
   async restoreSessions(): Promise<void> {
-    const references = this.store.read();
+    let context: PortalRequestContext;
+    try {
+      context = await this.readRequestContext(false);
+    } catch {
+      this.setNotice('Não foi possível confirmar o contexto atual para retomar autorizações.');
+      return;
+    }
+    const references = this.store.read(context.tenantContextRef);
     for (const ref of references) {
       if (!this.attempts.has(ref.id)) {
         this.attempts.set(ref.id, {
           ref,
+          tenantContextRef: context.tenantContextRef,
           message: 'Consultando a sessão persistida no servidor…',
           statusReadSequence: 0,
           statusReadInFlight: false,
@@ -377,6 +385,7 @@ export class PortalOnboardingService {
       }
       if (!this.store.ensureAvailable()) throw new Error('session-storage-unavailable');
       const requestContext = await this.readRequestContext(true);
+      if (!this.store.ensureAvailable(requestContext.tenantContextRef)) throw new Error('session-storage-unavailable');
       if (!this.assertTenantMutationAllowed()) throw new Error('tenant-identity-unconfirmed');
       const currentProfile = this.getSnapshot().profiles.find((item) =>
         item.flowVariant === profile.flowVariant && item.authVariant === profile.authVariant);
@@ -400,7 +409,7 @@ export class PortalOnboardingService {
       }));
       const created = parseCreatedSession(response, this.providerLaunch, Date.now());
       if (!created || this.attempts.has(created.id)) throw new Error('invalid-onboarding-creation');
-      if (!this.store.remember(created.id, created.expiresAt)) throw new Error('session-storage-write-failed');
+      if (!this.store.remember(created.id, created.expiresAt, requestContext.tenantContextRef)) throw new Error('session-storage-write-failed');
       const attempt: MutableAttempt = {
         ref: Object.freeze({ id: created.id, expiresAt: created.expiresAt }),
         tenantContextRef: requestContext.tenantContextRef,
@@ -429,9 +438,13 @@ export class PortalOnboardingService {
     } catch (error) {
       if (!popupTransferred) popup.close();
       if (requestSent) {
-        // The accepted response may have been lost. Keep this tab fail-closed rather than create another.
-        this.ambiguousCreate = true;
-        this.setNotice('O resultado da abertura da sessão não foi confirmado. Verifique as conexões antes de iniciar outra autorização.');
+        if (this.isActiveCoexistenceConflict(error)) {
+          this.setNotice('Já existe uma autorização WhatsApp Coexistence em andamento para esta empresa. Consulte ou conclua a sessão atual antes de iniciar outro número.');
+        } else {
+          // The accepted response may have been lost. Keep this tab fail-closed rather than create another.
+          this.ambiguousCreate = true;
+          this.setNotice('O resultado da abertura da sessão não foi confirmado. Verifique as conexões antes de iniciar outra autorização.');
+        }
       } else if (error instanceof Error && error.message === 'tenant-identity-unconfirmed') {
         this.setNotice(ONBOARDING_TENANT_IDENTITY_WARNING);
       } else if (error instanceof Error && error.message === 'coexistence-session-active') {
@@ -456,7 +469,7 @@ export class PortalOnboardingService {
     if (!attempt || Date.parse(attempt.ref.expiresAt) <= Date.now()) {
       if (attempt) {
         this.clearAttemptTimers(attempt);
-        this.store.forget(id);
+        if (attempt.tenantContextRef) this.store.forget(id, attempt.tenantContextRef);
         this.attempts.delete(id);
         this.publish();
       }
@@ -763,33 +776,32 @@ export class PortalOnboardingService {
   private hasActiveCoexistence(): boolean {
     return [...this.attempts.values()].some((attempt) => {
       if (this.currentTenantContextRef && attempt.tenantContextRef && attempt.tenantContextRef !== this.currentTenantContextRef) return false;
-      if (!attempt.status) return true;
-      return (attempt.flowVariant ?? attempt.status.flowVariant) === 'WHATSAPP_COEXISTENCE' && !isFinalStatus(attempt.status);
+      const flowVariant = attempt.flowVariant ?? attempt.status?.flowVariant;
+      return flowVariant === 'WHATSAPP_COEXISTENCE' && !isFinalStatus(attempt.status);
     });
   }
 
   private observeTenantContext(tenantContextRef: string): void {
     const previous = this.currentTenantContextRef;
     this.currentTenantContextRef = tenantContextRef;
-    if (!previous || previous === tenantContextRef) return;
+    if (!previous) {
+      this.store.useContext(tenantContextRef);
+      return;
+    }
+    if (previous === tenantContextRef) return;
+    this.store.useContext(tenantContextRef);
     this.catalogTenantContextRef = undefined;
     this.update({ catalogState: 'loading', profiles: Object.freeze([]) });
-    for (const attempt of this.attempts.values()) {
-      if (!attempt.tenantContextRef) attempt.tenantContextRef = previous;
-      if (attempt.tenantContextRef && attempt.tenantContextRef === tenantContextRef) continue;
+    for (const [id, attempt] of this.attempts) {
+      if (attempt.tenantContextRef === tenantContextRef) continue;
       this.clearAttemptTimers(attempt);
       attempt.statusReadSequence += 1;
       attempt.statusReadInFlight = false;
-      attempt.status = undefined;
-      attempt.flowVariant = undefined;
-      attempt.jobLocation = undefined;
-      attempt.jobStatus = undefined;
       attempt.popup?.close();
       attempt.popup = undefined;
-      attempt.locallyDetached = true;
-      attempt.actionKeys.clear();
-      attempt.message = 'O contexto ativo mudou desde esta sessão. Volte ao contexto original para consultar o resultado.';
+      this.attempts.delete(id);
     }
+    this.publish();
     this.setNotice('O contexto da empresa mudou. As sessões de outro contexto foram ocultadas.');
     void this.loadCatalog();
   }
@@ -799,6 +811,11 @@ export class PortalOnboardingService {
     if (capability.confirmed && capability.tenantDisplayName.trim()) return true;
     this.setNotice(ONBOARDING_TENANT_IDENTITY_WARNING);
     return false;
+  }
+
+  private isActiveCoexistenceConflict(error: unknown): boolean {
+    return error instanceof HttpErrorResponse && error.status === 409 && isRecord(error.error) &&
+      error.error['code'] === 'COEXISTENCE_SESSION_ACTIVE';
   }
 
   private statusReadFailure(error: unknown): string {

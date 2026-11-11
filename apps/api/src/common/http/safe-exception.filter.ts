@@ -13,6 +13,7 @@ import type { ErrorAction, ErrorCode } from './error-envelope.js';
 import { STRUCTURED_LOGGER, type StructuredLogger } from './request-context.js';
 import { IdentityDeniedError } from '../../identity/identity.errors.js';
 import { SafeBoundaryError } from '../security/security.errors.js';
+import { OnboardingCoexistenceActiveSessionConflictError } from '../../onboarding/onboarding-session.types.js';
 
 @Catch()
 @Injectable()
@@ -24,7 +25,9 @@ export class SafeExceptionFilter implements ExceptionFilter {
     const request = context.getRequest<Request & { requestId?: string }>();
     const response = context.getResponse<Response>();
     const requestId = request.requestId ?? 'unknown';
-    const status = exception instanceof IdentityDeniedError
+    const status = exception instanceof OnboardingCoexistenceActiveSessionConflictError
+      ? HttpStatus.CONFLICT
+      : exception instanceof IdentityDeniedError
       ? exception.code === 'CONTEXT_CHANGED' ? HttpStatus.CONFLICT : HttpStatus.FORBIDDEN
       : exception instanceof SafeBoundaryError
         ? exception.code === 'RATE_LIMITED' ? HttpStatus.TOO_MANY_REQUESTS : HttpStatus.FORBIDDEN
@@ -38,7 +41,8 @@ export class SafeExceptionFilter implements ExceptionFilter {
       requestId,
       statusCode: status,
       code: details.code,
-      errorType: exception instanceof IdentityDeniedError ? 'IdentityDeniedError' :
+      errorType: exception instanceof OnboardingCoexistenceActiveSessionConflictError ? 'OnboardingCoexistenceActiveSessionConflictError' :
+        exception instanceof IdentityDeniedError ? 'IdentityDeniedError' :
         exception instanceof SafeBoundaryError ? 'SafeBoundaryError' :
           exception instanceof HttpException ? 'HttpException' : 'UnhandledException',
     });
@@ -54,6 +58,9 @@ export class SafeExceptionFilter implements ExceptionFilter {
     retryable: boolean;
     action: ErrorAction;
   } {
+    if (exception instanceof OnboardingCoexistenceActiveSessionConflictError) {
+      return { code: 'COEXISTENCE_SESSION_ACTIVE', safeMessage: 'A WhatsApp Coexistence onboarding session is already active for this company.', retryable: false, action: 'CHECK_STATUS' };
+    }
     if (exception instanceof IdentityDeniedError && exception.code === 'CONTEXT_CHANGED') {
       return { code: 'CONTEXT_CHANGED', safeMessage: 'The tenant context has changed. Reload the current session context.', retryable: false, action: 'REFRESH' };
     }

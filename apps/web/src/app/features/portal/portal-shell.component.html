@@ -17,9 +17,8 @@
   </header>
 
   <nav class="portal-nav" aria-label="Navegação principal">
-    <a routerLink="/connections" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: true }">Conexões</a>
-    <a routerLink="/templates" routerLinkActive="is-active">Modelos</a>
-    <a routerLink="/notifications" routerLinkActive="is-active">Notificações</a>
+    <a *ngFor="let item of portalNavigation" [routerLink]="item.path" routerLinkActive="is-active"
+      [routerLinkActiveOptions]="{ exact: item.exact }">{{ item.label }}</a>
   </nav>
 
   <main #portalMain class="portal-main">

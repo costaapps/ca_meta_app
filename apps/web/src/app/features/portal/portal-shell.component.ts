@@ -10,6 +10,13 @@ import { safeRequestId } from '../../core/portal/safe-api-error';
 import { EmbedBridgeService, type EmbedBridgeSnapshot } from '../../core/embed/embed-bridge.service';
 import { embedRoutePath, type EmbedNavigationRequest } from '../../core/embed/embed-contract';
 
+export const PORTAL_NAVIGATION = Object.freeze([
+  Object.freeze({ path: '/connections', label: 'Conexões', exact: true }),
+  Object.freeze({ path: '/onboarding', label: 'Autorizações', exact: true }),
+  Object.freeze({ path: '/templates', label: 'Modelos', exact: false }),
+  Object.freeze({ path: '/notifications', label: 'Notificações', exact: false }),
+]);
+
 @Component({
   selector: 'app-portal-shell',
   standalone: true,
@@ -20,6 +27,7 @@ import { embedRoutePath, type EmbedNavigationRequest } from '../../core/embed/em
 export class PortalShellComponent implements OnInit, OnDestroy {
   @ViewChild('portalMain', { static: true }) private portalMain!: ElementRef<HTMLElement>;
 
+  readonly portalNavigation = PORTAL_NAVIGATION;
   session: PortalSession | null = null;
   embedSnapshot: EmbedBridgeSnapshot;
   notice = '';
