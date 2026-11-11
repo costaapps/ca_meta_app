@@ -24,3 +24,9 @@
 - **Decisão:** testes e ferramentas M5 usam somente fixtures e serviços descartáveis. Nenhuma chamada Meta, envio de mensagem, subscription, importação de credencial, migração de produção ou corte do legado é inferido de testes locais.
 - **Consequência:** piloto, shadow e migração real só serão marcados concluídos se exercitados no escopo autorizado e com evidência correspondente.
 
+## D-M5-05 — Identidade empresarial sem rótulo confirmado
+
+- **Contexto:** a regra M1.08 em `docs/meta-v2/experience/journey-spec.md` e CTX-01 de `screen-api-permission-test.csv` exigem rótulo `tenantDisplayName` ou host autenticado confirmado antes de exibir uma empresa ativa ou habilitar escritas. O `SessionContext` entregue atualmente contém `tenantRef`, mas não fornece essa evidência; `cUUID` também não é autoridade.
+- **Decisão:** enquanto essa lacuna existir, o portal mostra “Identidade da empresa não confirmada”, oculta o seletor empresarial e falha fechado para toda mutação tenant-scoped. Leituras server-scoped e emissão pública de magic-link continuam disponíveis. Não derivar nome de `tenantRef`/`cUUID`, não inventar endpoint de rótulo e não liberar chamadas legadas externas quando um rótulo seguro for adicionado depois.
+- **Consequência:** M5.01–M5.03 exercitam o fluxo de gravação apenas com capability confirmada sintética em testes. Em produção, ações permanecem indisponíveis até uma alteração revisada do contrato que forneça contexto de empresa confiável; identidade visível por si só nunca autoriza consumidores Msg4/PHP.
+
