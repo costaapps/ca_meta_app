@@ -66,6 +66,9 @@
 
     <p *ngIf="isLoading" class="state" role="status">Carregando conexões…</p>
     <p *ngIf="listError" class="error" role="alert">{{ listError }}</p>
+    <p *ngIf="listError && listRequestId" class="support-error">
+      Referência da solicitação: <code>{{ listRequestId }}</code>
+    </p>
 
     <ng-container *ngIf="!isLoading && !listError">
       <div *ngIf="connections.length === 0" class="empty-state">

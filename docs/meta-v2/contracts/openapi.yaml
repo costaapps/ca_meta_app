@@ -1141,7 +1141,7 @@ paths:
         items identify status, freshness and last confirmed evidence but contain no raw provider
         payload or credential.
       security: *a10
-      parameters: &a25
+      parameters:
         - $ref: "#/components/parameters/TenantContext"
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
@@ -2053,7 +2053,12 @@ paths:
         Provider eligibility and actual grant semantics are Not confirmed; no global credential is
         selected.
       security: *a10
-      parameters: *a25
+      parameters: &a25
+        - $ref: "#/components/parameters/TenantContext"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/AssetCatalogChannel"
+        - $ref: "#/components/parameters/AssetCatalogNumber"
       responses:
         "200":
           description: Sanitized success example

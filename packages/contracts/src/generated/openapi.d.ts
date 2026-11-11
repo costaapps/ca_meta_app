@@ -2868,9 +2868,6 @@ export interface operations {
                 readonly channel?: components["parameters"]["AssetCatalogChannel"];
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
-                readonly status?: components["parameters"]["ConnectionCatalogStatus"];
-                /** @description Exact configured Meta journey; combines with the product and status filters. */
-                readonly flowVariant?: components["parameters"]["ConnectionCatalogFlowVariant"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -2974,9 +2971,6 @@ export interface operations {
                 readonly channel?: components["parameters"]["AssetCatalogChannel"];
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
-                readonly status?: components["parameters"]["ConnectionCatalogStatus"];
-                /** @description Exact configured Meta journey; combines with the product and status filters. */
-                readonly flowVariant?: components["parameters"]["ConnectionCatalogFlowVariant"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */

@@ -1,4 +1,7 @@
 import { Subject } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
+import { provideRouter } from '@angular/router';
+import { TestBed } from '@angular/core/testing';
 import type { ConnectionCatalogFilters, ConnectionListPage } from '../../core/portal/connection-catalog.service';
 import { ConnectionCatalogService, connectionStatusCopy } from '../../core/portal/connection-catalog.service';
 import { PortalContextStore } from '../../core/portal/portal-context.store';
@@ -30,6 +33,29 @@ function createComponent(list: (filters: ConnectionCatalogFilters, cursor?: stri
 }
 
 describe('ConnectionsHomeComponent', () => {
+  it('renders the list request ID alongside a list error for support', async () => {
+    await TestBed.configureTestingModule({
+      imports: [ConnectionsHomeComponent],
+      providers: [
+        provideRouter([]),
+        { provide: MetaFlowCatalogService, useValue: { load: vi.fn().mockResolvedValue({}), cards: vi.fn().mockReturnValue([]) } },
+        { provide: ConnectionCatalogService, useValue: { list: vi.fn().mockRejectedValue(new HttpErrorResponse({ status: 503, error: { requestId: 'req-list-error-01' } })) } },
+        { provide: PortalSessionService, useValue: { ensureCurrentSession: vi.fn() } },
+        { provide: PortalContextStore, useValue: { contextChanged$: new Subject<void>(), sessionExpired$: new Subject<void>() } },
+      ],
+    }).compileComponents();
+
+    const fixture = TestBed.createComponent(ConnectionsHomeComponent);
+    fixture.detectChanges();
+    await settle();
+    fixture.detectChanges();
+
+    const view = fixture.nativeElement as HTMLElement;
+    expect(view.querySelector('[role="alert"]')?.textContent).toContain('Não foi possível carregar as conexões.');
+    expect(view.textContent).toContain('Referência da solicitação: req-list-error-01');
+    fixture.destroy();
+  });
+
   it('applies product, modality, status and number filters to the server, then follows its opaque cursor', async () => {
     const list = vi.fn()
       .mockResolvedValueOnce(listPage([connectionFixtures[0]!], 'opaque-server-cursor-0001', 'req-page-01'))
