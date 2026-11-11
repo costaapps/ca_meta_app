@@ -12,7 +12,7 @@
 | Pacote | Branch | Worktree | Estado inicial |
 |---|---|---|---|
 | M5.01 / #43 | `desktop/m5-01` | `C:\Users\user\.codex\worktrees\m5-01-portal\ca_meta_app` | SHA `389317a99932050112a31d002da565431003a943` passou review funcional independente e teste exato 5/5. Advisory P2 de paridade de validação em campos descartados. Cookie HttpOnly stale permanece blocker para magic-link até follow-up após merge M5.07. |
-| M5.07 / #62 | `desktop/m5-07` | `C:\Users\user\.codex\worktrees\m5-07-service-bridge\ca_meta_app` | SHA `9d9218a` recebeu FAIL funcional; implementador corrige replay/M1.07, adiciona matriz flow/auth, verifica migration MariaDB e avalia migração segura dos PHPs versionados. |
+| M5.07 / #62 | `desktop/m5-07` | `C:\Users\user\.codex\worktrees\m5-07-service-bridge\ca_meta_app` | Candidato `034b6038579179e5618907e4ab7e69e1f90e4798`; validador detached confirma 32/32, API typecheck/lint, contracts generated/lint, M1.07 typecheck+10/10+geradores/EOL; principal executou MariaDB migration no SHA exato. Reviews funcional/security em curso. PHP consumers seguem NOT_MIGRATED por ausência de prova de membership/tenant→asset. |
 
 Os dois branches começaram em `c3e9baa`. Um escritor por worktree. O coordenador é o único responsável por push/PR/CI/squash e commits na integração. Junctions `node_modules` reutilizam o install do checkout base, com symlinks `@ca-meta/*` direcionados a cada worktree.
 
