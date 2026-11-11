@@ -12,7 +12,7 @@
 | Pacote | Branch | Worktree | Estado inicial |
 |---|---|---|---|
 | M5.01 / #43 | `desktop/m5-01` | `C:\Users\user\.codex\worktrees\m5-01-portal\ca_meta_app` | SHA `389317a99932050112a31d002da565431003a943` passou review funcional independente e teste exato 5/5. Advisory P2 de paridade de validação em campos descartados. Cookie HttpOnly stale permanece blocker para magic-link até follow-up após merge M5.07. |
-| M5.07 / #62 | `desktop/m5-07` | `C:\Users\user\.codex\worktrees\m5-07-service-bridge\ca_meta_app` | Candidato `034b6038579179e5618907e4ab7e69e1f90e4798`; validador detached confirma 32/32, API typecheck/lint, contracts generated/lint, M1.07 typecheck+10/10+geradores/EOL; principal executou MariaDB migration no SHA exato. Reviews funcional/security em curso. PHP consumers seguem NOT_MIGRATED por ausência de prova de membership/tenant→asset. |
+| M5.07 / #62 | `desktop/m5-07` | `C:\Users\user\.codex\worktrees\m5-07-service-bridge\ca_meta_app` | Candidato `034b6038579179e5618907e4ab7e69e1f90e4798`; validação exata e migration MariaDB PASS; revisão funcional e security PASS com advisories P2. Pronto para PR de bridge local; consumidores versionados permanecem NOT_MIGRATED e issue #62 parcial. |
 
 Os dois branches começaram em `c3e9baa`. Um escritor por worktree. O coordenador é o único responsável por push/PR/CI/squash e commits na integração. Junctions `node_modules` reutilizam o install do checkout base, com symlinks `@ca-meta/*` direcionados a cada worktree.
 
@@ -27,7 +27,7 @@ Os dois branches começaram em `c3e9baa`. Um escritor por worktree. O coordenado
 ## Etapa e próxima ação
 
 - Onda 1: revisão independente reprovou os dois primeiros SHAs; correções estão ativas nos worktrees M5.01 e M5.07. Nenhum package PR foi criado ou integrado.
-- Próximo: aguardar reviews e M5.07 follow-up; a validação detached de M5.01 `ce3ccd9` passou. Abrir os package PRs e squash após checks reais. Integrar M5.07 antes de aplicar o middleware de cookie stale em M5.01, evitando disputa no arquivo de segurança.
+- Próximo: abrir PR M5.07 com evidências e limites claros, acompanhar checks e squash na milestone. Em seguida integrar essa base em M5.01 e corrigir o middleware do magic link com cookie stale, revisar/testar somente os arquivos afetados e abrir seu PR.
 - Depois de ambos os PRs na milestone, iniciar M5.02 e seguir pelas waves do prompt. Atualizar comentário/status da issue sem fechar.
 - Antes de qualquer interrupção futura, atualizar este handoff, estados e checks observados.
 

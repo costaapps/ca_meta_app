@@ -14,9 +14,9 @@
 
 ## D-M5-03 — Operações internas e consumidores Msg4
 
-- **Contexto:** M5.07 exige API de serviço tipada e migração de consumidores; fontes operacionais e `GeneralSettings` não estão disponíveis no checkout. Os PHP versionados são evidência funcional distinta.
-- **Decisão:** implementar apenas a fronteira tenant-scoped demonstrável com os contratos e ativos versionados; enumerar consumidores visíveis e separar os desconhecidos. Não abrir nem alterar `backend/connect.php` ou `backend/connect_old.php`, não alegar migração de consumidores ausentes e não adicionar fallback de token global.
-- **Consequência:** testes sintéticos podem demonstrar isolamento, redaction e idempotência local; equivalência Msg4/Suite4 e execução real permanecem **Not confirmed** até o código/contrato operacional autorizado estar disponível.
+- **Contexto:** M5.07 exige API de serviço tipada e migração de consumidores. As fontes PHP versionadas incluem list/create de templates, notificações, respostas a comentários e subscriptions de WABA/Page; GeneralSettings, jobs e equivalência implantada não estão confirmados. Os handlers versionados selecionam contexto via IDs legados e não mostram vínculo verificável entre membership, tenant e asset UUID.
+- **Decisão:** implementar a fronteira de serviço tenant-scoped, inventariar cada caller versionado e manter todos como `NOT_MIGRATED` até existir principal autenticado, membership validada, resolução tenant→asset UUID e provisionamento seguro de service proof. Não modificar os handlers para escolher prova por `company_uuid` ou ID da request, pois isso permitiria IDOR; não adicionar fallback de token global. Nunca abrir ou alterar `backend/connect.php` nem `backend/connect_old.php`.
+- **Consequência:** o harness sintético demonstra isolamento, redaction e idempotência da API, mas não comprova equivalência PHP, cutover sem double-send, credenciais Meta, Suite4 ou operação implantada. O pacote/issue #62 permanece parcial até esses vínculos e testes serem fornecidos e exercitados.
 
 ## D-M5-04 — Evidência local versus efeitos externos
 
