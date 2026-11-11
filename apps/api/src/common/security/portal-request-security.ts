@@ -45,6 +45,14 @@ function matchesHash(value: string, digest: string): boolean {
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const PORTAL_ENTRY_EXCHANGE_PATH = '/api/v1/auth/exchanges';
 const MAGIC_LINK_CONSUME_PATH = '/api/v1/auth/magic-links/consume';
+const INTERNAL_SERVICE_PATHS = [
+  /^\/internal\/v1\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/operations$/i,
+  /^\/internal\/v1\/operations\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+] as const;
+
+function isInternalServicePath(path: string): boolean {
+  return INTERNAL_SERVICE_PATHS.some((pattern) => pattern.test(path));
+}
 
 /** Exact-origin CORS plus same-origin Fetch Metadata and synchronizer-token checks on authenticated writes. */
 export function portalRequestSecurityMiddleware(
@@ -91,6 +99,12 @@ export function portalRequestSecurityMiddleware(
     }
 
     if (MUTATING_METHODS.has(request.method)) {
+      // Only these two machine routes bypass browser Origin/CSRF checks; their controllers
+      // require a tenant-bound service proof before resolving an asset or operation.
+      if (origin === undefined && isInternalServicePath(request.path)) {
+        next();
+        return;
+      }
       const requestHostOrigin = `${request.protocol}://${request.get('host') ?? ''}`;
       const fetchSite = oneHeader(request.headers['sec-fetch-site']);
       if (!origin || !isExactOrigin(origin, environment.allowedOrigins) || origin !== requestHostOrigin || fetchSite !== 'same-origin') {

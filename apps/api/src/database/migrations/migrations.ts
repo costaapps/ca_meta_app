@@ -19,6 +19,7 @@ import { META_WEBHOOKS_MIGRATION, META_WEBHOOKS_TABLES } from './meta-webhooks.j
 import { META_SUBSCRIPTIONS_MIGRATION, META_SUBSCRIPTIONS_TABLES } from './meta-subscriptions.js';
 import { ASSET_OBSERVATIONS_MIGRATION, ASSET_OBSERVATION_TABLES } from './asset-observations.js';
 import { CONNECTION_LIFECYCLE_MIGRATION, CONNECTION_LIFECYCLE_TABLES } from './connection-lifecycle.js';
+import { INTERNAL_ASSET_OPERATIONS_MIGRATION, INTERNAL_ASSET_OPERATION_TABLES } from './internal-asset-operations.js';
 
 function ddl(
   id: string,
@@ -289,6 +290,7 @@ const migrationsWithoutChecksums = [
   META_SUBSCRIPTIONS_MIGRATION,
   ASSET_OBSERVATIONS_MIGRATION,
   CONNECTION_LIFECYCLE_MIGRATION,
+  INTERNAL_ASSET_OPERATIONS_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -320,5 +322,6 @@ export const DOMAIN_TABLES = [
   ...META_SUBSCRIPTIONS_TABLES,
   ...ASSET_OBSERVATION_TABLES,
   ...CONNECTION_LIFECYCLE_TABLES,
+  ...INTERNAL_ASSET_OPERATION_TABLES,
 ] as const;
 

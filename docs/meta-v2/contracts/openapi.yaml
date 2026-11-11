@@ -2262,34 +2262,34 @@ paths:
           tenant.
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
-          pattern: ^[A-Za-z0-9_-]+$
+          format: uuid
     post:
       operationId: runInternalAssetOperation
       tags:
         - Internal Operations
-      summary: Execute an allowlisted tenant-scoped asset operation
-      description: Service-to-service only, with a dedicated short-lived internal service identity and
-        explicit tenant/asset/operation scopes. The signed workload token has audience `msg4-meta-internal`
-        and carries `service_id`, `tenant_ref`, `asset_ref`, and `operation` claims. Each claim is matched
-        against the server-resolved tenant, this path's `assetId`, and the request's `kind`; the server
-        rechecks the current tenant grant and exact operation allowlist on every call. Issuer and key
-        rotation are deployment-configured and remain Not confirmed. Server resolves the asset and credential; caller
-        cannot provide a Graph URL, token, credential, tenant override or raw SQL. `SEND_REPLY`,
-        `MARK_READ` and `REFRESH_STATUS` are distinct typed operations. This endpoint never decrypts
-        or returns a token.
+      summary: Accept an allowlisted tenant-scoped asset operation
+      description: Service-to-service only. An opaque high-entropy bearer proof is mapped by protected
+        server configuration to exactly one service principal and tenant; the current active tenant grant
+        must include META_CONNECTION_EXECUTE and CREDENTIAL_USE. The caller supplies no tenant, app,
+        authorization, provider object ID, credential family, or Graph URL. The server loads one current
+        verified asset authorization, checks the server capability gate, and resolves a one-use M3.08
+        credential handle. Payloads are a closed operation-specific union. The idempotency ledger stores
+        hashes and metadata only. The production adapter is unavailable until the real Meta capability and
+        deployment gates pass; recipient/comment references also need a tenant/asset-bound server mapping.
+        No operation is reported as successful in their absence. Permanent Meta tokens are never returned
+        or sent to the caller.
       security:
         - internalServiceAuth: []
       x-internal-authorization:
-        requiredClaims: [service_id, tenant_ref, asset_ref, operation]
-        audience: msg4-meta-internal
+        requiredProof: "Authorization: Bearer <opaque service credential>"
+        serverMapping: API_INTERNAL_SERVICE_CREDENTIAL_HASHES_JSON -> one principalId + tenantId
         bindings:
-          tenant_ref: tenant owning the asset identified by path.assetId
-          asset_ref: path.assetId
-          operation: requestBody.kind
+          tenantId: server-mapped service credential and current service grant
+          assetId: path.assetId plus current verified tenant-owned asset authorization
+          operation: requestBody.operation
         enforceCurrentTenantGrant: true
-        allowlist: [SEND_REPLY, MARK_READ, REFRESH_STATUS]
+        requiredServiceScopes: [META_CONNECTION_EXECUTE, CREDENTIAL_USE]
+        allowlist: [SEND_MESSAGE, MANAGE_TEMPLATES, MANAGE_COMMENTS, READ_STATUS, SUBSCRIBE_WEBHOOKS]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2300,28 +2300,30 @@ paths:
             schema:
               $ref: "#/components/schemas/InternalAssetOperationRequest"
             examples:
-              sanitized:
-                summary: Sanitized request example
+              sanitized_template_send:
+                summary: Typed template send; IDs are synthetic references, not provider IDs.
                 value:
-                  kind: SEND_REPLY
-                  messageRef: message_example_01
-                  text: Thanks, we will follow up shortly.
+                  operation: SEND_MESSAGE
+                  recipientRef: "50000000-0000-4000-8000-000000000001"
+                  message:
+                    kind: TEMPLATE
+                    name: welcome_message
+                    language: pt_BR
+                    parameters: ["Example"]
       responses:
         "202":
-          description: Sanitized success example
-          headers: *a24
+          description: Accepted or immediately resolved operation status. UNKNOWN remains ambiguous and is never a blind retry signal.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/JobAccepted"
+                $ref: "#/components/schemas/InternalAssetOperationResult"
               examples:
-                sanitized:
-                  summary: Sanitized success example
+                unknown:
+                  summary: Ambiguous external result requiring reconciliation by operationId.
                   value:
-                    jobId: job_example_08
-                    status: PENDING
-                    location: /api/v1/jobs/job_example_08
-                    requestId: req_example_40
+                    operationId: "50000000-0000-4000-8000-000000000002"
+                    status: UNKNOWN
+                    reasonCode: PROVIDER_RESULT_UNKNOWN
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2332,23 +2334,51 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
-        "412":
-          $ref: "#/components/responses/PreconditionFailed"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/Unprocessable"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
         "503":
           $ref: "#/components/responses/Unavailable"
         default:
           $ref: "#/components/responses/UnexpectedError"
-      x-external-effect: Operation-specific allowlisted provider effect/read; service scope is tenant +
-        asset + operation.
-      x-idempotency-scope: tenant + operation + Idempotency-Key and canonical payload hash.
-      x-retry-policy: Use the same UNKNOWN/reconciliation and bounded retry rules as the corresponding
-        public operation.
+      x-external-effect: The trusted adapter may mutate the selected provider asset. The registered production
+        adapter is currently unavailable; this API therefore fails closed before claiming an operation.
+      x-idempotency-scope: Current tenant + service principal + asset + operation + Idempotency-Key and request payload hash.
+      x-retry-policy: A unique UNKNOWN ledger row is committed before adapter invocation. Same key and body returns
+        the stored status without another adapter call; same key with another body returns 409. Adapter timeout or
+        response loss remains UNKNOWN and is never retried blindly.
+  /internal/v1/operations/{operationId}:
+    get:
+      operationId: readInternalAssetOperationStatus
+      tags:
+        - Internal Operations
+      summary: Read a service operation outcome in its mapped tenant
+      description: Requires the same tenant-bound service proof and current META_CONNECTION_EXECUTE grant. The
+        operation ID is readable only by the same service principal that submitted it in that tenant. Returns
+        status and a fixed safe reason code only; no payload, provider ID, tenant ID, or credential is returned.
+      security:
+        - internalServiceAuth: []
+      parameters:
+        - name: operationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tenant- and service-principal-scoped operation outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalAssetOperationResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+        default:
+          $ref: "#/components/responses/UnexpectedError"
   /api/v1/webhooks/meta/{appConfigRef}:
     parameters:
       - name: appConfigRef
@@ -2506,10 +2536,11 @@ components:
     internalServiceAuth:
       type: http
       scheme: bearer
-      bearerFormat: service token
-      description: Short-lived signed workload token for audience `msg4-meta-internal` with `service_id`,
-        `tenant_ref`, `asset_ref`, and `operation` claims. Issuer and key rotation are deployment-configured
-        and Not confirmed. Never a Meta token or user session.
+      bearerFormat: opaque high-entropy service proof
+      description: Proof is verified against SHA-256 hashes in protected server configuration and maps to
+        exactly one service principal and tenant. Current service and tenant grants are rechecked on every
+        operation/status request. Rotation and revocation require server configuration rollout plus grant
+        changes; issuer, client distribution, and production setup are Not confirmed. Never a Meta token or user session.
   parameters:
     Origin:
       name: Origin
@@ -4305,33 +4336,90 @@ components:
       oneOf:
         - type: object
           additionalProperties: false
-          required:
-            - kind
-            - messageRef
-            - text
+          required: [operation, recipientRef, message]
           properties:
-            kind:
+            operation: { type: string, const: SEND_MESSAGE }
+            recipientRef:
               type: string
-              const: SEND_REPLY
-            messageRef:
-              type: string
-              minLength: 1
-              maxLength: 128
-            text:
-              type: string
-              minLength: 1
-              maxLength: 4096
-              writeOnly: true
+              format: uuid
+              description: Internal recipient reference resolved inside the current tenant and asset; never a provider ID.
+            message:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [kind, text]
+                  properties:
+                    kind: { type: string, const: TEXT }
+                    text: { type: string, minLength: 1, maxLength: 4096, writeOnly: true }
+                - type: object
+                  additionalProperties: false
+                  required: [kind, name, language, parameters]
+                  properties:
+                    kind: { type: string, const: TEMPLATE }
+                    name: { type: string, minLength: 1, maxLength: 128, pattern: '^[a-z0-9_]+$' }
+                    language: { type: string, minLength: 2, maxLength: 16 }
+                    parameters:
+                      type: array
+                      maxItems: 20
+                      items: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
         - type: object
           additionalProperties: false
-          required:
-            - kind
+          required: [operation, action]
           properties:
-            kind:
+            operation: { type: string, const: MANAGE_TEMPLATES }
+            action: { type: string, const: LIST }
+        - type: object
+          additionalProperties: false
+          required: [operation, action, name, language, category, bodyText]
+          properties:
+            operation: { type: string, const: MANAGE_TEMPLATES }
+            action: { type: string, const: CREATE }
+            name: { type: string, minLength: 1, maxLength: 128, pattern: '^[a-z0-9_]+$' }
+            language: { type: string, minLength: 2, maxLength: 16 }
+            category: { type: string, enum: [AUTHENTICATION, MARKETING, UTILITY] }
+            bodyText: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+            exampleValues:
+              type: array
+              maxItems: 20
+              items: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+        - type: object
+          additionalProperties: false
+          required: [operation, action]
+          properties:
+            operation: { type: string, const: MANAGE_COMMENTS }
+            action: { type: string, const: LIST }
+        - type: object
+          additionalProperties: false
+          required: [operation, action, commentRef, text]
+          properties:
+            operation: { type: string, const: MANAGE_COMMENTS }
+            action: { type: string, const: REPLY }
+            commentRef:
               type: string
-              enum:
-                - MARK_READ
-                - REFRESH_STATUS
+              format: uuid
+              description: Internal comment reference resolved inside the current tenant and asset; never a provider ID.
+            text: { type: string, minLength: 1, maxLength: 4096, writeOnly: true }
+        - type: object
+          additionalProperties: false
+          required: [operation]
+          properties:
+            operation: { type: string, const: READ_STATUS }
+        - type: object
+          additionalProperties: false
+          required: [operation, action]
+          properties:
+            operation: { type: string, const: SUBSCRIBE_WEBHOOKS }
+            action: { type: string, enum: [READ, RECONCILE] }
+    InternalAssetOperationResult:
+      type: object
+      additionalProperties: false
+      required: [operationId, status]
+      properties:
+        operationId: { type: string, format: uuid }
+        status: { type: string, enum: [UNKNOWN, SUCCEEDED, FAILED] }
+        reasonCode:
+          type: string
+          enum: [OPERATION_ACCEPTED, PROVIDER_REJECTED, PROVIDER_RESULT_UNKNOWN, OPERATION_FAILED, OPERATION_UNSUPPORTED, CREDENTIAL_UNAVAILABLE]
     WebhookChallengeResponse:
       type: object
       additionalProperties: false

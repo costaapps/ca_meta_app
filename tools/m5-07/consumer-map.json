@@ -1,0 +1,64 @@
+{
+  "evidenceScope": "tracked versioned PHP sources and docs/baseline inventories only",
+  "externalConsumerInventory": "NOT_CONFIRMED",
+  "consumers": [
+    {
+      "id": "whatsapp-template-list",
+      "source": "backend/connect_whatsapp.php:760-801",
+      "legacyOperation": "GET /whatsapp/templates",
+      "credentialSource": "SYSTEM_ROOT_USER_TOKEN",
+      "typedOperation": { "operation": "MANAGE_TEMPLATES", "action": "LIST" },
+      "migrationState": "NOT_MIGRATED"
+    },
+    {
+      "id": "whatsapp-template-create",
+      "source": "backend/connect_whatsapp.php:805-872",
+      "legacyOperation": "POST /whatsapp/templates",
+      "credentialSource": "SYSTEM_ROOT_USER_TOKEN",
+      "typedOperation": { "operation": "MANAGE_TEMPLATES", "action": "CREATE" },
+      "migrationState": "NOT_MIGRATED"
+    },
+    {
+      "id": "whatsapp-template-notification-send",
+      "source": "backend/connect_whatsapp.php:648-758;894-924",
+      "legacyOperation": "POST /notifications/action SEND_TEMPLATE",
+      "credentialSource": "SYSTEM_ROOT_USER_TOKEN",
+      "typedOperation": { "operation": "SEND_MESSAGE", "messageKind": "TEMPLATE" },
+      "migrationState": "NOT_MIGRATED"
+    },
+    {
+      "id": "facebook-comment-reply",
+      "source": "backend/connect_whatsapp.php:734-751",
+      "legacyOperation": "POST /notifications/action REPLY_COMMENT",
+      "credentialSource": "tenant database PageAccessToken in versioned helper path",
+      "typedOperation": { "operation": "MANAGE_COMMENTS", "action": "REPLY" },
+      "migrationState": "NOT_MIGRATED"
+    },
+    {
+      "id": "whatsapp-waba-subscription",
+      "source": "backend/connect_whatsapp.php:397-423",
+      "legacyOperation": "facebookCallback WABA subscription",
+      "credentialSource": "SYSTEM_ROOT_USER_TOKEN",
+      "typedOperation": { "operation": "SUBSCRIBE_WEBHOOKS", "action": "RECONCILE" },
+      "migrationState": "NOT_MIGRATED"
+    },
+    {
+      "id": "facebook-page-subscription",
+      "source": "backend/connect_facebook.php:159",
+      "legacyOperation": "facebookCallback subscribed fields",
+      "credentialSource": "per-page token in versioned callback path",
+      "typedOperation": { "operation": "SUBSCRIBE_WEBHOOKS", "action": "RECONCILE" },
+      "migrationState": "NOT_MIGRATED"
+    },
+    {
+      "id": "general-settings-and-operational-consumers",
+      "source": "outside tracked source inventory",
+      "legacyOperation": "NOT_CONFIRMED",
+      "credentialSource": "NOT_CONFIRMED",
+      "typedOperation": null,
+      "migrationState": "NOT_CONFIRMED"
+    }
+  ],
+  "transitionRule": "single writer per tenant/asset/operation; no shadow-send; UNKNOWN requires reconciliation before another send",
+  "providerTraffic": "NOT_TESTED"
+}
