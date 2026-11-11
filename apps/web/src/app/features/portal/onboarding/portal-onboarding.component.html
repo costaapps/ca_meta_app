@@ -1,0 +1,89 @@
+<main class="onboarding-page" aria-labelledby="onboarding-title">
+  <header class="page-header">
+    <p class="eyebrow">Conexões Meta</p>
+    <h1 id="onboarding-title">Adicionar uma conexão</h1>
+    <p *ngIf="snapshot.tenantDisplayName" class="tenant-name">Empresa: {{ snapshot.tenantDisplayName }}</p>
+    <p *ngIf="!snapshot.tenantMutationAllowed" class="identity-warning" role="alert">Identidade da empresa não confirmada</p>
+    <p *ngIf="snapshot.tenantMutationAllowed && !snapshot.providerActivationEnabled" class="external-gate" role="status">
+      Os fluxos permanecem desativados até a evidência externa de segurança e elegibilidade ser confirmada.
+    </p>
+  </header>
+
+  <p *ngIf="snapshot.notice" class="notice" role="status" aria-live="polite">{{ snapshot.notice }}</p>
+
+  <section *ngIf="snapshot.catalogState === 'loading'" class="loading" aria-live="polite">
+    Carregando as opções de autorização…
+  </section>
+  <section *ngIf="snapshot.catalogState === 'error'" class="error-panel" role="alert">
+    {{ snapshot.notice || 'Não foi possível carregar as opções de conexão.' }}
+  </section>
+
+  <section *ngIf="snapshot.catalogState === 'loaded'" class="flow-list" aria-label="Modalidades de conexão">
+    <article *ngFor="let group of groups" class="flow-card">
+      <div class="flow-card-heading">
+        <div>
+          <h2>{{ group.title }}</h2>
+          <p>{{ group.summary }}</p>
+        </div>
+      </div>
+
+      <div *ngFor="let profile of profilesFor(group); trackBy: trackProfile" class="profile-choice">
+        <div>
+          <h3>{{ profileTitle(profile) }}</h3>
+          <p class="profile-reason">{{ profileReason(profile) }}</p>
+          <ul *ngIf="profile.capabilities.length" class="capability-list" aria-label="Capacidades configuradas">
+            <li *ngFor="let capability of profile.capabilities">
+              <span>{{ capabilityLabel(capability.operation) }}</span>
+              <span class="capability-state" [class.is-enabled]="capability.enabled">
+                {{ capability.enabled ? 'Disponível' : 'Desativada' }}
+              </span>
+            </li>
+          </ul>
+        </div>
+        <button type="button" class="primary-button" [disabled]="!canStart(profile) || snapshot.busy"
+          (click)="start(profile)">
+          {{ snapshot.busy ? 'Preparando…' : startLabel(profile) }}
+        </button>
+      </div>
+    </article>
+  </section>
+
+  <section *ngIf="snapshot.attempts.length" class="attempts-section" aria-labelledby="attempts-title">
+    <h2 id="attempts-title">Autorizações em andamento e recentes</h2>
+    <article *ngFor="let attempt of snapshot.attempts; trackBy: trackAttempt" class="attempt-card">
+      <div class="attempt-heading">
+        <div>
+          <h3>{{ flowTitle(attempt) }}</h3>
+          <p class="status-label">{{ statusLabel(attempt) }}</p>
+        </div>
+        <span *ngIf="attempt.jobStatus" class="job-status">Trabalho: {{ attempt.jobStatus }}</span>
+      </div>
+
+      <p class="attempt-message" aria-live="polite">{{ attempt.message }}</p>
+
+      <ol *ngIf="visibleSteps(attempt).length" class="step-list" aria-label="Etapas desta autorização">
+        <li *ngFor="let step of visibleSteps(attempt); trackBy: trackStep">
+          <span>{{ stepTitle(step) }}</span>
+          <span>{{ stepStatus(step) }}</span>
+        </li>
+      </ol>
+
+      <div class="attempt-actions">
+        <button type="button" class="secondary-button" (click)="refresh(attempt)">Atualizar status</button>
+        <button *ngIf="attempt.popupAttached" type="button" class="secondary-button" (click)="detach(attempt)">
+          Fechar janela e continuar verificando
+        </button>
+        <button *ngFor="let option of attempt.recoveryOptions; trackBy: trackRecovery" type="button"
+          class="secondary-button" [disabled]="!snapshot.tenantMutationAllowed || !snapshot.providerActivationEnabled"
+          (click)="recover(attempt, option)">
+          {{ option.label }}
+        </button>
+      </div>
+
+      <details *ngIf="attempt.status?.requestId" class="support-details">
+        <summary>Detalhes para suporte</summary>
+        <p>Solicitação: <code>{{ attempt.status?.requestId }}</code></p>
+      </details>
+    </article>
+  </section>
+</main>
