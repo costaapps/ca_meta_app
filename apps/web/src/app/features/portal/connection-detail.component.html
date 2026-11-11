@@ -1,0 +1,39 @@
+<section class="detail-page" aria-labelledby="flow-title">
+  <a class="back-link" routerLink="/connections">← Voltar às conexões</a>
+  <p class="eyebrow">Novo fluxo</p>
+  <h1 id="flow-title">{{ title }}</h1>
+  <p class="intro">{{ description }}</p>
+
+  <p *ngIf="isLoading" role="status" class="state">Confirmando a configuração do servidor…</p>
+  <p *ngIf="errorMessage" role="alert" class="error">
+    {{ errorMessage }} <span *ngIf="errorRequestId">Referência: {{ errorRequestId }}</span>
+  </p>
+
+  <ng-container *ngIf="!isLoading && !errorMessage">
+    <section *ngIf="flow === 'INSTAGRAM' && profiles.length > 1" class="variant-picker" aria-labelledby="variant-title">
+      <label id="variant-title" for="auth-variant">Variante disponível</label>
+      <select id="auth-variant" name="authVariant" [(ngModel)]="selectedAuthVariant">
+        <option value="">Escolha uma variante</option>
+        <option *ngFor="let profile of profiles" [value]="profile.authVariant">
+          {{ profile.authVariant === 'INSTAGRAM_LOGIN' ? 'Instagram Login' : 'Facebook Login' }}
+        </option>
+      </select>
+    </section>
+
+    <article class="availability-card" *ngIf="selectedProfile as profile; else noProfile">
+      <span class="state-label" [class.available]="profile.enabled">{{ profile.enabled ? 'Configuração disponível' : 'Indisponível neste ambiente' }}</span>
+      <p>{{ catalog.reasonFor(profile) }}</p>
+      <p class="verification-note">A configuração não confirma uma autorização Meta nem a conexão de recursos. O servidor verifica esses estados antes de concluir qualquer conexão.</p>
+      <button type="button" [disabled]="!canContinue" title="A etapa assistida será disponibilizada no fluxo de onboarding">
+        Iniciar conexão
+      </button>
+      <p class="pending-note" *ngIf="profile.enabled">A etapa assistida ainda não está disponível neste portal.</p>
+    </article>
+    <ng-template #noProfile>
+      <article class="availability-card">
+        <span class="state-label">Indisponível neste ambiente</span>
+        <p>O servidor não disponibilizou uma configuração para este fluxo.</p>
+      </article>
+    </ng-template>
+  </ng-container>
+</section>

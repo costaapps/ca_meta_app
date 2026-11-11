@@ -1,0 +1,30 @@
+:host { display: block; min-height: 100vh; }
+
+.portal-shell { min-height: 100vh; background: #f5f6f7; color: #1c2b36; }
+.portal-header {
+  min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .9rem clamp(1rem, 4vw, 3rem); background: #fff; border-bottom: 1px solid #e6e9ee;
+}
+.brand { display: inline-flex; align-items: center; gap: .7rem; color: #1c2b36; font-weight: 700; text-decoration: none; }
+.brand-mark { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: .55rem; color: #fff; background: #0070f2; }
+.brand-divider { color: #9aa4ad; font-weight: 400; }
+.session-summary { display: flex; align-items: center; gap: .8rem; color: #53616c; font-size: .85rem; }
+.session-state { display: inline-flex; align-items: center; gap: .4rem; color: #237443; font-weight: 600; }
+.state-dot { width: .48rem; height: .48rem; border-radius: 50%; background: #2a9b55; }
+.tenant-label { padding-left: .8rem; border-left: 1px solid #dfe4e8; }
+.role-label { color: #66737e; text-transform: capitalize; }
+.sign-out { border: 1px solid #d6dde3; border-radius: 6px; padding: .55rem .85rem; color: #34424d; background: #fff; font: inherit; cursor: pointer; }
+.sign-out:hover:not(:disabled) { background: #f6f8fa; }
+.sign-out:focus-visible, .portal-nav a:focus-visible, .brand:focus-visible { outline: 3px solid #80b9ff; outline-offset: 2px; }
+.portal-nav { display: flex; gap: .35rem; padding: 0 clamp(1rem, 4vw, 3rem); background: #fff; border-bottom: 1px solid #e6e9ee; overflow-x: auto; }
+.portal-nav a { display: inline-flex; align-items: center; min-height: 48px; padding: .15rem .9rem 0; border-bottom: 3px solid transparent; color: #52616c; text-decoration: none; white-space: nowrap; }
+.portal-nav a:hover { color: #005ecb; }
+.portal-nav a.is-active { color: #005ecb; border-bottom-color: #0070f2; font-weight: 600; }
+.portal-main { width: min(1180px, 100%); margin: 0 auto; padding: clamp(1rem, 3vw, 2rem); }
+.context-notice { margin-bottom: 1rem; padding: .8rem 1rem; border: 1px solid #c7d9ed; border-radius: 7px; color: #254d73; background: #eef6ff; }
+
+@media (max-width: 650px) {
+  .portal-header { flex-wrap: wrap; }
+  .session-summary { order: 3; width: 100%; flex-wrap: wrap; }
+  .tenant-label { padding-left: 0; border-left: 0; }
+}

@@ -1,0 +1,40 @@
+<section aria-labelledby="connections-title">
+  <header class="page-heading">
+    <div>
+      <p class="eyebrow">Canais da empresa</p>
+      <h1 id="connections-title">Conexões</h1>
+      <p class="intro">Gerencie os canais autorizados para esta empresa. A disponibilidade de cada fluxo vem da configuração do servidor.</p>
+    </div>
+    <a class="primary-action" href="#flow-catalog">Ver fluxos disponíveis</a>
+  </header>
+
+  <p *ngIf="isLoading" class="state" role="status">Consultando os fluxos disponíveis…</p>
+  <p *ngIf="errorMessage" class="error" role="alert">
+    {{ errorMessage }} <span *ngIf="errorRequestId">Referência: {{ errorRequestId }}</span>
+  </p>
+
+  <ng-container *ngIf="!isLoading && !errorMessage">
+    <div class="empty-state">
+      <span class="empty-icon" aria-hidden="true">↗</span>
+      <h2>Escolha um fluxo para começar</h2>
+      <p>As conexões existentes aparecem aqui quando os recursos forem verificados pelo servidor.</p>
+    </div>
+
+    <div id="flow-catalog" class="flow-grid" aria-label="Fluxos de conexão">
+      <article class="flow-card" *ngFor="let card of cards">
+        <div class="flow-card-heading">
+          <span class="flow-icon" aria-hidden="true">{{ card.id === 'FACEBOOK' ? 'f' : card.id === 'INSTAGRAM' ? '◎' : '◉' }}</span>
+          <span class="availability" [class.is-available]="card.enabled">
+            {{ card.enabled ? 'Disponível' : 'Indisponível' }}
+          </span>
+        </div>
+        <h2>{{ card.title }}</h2>
+        <p class="summary">{{ card.summary }}</p>
+        <p class="reason">{{ card.reason }}</p>
+        <a class="card-link" [routerLink]="flowPath(card)" [attr.aria-label]="'Ver detalhes: ' + card.title">
+          Ver detalhes <span aria-hidden="true">→</span>
+        </a>
+      </article>
+    </div>
+  </ng-container>
+</section>
