@@ -84,6 +84,10 @@ export class AssetAutomationConfigComponent implements OnInit, OnDestroy {
 
   async save(): Promise<void> {
     if (!this.config || !this.canSave || !this.etag) return;
+    const generation = this.generation;
+    const assetId = this.assetId;
+    const contextRef = this.context.contextRef;
+    if (!contextRef) return;
     const update = {
       version: this.config.version,
       ...(this.supports('privateWelcomeMessage') && this.form.privateWelcomeMessage !== (this.config.privateWelcomeMessage ?? '')
@@ -99,16 +103,18 @@ export class AssetAutomationConfigComponent implements OnInit, OnDestroy {
     this.savedMessage = '';
     this.errorRequestId = null;
     try {
-      const next = await this.settings.update(this.assetId, update, this.etag);
+      const next = await this.settings.update(assetId, update, this.etag);
+      if (!this.isCurrentSave(generation, assetId, contextRef)) return;
       this.setConfig(next);
       this.savedMessage = 'Configuração salva no catálogo central. A sincronização empresarial está pendente quando indicada abaixo.';
     } catch (error: unknown) {
+      if (!this.isCurrentSave(generation, assetId, contextRef)) return;
       this.errorMessage = error instanceof HttpErrorResponse && error.status === 412
         ? 'A configuração mudou em outra sessão. Atualize e revise os valores antes de salvar.'
         : 'Não foi possível salvar a configuração. Nenhuma mensagem foi enviada.';
       this.errorRequestId = safeRequestId(error);
     } finally {
-      this.isSaving = false;
+      if (this.isCurrentSave(generation, assetId, contextRef)) this.isSaving = false;
     }
   }
 
@@ -116,6 +122,7 @@ export class AssetAutomationConfigComponent implements OnInit, OnDestroy {
     const generation = ++this.generation;
     this.config = null;
     this.isLoading = true;
+    this.isSaving = false;
     this.errorMessage = '';
     this.errorRequestId = null;
     this.savedMessage = '';
@@ -145,5 +152,9 @@ export class AssetAutomationConfigComponent implements OnInit, OnDestroy {
       commentPublicReply: value.config.commentPublicReply ?? '',
       commentPrivateReply: value.config.commentPrivateReply ?? '',
     };
+  }
+
+  private isCurrentSave(generation: number, assetId: string, contextRef: string): boolean {
+    return generation === this.generation && assetId === this.assetId && contextRef === this.context.contextRef;
   }
 }
