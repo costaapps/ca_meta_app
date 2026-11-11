@@ -124,4 +124,84 @@ describe('AssetAutomationConfigComponent', () => {
     expect(component.isSaving).toBe(false);
     fixture.destroy();
   });
+
+  it('ignores a delayed save rejection while a save for the new tenant is in progress', async () => {
+    const assetId = '00000000-0000-4000-8000-000000000052';
+    const config = (privateWelcomeMessage: string, version: number): VersionedAutomationConfig => ({
+      etag: `"automation-v${version}"`,
+      config: {
+        assetId,
+        assetKind: 'WHATSAPP_PHONE_NUMBER',
+        inheritanceMode: 'ASSET_ONLY',
+        supportedFields: ['privateWelcomeMessage'],
+        privateWelcomeMessage,
+        commentPublicReply: null,
+        commentPrivateReply: null,
+        capabilities: { canEdit: true, executable: false },
+        version,
+        updatedAt: null,
+        projectionState: 'UNKNOWN',
+        requestId: `req-synthetic-automation-reject-${version}`,
+      },
+    });
+    const contextChanged$ = new Subject<void>();
+    let contextRef = 'synthetic-tenant-context-reference-333';
+    const context = {
+      contextChanged$: contextChanged$.asObservable(),
+      get contextRef() { return contextRef; },
+    };
+    const pendingUpdates: Array<{
+      readonly resolve: (value: VersionedAutomationConfig) => void;
+      readonly reject: (reason: unknown) => void;
+    }> = [];
+    const settings = {
+      read: vi.fn().mockResolvedValueOnce(config('Tenant inicial', 1)).mockResolvedValueOnce(config('Tenant atual', 2)),
+      update: vi.fn(() => new Promise<VersionedAutomationConfig>((resolve, reject) => pendingUpdates.push({ resolve, reject }))),
+    };
+    await TestBed.configureTestingModule({
+      imports: [AssetAutomationConfigComponent],
+      providers: [
+        { provide: ActivatedRoute, useValue: { paramMap: of(convertToParamMap({ id: assetId })) } },
+        { provide: AutomationConfigService, useValue: settings },
+        { provide: PortalContextStore, useValue: context },
+        { provide: PortalTenantIdentityService, useValue: { current: {
+          confirmed: true,
+          tenantDisplayName: 'Empresa sintética',
+          source: 'server-session',
+        } } },
+      ],
+    }).compileComponents();
+
+    const fixture = TestBed.createComponent(AssetAutomationConfigComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const component = fixture.componentInstance;
+    component.form.privateWelcomeMessage = 'Alteração do tenant anterior';
+    const oldSave = component.save();
+    expect(component.isSaving).toBe(true);
+
+    contextRef = 'synthetic-tenant-context-reference-444';
+    contextChanged$.next();
+    await fixture.whenStable();
+    expect(component.config?.privateWelcomeMessage).toBe('Tenant atual');
+    expect(component.isSaving).toBe(false);
+
+    component.form.privateWelcomeMessage = 'Alteração do tenant atual';
+    const currentSave = component.save();
+    expect(component.isSaving).toBe(true);
+    pendingUpdates[0]!.reject(new Error('synthetic late old-tenant failure'));
+    await oldSave;
+    expect(component.errorMessage).toBe('');
+    expect(component.errorRequestId).toBeNull();
+    expect(component.savedMessage).toBe('');
+    expect(component.isSaving).toBe(true);
+
+    pendingUpdates[1]!.resolve(config('Salvo no tenant atual', 3));
+    await currentSave;
+    expect(component.config?.privateWelcomeMessage).toBe('Salvo no tenant atual');
+    expect(component.form.privateWelcomeMessage).toBe('Salvo no tenant atual');
+    expect(component.savedMessage).toContain('Configuração salva');
+    expect(component.isSaving).toBe(false);
+    fixture.destroy();
+  });
 });
