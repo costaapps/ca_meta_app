@@ -436,6 +436,15 @@ test('public magic-link initiation tolerates stale portal cookies but retains br
   assert.equal(authenticatedWrite.response.statusCodeValue(), 401);
   assert.equal((authenticatedWrite.response.bodyValue() as { code: string }).code, 'AUTH_REQUIRED');
   assert.equal(verifyCalls, 1);
+
+  const wrongMethod = await invokeMiddleware(middleware, request(sameOrigin, 'PUT', '/api/v1/auth/magic-links'));
+  assert.equal(wrongMethod.response.statusCodeValue(), 401);
+  assert.equal((wrongMethod.response.bodyValue() as { code: string }).code, 'AUTH_REQUIRED');
+
+  const wrongPath = await invokeMiddleware(middleware, request(sameOrigin, 'POST', '/api/v1/auth/magic-links/extra'));
+  assert.equal(wrongPath.response.statusCodeValue(), 401);
+  assert.equal((wrongPath.response.bodyValue() as { code: string }).code, 'AUTH_REQUIRED');
+  assert.equal(verifyCalls, 3);
 });
 
 test('portal cookies are host-only, Secure, HttpOnly where required, and denial codes map to safe 403/409 envelopes', () => {
