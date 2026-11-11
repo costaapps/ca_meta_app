@@ -11,7 +11,7 @@
 
 | Pacote | Branch | Worktree | Estado inicial |
 |---|---|---|---|
-| M5.01 / #43 | `desktop/m5-01` | `C:\Users\user\.codex\worktrees\m5-01-portal\ca_meta_app` | Nova correção commitada em `ce3ccd99fab46ef4017a767fa2cff14e3bfc5f32`; autor typecheck, 26 focados e build passaram; coordenador repetiu 26/26 no detached SHA. Review funcional em curso. Middleware de cookie stale depende do merge M5.07. |
+| M5.01 / #43 | `desktop/m5-01` | `C:\Users\user\.codex\worktrees\m5-01-portal\ca_meta_app` | SHA `ce3ccd9` passou typecheck/build e 26 focados; review detectou uma capability real ausente. Corrigido em `389317a99932050112a31d002da565431003a943`, com typecheck + 5 specs do catálogo do autor e validação detached 5/5 pelo coordenador. Review funcional em curso. Middleware de cookie stale depende do merge M5.07. |
 | M5.07 / #62 | `desktop/m5-07` | `C:\Users\user\.codex\worktrees\m5-07-service-bridge\ca_meta_app` | SHA `9d9218a` recebeu FAIL funcional; implementador corrige replay/M1.07, adiciona matriz flow/auth, verifica migration MariaDB e avalia migração segura dos PHPs versionados. |
 
 Os dois branches começaram em `c3e9baa`. Um escritor por worktree. O coordenador é o único responsável por push/PR/CI/squash e commits na integração. Junctions `node_modules` reutilizam o install do checkout base, com symlinks `@ca-meta/*` direcionados a cada worktree.
