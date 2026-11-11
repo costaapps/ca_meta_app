@@ -11,10 +11,11 @@
 
 | Pacote | Branch | Worktree | Estado inicial |
 |---|---|---|---|
-| M5.01 / #43 | `desktop/m5-01` | `C:\Users\user\.codex\worktrees\m5-01-portal\ca_meta_app` | SHA base `389317a99932050112a31d002da565431003a943`; implementador executa follow-up de cookie stale no POST magic-link (sem enfraquecer Origin/Fetch Metadata) e remoção do `tenantRef` bruto do rótulo da empresa. Não rebasear sobre #62 até o integrador autorizar após gate. |
+| M5.01 / #43 | `desktop/m5-01` | `C:\Users\user\.codex\worktrees\m5-01-portal\ca_meta_app` | Candidate `0f65c512959f93d97924a850764f50640a10f5d9`; funcional review encontrou blocker M1.08: sem label segura de empresa, warning exato, switcher oculto e todas as mutações tenant-scoped bloqueadas. Implementador está centralizando o gate e adicionando specs focadas. Preservar o fix anterior de magic-link com cookie stale e as proteções Origin/Fetch Metadata. |
+| M5.02 / #56 | `desktop/m5-02` | `C:\Users\user\.codex\worktrees\m5-02-connections\ca_meta_app` | Implementação ativa a partir de `f6bf73e`; lista/detail, filtros server-side e safe labels. Manter somente leitura até identidade empresarial confirmada e alinhar a barreira M1.08 final de M5.01 antes da PR. |
 | M5.07 / #62 | `desktop/m5-07` | `C:\Users\user\.codex\worktrees\m5-07-service-bridge\ca_meta_app` | PR #152 em `9314a002707d29e98dd343b9cb8775fa5a7edcce`; reviews funcional/security PASS. Build API, compile TS, middleware/migration 16/16, harness M5.07 32/32 e harness M2.03/MariaDB 11.8.8 PASS no SHA atual; migrações 1–21 e backup/restore verificados. GitHub Actions foi bloqueado antes do runner por billing/spending limit; não squash. A rota v2 ainda requer aceite final; consumers PHP permanecem `NOT_MIGRATED`. |
 
-Os dois branches começaram em `c3e9baa`. Um escritor por worktree. O coordenador é o único responsável por push/PR/CI/squash e commits na integração. Junctions `node_modules` reutilizam o install do checkout base, com symlinks `@ca-meta/*` direcionados a cada worktree.
+M5.01 e M5.07 começaram em `c3e9baa`; M5.02 foi criada a partir do candidato M5.01 `f6bf73e`. Um escritor por worktree. O coordenador é o único responsável por push/PR/CI/squash e commits na integração. Junctions `node_modules` reutilizam o install do checkout base, com symlinks `@ca-meta/*` direcionados a cada worktree.
 
 ## Ambiente
 
@@ -28,8 +29,8 @@ Os dois branches começaram em `c3e9baa`. Um escritor por worktree. O coordenado
 ## Etapa e próxima ação
 
 - Onda 1: PR #152 aberto, mas CI do SHA `9314a00` não iniciou jobs por bloqueio de billing/spending limit da conta GitHub Actions. Localmente passaram build/API, 16 testes focados e harness M2.03 completo com MariaDB 11.8.8 e backup/restore 1–21. Não integrar enquanto checks/proteções estiverem bloqueados.
-- Próximo: receber follow-up M5.01, validar e abrir PR; preparar integração depois que #152 puder passar nos gates. Manter #62 aberta/parcial, com aceite v2 e migração dos callers reais pendentes.
-- Onda 2: implementar M5.02 sobre M5.01 estabilizada. O recon identificou ausência de labels de asset/filtro server-side `flowVariant` e adapter de refresh; respeitar UNKNOWN/stale, requestId apenas para suporte e nunca mostrar `tenantRef` como nome da empresa.
+- Próximo: concluir follow-up M5.01, validar com revisão funcional/security e abrir PR. A M1.08 bloqueia mutações tenant-scoped enquanto não houver `tenantDisplayName` seguro ou host autenticado confirmado; manter leituras e magic-link público.
+- Onda 2: M5.02 está em implementação contra a API existente, com labels seguras e filtro server-side. Refresh sem adapter deve mostrar indisponibilidade; respeitar UNKNOWN/stale e nunca mostrar `tenantRef` como nome da empresa.
 - Continuar pelas waves do prompt em frentes independentes; não fechar issues. Atualizar comentários/status sem alegar rollout real.
 - Antes de qualquer interrupção futura, atualizar este handoff, estados e checks observados.
 
