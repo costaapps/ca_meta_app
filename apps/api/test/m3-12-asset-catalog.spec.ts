@@ -380,18 +380,32 @@ test('safe display labels mask WhatsApp numbers and never fall back to opaque nu
       return {
         async query(sql: string) {
           statements.push(sql);
-          if (statements.length === 1) return [{
-            id: assetId,
-            app_configuration_id: appConfigurationId,
-            asset_kind: 'WHATSAPP_PHONE_NUMBER',
-            display_name: 'Legacy display label',
-            external_name: 'Support +1 (555) 123-4567',
-            status: 'ACTIVE',
-            authorization_status: 'VERIFIED',
-            observed_at: new Date().toISOString(),
-            last_verified_at: new Date().toISOString(),
-            reauthorization_required: 0,
-          }];
+          if (statements.length === 1) return [
+            {
+              id: assetId,
+              app_configuration_id: appConfigurationId,
+              asset_kind: 'WHATSAPP_PHONE_NUMBER',
+              display_name: 'Legacy display label',
+              external_name: 'Support +1 (555) 123-4321',
+              status: 'ACTIVE',
+              authorization_status: 'VERIFIED',
+              observed_at: new Date().toISOString(),
+              last_verified_at: new Date().toISOString(),
+              reauthorization_required: 0,
+            },
+            {
+              id: '00000000-0000-4000-8000-000000000006',
+              app_configuration_id: appConfigurationId,
+              asset_kind: 'WHATSAPP_PHONE_NUMBER',
+              display_name: null,
+              external_name: 'Support 01234567',
+              status: 'ACTIVE',
+              authorization_status: 'VERIFIED',
+              observed_at: new Date().toISOString(),
+              last_verified_at: new Date().toISOString(),
+              reauthorization_required: 0,
+            },
+          ];
           return [];
         },
       };
@@ -399,7 +413,7 @@ test('safe display labels mask WhatsApp numbers and never fall back to opaque nu
   } as unknown as DurableWorkDatabase;
   const repository = new MysqlMetaAssetsRepository(database, {} as never, {} as never);
   const page = await repository.listAssetCatalog({ tenantId, environment: 'test', limit: 10 });
-  assert.equal(page.items[0]?.displayLabel, 'Support ••••4567');
+  assert.deepEqual(page.items.map((item) => item.displayLabel), ['Support ••••4321', 'Support ••••4567']);
   assert.match(statements[0] ?? '', /a\.display_name, a\.external_name/);
 
   const numericDatabase = {

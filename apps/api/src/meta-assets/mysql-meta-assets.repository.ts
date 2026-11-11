@@ -136,7 +136,7 @@ function safeAssetDisplayLabel(displayName: string | null, externalName: string 
   if (!label || (/^[\d\s._-]{6,}$/.test(label))) return null;
   if (!kind.startsWith('WHATSAPP_')) return label;
 
-  const masked = label.replace(/\+?[1-9][\d\s().-]{6,30}/g, (candidate) => {
+  const masked = label.replace(/\+?[0-9](?:[\d\s().-]*[0-9])?/g, (candidate) => {
     const digits = candidate.replace(/\D/g, '');
     return digits.length >= 8 ? `••••${digits.slice(-4)}` : candidate;
   });
