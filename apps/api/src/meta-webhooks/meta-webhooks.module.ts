@@ -23,12 +23,26 @@ import {
   type MetaWebhookReplayAuthorization,
   type MetaWebhookSecretProvider,
 } from './meta-webhook.types.js';
+import { AuditEventWriter } from '../privacy/audit.service.js';
+import { MetaLifecycleCallbackController } from '../meta-lifecycle/meta-lifecycle-callback.controller.js';
+import { MetaLifecycleCallbackIngressService, FailClosedMetaLifecycleCallbackVerifier } from '../meta-lifecycle/meta-lifecycle-callback.service.js';
+import { MysqlMetaLifecycleCallbackProcessor, FailClosedMetaLifecycleCallbackTargetResolver } from '../meta-lifecycle/mysql-connection-lifecycle.repository.js';
+import {
+  META_LIFECYCLE_CALLBACK_PROCESSOR,
+  META_LIFECYCLE_CALLBACK_TARGET_RESOLVER,
+  META_LIFECYCLE_CALLBACK_VERIFIER,
+  type MetaLifecycleCallbackProcessor,
+  type MetaLifecycleCallbackTargetResolver,
+  type MetaLifecycleCallbackVerifier,
+} from '../meta-lifecycle/connection-lifecycle.types.js';
 
 export interface MetaWebhookAdapters {
   readonly secrets?: MetaWebhookSecretProvider;
   readonly payloadProtector?: MetaWebhookPayloadProtector;
   readonly processor?: MetaWebhookItemProcessor;
   readonly replayAuthorization?: MetaWebhookReplayAuthorization;
+  readonly lifecycleVerifier?: MetaLifecycleCallbackVerifier;
+  readonly lifecycleTargetResolver?: MetaLifecycleCallbackTargetResolver;
 }
 
 @Module({})
@@ -38,8 +52,22 @@ export class MetaWebhooksModule {
       module: MetaWebhooksModule,
       // Reuse the exact shared jobs module instance exported by MetaAssetsModule.
       imports: [durableWorkModule],
-      controllers: [MetaWebhookController],
+      controllers: [MetaWebhookController, MetaLifecycleCallbackController],
       providers: [
+        { provide: META_LIFECYCLE_CALLBACK_VERIFIER, useValue: adapters.lifecycleVerifier ?? new FailClosedMetaLifecycleCallbackVerifier() },
+        { provide: META_LIFECYCLE_CALLBACK_TARGET_RESOLVER, useValue: adapters.lifecycleTargetResolver ?? new FailClosedMetaLifecycleCallbackTargetResolver() },
+        {
+          provide: META_LIFECYCLE_CALLBACK_PROCESSOR,
+          useFactory: (database: DurableWorkDatabase, targets: MetaLifecycleCallbackTargetResolver) =>
+            new MysqlMetaLifecycleCallbackProcessor(database, new AuditEventWriter(database), targets),
+          inject: [DURABLE_WORK_DATABASE, META_LIFECYCLE_CALLBACK_TARGET_RESOLVER],
+        },
+        {
+          provide: MetaLifecycleCallbackIngressService,
+          useFactory: (verifier: MetaLifecycleCallbackVerifier, processor: MetaLifecycleCallbackProcessor) =>
+            new MetaLifecycleCallbackIngressService(verifier, processor),
+          inject: [META_LIFECYCLE_CALLBACK_VERIFIER, META_LIFECYCLE_CALLBACK_PROCESSOR],
+        },
         { provide: META_WEBHOOK_SECRET_PROVIDER, useValue: adapters.secrets ?? new FailClosedMetaWebhookSecretProvider() },
         { provide: META_WEBHOOK_PAYLOAD_PROTECTOR, useValue: adapters.payloadProtector ?? new FailClosedMetaWebhookPayloadProtector() },
         { provide: META_WEBHOOK_ITEM_PROCESSOR, useValue: adapters.processor ?? new FailClosedMetaWebhookItemProcessor() },

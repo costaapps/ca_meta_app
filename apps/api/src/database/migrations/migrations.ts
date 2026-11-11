@@ -18,6 +18,7 @@ import { ONBOARDING_CODE_TABLES, ONBOARDING_SAGA_MIGRATION } from './onboarding-
 import { META_WEBHOOKS_MIGRATION, META_WEBHOOKS_TABLES } from './meta-webhooks.js';
 import { META_SUBSCRIPTIONS_MIGRATION, META_SUBSCRIPTIONS_TABLES } from './meta-subscriptions.js';
 import { ASSET_OBSERVATIONS_MIGRATION, ASSET_OBSERVATION_TABLES } from './asset-observations.js';
+import { CONNECTION_LIFECYCLE_MIGRATION, CONNECTION_LIFECYCLE_TABLES } from './connection-lifecycle.js';
 
 function ddl(
   id: string,
@@ -287,6 +288,7 @@ const migrationsWithoutChecksums = [
   META_WEBHOOKS_MIGRATION,
   META_SUBSCRIPTIONS_MIGRATION,
   ASSET_OBSERVATIONS_MIGRATION,
+  CONNECTION_LIFECYCLE_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -317,5 +319,6 @@ export const DOMAIN_TABLES = [
   ...META_WEBHOOKS_TABLES,
   ...META_SUBSCRIPTIONS_TABLES,
   ...ASSET_OBSERVATION_TABLES,
+  ...CONNECTION_LIFECYCLE_TABLES,
 ] as const;
 

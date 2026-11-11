@@ -8,6 +8,8 @@ export const META_WEBHOOK_MAX_ITEMS = 500;
 export const META_WEBHOOK_SCHEMA_VERSION = 1 as const;
 export const META_WEBHOOK_APP_CONFIG_REF_PATTERN = /^[A-Za-z0-9._-]{1,96}$/;
 export const META_WEBHOOK_RAW_POST_PATH = /^\/api\/v1\/webhooks\/meta\/[A-Za-z0-9._-]{1,96}$/;
+/** This distinct provider callback contract is not enabled until its current Meta signature format is confirmed. */
+export const META_LIFECYCLE_RAW_POST_PATH = /^\/api\/v1\/webhooks\/meta-lifecycle\/[A-Za-z0-9._-]{1,96}$/;
 
 export class MetaWebhookPayloadValidationError extends Error {
   constructor() { super('Meta webhook payload failed validation.'); }
