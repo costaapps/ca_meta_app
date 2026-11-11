@@ -1,4 +1,4 @@
-# ADR-012: M4.11 subscription reconciliation boundaries
+# ADR-020: M4.11 subscription reconciliation boundaries
 
 - **Status:** Accepted for implementation; external provider evidence remains incomplete
 - **Date:** 2026-11-06

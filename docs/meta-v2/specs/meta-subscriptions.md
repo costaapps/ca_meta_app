@@ -2,7 +2,7 @@
 
 **State:** Implemented candidate; awaiting integrated review and gate evidence
 **Issue:** [#47](https://github.com/costaapps/ca_meta_app/issues/47)
-**Decision:** [ADR-012](../adrs/ADR-012-m4-11-subscription-reconciliation.md)
+**Decision:** [ADR-020](../adrs/ADR-020-m4-11-subscription-reconciliation.md)
 
 ## Scope
 
