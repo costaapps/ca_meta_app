@@ -1,0 +1,103 @@
+<section class="detail-page" aria-labelledby="connection-detail-title">
+  <a class="back-link" routerLink="/connections">← Voltar às conexões</a>
+  <p class="eyebrow">Detalhes da conexão</p>
+  <h1 id="connection-detail-title">{{ connection ? flowLabel(connection) : 'Conexão' }}</h1>
+
+  <aside class="identity-warning" role="status" aria-label="Identidade da empresa não confirmada">
+    <strong>Identidade da empresa não confirmada</strong>
+    <p>{{ writesUnavailableCopy }} Nenhuma atualização ou tarefa de acompanhamento foi iniciada.</p>
+  </aside>
+
+  <p *ngIf="isLoading" class="state" role="status">Carregando detalhes da conexão…</p>
+  <p *ngIf="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
+
+  <ng-container *ngIf="!isLoading && connection as record">
+    <section class="connection-status" aria-labelledby="connection-status-title">
+      <div class="status-heading">
+        <h2 id="connection-status-title">Status da conexão</h2>
+        <span class="status-cue" [class.is-ready]="record.status === 'ACTIVE' && record.readiness === 'READY' && !record.stale">
+          {{ record.stale ? 'Status desatualizado' : record.readiness === 'READY' && record.status === 'ACTIVE' ? 'Conexão pronta' : record.status }}
+        </span>
+      </div>
+      <p class="status-copy">{{ statusCopy(record) }}</p>
+      <dl class="evidence-grid">
+        <div><dt>Última verificação</dt><dd>{{ record.lastVerifiedAt || 'Sem confirmação' }}</dd></div>
+        <div><dt>Fonte da evidência</dt><dd>{{ record.verificationSource || 'Não informada' }}</dd></div>
+        <div><dt>Recursos</dt><dd>{{ record.assetCount ?? 'Quantidade não confirmada' }}</dd></div>
+      </dl>
+    </section>
+
+    <section class="assets-section" aria-labelledby="assets-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="assets-title">Recursos desta conexão</h2>
+          <p>Autorização, configuração de eventos e sincronização empresarial são mostradas separadamente.</p>
+        </div>
+      </div>
+      <p *ngIf="record.assets.length === 0" class="empty-state">O servidor não retornou recursos associados a esta conexão.</p>
+
+      <div class="asset-list">
+        <article class="asset-card" *ngFor="let asset of record.assets; let index = index">
+          <header class="asset-heading">
+            <div>
+              <p class="asset-kind">{{ assetTitle(asset, index) }}</p>
+              <h3>{{ asset.displayLabel || 'Identificação não confirmada' }}</h3>
+            </div>
+            <span class="status-cue" [class.is-ready]="asset.status === 'ACTIVE' && asset.authorizationStatus === 'VERIFIED' && !asset.stale">
+              {{ asset.stale || asset.status === 'STALE' ? 'Status desatualizado' : asset.status === 'ACTIVE' ? 'Ativo' : asset.status }}
+            </span>
+          </header>
+          <p class="status-copy">{{ assetStatusCopy(asset) }}</p>
+
+          <dl class="dimension-list">
+            <div>
+              <dt>Estado do recurso</dt>
+              <dd>{{ assetStatusCopy(asset) }}</dd>
+            </div>
+            <div>
+              <dt>Autorização</dt>
+              <dd>{{ authorizationCopy(asset) }} <span class="dimension-state">({{ asset.authorizationStatus }})</span></dd>
+              <small>Última verificação registrada: {{ asset.lastVerifiedAt || 'Sem confirmação' }} · {{ asset.verificationSource || 'fonte não informada' }}. O contrato não fornece uma data de autorização separada.</small>
+            </div>
+            <div>
+              <dt>Saúde da credencial</dt>
+              <dd>{{ credentialCopy(asset) }}</dd>
+              <small>Última confirmação: {{ asset.diagnostics?.tokenHealthObservedAt || record.diagnostics?.tokenHealthObservedAt || 'Sem confirmação' }}. Estado retornado: {{ asset.diagnostics?.tokenHealth || record.diagnostics?.tokenHealth || 'UNKNOWN' }}.</small>
+            </div>
+            <div>
+              <dt>Webhook e configuração de eventos</dt>
+              <dd>{{ subscriptionCopy(asset) }}</dd>
+              <small>{{ asset.statusObservation ? 'Evidência do snapshot: ' + evidenceTime(asset) : 'Não há evidência separada de configuração de eventos.' }}</small>
+            </div>
+            <div>
+              <dt>Sincronização empresarial</dt>
+              <dd>{{ projectionCopy(asset) }}</dd>
+              <small>{{ asset.statusObservation ? 'Evidência do snapshot: ' + evidenceTime(asset) : 'Não há evidência separada de sincronização empresarial.' }}</small>
+            </div>
+          </dl>
+
+          <p *ngIf="asset.stale || asset.status === 'STALE'" class="stale-note" role="status">
+            Última confirmação {{ asset.lastVerifiedAt || asset.observedAt }}. O status pode ter mudado; isso não confirma perda do recurso.
+          </p>
+
+          <div *ngIf="canShowReauthorization(asset) || canShowDisconnect(asset)" class="asset-actions" aria-label="Ações indisponíveis">
+            <button *ngIf="canShowReauthorization(asset)" type="button" [disabled]="!writesAllowed" [attr.aria-describedby]="'writes-disabled-' + index">Solicitar reautorização</button>
+            <button *ngIf="canShowDisconnect(asset)" type="button" [disabled]="!writesAllowed" [attr.aria-describedby]="'writes-disabled-' + index">Desconectar este recurso</button>
+            <p [id]="'writes-disabled-' + index">{{ writesUnavailableCopy }} Nenhuma alteração foi iniciada.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <details class="support-details">
+      <summary>Detalhes técnicos para suporte</summary>
+      <dl>
+        <div><dt>Referência da conexão</dt><dd><code>{{ record.id }}</code></dd></div>
+        <div><dt>Identificador da solicitação</dt><dd><code>{{ record.requestId }}</code></dd></div>
+        <div><dt>Última observação</dt><dd>{{ record.observedAt }}</dd></div>
+      </dl>
+      <p>As referências são internas ao catálogo e não são identificadores Meta.</p>
+    </details>
+  </ng-container>
+  <p *ngIf="errorRequestId" class="support-error">Referência da solicitação: <code>{{ errorRequestId }}</code></p>
+</section>

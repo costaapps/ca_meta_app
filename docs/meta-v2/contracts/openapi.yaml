@@ -1148,6 +1148,7 @@ paths:
         - $ref: "#/components/parameters/AssetCatalogChannel"
         - $ref: "#/components/parameters/AssetCatalogNumber"
         - $ref: "#/components/parameters/ConnectionCatalogStatus"
+        - $ref: "#/components/parameters/ConnectionCatalogFlowVariant"
       responses:
         "200":
           description: Sanitized success example
@@ -2765,6 +2766,14 @@ components:
           - REAUTH_REQUIRED
           - UNKNOWN
           - DISCONNECTED
+          - STALE
+    ConnectionCatalogFlowVariant:
+      name: flowVariant
+      in: query
+      required: false
+      description: Exact configured Meta journey; combines with the product and status filters.
+      schema:
+        $ref: "#/components/schemas/FlowVariant"
     Limit:
       name: limit
       in: query
@@ -3568,6 +3577,12 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        displayLabel:
+          type:
+            - string
+            - "null"
+          maxLength: 128
+          description: Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback.
         kind:
           type: string
           enum:
@@ -3709,6 +3724,12 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        displayLabel:
+          type:
+            - string
+            - "null"
+          maxLength: 128
+          description: Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback.
         kind:
           type: string
           enum:
@@ -3769,6 +3790,12 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        displayLabel:
+          type:
+            - string
+            - "null"
+          maxLength: 128
+          description: Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback.
         kind:
           type: string
           enum:

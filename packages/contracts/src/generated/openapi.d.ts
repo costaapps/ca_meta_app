@@ -1023,6 +1023,8 @@ export interface components {
         };
         readonly ConnectionAsset: {
             readonly id: string;
+            /** @description Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback. */
+            readonly displayLabel?: string | null;
             /** @enum {string} */
             readonly kind: "PAGE" | "INSTAGRAM_ACCOUNT" | "WHATSAPP_BUSINESS_ACCOUNT" | "PHONE_NUMBER";
             /** @enum {string} */
@@ -1066,6 +1068,8 @@ export interface components {
         };
         readonly Asset: {
             readonly id: string;
+            /** @description Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback. */
+            readonly displayLabel?: string | null;
             /** @enum {string} */
             readonly kind: "PAGE" | "INSTAGRAM_ACCOUNT" | "WHATSAPP_BUSINESS_ACCOUNT" | "PHONE_NUMBER";
             /** @enum {string} */
@@ -1086,6 +1090,8 @@ export interface components {
         };
         readonly AssetListItem: {
             readonly id: string;
+            /** @description Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback. */
+            readonly displayLabel?: string | null;
             /** @enum {string} */
             readonly kind: "PAGE" | "INSTAGRAM_ACCOUNT" | "WHATSAPP_BUSINESS_ACCOUNT" | "PHONE_NUMBER";
             /** @enum {string} */
@@ -1434,7 +1440,9 @@ export interface components {
         /** @description Exact opaque WhatsApp phone number filter. */
         readonly AssetCatalogNumber: string;
         readonly AssetCatalogStatus: "ACTIVE" | "INACTIVE" | "UNKNOWN" | "STALE";
-        readonly ConnectionCatalogStatus: "ACTIVE" | "PARTIAL" | "REAUTH_REQUIRED" | "UNKNOWN" | "DISCONNECTED";
+        readonly ConnectionCatalogStatus: "ACTIVE" | "PARTIAL" | "REAUTH_REQUIRED" | "UNKNOWN" | "DISCONNECTED" | "STALE";
+        /** @description Exact configured Meta journey; combines with the product and status filters. */
+        readonly ConnectionCatalogFlowVariant: components["schemas"]["FlowVariant"];
         /** @description Page size, default 50, maximum 100. */
         readonly Limit: number;
         /** @description Provider signature over exact raw request bytes. Supported algorithm/header configuration must be ratified for the actual app. */
@@ -2129,6 +2137,8 @@ export interface operations {
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
                 readonly status?: components["parameters"]["ConnectionCatalogStatus"];
+                /** @description Exact configured Meta journey; combines with the product and status filters. */
+                readonly flowVariant?: components["parameters"]["ConnectionCatalogFlowVariant"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -2859,6 +2869,8 @@ export interface operations {
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
                 readonly status?: components["parameters"]["ConnectionCatalogStatus"];
+                /** @description Exact configured Meta journey; combines with the product and status filters. */
+                readonly flowVariant?: components["parameters"]["ConnectionCatalogFlowVariant"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -2963,6 +2975,8 @@ export interface operations {
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
                 readonly status?: components["parameters"]["ConnectionCatalogStatus"];
+                /** @description Exact configured Meta journey; combines with the product and status filters. */
+                readonly flowVariant?: components["parameters"]["ConnectionCatalogFlowVariant"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */

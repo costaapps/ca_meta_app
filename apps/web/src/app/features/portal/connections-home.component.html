@@ -3,24 +3,127 @@
     <div>
       <p class="eyebrow">Canais da empresa</p>
       <h1 id="connections-title">Conexões</h1>
-      <p class="intro">Gerencie os canais autorizados para esta empresa. A disponibilidade de cada fluxo vem da configuração do servidor.</p>
+      <p class="intro">Veja conexões e recursos confirmados pelo servidor, com o estado de cada etapa separado.</p>
     </div>
     <a class="primary-action" href="#flow-catalog">Ver fluxos disponíveis</a>
   </header>
 
-  <p *ngIf="isLoading" class="state" role="status">Consultando os fluxos disponíveis…</p>
-  <p *ngIf="errorMessage" class="error" role="alert">
-    {{ errorMessage }} <span *ngIf="errorRequestId">Referência: {{ errorRequestId }}</span>
-  </p>
+  <aside class="identity-warning" role="status" aria-labelledby="identity-warning-title">
+    <strong id="identity-warning-title">Identidade da empresa não confirmada</strong>
+    <p>Ações de alteração indisponíveis até que a empresa possa ser identificada com segurança. A consulta de conexões permanece disponível; nenhuma atualização foi solicitada.</p>
+  </aside>
 
-  <ng-container *ngIf="!isLoading && !errorMessage">
-    <div class="empty-state">
-      <span class="empty-icon" aria-hidden="true">↗</span>
-      <h2>Escolha um fluxo para começar</h2>
-      <p>As conexões existentes aparecem aqui quando os recursos forem verificados pelo servidor.</p>
+  <section class="connection-section" aria-labelledby="connection-list-title">
+    <div class="section-heading">
+      <div>
+        <h2 id="connection-list-title">Conexões existentes</h2>
+        <p>Os filtros são aplicados pelo servidor antes da paginação.</p>
+      </div>
     </div>
 
-    <div id="flow-catalog" class="flow-grid" aria-label="Fluxos de conexão">
+    <form class="filters" (ngSubmit)="applyFilters()" aria-label="Filtrar conexões">
+      <label>
+        Produto
+        <select name="channel" [(ngModel)]="filters.channel">
+          <option value="">Todos os produtos</option>
+          <option value="FACEBOOK">Facebook</option>
+          <option value="INSTAGRAM">Instagram</option>
+          <option value="WHATSAPP">WhatsApp</option>
+        </select>
+      </label>
+      <label>
+        Modalidade
+        <select name="flowVariant" [(ngModel)]="filters.flowVariant">
+          <option value="">Todas as modalidades</option>
+          <option value="FACEBOOK_LOGIN">Facebook Login</option>
+          <option value="INSTAGRAM_VIA_FACEBOOK_LOGIN">Instagram via Facebook Login</option>
+          <option value="INSTAGRAM_LOGIN">Instagram Login</option>
+          <option value="WHATSAPP_CLOUD_API">WhatsApp API exclusiva</option>
+          <option value="WHATSAPP_COEXISTENCE">WhatsApp Coexistence</option>
+        </select>
+      </label>
+      <label>
+        Estado da conexão
+        <select name="status" [(ngModel)]="filters.status">
+          <option value="">Todos os estados</option>
+          <option value="ACTIVE">Ativa</option>
+          <option value="PARTIAL">Parcial</option>
+          <option value="REAUTH_REQUIRED">Autorização necessária</option>
+          <option value="UNKNOWN">Não confirmado</option>
+          <option value="DISCONNECTED">Desconectada</option>
+          <option value="STALE">Desatualizada</option>
+        </select>
+      </label>
+      <label>
+        Número exato do WhatsApp
+        <input name="number" type="tel" inputmode="tel" autocomplete="off" [(ngModel)]="filters.number" placeholder="+55…">
+      </label>
+      <div class="filter-actions">
+        <button type="submit">Aplicar filtros</button>
+        <button type="button" class="secondary-button" (click)="clearFilters()">Limpar</button>
+      </div>
+    </form>
+
+    <p *ngIf="isLoading" class="state" role="status">Carregando conexões…</p>
+    <p *ngIf="listError" class="error" role="alert">{{ listError }}</p>
+
+    <ng-container *ngIf="!isLoading && !listError">
+      <div *ngIf="connections.length === 0" class="empty-state">
+        <span class="empty-icon" aria-hidden="true">⌕</span>
+        <h3>Nenhuma conexão nesta empresa.</h3>
+        <p>O resultado aparece depois de uma leitura bem-sucedida do servidor. Tente ajustar os filtros ou escolha um fluxo disponível.</p>
+      </div>
+
+      <div *ngIf="connections.length > 0" class="connection-list">
+        <article class="connection-card" *ngFor="let connection of connections; trackBy: trackByConnection">
+          <div class="connection-card-heading">
+            <div>
+              <p class="product-label">{{ flowLabel(connection) }}</p>
+              <h3>{{ flowLabel(connection) }}</h3>
+            </div>
+            <span class="status-cue" [class.is-ready]="connection.status === 'ACTIVE' && connection.readiness === 'READY' && !connection.stale">
+              {{ statusLabel(connection) }}
+            </span>
+          </div>
+          <p class="status-copy">{{ statusCopy(connection) }}</p>
+          <dl class="connection-summary">
+            <div><dt>Recursos</dt><dd>{{ connection.assetCount }}</dd></div>
+            <div><dt>Última verificação</dt><dd>{{ connection.lastVerifiedAt || 'Sem confirmação' }}</dd></div>
+            <div><dt>Fonte da evidência</dt><dd>{{ connection.verificationSource || 'Não informada' }}</dd></div>
+          </dl>
+          <a class="detail-link" [routerLink]="['/connections', connection.id]" [attr.aria-label]="'Ver detalhes de ' + flowLabel(connection)">
+            Ver recursos e detalhes <span aria-hidden="true">→</span>
+          </a>
+        </article>
+      </div>
+
+      <nav class="pagination" aria-label="Paginação das conexões">
+        <button type="button" class="secondary-button" (click)="previousPage()" [disabled]="pageIndex === 0">Página anterior</button>
+        <span aria-live="polite">Página {{ pageIndex + 1 }}</span>
+        <button type="button" class="secondary-button" (click)="nextPage()" [disabled]="!nextCursor">Próxima página</button>
+      </nav>
+      <details *ngIf="listRequestId" class="support-details">
+        <summary>Referência para suporte</summary>
+        <p>Identificador da solicitação: <code>{{ listRequestId }}</code></p>
+      </details>
+    </ng-container>
+  </section>
+
+  <section id="flow-catalog" class="flow-section" aria-labelledby="flow-catalog-title">
+    <div class="section-heading">
+      <div>
+        <h2 id="flow-catalog-title">Fluxos disponíveis</h2>
+        <p>A disponibilidade vem da configuração do servidor e não confirma uma autorização Meta.</p>
+      </div>
+    </div>
+    <p *ngIf="isCatalogLoading" class="state" role="status">Consultando os fluxos disponíveis…</p>
+    <p *ngIf="catalogError" class="error" role="alert">{{ catalogError }}</p>
+    <details *ngIf="catalogRequestId" class="support-details">
+      <summary>Referência para suporte</summary>
+      <p>Identificador da solicitação: <code>{{ catalogRequestId }}</code></p>
+    </details>
+
+    <div *ngIf="!isCatalogLoading && !catalogError" class="flow-grid" aria-label="Fluxos de conexão">
       <article class="flow-card" *ngFor="let card of cards">
         <div class="flow-card-heading">
           <span class="flow-icon" aria-hidden="true">{{ card.id === 'FACEBOOK' ? 'f' : card.id === 'INSTAGRAM' ? '◎' : '◉' }}</span>
@@ -28,7 +131,7 @@
             {{ card.enabled ? 'Disponível' : 'Indisponível' }}
           </span>
         </div>
-        <h2>{{ card.title }}</h2>
+        <h3>{{ card.title }}</h3>
         <p class="summary">{{ card.summary }}</p>
         <p class="reason">{{ card.reason }}</p>
         <a class="card-link" [routerLink]="flowPath(card)" [attr.aria-label]="'Ver detalhes: ' + card.title">
@@ -36,5 +139,5 @@
         </a>
       </article>
     </div>
-  </ng-container>
+  </section>
 </section>

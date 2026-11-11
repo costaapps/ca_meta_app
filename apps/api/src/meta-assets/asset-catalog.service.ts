@@ -22,7 +22,8 @@ export interface AssetCatalogQuery {
 }
 
 export interface ConnectionCatalogQuery extends Omit<AssetCatalogQuery, 'status'> {
-  readonly status?: ConnectionCatalogReadModel['status'];
+  readonly flowVariant?: ConnectionCatalogReadModel['flowVariant'];
+  readonly status?: ConnectionCatalogPageQuery['status'];
 }
 
 const FLOW_CATALOG: readonly FlowCatalogVariant[] = [
@@ -122,6 +123,7 @@ function toAssetListItem(item: AssetCatalogReadModel, roles: readonly Membership
   return Object.freeze({
     id: item.assetRef,
     kind: publicAssetKind(item.kind),
+    displayLabel: item.displayLabel,
     status: item.status,
     authorizationStatus: item.authorizationStatus,
     observedAt: item.observedAt,
@@ -154,6 +156,7 @@ function toConnectionAsset(item: AssetCatalogReadModel, roles: readonly Membersh
   return Object.freeze({
     id: item.assetRef,
     kind: publicAssetKind(item.kind),
+    displayLabel: item.displayLabel,
     status: item.status,
     authorizationStatus: item.authorizationStatus,
     observedAt: item.observedAt,
@@ -268,6 +271,7 @@ export class AssetCatalogService {
     const repoQuery: ConnectionCatalogPageQuery = {
       tenantId: scope.tenantId, environment: this.environment, limit: query.limit,
       ...(cursor ? { cursor } : {}), ...(query.channel ? { channel: query.channel } : {}),
+      ...(query.flowVariant ? { flowVariant: query.flowVariant } : {}),
       ...(query.number ? { number: query.number } : {}), ...(query.status ? { status: query.status } : {}),
     };
     const page = await this.repository.listConnectionCatalog(repoQuery);

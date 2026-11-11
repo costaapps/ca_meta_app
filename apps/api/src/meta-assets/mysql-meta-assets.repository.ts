@@ -82,6 +82,8 @@ interface AssetCatalogRow {
   id: string;
   app_configuration_id: string;
   asset_kind: string;
+  display_name: string | null;
+  external_name: string | null;
   status: AssetCatalogReadModel['status'];
   authorization_status: AssetCatalogReadModel['authorizationStatus'];
   observed_at: string | Date;
@@ -125,6 +127,20 @@ function publicFlowVariant(flow: string | null, auth: string | null): Connection
 
 function evidenceSource(value: string | null): EvidenceSource | null {
   return value === 'META_API' || value === 'SIGNED_WEBHOOK' ? value : null;
+}
+
+function safeAssetDisplayLabel(displayName: string | null, externalName: string | null, kind: string): string | null {
+  const value = typeof externalName === 'string' && externalName.trim() ? externalName : displayName;
+  if (typeof value !== 'string') return null;
+  const label = value.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 128);
+  if (!label || (/^[\d\s._-]{6,}$/.test(label))) return null;
+  if (!kind.startsWith('WHATSAPP_')) return label;
+
+  const masked = label.replace(/\+?[1-9][\d\s().-]{6,30}/g, (candidate) => {
+    const digits = candidate.replace(/\D/g, '');
+    return digits.length >= 8 ? `••••${digits.slice(-4)}` : candidate;
+  });
+  return masked || null;
 }
 
 function tokenHealth(value: string | null): TokenHealthState {
@@ -447,7 +463,7 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     }
     values.push(input.limit + 1);
     const rows = await dataSource.query(
-      `SELECT a.id, a.app_configuration_id, a.asset_kind,
+      `SELECT a.id, a.app_configuration_id, a.asset_kind, a.display_name, a.external_name,
               ${statusExpression} AS status,
               ${authorizationStatusExpression} AS authorization_status,
               MAX(auth.observed_at) AS observed_at,
@@ -622,6 +638,7 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
         assetRef: row.id,
         appConfigurationId: row.app_configuration_id,
         kind: row.asset_kind,
+        displayLabel: safeAssetDisplayLabel(row.display_name, row.external_name, row.asset_kind),
         status,
         authorizationStatus: row.authorization_status,
         observedAt: statusObservation?.status.observedAt ?? formatDate(row.observed_at),
@@ -656,6 +673,8 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     const dataSource = await this.database.getDataSource();
     const connectionStatus = `CASE WHEN auth.authorization_state IN ('REVOKED', 'DISCONNECTED') THEN 'DISCONNECTED'
       WHEN auth.authorization_state IN ('ACTIVE', 'PARTIAL', 'REAUTH_REQUIRED', 'UNKNOWN') THEN auth.authorization_state ELSE 'UNKNOWN' END`;
+    const staleObservation = `MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) IS NOT NULL
+      AND MAX(CASE WHEN aa.verification_state = 'VERIFIED' THEN aa.verified_at END) < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 24 HOUR)`;
     const verifiedCount = `COUNT(DISTINCT CASE WHEN aa.state = 'ACTIVE' AND aa.verification_state = 'VERIFIED' THEN aa.asset_id END)`;
     const clauses = [
       'auth.tenant_id = ?', 'auth.environment = ?', "app.provider = 'META'",
@@ -670,6 +689,16 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     if (input.channel === 'FACEBOOK') clauses.push("auth.flow_variant = 'FACEBOOK'");
     if (input.channel === 'INSTAGRAM') clauses.push("auth.flow_variant = 'INSTAGRAM'");
     if (input.channel === 'WHATSAPP') clauses.push("auth.flow_variant IN ('WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE')");
+    if (input.flowVariant) {
+      const flowFilters: Readonly<Record<ConnectionCatalogReadModel['flowVariant'], string>> = {
+        FACEBOOK_LOGIN: "(auth.flow_variant = 'FACEBOOK' AND auth.auth_variant = 'FACEBOOK_LOGIN_FOR_BUSINESS')",
+        INSTAGRAM_VIA_FACEBOOK_LOGIN: "(auth.flow_variant = 'INSTAGRAM' AND auth.auth_variant = 'FACEBOOK_LOGIN_FOR_BUSINESS')",
+        INSTAGRAM_LOGIN: "(auth.flow_variant = 'INSTAGRAM' AND auth.auth_variant = 'INSTAGRAM_LOGIN')",
+        WHATSAPP_CLOUD_API: "(auth.flow_variant = 'WHATSAPP_EXCLUSIVE' AND auth.auth_variant = 'WHATSAPP_EMBEDDED_SIGNUP')",
+        WHATSAPP_COEXISTENCE: "(auth.flow_variant = 'WHATSAPP_COEXISTENCE' AND auth.auth_variant = 'WHATSAPP_BUSINESS_APP_ONBOARDING')",
+      };
+      clauses.push(flowFilters[input.flowVariant]);
+    }
     if (input.number !== undefined) {
       clauses.push(`EXISTS (SELECT 1 FROM ca_meta_asset_authorizations naa
         INNER JOIN ca_meta_assets na ON na.tenant_id = naa.tenant_id AND na.id = naa.asset_id
@@ -712,9 +741,9 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
         AND lifecycle.provider = 'META' AND lifecycle.environment = auth.environment
        WHERE ${clauses.join(' AND ')}
        GROUP BY auth.id, auth.flow_variant, auth.auth_variant, auth.authorization_state, auth.observed_at
-       ${input.status ? `HAVING ${connectionStatus} = ?` : ''}
+       ${input.status ? `HAVING ${input.status === 'STALE' ? `(${staleObservation})` : `${connectionStatus} = ?`}` : ''}
        ORDER BY auth.id ASC LIMIT ?`,
-      input.status ? [...values.slice(0, -1), input.status, input.limit + 1] : values,
+      input.status && input.status !== 'STALE' ? [...values.slice(0, -1), input.status, input.limit + 1] : values,
     ) as ConnectionCatalogRow[];
     const hasMore = rows.length > input.limit;
     const pageRows = hasMore ? rows.slice(0, input.limit) : rows;

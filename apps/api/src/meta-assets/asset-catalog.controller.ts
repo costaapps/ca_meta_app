@@ -27,8 +27,11 @@ import {
 import { AssetRefreshRateLimitError, AssetRefreshUnavailableError } from './asset-refresh.service.js';
 
 const CHANNELS = new Set(['FACEBOOK', 'INSTAGRAM', 'WHATSAPP']);
+const CONNECTION_FLOW_VARIANTS = new Set([
+  'FACEBOOK_LOGIN', 'INSTAGRAM_VIA_FACEBOOK_LOGIN', 'INSTAGRAM_LOGIN', 'WHATSAPP_CLOUD_API', 'WHATSAPP_COEXISTENCE',
+]);
 const STATUSES = new Set(['ACTIVE', 'INACTIVE', 'UNKNOWN', 'STALE']);
-const CONNECTION_STATUSES = new Set(['ACTIVE', 'PARTIAL', 'REAUTH_REQUIRED', 'UNKNOWN', 'DISCONNECTED']);
+const CONNECTION_STATUSES = new Set(['ACTIVE', 'PARTIAL', 'REAUTH_REQUIRED', 'UNKNOWN', 'DISCONNECTED', 'STALE']);
 
 function tenantContextRef(request: PortalRequest, headerContext?: string): string {
   const ref = headerContext ?? readPortalCookie(request.headers.cookie, PORTAL_CONTEXT_COOKIE);
@@ -68,15 +71,18 @@ function parseConnectionQuery(query: Record<string, unknown>): ConnectionCatalog
   const status = query.status;
   const cursor = query.cursor;
   const number = query.number;
+  const flowVariant = query.flowVariant;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
       (channel !== undefined && (typeof channel !== 'string' || !CHANNELS.has(channel))) ||
       (status !== undefined && (typeof status !== 'string' || !CONNECTION_STATUSES.has(status))) ||
+      (flowVariant !== undefined && (typeof flowVariant !== 'string' || !CONNECTION_FLOW_VARIANTS.has(flowVariant))) ||
       (cursor !== undefined && typeof cursor !== 'string') ||
       (number !== undefined && (typeof number !== 'string' || !/^\+?[0-9]{1,32}$/.test(number)))) throw new BadRequestException();
   return {
     limit,
     ...(typeof cursor === 'string' ? { cursor } : {}),
     ...(typeof channel === 'string' ? { channel: channel as 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP' } : {}),
+    ...(typeof flowVariant === 'string' ? { flowVariant: flowVariant as ConnectionCatalogQuery['flowVariant'] } : {}),
     ...(typeof number === 'string' ? { number } : {}),
     ...(typeof status === 'string' ? { status: status as ConnectionCatalogQuery['status'] } : {}),
   };

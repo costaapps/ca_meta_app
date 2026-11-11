@@ -78,7 +78,7 @@ async function sessionFor(tenant: string = tenantId): Promise<VerifiedPortalSess
 
 function asset(overrides: Partial<AssetCatalogReadModel> = {}): AssetCatalogReadModel {
   return {
-    assetRef: assetId, appConfigurationId, kind: 'WHATSAPP_PHONE_NUMBER', status: 'ACTIVE',
+    assetRef: assetId, appConfigurationId, kind: 'WHATSAPP_PHONE_NUMBER', displayLabel: null, status: 'ACTIVE',
     authorizationStatus: 'VERIFIED', observedAt: '2026-11-01T12:00:00.000Z',
     lastVerifiedAt: '2026-11-01T12:00:00.000Z', verificationSource: 'META_API', stale: false,
     diagnostics: {
@@ -168,11 +168,12 @@ test('asset cursor is strictly parsed and every catalog read carries the server-
 test('connection list uses the same protected tenant scope and bounded filters', async () => {
   const { service, connectionQueries } = setup({ roles: ['viewer'] });
   await service.listConnections(await sessionFor(), contextRef, {
-    limit: 20, channel: 'INSTAGRAM', number: '+15555550123', status: 'PARTIAL',
+    limit: 20, channel: 'INSTAGRAM', flowVariant: 'INSTAGRAM_LOGIN', number: '+15555550123', status: 'PARTIAL',
   }, 'request-synthetic');
   assert.equal(connectionQueries[0]?.tenantId, tenantId);
   assert.equal(connectionQueries[0]?.limit, 20);
   assert.equal(connectionQueries[0]?.channel, 'INSTAGRAM');
+  assert.equal(connectionQueries[0]?.flowVariant, 'INSTAGRAM_LOGIN');
   assert.equal(connectionQueries[0]?.number, '+15555550123');
   assert.equal(connectionQueries[0]?.status, 'PARTIAL');
 });
@@ -184,12 +185,14 @@ test('refresh fails closed without a configured adapter and does not open a queu
 });
 
 test('asset response is an explicit allowlist and does not serialize provider or secret fields', async () => {
-  const unsafe = { ...asset(), accessToken: 'synthetic-secret-never-return', providerPayload: { id: 'raw-provider-object' } } as AssetCatalogReadModel;
+  const unsafe = { ...asset({ displayLabel: 'Support ••••4567' }), externalId: 'raw-provider-object', accessToken: 'synthetic-secret-never-return', providerPayload: { id: 'raw-provider-object' } } as AssetCatalogReadModel;
   const { service } = setup({ assets: [unsafe] });
   const result = await service.listAssets(await sessionFor(), contextRef, { limit: 50 }, 'request-synthetic');
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes('synthetic-secret-never-return'), false);
   assert.equal(serialized.includes('raw-provider-object'), false);
+  assert.equal(serialized.includes('externalId'), false);
+  assert.equal(result.items[0]?.displayLabel, 'Support ••••4567');
   assert.equal(result.items[0]?.lastVerifiedAt, '2026-11-01T12:00:00.000Z');
   assert.equal(result.items[0]?.verificationSource, 'META_API');
   assert.equal(result.items[0]?.diagnostics?.onboardingStatus, 'UNKNOWN');
@@ -328,6 +331,100 @@ test('reauthorization reflects M3.09 open impacts in exact tenant, environment, 
   assert.match(query, /impact\.authorization_id = aa\.authorization_id/i);
   assert.match(query, /impact\.environment = a\.environment/i);
   assert.deepEqual(statements[0]?.params.slice(0, 2), [tenantId, 'test']);
+});
+
+test('connection journey filter is applied in SQL before bounded pagination', async () => {
+  const statements: Array<{ sql: string; params: readonly unknown[] }> = [];
+  const database = {
+    async getDataSource() {
+      return {
+        async query(sql: string, params: readonly unknown[] = []) {
+          statements.push({ sql, params });
+          return [];
+        },
+      };
+    },
+  } as unknown as DurableWorkDatabase;
+  const repository = new MysqlMetaAssetsRepository(database, {} as never, {} as never);
+  await repository.listConnectionCatalog({ tenantId, environment: 'test', limit: 2,
+    channel: 'WHATSAPP', flowVariant: 'WHATSAPP_COEXISTENCE', status: 'PARTIAL' });
+
+  const statement = statements[0];
+  assert.ok(statement);
+  assert.match(statement.sql, /auth\.flow_variant = 'WHATSAPP_COEXISTENCE'/);
+  assert.match(statement.sql, /auth\.auth_variant = 'WHATSAPP_BUSINESS_APP_ONBOARDING'/);
+  assert.match(statement.sql, /HAVING CASE WHEN auth\.authorization_state[\s\S]*?= \?/);
+  assert.equal(statement.params.at(-2), 'PARTIAL');
+  assert.equal(statement.params.at(-1), 3, 'server requests one extra row to detect the next page');
+});
+
+test('stale connection filter selects stale evidence without rewriting the connection status', async () => {
+  let sql = '';
+  let params: readonly unknown[] = [];
+  const database = {
+    async getDataSource() {
+      return { async query(query: string, values: readonly unknown[] = []) { sql = query; params = values; return []; } };
+    },
+  } as unknown as DurableWorkDatabase;
+  const repository = new MysqlMetaAssetsRepository(database, {} as never, {} as never);
+  await repository.listConnectionCatalog({ tenantId, environment: 'test', limit: 4, status: 'STALE' });
+  assert.match(sql, /HAVING \(MAX\(CASE WHEN aa\.verification_state = 'VERIFIED' THEN aa\.verified_at END\) IS NOT NULL/);
+  assert.doesNotMatch(sql, /HAVING .*DISCONNECTED/);
+  assert.deepEqual(params, [tenantId, 'test', 5]);
+});
+
+test('safe display labels mask WhatsApp numbers and never fall back to opaque numeric identifiers', async () => {
+  const statements: string[] = [];
+  const database = {
+    async getDataSource() {
+      return {
+        async query(sql: string) {
+          statements.push(sql);
+          if (statements.length === 1) return [{
+            id: assetId,
+            app_configuration_id: appConfigurationId,
+            asset_kind: 'WHATSAPP_PHONE_NUMBER',
+            display_name: 'Legacy display label',
+            external_name: 'Support +1 (555) 123-4567',
+            status: 'ACTIVE',
+            authorization_status: 'VERIFIED',
+            observed_at: new Date().toISOString(),
+            last_verified_at: new Date().toISOString(),
+            reauthorization_required: 0,
+          }];
+          return [];
+        },
+      };
+    },
+  } as unknown as DurableWorkDatabase;
+  const repository = new MysqlMetaAssetsRepository(database, {} as never, {} as never);
+  const page = await repository.listAssetCatalog({ tenantId, environment: 'test', limit: 10 });
+  assert.equal(page.items[0]?.displayLabel, 'Support ••••4567');
+  assert.match(statements[0] ?? '', /a\.display_name, a\.external_name/);
+
+  const numericDatabase = {
+    async getDataSource() {
+      return {
+        async query() {
+          return [{
+            id: assetId,
+            app_configuration_id: appConfigurationId,
+            asset_kind: 'FACEBOOK_PAGE',
+            display_name: null,
+            external_name: '109876543210987654',
+            status: 'ACTIVE',
+            authorization_status: 'VERIFIED',
+            observed_at: new Date().toISOString(),
+            last_verified_at: new Date().toISOString(),
+            reauthorization_required: 0,
+          }];
+        },
+      };
+    },
+  } as unknown as DurableWorkDatabase;
+  const numericPage = await new MysqlMetaAssetsRepository(numericDatabase, {} as never, {} as never)
+    .listAssetCatalog({ tenantId, environment: 'test', limit: 10 });
+  assert.equal(numericPage.items[0]?.displayLabel, null, 'an opaque numeric provider identifier is not used as a name');
 });
 
 test('reauthorization capability is limited to operators with an open M3.09 intent', async () => {
