@@ -1,10 +1,34 @@
+// @vitest-environment jsdom
+import { TestBed } from '@angular/core/testing';
 import { describe, expect, it } from 'vitest';
-import { resolveMetaApiBaseUrl, validateExactHttpsOrigins } from './public-runtime-config';
+import { environment } from '../../../environments/environment';
+import {
+  META_API_BASE_URL,
+  PROVIDER_AUTHORIZATION_ORIGINS,
+  resolveMetaApiBaseUrl,
+  SUITE4_EMBED_ORIGINS,
+  validateExactHttpsOrigins,
+} from './public-runtime-config';
 
 describe('resolveMetaApiBaseUrl', () => {
   it('uses the compiled fallback when runtime config is absent or empty', () => {
     expect(resolveMetaApiBaseUrl(undefined, '')).toBe('');
     expect(resolveMetaApiBaseUrl({}, '')).toBe('');
+  });
+
+  it('treats an injected empty runtime config object as absent and uses validated defaults', () => {
+    const original = window.__CA_META_PUBLIC_CONFIG__;
+    window.__CA_META_PUBLIC_CONFIG__ = {};
+    try {
+      TestBed.configureTestingModule({});
+      expect(TestBed.inject(META_API_BASE_URL)).toBe(environment.metaApiBaseUrl);
+      expect(TestBed.inject(SUITE4_EMBED_ORIGINS)).toEqual([]);
+      expect(TestBed.inject(PROVIDER_AUTHORIZATION_ORIGINS)).toEqual([]);
+    } finally {
+      TestBed.resetTestingModule();
+      if (original === undefined) delete window.__CA_META_PUBLIC_CONFIG__;
+      else window.__CA_META_PUBLIC_CONFIG__ = original;
+    }
   });
 
   it('accepts the supported versioned same-origin API paths', () => {
