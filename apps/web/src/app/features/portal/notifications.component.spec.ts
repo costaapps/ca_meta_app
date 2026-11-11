@@ -88,4 +88,34 @@ describe('NotificationsComponent', () => {
     expect(fixture.componentInstance.items).toEqual([]);
     fixture.destroy();
   });
+
+  it('keeps earlier notices when loading the next page', async () => {
+    const contextChanged$ = new Subject<void>();
+    const nextNotice: Notification = { ...notice, id: '00000000-0000-4000-8000-000000000063',
+      createdAt: '2026-11-11T12:01:00.000Z' };
+    const service = {
+      list: vi.fn()
+        .mockResolvedValueOnce({ items: [notice], nextCursor: 'cursor-next-page', requestId: 'req-notifications-page-one' })
+        .mockResolvedValueOnce({ items: [nextNotice], nextCursor: null, requestId: 'req-notifications-page-two' }),
+      act: vi.fn(),
+    };
+    await TestBed.configureTestingModule({
+      imports: [NotificationsComponent],
+      providers: [
+        { provide: NotificationsService, useValue: service },
+        { provide: PortalSessionService, useValue: { ensureCurrentSession: vi.fn().mockResolvedValue(true) } },
+        { provide: PortalContextStore, useValue: { contextChanged$, sessionExpired$: new Subject<void>() } },
+      ],
+    }).compileComponents();
+
+    const fixture = TestBed.createComponent(NotificationsComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.componentRef.changeDetectorRef.detectChanges();
+    expect(fixture.componentInstance.items.map((item) => item.id)).toEqual([notice.id]);
+    await fixture.componentInstance.nextPage();
+    expect(service.list).toHaveBeenNthCalledWith(2, 'cursor-next-page');
+    expect(fixture.componentInstance.items.map((item) => item.id)).toEqual([notice.id, nextNotice.id]);
+    fixture.destroy();
+  });
 });

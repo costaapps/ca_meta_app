@@ -47,7 +47,7 @@ export class NotificationsComponent implements OnInit, OnDestroy {
     try {
       const page = await this.service.list(cursor);
       if (generation !== this.generation) return;
-      this.items = page.items;
+      this.items = cursor === undefined ? page.items : [...this.items, ...page.items];
       this.nextCursor = page.nextCursor;
       this.requestId = page.requestId;
     } catch (error: unknown) {
