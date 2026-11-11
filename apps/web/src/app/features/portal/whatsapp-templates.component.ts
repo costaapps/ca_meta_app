@@ -1,4 +1,5 @@
 import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
@@ -7,6 +8,7 @@ import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalSessionService } from '../../core/portal/portal-session.service';
 import { safeRequestId } from '../../core/portal/safe-api-error';
 import { TemplateAsset, TemplateCreateRequest, TemplateJobStatus, TemplateListPage, TemplateRecord, WhatsAppTemplatesService } from '../../core/portal/whatsapp-templates.service';
+import { PendingWhatsAppTemplateAttempts } from '../../core/portal/pending-whatsapp-template-attempts';
 
 type TemplateCategory = TemplateCreateRequest['category'];
 type TemplateForm = { name: string; language: string; category: TemplateCategory; bodyText: string };
@@ -41,8 +43,9 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
   private readonly destroy$ = new Subject<void>();
   private accountGeneration = 0;
   private templateGeneration = 0;
-  private lastCreateFingerprint = '';
+  private currentAttemptScope: string | null = null;
   private createIdempotencyKey = '';
+  private readonly pendingAttempts = new PendingWhatsAppTemplateAttempts();
   private readonly cursorHistory: Array<string | undefined> = [undefined];
 
   constructor(
@@ -53,8 +56,13 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     void this.loadAccounts();
-    this.context.contextChanged$.pipe(takeUntil(this.destroy$)).subscribe(() => { void this.reloadForCurrentContext(); });
-    this.context.sessionExpired$.pipe(takeUntil(this.destroy$)).subscribe(() => this.clearForExpiredSession());
+    this.context.contextChanged$.pipe(takeUntil(this.destroy$)).subscribe(() => {
+      this.clearPendingAttemptsForContextChange();
+      void this.reloadForCurrentContext();
+    });
+    this.context.sessionExpired$.pipe(takeUntil(this.destroy$)).subscribe(() => {
+      this.clearForExpiredSession();
+    });
   }
 
   ngOnDestroy(): void {
@@ -80,7 +88,7 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
       this.jobId = null;
       this.jobStatus = null;
       this.jobStatusError = '';
-      this.lastCreateFingerprint = '';
+      this.currentAttemptScope = null;
       this.createIdempotencyKey = '';
     }
     this.selectedAssetId = assetId;
@@ -130,23 +138,27 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const fingerprint = JSON.stringify(request);
-    if (fingerprint !== this.lastCreateFingerprint) {
-      const key = globalThis.crypto?.randomUUID?.();
-      if (!key) {
-        this.formError = 'Este navegador não conseguiu criar uma chave segura para o pedido.';
-        return;
-      }
-      this.lastCreateFingerprint = fingerprint;
-      this.createIdempotencyKey = key;
-    }
-
     this.isCreating = true;
     this.requestId = null;
+    const contextRef = this.context.contextRef;
+    let attemptScope: string | null = null;
+    let dispatched = false;
     try {
+      if (!contextRef) throw new Error('The portal context is unavailable.');
+      attemptScope = await this.pendingAttempts.scope(contextRef, assetId, request);
+      if (generation !== this.accountGeneration || assetId !== this.selectedAssetId || contextRef !== this.context.contextRef) return;
+      const attempt = this.pendingAttempts.reserve(attemptScope, () => {
+        const key = globalThis.crypto?.randomUUID?.();
+        if (!key) throw new Error('A secure idempotency key is unavailable.');
+        return key;
+      });
+      this.currentAttemptScope = attemptScope;
+      this.createIdempotencyKey = attempt.idempotencyKey;
+      dispatched = true;
       const accepted = await this.service.create(assetId, request, this.createIdempotencyKey);
       if (generation !== this.accountGeneration || assetId !== this.selectedAssetId) return;
       if (!this.isAcceptedJob(accepted)) throw new Error('The template request was not accepted.');
+      try { this.pendingAttempts.recordJob(attemptScope, accepted.jobId); } catch { /* The key was persisted before the POST. */ }
       this.requestId = accepted.requestId;
       this.jobId = accepted.jobId;
       this.jobStatus = null;
@@ -154,6 +166,12 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
       this.statusMessage = 'Pedido enviado para processamento. A aceitação da solicitação não confirma aprovação do modelo pela Meta.';
     } catch (error: unknown) {
       if (generation !== this.accountGeneration || assetId !== this.selectedAssetId) return;
+      if (!dispatched) {
+        this.formError = 'Não foi possível registrar a tentativa pendente neste navegador. O pedido não foi enviado.';
+        this.requestId = safeRequestId(error);
+        return;
+      }
+      if (attemptScope && definitiveNoEffect(error)) this.resolveTemplateAttempt(attemptScope);
       this.formError = 'Não foi possível confirmar o envio do pedido. Consulte o status antes de tentar novamente.';
       this.requestId = safeRequestId(error);
     } finally {
@@ -179,6 +197,9 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
         this.statusMessage = 'O pedido não foi concluído. Consulte os detalhes seguros do trabalho antes de tentar novamente.';
       } else {
         this.statusMessage = 'O pedido continua em processamento.';
+      }
+      if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(this.jobStatus.status) && this.currentAttemptScope) {
+        this.resolveTemplateAttempt(this.currentAttemptScope);
       }
       this.requestId = this.jobStatus.requestId;
     } catch (error: unknown) {
@@ -259,7 +280,7 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
     this.jobStatusError = '';
     this.isCheckingJob = false;
     this.isCreating = false;
-    this.lastCreateFingerprint = '';
+    this.currentAttemptScope = null;
     this.createIdempotencyKey = '';
     this.form = { name: '', language: '', category: 'UTILITY', bodyText: '' };
     this.examplesText = '';
@@ -290,13 +311,31 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
     this.jobStatus = null;
     this.jobStatusError = '';
     this.requestId = null;
-    this.lastCreateFingerprint = '';
+    this.currentAttemptScope = null;
     this.createIdempotencyKey = '';
     this.form = { name: '', language: '', category: 'UTILITY', bodyText: '' };
     this.examplesText = '';
     this.formError = '';
     this.statusMessage = '';
     this.accountError = 'Sua sessão terminou. Entre novamente para consultar os modelos.';
+  }
+
+  private clearPendingAttemptsForContextChange(): void {
+    try { this.pendingAttempts.clear(); } catch { /* The new context hash still fences any old record. */ }
+    this.currentAttemptScope = null;
+    this.createIdempotencyKey = '';
+  }
+
+  private resolveTemplateAttempt(scope: string): void {
+    try {
+      this.pendingAttempts.resolve(scope);
+      if (this.currentAttemptScope === scope) {
+        this.currentAttemptScope = null;
+        this.createIdempotencyKey = '';
+      }
+    } catch {
+      // Retain the key if storage cannot confirm removal; that is safer than generating a new POST key.
+    }
   }
 
   private parseExamples(bodyText: string, rawExamples: string): readonly string[] | null {
@@ -334,4 +373,8 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
     return Array.isArray(page['items']) && page['items'].length <= 100 &&
       (page['nextCursor'] === null || typeof page['nextCursor'] === 'string') && typeof page['requestId'] === 'string';
   }
+}
+
+function definitiveNoEffect(error: unknown): boolean {
+  return error instanceof HttpErrorResponse && [400, 403, 404, 422].includes(error.status);
 }
