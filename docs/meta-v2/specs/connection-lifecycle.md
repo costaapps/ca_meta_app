@@ -48,4 +48,4 @@ After the workspace dependencies are already present, run from repository root:
 npm run test:m4-13 --workspace=@ca-meta/api
 ```
 
-The harness strictly compiles the focused lifecycle slice and runs only `apps/api/test/m4-13-connection-lifecycle.spec.ts` in an OS temporary directory. It does not install dependencies, start a provider session, or access a real Meta account. Test results must be recorded by the coordinator on the final package SHA.
+The harness strictly compiles the focused lifecycle slice and runs only `apps/api/test/m4-13-connection-lifecycle.spec.ts` in an OS temporary directory. It does not install dependencies, start a provider session, or access a real Meta account. The coordinator recorded 11/11 on candidate `9c5fe20c8a294aa6a3c8f50bc84df089a3ef7915`; migration, contract, review and applicable CI evidence is summarized in the M4 progress record. External offboarding and cleanup behavior remain **Not confirmed**.

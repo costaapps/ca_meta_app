@@ -46,7 +46,7 @@ The local adapter is intentionally not installed by `configuredMetaOnboardingSag
 
 ## Validation and recovery
 
-Focused harness: [`tools/m4-06/README.md`](../../../tools/m4-06/README.md). Command: `node tools/m4-06/run-focused-test.mjs`. It compiles the small adapter dependency graph into an OS temp folder and cleans it in `finally`; the fixtures contain only generated UUIDs, synthetic code, synthetic assets and fake service results. The coordinator runs it once on the exact package candidate. It has not been run by the implementer.
+Focused harness: [`tools/m4-06/README.md`](../../../tools/m4-06/README.md). Command: `node tools/m4-06/run-focused-test.mjs`. It compiles the small adapter dependency graph into an OS temp folder and cleans it in `finally`; the fixtures contain only generated UUIDs, synthetic code, synthetic assets and fake service results. The implementer did not run it. The coordinator recorded 12/12 on source SHA `d305370`; package candidate `cd3533ad7227344db9839b199eec6a13f5bf2910` passed exact-head CI and code/security reviews. See the M4 progress record for the environment and package PR evidence.
 
 No migration is needed. Recovery uses M4.03 stage actions: authorization is never resumed with the same code; asset/subscription work may resume only from persisted authorization and verified assets; ambiguous effects require read-only reconciliation. If app grants, token family, asset relation or subscription target cannot be proven, keep the session partial/action-required and do not publish READY.
 

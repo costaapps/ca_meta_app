@@ -36,4 +36,4 @@ Persist subscription desired state separately from provider observations for eac
 
 ## Gate
 
-The focused package command is `node tools/m4-11/run-focused-test.mjs`. The coordinator must register the module/migration/command serially, then run the focused check and the appropriate synthetic MariaDB migration fixture on the integrated candidate SHA. This branch does not register itself or claim those later checks have run.
+The focused package command is `node tools/m4-11/run-focused-test.mjs`. The coordinator registered the module, migration and command; the focused harness passed 13/13 on candidate `c16ac350dec14b02e8b0b8a6e26fd55c961a6a36` with Node `24.22.1` and MariaDB `11.8.9`. Package PR #135 was squash-integrated as `e11fc12673f3ddb5ab2deb6bd5e1e6fb4d8977e1`; exact-head reviews and applicable CI passed. The final M4 acceptance and external subscription behavior remain pending.

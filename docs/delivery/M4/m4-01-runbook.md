@@ -169,7 +169,7 @@ are a safe disabled state; profiles without their trusted app-ID allowlist fail 
 
 ## Reproducible local checks
 
-Focused package command (coordinator runs it on the exact candidate SHA):
+Coordinator evidence: `npm run test:m4-01 --workspace=@ca-meta/api` passed 10/10 on implementation SHA `95f2acaa9d43827b060a685972f7956bde147b50` with Node `v24.22.1` and npm `11.19.1`. On final contract candidate `513cddc`, `npm run test:contract` passed 8/8 and `npm run check:generated` confirmed the generated client and 53 compatibility rows. The focused command below reproduces the synthetic API run:
 
 ```powershell
 npm run test:m4-01 --workspace=@ca-meta/api

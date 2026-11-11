@@ -47,6 +47,6 @@ No 24-hour window, trigger, schema, subscription or eligibility is inferred. The
 
 ## Validation and rollout
 
-Focused synthetic harness: [`tools/m4-07/README.md`](../../../tools/m4-07/README.md). Command: `node tools/m4-07/run-focused-test.mjs`. It compiles only the relevant API types, processor and synthetic test to a unique OS temp directory. The implementer did not run it; the coordinator runs it once on the package candidate. No credentials, real events, provider calls or production services are used.
+Focused synthetic harness: [`tools/m4-07/README.md`](../../../tools/m4-07/README.md). Command: `node tools/m4-07/run-focused-test.mjs`. It compiles only the relevant API types, processor and synthetic test to a unique OS temp directory. The implementer did not run it; the coordinator recorded 13/13 on source SHA `ced6ac1`. Package candidate `9f3990b90adf11c02d3c281c952486b879096169` passed exact-head CI and code/security reviews. The fixtures remain synthetic and do not establish provider event behavior. No credentials, real events, provider calls or production services are used.
 
 The processor is opt-in and has no default production wiring. Enabling it requires a reviewed server-side scope resolver, durable sink with atomic idempotency and retention enforcement, confirmed provider event schemas and retention/consent semantics, updated tests, security review and exact-candidate validation. Until these gates close, M4.10's fail-closed processor and tenantless quarantine remain the runtime behavior. No migration or public API is introduced here.

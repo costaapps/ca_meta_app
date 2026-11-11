@@ -62,7 +62,7 @@ No request in this package sends a message, replies to a comment, creates a subs
 | AC04 — zero accounts or missing webhook is not ready | Zero returns empty refs; partial/unknown subscription fails closed before projection | Instagram subscription semantics and live webhook receipt Not confirmed |
 | AC05 — messages/comments use the correct account credential and do not affect other products | This package adds no send/reply route; no cross-product mutation path is introduced | Not met: authorized message/comment Sandbox scenario and operation grants unavailable |
 
-The local harness is `node tools/m4-09/run-focused-test.mjs`; it uses only synthetic data, TypeScript compilation and Node's test runner. Execution evidence must be recorded by the M4 coordinator on the rebased candidate SHA. **Not run by this implementation agent**, per the coordinator's single-gate plan.
+The local harness is `node tools/m4-09/run-focused-test.mjs`; it uses only synthetic data, TypeScript compilation and Node's test runner. The coordinator recorded 14/14 on candidate `81d691b7266730435ba25eb582a90100beb4c161`; exact-SHA code/security reviews and applicable GitHub checks passed. **Not run by this implementation agent**, per the coordinator's single-gate plan. Provider execution remains disabled pending external evidence.
 
 ## Required enablement evidence
 
