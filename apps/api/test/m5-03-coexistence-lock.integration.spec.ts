@@ -111,7 +111,7 @@ test('M5.03 serializes Coexistence starts per tenant and releases on terminal/ex
     }));
     assert.equal(facebook.flowVariant, 'FACEBOOK_LOGIN', 'a Coexistence lock does not block a different flow variant');
 
-    const tenantBCommand = command({ tenantId: tenantB, portalSessionId: portalSessionB, ttlMs: 150 });
+    const tenantBCommand = command({ tenantId: tenantB, portalSessionId: portalSessionB });
     const tenantBRecord = await sessions.createOrReplay(tenantBCommand);
     assert.equal(tenantBRecord.flowVariant, 'WHATSAPP_COEXISTENCE', 'another tenant may start its own Coexistence session');
 
@@ -127,9 +127,22 @@ test('M5.03 serializes Coexistence starts per tenant and releases on terminal/ex
     const afterTerminal = await sessions.createOrReplay(command({ tenantId: tenantA, portalSessionId: portalSessionA }));
     assert.equal(afterTerminal.flowVariant, 'WHATSAPP_COEXISTENCE');
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await connection.execute(
+      `UPDATE ca_meta_onboarding_sessions SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)
+       WHERE tenant_id = ? AND id = ?`,
+      [tenantB, tenantBRecord.id],
+    );
     const afterExpiry = await sessions.createOrReplay(command({ tenantId: tenantB, portalSessionId: portalSessionB }));
     assert.equal(afterExpiry.flowVariant, 'WHATSAPP_COEXISTENCE', 'an expired active session no longer occupies the tenant slot');
+    const [expiredRows] = await connection.execute<Array<{ status: string } & import('mysql2').RowDataPacket>>(
+      'SELECT status FROM ca_meta_onboarding_sessions WHERE tenant_id = ? AND id = ?', [tenantB, tenantBRecord.id],
+    );
+    assert.equal(expiredRows[0]?.status, 'EXPIRED', 'the next create materializes an expired session as terminal');
+    const [expiryLockRows] = await connection.execute<Array<{ onboarding_session_id: string } & import('mysql2').RowDataPacket>>(
+      'SELECT onboarding_session_id FROM ca_meta_onboarding_coexistence_locks WHERE tenant_id = ?', [tenantB],
+    );
+    assert.equal(expiryLockRows.length, 1);
+    assert.equal(expiryLockRows[0]?.onboarding_session_id, afterExpiry.id, 'the expired lock is replaced by the new session');
   } finally {
     try {
       await connection.execute('DELETE FROM ca_meta_onboarding_coexistence_locks WHERE tenant_id IN (?, ?)', [tenantA, tenantB]);
