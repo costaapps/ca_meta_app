@@ -1,0 +1,113 @@
+<section class="templates-page" aria-labelledby="templates-title">
+  <p class="eyebrow">Portal do WhatsApp</p>
+  <h1 id="templates-title">Modelos de mensagem</h1>
+  <p class="intro">Consulte e solicite modelos BODY de uma conta WhatsApp Business autorizada.</p>
+
+  <p *ngIf="isLoadingAccounts" class="state" role="status">Carregando contas WhatsApp…</p>
+  <p *ngIf="accountError" class="error" role="alert">{{ accountError }}</p>
+
+  <ng-container *ngIf="!isLoadingAccounts && !accountError">
+    <p *ngIf="accounts.length === 0" class="empty-state">Nenhuma conta WhatsApp Business está disponível nesta empresa.</p>
+
+    <ng-container *ngIf="accounts.length > 0">
+      <label class="account-field" for="template-account">Conta WhatsApp Business</label>
+      <select id="template-account" name="templateAccount" [(ngModel)]="selectedAssetId"
+        (ngModelChange)="selectAccount($event)">
+        <option *ngFor="let account of accounts; trackBy: trackByAsset" [value]="account.id">
+          {{ account.displayLabel || 'Conta do WhatsApp Business' }} · {{ account.authorizationStatus === 'VERIFIED' ? 'autorização confirmada' : 'autorização não confirmada' }}
+        </option>
+      </select>
+
+      <p *ngIf="!accountCanManageTemplates" class="notice" role="status">
+        A listagem e a criação ficam indisponíveis enquanto a conta e a permissão de administrar modelos não forem confirmadas.
+      </p>
+
+      <section *ngIf="accountCanManageTemplates" class="template-content" aria-label="Modelos e criação">
+        <div class="section-heading">
+          <div>
+            <h2>Modelos existentes</h2>
+            <p>Os dados e estados abaixo dependem da última resposta confirmada pelo servidor.</p>
+          </div>
+          <button type="button" class="secondary-button" [disabled]="isLoadingTemplates" (click)="selectAccount(selectedAssetId)">
+            Atualizar lista
+          </button>
+        </div>
+
+        <p *ngIf="isLoadingTemplates" class="state" role="status">Consultando modelos…</p>
+        <p *ngIf="listError" class="error" role="alert">{{ listError }}</p>
+        <p *ngIf="!isLoadingTemplates && !listError && templates.length === 0" class="empty-state">Esta conta não retornou modelos nesta página.</p>
+
+        <div *ngIf="templates.length > 0" class="template-list">
+          <article class="template-card" *ngFor="let item of templates; trackBy: trackByTemplate">
+            <div class="template-title-row">
+              <h3>{{ item.name }}</h3>
+              <span class="status">{{ item.status }}</span>
+            </div>
+            <dl>
+              <div><dt>Idioma</dt><dd>{{ item.language }}</dd></div>
+              <div><dt>Categoria informada</dt><dd>{{ item.category }}</dd></div>
+              <div><dt>Última atualização observada</dt><dd>{{ item.updatedAt }}</dd></div>
+            </dl>
+          </article>
+        </div>
+
+        <nav class="pagination" aria-label="Paginação de modelos" *ngIf="templates.length > 0 || nextCursor">
+          <button type="button" class="secondary-button" (click)="previousPage()" [disabled]="pageIndex === 0 || isLoadingTemplates">Página anterior</button>
+          <span aria-live="polite">Página {{ pageIndex + 1 }}</span>
+          <button type="button" class="secondary-button" (click)="nextPage()" [disabled]="!nextCursor || isLoadingTemplates">Próxima página</button>
+        </nav>
+
+        <details *ngIf="requestId" class="support-details">
+          <summary>Referência para suporte</summary>
+          <p>Identificador da solicitação: <code>{{ requestId }}</code></p>
+        </details>
+
+        <section class="create-panel" aria-labelledby="create-template-title">
+          <h2 id="create-template-title">Solicitar modelo BODY</h2>
+          <p>Os exemplos seguem a convenção local deste formulário: um exemplo para cada marcador distinto, na ordem em que aparece.</p>
+          <form (ngSubmit)="createTemplate()">
+            <div class="form-grid">
+              <label>
+                Nome
+                <input name="name" [(ngModel)]="form.name" autocomplete="off" maxlength="128" required>
+              </label>
+              <label>
+                Idioma
+                <input name="language" [(ngModel)]="form.language" autocomplete="off" maxlength="16" placeholder="pt_BR" required>
+              </label>
+              <label>
+                Categoria
+                <select name="category" [(ngModel)]="form.category">
+                  <option value="AUTHENTICATION">Autenticação</option>
+                  <option value="MARKETING">Marketing</option>
+                  <option value="UTILITY">Utilidade</option>
+                </select>
+              </label>
+              <label class="wide-field">
+                Texto do corpo
+                <textarea name="bodyText" [(ngModel)]="form.bodyText" rows="5" maxlength="1024" required></textarea>
+              </label>
+              <label class="wide-field">
+                Exemplos de valores, um por linha
+                <textarea name="examples" [(ngModel)]="examplesText" rows="3" placeholder="Ana&#10;1234"></textarea>
+              </label>
+            </div>
+            <p *ngIf="formError" class="error" role="alert">{{ formError }}</p>
+            <p *ngIf="statusMessage" class="success" role="status">{{ statusMessage }}</p>
+            <div *ngIf="jobId" class="job-status">
+              <p>Pedido de acompanhamento: <code>{{ jobId }}</code></p>
+              <button type="button" class="secondary-button" [disabled]="isCheckingJob" (click)="checkJobStatus()">
+                {{ isCheckingJob ? 'Consultando…' : 'Consultar status' }}
+              </button>
+              <p *ngIf="jobStatus" class="status-detail">Status local do trabalho: {{ jobStatus.status }}</p>
+              <p *ngIf="jobStatusError" class="error" role="alert">{{ jobStatusError }}</p>
+            </div>
+            <button type="submit" [disabled]="isCreating || !accountCanManageTemplates">
+              {{ isCreating ? 'Enviando…' : 'Enviar pedido' }}
+            </button>
+          </form>
+        </section>
+      </section>
+    </ng-container>
+  </ng-container>
+</section>

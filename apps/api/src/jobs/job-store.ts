@@ -178,6 +178,7 @@ function resourceScope(input: EnqueueJobInput, payload: JobPayload): string {
     case 'HISTORY_SYNC': return payload.checkpointRef;
     case 'CREDENTIAL_INSPECTION': return payload.credentialId;
     case 'ASSET_REFRESH': return payload.assetId;
+    case 'TEMPLATE_CREATE': return payload.assetId;
   }
 }
 

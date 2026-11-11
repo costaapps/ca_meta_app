@@ -10,6 +10,7 @@
     "test": "ng test --watch=false",
     "test:m5-02": "node ../../tools/m5-02/run-focused-web-tests.mjs",
     "test:m5-03": "node ../../tools/m5-03/run-focused-web-tests.mjs",
+    "test:m5-04": "node ../../tools/m5-04/run-focused-web-tests.mjs",
     "typecheck": "ngc -p tsconfig.app.json --noEmit",
     "lint": "node ../../tools/m2/check-web-boundary.mjs"
   },

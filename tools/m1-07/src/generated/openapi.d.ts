@@ -655,20 +655,20 @@ export interface paths {
             readonly query?: never;
             readonly header?: never;
             readonly path: {
-                /** @description Opaque account asset ID; the server verifies tenant and MANAGE_TEMPLATES capability. */
+                /** @description Internal WABA asset UUID selected from this tenant's verified WhatsApp EXCLUSIVE assets. The server resolves the provider account identifier and MANAGE_TEMPLATES credential; browser-supplied provider IDs, cUUID, company_uuid and tokens are not accepted. */
                 readonly assetId: string;
             };
             readonly cookie?: never;
         };
         /**
          * List templates for an authorized WhatsApp account
-         * @description Returns a tenant/account-scoped template projection from the selected eligible grant. Provider eligibility and actual grant semantics are Not confirmed; no global credential is selected.
+         * @description Returns a tenant/account-scoped template projection after current membership, WABA ownership, WhatsApp EXCLUSIVE flow, verified asset and candidate MANAGE_TEMPLATES grant checks. The provider adapter is disabled by default until current eligibility and capability evidence is reviewed. Unrecognized provider states are normalized to UNKNOWN; exact provider fields and status enumeration are Not confirmed. No root/global credential is selected.
          */
         readonly get: operations["listTemplates"];
         readonly put?: never;
         /**
          * Request creation of a template
-         * @description Validates an allowlisted payload and selected account grant before dispatch. Provider template review/approval is asynchronous and is not inferred from request acceptance.
+         * @description Validates an allowlisted payload and selected account grant before dispatch. Provider template review/approval is asynchronous and is not inferred from request acceptance. The real dispatch adapter remains disabled until current provider capability and tenant eligibility are confirmed. Body and category constraints are local request-contract limits, not a claim about the current Meta validation rules.
          */
         readonly post: operations["createTemplate"];
         readonly delete?: never;
@@ -1233,9 +1233,15 @@ export interface components {
             readonly id: string;
             readonly name: string;
             readonly language: string;
-            /** @enum {string} */
+            /**
+             * @description Local normalized vocabulary. Do not map a provider value until its current status and approval semantics have been confirmed; current provider values and meanings are Not confirmed.
+             * @enum {string}
+             */
             readonly status: "PENDING" | "APPROVED" | "REJECTED" | "PAUSED" | "UNKNOWN";
-            /** @enum {string} */
+            /**
+             * @description Local normalized vocabulary. Do not map a provider value until its current category mapping has been confirmed; current provider values and meanings are Not confirmed.
+             * @enum {string}
+             */
             readonly category: "AUTHENTICATION" | "MARKETING" | "UTILITY" | "UNKNOWN";
             /** Format: date-time */
             readonly updatedAt: string;
@@ -1245,12 +1251,16 @@ export interface components {
             readonly nextCursor: string | null;
             readonly requestId: string;
         };
+        /** @description Local BODY-only request shape. Name/language/body limits and the local create-category allowlist are compatibility constraints of this API and are not asserted as current Meta rules. `exampleValues` has one entry per distinct BODY placeholder in first-occurrence order; repeated placeholders reuse that entry. This correspondence is a local contract rule, not a claim about Meta's current examples validation. */
         readonly TemplateCreateRequest: {
             readonly name: string;
             readonly language: string;
             /** @enum {string} */
             readonly category: "AUTHENTICATION" | "MARKETING" | "UTILITY";
+            /** @description BODY text. Matched placeholders use {{1}} through {{N}} with first occurrence in ascending order; repeats are allowed by this local request contract. */
             readonly bodyText: string;
+            /** @description Local BODY example values, one non-empty string for each distinct placeholder index. Omit or pass an empty array when the body has no placeholders. */
+            readonly exampleValues?: readonly string[];
         };
         readonly Notification: {
             readonly id: string;
@@ -2874,7 +2884,7 @@ export interface operations {
                 readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
             };
             readonly path: {
-                /** @description Opaque account asset ID; the server verifies tenant and MANAGE_TEMPLATES capability. */
+                /** @description Internal WABA asset UUID selected from this tenant's verified WhatsApp EXCLUSIVE assets. The server resolves the provider account identifier and MANAGE_TEMPLATES credential; browser-supplied provider IDs, cUUID, company_uuid and tokens are not accepted. */
                 readonly assetId: string;
             };
             readonly cookie?: never;
@@ -2925,7 +2935,7 @@ export interface operations {
                 readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             readonly path: {
-                /** @description Opaque account asset ID; the server verifies tenant and MANAGE_TEMPLATES capability. */
+                /** @description Internal WABA asset UUID selected from this tenant's verified WhatsApp EXCLUSIVE assets. The server resolves the provider account identifier and MANAGE_TEMPLATES credential; browser-supplied provider IDs, cUUID, company_uuid and tokens are not accepted. */
                 readonly assetId: string;
             };
             readonly cookie?: never;

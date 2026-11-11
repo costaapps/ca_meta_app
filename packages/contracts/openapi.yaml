@@ -1203,19 +1203,19 @@ paths:
               schema:
                 type: string
                 const: no-store
-        "400": &a30
+        "400": &a29
           $ref: "#/components/responses/BadRequest"
-        "404": &a31
+        "404": &a30
           $ref: "#/components/responses/NotFound"
-        "409": &a32
+        "409": &a31
           $ref: "#/components/responses/Conflict"
-        "413": &a33
+        "413": &a32
           $ref: "#/components/responses/PayloadTooLarge"
-        "429": &a34
+        "429": &a33
           $ref: "#/components/responses/TooManyRequests"
-        "503": &a35
+        "503": &a34
           $ref: "#/components/responses/Unavailable"
-        default: &a36
+        default: &a35
           $ref: "#/components/responses/UnexpectedError"
       x-external-effect: Consumes one-time state and records provider return for a
         server-side job.
@@ -2186,28 +2186,30 @@ paths:
       - name: assetId
         in: path
         required: true
-        description: Opaque account asset ID; the server verifies tenant and
-          MANAGE_TEMPLATES capability.
+        description: Internal WABA asset UUID selected from this tenant's verified
+          WhatsApp EXCLUSIVE assets. The server resolves the provider account
+          identifier and MANAGE_TEMPLATES credential; browser-supplied provider
+          IDs, cUUID, company_uuid and tokens are not accepted.
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
-          pattern: ^[A-Za-z0-9_-]+$
+          format: uuid
     get:
       operationId: listTemplates
       tags:
         - Templates
       summary: List templates for an authorized WhatsApp account
-      description: Returns a tenant/account-scoped template projection from the
-        selected eligible grant. Provider eligibility and actual grant semantics
-        are Not confirmed; no global credential is selected.
+      description: Returns a tenant/account-scoped template projection after current
+        membership, WABA ownership, WhatsApp EXCLUSIVE flow, verified asset and
+        candidate MANAGE_TEMPLATES grant checks. The provider adapter is
+        disabled by default until current eligibility and capability evidence is
+        reviewed. Unrecognized provider states are normalized to UNKNOWN; exact
+        provider fields and status enumeration are Not confirmed. No root/global
+        credential is selected.
       security: *a10
-      parameters: &a29
+      parameters:
         - $ref: "#/components/parameters/TenantContext"
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/AssetCatalogChannel"
-        - $ref: "#/components/parameters/AssetCatalogNumber"
       responses:
         "200":
           description: Sanitized success example
@@ -2223,8 +2225,8 @@ paths:
                       - id: template_example_01
                         name: order_update
                         language: en
-                        status: APPROVED
-                        category: UTILITY
+                        status: UNKNOWN
+                        category: UNKNOWN
                         updatedAt: 2026-10-29T10:00:00Z
                     nextCursor: null
                     requestId: req_example_36
@@ -2246,7 +2248,10 @@ paths:
       summary: Request creation of a template
       description: Validates an allowlisted payload and selected account grant before
         dispatch. Provider template review/approval is asynchronous and is not
-        inferred from request acceptance.
+        inferred from request acceptance. The real dispatch adapter remains
+        disabled until current provider capability and tenant eligibility are
+        confirmed. Body and category constraints are local request-contract
+        limits, not a claim about the current Meta validation rules.
       security: *a10
       parameters: *a23
       requestBody:
@@ -2264,6 +2269,7 @@ paths:
                   language: en
                   category: UTILITY
                   bodyText: Your order is ready for pickup.
+                  exampleValues: []
       responses:
         "202":
           description: Sanitized success example
@@ -2291,12 +2297,17 @@ paths:
         "429": *a19
         "503": *a20
         default: *a21
-      x-external-effect: Submits template creation to the provider for review.
+      x-external-effect: The installed worker adapter submits template creation to the
+        provider for review. The API and worker adapters are disabled by default
+        until current capability evidence is reviewed.
       x-idempotency-scope: tenant + operation + Idempotency-Key and canonical request payload hash.
-      x-retry-policy: At most one automatic provider submission, including the initial
-        request; zero automatic retries without verified provider idempotency.
-        If the result is ambiguous, reconcile by provider template identity
-        before any new explicit request.
+      x-retry-policy: At most one provider submission, including the initial request.
+        The durable job is configured with one attempt and AMBIGUOUS effect
+        mode. If the outcome is ambiguous, status is UNKNOWN and a read-only
+        reconciliation checks the same internal account for a name/language
+        candidate. A candidate can predate the request and does not prove
+        causation; without confirmed provider correlation the outcome remains
+        UNKNOWN. No blind retry.
   /api/v1/notifications:
     get:
       operationId: listNotifications
@@ -2306,7 +2317,12 @@ paths:
       description: Returns safe metadata, references and freshness; no message body or
         raw provider payload is included. Cursor and limit are bounded.
       security: *a10
-      parameters: *a29
+      parameters:
+        - $ref: "#/components/parameters/TenantContext"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/AssetCatalogChannel"
+        - $ref: "#/components/parameters/AssetCatalogNumber"
       responses:
         "200":
           description: Sanitized success example
@@ -2448,13 +2464,13 @@ paths:
                   summary: Sanitized success example
                   value:
                     challenge: synthetic-webhook-challenge
-        "400": *a30
-        "404": *a31
-        "409": *a32
-        "413": *a33
-        "429": *a34
-        "503": *a35
-        default: *a36
+        "400": *a29
+        "404": *a30
+        "409": *a31
+        "413": *a32
+        "429": *a33
+        "503": *a34
+        default: *a35
       x-external-effect: None beyond a challenge response after configured verification.
     post:
       operationId: receiveMetaWebhook
@@ -2495,13 +2511,13 @@ paths:
                   value:
                     accepted: true
                     requestId: req_example_41
-        "400": *a30
-        "404": *a31
-        "409": *a32
-        "413": *a33
-        "429": *a34
-        "503": *a35
-        default: *a36
+        "400": *a29
+        "404": *a30
+        "409": *a31
+        "413": *a32
+        "429": *a33
+        "503": *a34
+        default: *a35
       x-external-effect: Stores a bounded signed inbox envelope for asynchronous routing.
       x-idempotency-scope: Configured app + provider delivery ID when available;
         otherwise a bounded raw-body digest with signature-verification
@@ -2529,11 +2545,11 @@ paths:
                   summary: Sanitized success example
                   value:
                     status: ok
-        "405": &a37
+        "405": &a36
           $ref: "#/components/responses/MethodNotAllowed"
-        "503": &a38
+        "503": &a37
           $ref: "#/components/responses/Unavailable"
-        default: &a39
+        default: &a38
           $ref: "#/components/responses/UnexpectedError"
   /ready:
     get:
@@ -2557,9 +2573,9 @@ paths:
                   summary: Sanitized success example
                   value:
                     status: ok
-        "405": *a37
-        "503": *a38
-        default: *a39
+        "405": *a36
+        "503": *a37
+        default: *a38
 components:
   securitySchemes:
     portalSession:
@@ -4333,6 +4349,9 @@ components:
           maxLength: 16
         status:
           type: string
+          description: Local normalized vocabulary. Do not map a provider value until its
+            current status and approval semantics have been confirmed; current
+            provider values and meanings are Not confirmed.
           enum:
             - PENDING
             - APPROVED
@@ -4341,6 +4360,9 @@ components:
             - UNKNOWN
         category:
           type: string
+          description: Local normalized vocabulary. Do not map a provider value until its
+            current category mapping has been confirmed; current provider values
+            and meanings are Not confirmed.
           enum:
             - AUTHENTICATION
             - MARKETING
@@ -4374,6 +4396,12 @@ components:
     TemplateCreateRequest:
       type: object
       additionalProperties: false
+      description: Local BODY-only request shape. Name/language/body limits and the
+        local create-category allowlist are compatibility constraints of this
+        API and are not asserted as current Meta rules. `exampleValues` has one
+        entry per distinct BODY placeholder in first-occurrence order; repeated
+        placeholders reuse that entry. This correspondence is a local contract
+        rule, not a claim about Meta's current examples validation.
       required:
         - name
         - language
@@ -4389,6 +4417,7 @@ components:
           type: string
           minLength: 2
           maxLength: 16
+          pattern: ^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8}){0,2}$
         category:
           type: string
           enum:
@@ -4399,6 +4428,19 @@ components:
           type: string
           minLength: 1
           maxLength: 1024
+          description: BODY text. Matched placeholders use {{1}} through {{N}} with first
+            occurrence in ascending order; repeats are allowed by this local
+            request contract.
+        exampleValues:
+          type: array
+          maxItems: 100
+          description: Local BODY example values, one non-empty string for each distinct
+            placeholder index. Omit or pass an empty array when the body has no
+            placeholders.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 1024
     Notification:
       type: object
       additionalProperties: false
@@ -4567,7 +4609,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
           examples:
-            sanitized: &a40
+            sanitized: &a39
               summary: Invalid input, redacted
               value:
                 code: VALIDATION_FAILED
@@ -4679,7 +4721,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
           examples:
-            sanitized: *a40
+            sanitized: *a39
     PayloadTooLarge:
       description: The payload exceeds the endpoint limit.
       content:

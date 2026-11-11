@@ -18,8 +18,7 @@ export const routes: Routes = [
       { path: 'assets/:id', loadComponent: () => import('./features/portal/asset-detail.component').then((m) => m.AssetDetailComponent) },
       {
         path: 'templates',
-        loadComponent: () => import('./features/portal/portal-section.component').then((m) => m.PortalSectionComponent),
-        data: { title: 'Modelos', description: 'Os modelos disponíveis serão exibidos após a confirmação dos recursos e permissões desta empresa.' },
+        loadComponent: () => import('./features/portal/whatsapp-templates.component').then((m) => m.WhatsAppTemplatesComponent),
       },
       {
         path: 'notifications',
