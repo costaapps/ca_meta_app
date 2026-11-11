@@ -5,7 +5,7 @@ import { BehaviorSubject, firstValueFrom, type Observable } from 'rxjs';
 import { META_API_BASE_URL } from '../config/public-runtime-config';
 import { isOpaqueOnboardingRef, validateOAuthReturnEvent } from '../embed/embed-contract';
 import { ONBOARDING_PROVIDER_ACTIVATION_ENABLED, ONBOARDING_PROVIDER_LAUNCH, type OnboardingProviderLaunchAdapter, type PreparedOnboardingPopup } from './onboarding-provider-launch';
-import { OnboardingSessionStore, type StoredOnboardingReference } from './onboarding-session-store';
+import { OnboardingSessionStore, type StoredOnboardingReference, type StoredPendingOnboardingCreate } from './onboarding-session-store';
 import { ONBOARDING_TENANT_IDENTITY, ONBOARDING_TENANT_IDENTITY_WARNING, type OnboardingTenantIdentityReader } from './onboarding-tenant-identity';
 import { parseOnboardingFlowCatalog, type OnboardingFlowProfile, type OnboardingFlowVariant } from './onboarding-flow-catalog';
 
@@ -54,6 +54,7 @@ export interface PortalOnboardingSnapshot {
   readonly tenantDisplayName: string | null;
   readonly tenantMutationAllowed: boolean;
   readonly providerActivationEnabled: boolean;
+  readonly pendingCreateFlowVariant?: OnboardingFlowVariant;
 }
 
 interface MutableAttempt {
@@ -211,6 +212,10 @@ function requestIdempotencyKey(documentRef: Document): string | undefined {
   return typeof id === 'string' && /^[A-Fa-f0-9-]{36}$/.test(id) ? id : undefined;
 }
 
+function sameRequestedCapabilities(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function isFinalStatus(status: OnboardingServerStatus | undefined): boolean {
   return status !== undefined && TERMINAL_STATUSES.has(status.status);
 }
@@ -242,7 +247,7 @@ export class PortalOnboardingService {
   private initialized?: Promise<void>;
   private catalogLoadSequence = 0;
   private busy = false;
-  private ambiguousCreate = false;
+  private pendingCreate?: StoredPendingOnboardingCreate;
   private catalogTenantContextRef?: string;
   private currentTenantContextRef?: string;
 
@@ -310,6 +315,10 @@ export class PortalOnboardingService {
       return;
     }
     const references = this.store.read(context.tenantContextRef);
+    this.pendingCreate = this.store.pendingCreate(context.tenantContextRef);
+    if (this.pendingCreate) {
+      this.setNotice('Uma tentativa anterior pode ter sido aceita pelo servidor. Escolha novamente o mesmo fluxo para consultar a sessão existente com segurança.');
+    }
     for (const ref of references) {
       if (!this.attempts.has(ref.id)) {
         this.attempts.set(ref.id, {
@@ -331,8 +340,10 @@ export class PortalOnboardingService {
   canStart(profile: OnboardingFlowProfile): boolean {
     const capability = this.tenantIdentity.current();
     if (!capability.confirmed || !capability.tenantDisplayName.trim() || !this.providerActivationEnabled ||
-        this.ambiguousCreate || this.busy || !profile.enabled || profile.blockedReason !== null ||
+        this.busy || !profile.enabled || profile.blockedReason !== null ||
         this.getSnapshot().catalogState !== 'loaded' || this.catalogTenantContextRef !== this.currentTenantContextRef) return false;
+    if (this.pendingCreate && (profile.flowVariant !== this.pendingCreate.flowVariant ||
+        !sameRequestedCapabilities(profile.requestedCapabilities, this.pendingCreate.requestedCapabilities))) return false;
     if (profile.flowVariant === 'WHATSAPP_COEXISTENCE' && this.hasActiveCoexistence()) return false;
     return true;
   }
@@ -347,7 +358,7 @@ export class PortalOnboardingService {
       this.setNotice('Os fluxos Meta permanecem desativados até a evidência externa de segurança e elegibilidade ser confirmada.');
       return false;
     }
-    if (this.ambiguousCreate || this.busy) return false;
+    if (this.busy) return false;
     if (!this.store.ensureAvailable()) {
       this.setNotice('O armazenamento desta aba está indisponível; não é seguro iniciar uma autorização que não poderá ser retomada após recarregar.');
       return false;
@@ -361,6 +372,11 @@ export class PortalOnboardingService {
       this.setNotice(selected?.blockedReason ?? 'Este fluxo não está habilitado pelo servidor.');
       return false;
     }
+    if (this.pendingCreate && (selected.flowVariant !== this.pendingCreate.flowVariant ||
+        !sameRequestedCapabilities(selected.requestedCapabilities, this.pendingCreate.requestedCapabilities))) {
+      this.setNotice('Retome a tentativa pendente pelo mesmo fluxo antes de iniciar outra autorização.');
+      return false;
+    }
 
     // Open the blank popup synchronously in the click handler; catalog/session work can resume afterward.
     const popup = this.providerLaunch.prepare();
@@ -372,6 +388,8 @@ export class PortalOnboardingService {
     this.update({ busy: true, notice: '' });
     let requestSent = false;
     let popupTransferred = false;
+    let requestContextForCreate: PortalRequestContext | undefined;
+    let createIdempotencyKey: string | undefined;
     try {
       await this.initialize();
       if (!this.assertTenantMutationAllowed()) throw new Error('tenant-identity-unconfirmed');
@@ -385,6 +403,7 @@ export class PortalOnboardingService {
       }
       if (!this.store.ensureAvailable()) throw new Error('session-storage-unavailable');
       const requestContext = await this.readRequestContext(true);
+      requestContextForCreate = requestContext;
       if (!this.store.ensureAvailable(requestContext.tenantContextRef)) throw new Error('session-storage-unavailable');
       if (!this.assertTenantMutationAllowed()) throw new Error('tenant-identity-unconfirmed');
       const currentProfile = this.getSnapshot().profiles.find((item) =>
@@ -392,8 +411,21 @@ export class PortalOnboardingService {
       if (!this.catalogTenantContextRef || this.catalogTenantContextRef !== requestContext.tenantContextRef || currentProfile !== profile) {
         throw new Error('catalog-tenant-context-changed');
       }
-      const idempotencyKey = requestIdempotencyKey(this.documentRef);
-      if (!idempotencyKey) throw new Error('idempotency-key-unavailable');
+      const storedPending = this.store.pendingCreate(requestContext.tenantContextRef);
+      if (storedPending && (storedPending.flowVariant !== profile.flowVariant ||
+          !sameRequestedCapabilities(storedPending.requestedCapabilities, profile.requestedCapabilities))) {
+        throw new Error('pending-create-profile-mismatch');
+      }
+      let idempotencyKey = storedPending?.idempotencyKey;
+      if (!idempotencyKey) {
+        idempotencyKey = requestIdempotencyKey(this.documentRef);
+        if (!idempotencyKey) throw new Error('idempotency-key-unavailable');
+        if (!this.store.rememberPendingCreate(idempotencyKey, profile.flowVariant, profile.requestedCapabilities, requestContext.tenantContextRef)) {
+          throw new Error('pending-create-storage-failed');
+        }
+      }
+      createIdempotencyKey = idempotencyKey;
+      this.pendingCreate = this.store.pendingCreate(requestContext.tenantContextRef);
       requestSent = true;
       const response: unknown = await firstValueFrom(this.http.post<unknown>(`${this.baseUrl}/onboarding-sessions`, {
         flowVariant: profile.flowVariant,
@@ -409,7 +441,10 @@ export class PortalOnboardingService {
       }));
       const created = parseCreatedSession(response, this.providerLaunch, Date.now());
       if (!created || this.attempts.has(created.id)) throw new Error('invalid-onboarding-creation');
-      if (!this.store.remember(created.id, created.expiresAt, requestContext.tenantContextRef)) throw new Error('session-storage-write-failed');
+      if (!this.store.completePendingCreate(created.id, created.expiresAt, requestContext.tenantContextRef, idempotencyKey)) {
+        throw new Error('session-storage-write-failed');
+      }
+      this.pendingCreate = undefined;
       const attempt: MutableAttempt = {
         ref: Object.freeze({ id: created.id, expiresAt: created.expiresAt }),
         tenantContextRef: requestContext.tenantContextRef,
@@ -439,11 +474,14 @@ export class PortalOnboardingService {
       if (!popupTransferred) popup.close();
       if (requestSent) {
         if (this.isActiveCoexistenceConflict(error)) {
+          if (requestContextForCreate && createIdempotencyKey) {
+            this.store.forgetPendingCreate(requestContextForCreate.tenantContextRef, createIdempotencyKey);
+          }
+          if (this.pendingCreate?.idempotencyKey === createIdempotencyKey) this.pendingCreate = undefined;
           this.setNotice('Já existe uma autorização WhatsApp Coexistence em andamento para esta empresa. Consulte ou conclua a sessão atual antes de iniciar outro número.');
         } else {
-          // The accepted response may have been lost. Keep this tab fail-closed rather than create another.
-          this.ambiguousCreate = true;
-          this.setNotice('O resultado da abertura da sessão não foi confirmado. Verifique as conexões antes de iniciar outra autorização.');
+          // Keep the pre-send key so only an explicit same-flow retry can replay the create safely.
+          this.setNotice('O resultado da abertura da sessão não foi confirmado. Escolha novamente o mesmo fluxo para retomar com a chave já reservada.');
         }
       } else if (error instanceof Error && error.message === 'tenant-identity-unconfirmed') {
         this.setNotice(ONBOARDING_TENANT_IDENTITY_WARNING);
@@ -454,6 +492,8 @@ export class PortalOnboardingService {
       } else if (error instanceof Error && error.message === 'catalog-tenant-context-changed') {
         this.setNotice('O contexto da empresa mudou. Atualize as opções de autorização antes de continuar.');
         if (this.getSnapshot().catalogState !== 'loading') void this.loadCatalog();
+      } else if (error instanceof Error && error.message === 'pending-create-profile-mismatch') {
+        this.setNotice('Retome a tentativa pendente pelo mesmo fluxo e capacidades antes de iniciar outra autorização.');
       } else {
         this.setNotice('Não foi possível preparar uma sessão de autorização. Nenhum código ou token foi reenviado.');
       }
@@ -786,10 +826,12 @@ export class PortalOnboardingService {
     this.currentTenantContextRef = tenantContextRef;
     if (!previous) {
       this.store.useContext(tenantContextRef);
+      this.pendingCreate = this.store.pendingCreate(tenantContextRef);
       return;
     }
     if (previous === tenantContextRef) return;
     this.store.useContext(tenantContextRef);
+    this.pendingCreate = this.store.pendingCreate(tenantContextRef);
     this.catalogTenantContextRef = undefined;
     this.update({ catalogState: 'loading', profiles: Object.freeze([]) });
     for (const [id, attempt] of this.attempts) {
@@ -855,6 +897,7 @@ export class PortalOnboardingService {
       tenantDisplayName: capability.confirmed && capability.tenantDisplayName.trim() ? capability.tenantDisplayName : null,
       tenantMutationAllowed: capability.confirmed === true && !!capability.tenantDisplayName.trim(),
       providerActivationEnabled: this.providerActivationEnabled,
+      ...(this.pendingCreate ? { pendingCreateFlowVariant: this.pendingCreate.flowVariant } : {}),
       notice: !capability.confirmed ? ONBOARDING_TENANT_IDENTITY_WARNING : input.notice,
     });
   }

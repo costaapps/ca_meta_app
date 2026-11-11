@@ -36,6 +36,26 @@ describe('OnboardingSessionStore', () => {
     expect(Object.keys(partition.references[0]).sort()).toEqual(['expiresAt', 'id']);
   });
 
+  it('persists only a short-lived context-bound create key and clears it atomically on success', () => {
+    const { documentRef, storage } = makeDocument();
+    const store = new OnboardingSessionStore(documentRef);
+    const key = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const id = '55555555-5555-4555-8555-555555555555';
+    const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+
+    expect(store.rememberPendingCreate(key, 'FACEBOOK_LOGIN', ['READ_STATUS'], tenantContextRef)).toBe(true);
+    expect(store.pendingCreate(tenantContextRef)).toMatchObject({
+      flowVariant: 'FACEBOOK_LOGIN', idempotencyKey: key, requestedCapabilities: ['READ_STATUS'],
+    });
+    const partition = JSON.parse(storage.getItem('ca.meta.portal.onboarding-refs.v1')!);
+    expect(Object.keys(partition.pendingCreate).sort()).toEqual(['expiresAt', 'flowVariant', 'idempotencyKey', 'requestedCapabilities']);
+    expect(JSON.stringify(partition)).not.toMatch(/token|code|state|launchUrl/i);
+    expect(store.pendingCreate(otherTenantContextRef)).toBeUndefined();
+    expect(store.completePendingCreate(id, expiresAt, tenantContextRef, key)).toBe(true);
+    expect(store.pendingCreate(tenantContextRef)).toBeUndefined();
+    expect(store.read(tenantContextRef)).toEqual([{ id, expiresAt }]);
+  });
+
   it('drops expired, malformed, and extra-field values without retaining credential-like fields', () => {
     const { documentRef, storage } = makeDocument();
     storage.setItem('ca.meta.portal.onboarding-refs.v1', JSON.stringify({ tenantContextRef, references: [

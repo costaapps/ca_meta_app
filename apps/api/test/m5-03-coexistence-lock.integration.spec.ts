@@ -128,6 +128,24 @@ test('M5.03 serializes Coexistence starts per tenant and releases on terminal/ex
     assert.equal(afterTerminal.flowVariant, 'WHATSAPP_COEXISTENCE');
 
     await connection.execute(
+      `UPDATE ca_meta_onboarding_sessions SET status = 'READY', readiness = 'READY', next_action = 'NONE',
+         steps_json = ?, last_updated_at = UTC_TIMESTAMP(6), version = version + 1 WHERE tenant_id = ? AND id = ?`,
+      [JSON.stringify([
+        { name: 'authorization', status: 'SUCCEEDED' },
+        { name: 'asset-verification', status: 'SUCCEEDED' },
+        { name: 'subscription', status: 'SUCCEEDED' },
+        { name: 'projection', status: 'SUCCEEDED' },
+      ]), tenantA, afterTerminal.id],
+    );
+    const [readyLockRows] = await connection.execute<Array<{ tenant_id: string } & import('mysql2').RowDataPacket>>(
+      'SELECT tenant_id FROM ca_meta_onboarding_coexistence_locks WHERE tenant_id = ?', [tenantA],
+    );
+    assert.equal(readyLockRows.length, 0, 'successful READY status releases the durable Coexistence lock');
+    const afterReady = await sessions.createOrReplay(command({ tenantId: tenantA, portalSessionId: portalSessionA }));
+    assert.notEqual(afterReady.id, afterTerminal.id, 'a new number receives a distinct session after successful completion');
+    assert.equal(afterReady.flowVariant, 'WHATSAPP_COEXISTENCE');
+
+    await connection.execute(
       `UPDATE ca_meta_onboarding_sessions
        SET created_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 SECOND),
            expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)

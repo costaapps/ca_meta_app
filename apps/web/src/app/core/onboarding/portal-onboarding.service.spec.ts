@@ -27,8 +27,23 @@ class MemorySessionStorage {
   removeItem(key: string): void { this.values.delete(key); }
 }
 
-function makeDocument(): { documentRef: Document; storage: MemorySessionStorage; listeners: Map<string, EventListener> } {
-  const storage = new MemorySessionStorage();
+interface SyntheticCreatedSession {
+  readonly response: {
+    readonly id: string;
+    readonly status: 'AWAITING_PROVIDER';
+    readonly expiresAt: string;
+    readonly launchUrl: string;
+    readonly requestId: string;
+  };
+  readonly flowVariant: OnboardingServerStatus['flowVariant'];
+}
+
+interface SyntheticOnboardingBackend {
+  readonly createdByKey: Map<string, SyntheticCreatedSession>;
+  createCount: number;
+}
+
+function makeDocument(storage = new MemorySessionStorage()): { documentRef: Document; storage: MemorySessionStorage; listeners: Map<string, EventListener> } {
   const listeners = new Map<string, EventListener>();
   let keyIndex = 0;
   const windowRef = {
@@ -138,11 +153,14 @@ function createHarness(options?: {
   providerEnabled?: boolean;
   refs?: readonly { id: string; expiresAt: string }[];
   statuses?: Map<string, OnboardingServerStatus>;
+  storage?: MemorySessionStorage;
+  backend?: SyntheticOnboardingBackend;
 }) {
-  const { documentRef, storage, listeners } = makeDocument();
+  const { documentRef, storage, listeners } = makeDocument(options?.storage);
   const store = new OnboardingSessionStore(documentRef);
   for (const ref of options?.refs ?? []) store.remember(ref.id, ref.expiresAt, tenantContextRef);
   let createIndex = 0;
+  const backend = options?.backend ?? { createdByKey: new Map<string, SyntheticCreatedSession>(), createCount: 0 };
   const statuses = options?.statuses ?? new Map<string, OnboardingServerStatus>();
   const createdFlows = new Map<string, OnboardingServerStatus['flowVariant']>();
   const statusFailures = new Map<string, number>();
@@ -171,17 +189,29 @@ function createHarness(options?: {
     }),
     post: vi.fn((url: string, body?: unknown, _options?: { readonly withCredentials?: boolean; readonly headers?: HttpHeaders }) => {
       if (url.endsWith('/onboarding-sessions')) {
-        const id = onboardingIds[createIndex++ % onboardingIds.length];
-        if (body && typeof body === 'object' && 'flowVariant' in body && typeof body.flowVariant === 'string') {
-          createdFlows.set(id, body.flowVariant as OnboardingServerStatus['flowVariant']);
+        const key = _options?.headers?.get('Idempotency-Key');
+        if (!key) throw new Error('synthetic backend requires an idempotency key');
+        let record = backend.createdByKey.get(key);
+        if (!record) {
+          const id = onboardingIds[createIndex++ % onboardingIds.length];
+          const flowVariant = body && typeof body === 'object' && 'flowVariant' in body && typeof body.flowVariant === 'string'
+            ? body.flowVariant as OnboardingServerStatus['flowVariant']
+            : 'FACEBOOK_LOGIN';
+          record = {
+            response: {
+              id,
+              status: 'AWAITING_PROVIDER',
+              expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+              launchUrl: 'https://provider.synthetic.invalid/authorize?state=synthetic-state-value-1234567890123456',
+              requestId: `req-create-${backend.createCount + 1}-1234567890`,
+            },
+            flowVariant,
+          };
+          backend.createdByKey.set(key, record);
+          backend.createCount += 1;
         }
-        return of({
-          id,
-          status: 'AWAITING_PROVIDER',
-          expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
-          launchUrl: 'https://provider.synthetic.invalid/authorize?state=synthetic-state-value-1234567890123456',
-          requestId: `req-create-${createIndex}-1234567890`,
-        });
+        createdFlows.set(record.response.id, record.flowVariant);
+        return of(record.response);
       }
       if (url.endsWith('/actions')) return of({
         jobId: 'job-11111111', status: 'PENDING', location: '/api/v1/jobs/job-11111111', requestId: 'req-action-1234567890',
@@ -201,7 +231,7 @@ function createHarness(options?: {
     providerLaunch,
     options?.providerEnabled ?? true,
   );
-  return { service, http, store, storage, listeners, popup, providerLaunch, statuses, statusFailures };
+  return { service, http, store, storage, listeners, popup, providerLaunch, statuses, statusFailures, backend, documentRef };
 }
 
 describe('PortalOnboardingService', () => {
@@ -372,6 +402,47 @@ describe('PortalOnboardingService', () => {
     expect(service.getSnapshot().notice).toContain('Já existe uma autorização WhatsApp Coexistence');
     expect(popup.close).toHaveBeenCalledTimes(1);
     expect(store.read(tenantContextRef)).toEqual([]);
+    expect(store.pendingCreate(tenantContextRef)).toBeUndefined();
+  });
+
+  it('replays an accepted create only after explicit same-flow action and reuses its pre-send key after reload', async () => {
+    const storage = new MemorySessionStorage();
+    const backend: SyntheticOnboardingBackend = { createdByKey: new Map(), createCount: 0 };
+    const first = createHarness({ storage, backend });
+    await first.service.initialize();
+    const profile = first.service.getSnapshot().profiles.find((item) => item.flowVariant === 'FACEBOOK_LOGIN')!;
+    const originalPost = first.http.post.getMockImplementation()!;
+    first.http.post.mockImplementation((url, body, options) => {
+      const acceptedResponse = originalPost(url, body, options);
+      return url.endsWith('/onboarding-sessions')
+        ? throwError(() => new Error('synthetic response lost after server acceptance'))
+        : acceptedResponse;
+    });
+
+    expect(await first.service.start(profile)).toBe(false);
+    const firstCreate = first.http.post.mock.calls.find(([url]) => url.endsWith('/onboarding-sessions'))!;
+    const idempotencyKey = firstCreate[2]?.headers?.get('Idempotency-Key');
+    expect(idempotencyKey).toMatch(/^[A-Fa-f0-9-]{36}$/);
+    expect(backend.createCount).toBe(1);
+    expect(first.store.pendingCreate(tenantContextRef)).toMatchObject({
+      flowVariant: 'FACEBOOK_LOGIN', requestedCapabilities: ['READ_STATUS'], idempotencyKey,
+    });
+
+    const reloaded = createHarness({ storage, backend });
+    await reloaded.service.initialize();
+    expect(reloaded.http.post).not.toHaveBeenCalled();
+    expect(reloaded.service.getSnapshot().pendingCreateFlowVariant).toBe('FACEBOOK_LOGIN');
+    expect(reloaded.service.getSnapshot().notice).toContain('Uma tentativa anterior pode ter sido aceita');
+    expect(reloaded.service.canStart(reloaded.service.getSnapshot().profiles.find((item) => item.flowVariant === 'FACEBOOK_LOGIN')!)).toBe(true);
+    expect(reloaded.service.canStart(reloaded.service.getSnapshot().profiles.find((item) => item.flowVariant === 'INSTAGRAM_LOGIN')!)).toBe(false);
+
+    const retryProfile = reloaded.service.getSnapshot().profiles.find((item) => item.flowVariant === 'FACEBOOK_LOGIN')!;
+    expect(await reloaded.service.start(retryProfile)).toBe(true);
+    const replayCall = reloaded.http.post.mock.calls.find(([url]) => url.endsWith('/onboarding-sessions'))!;
+    expect(replayCall[2]?.headers?.get('Idempotency-Key')).toBe(idempotencyKey);
+    expect(backend.createCount).toBe(1);
+    expect(reloaded.store.read(tenantContextRef).map((ref) => ref.id)).toEqual([backend.createdByKey.get(idempotencyKey!)?.response.id]);
+    expect(reloaded.store.pendingCreate(tenantContextRef)).toBeUndefined();
   });
 
   it('does not let an unreadable prior session block a server-authorized Coexistence start', async () => {

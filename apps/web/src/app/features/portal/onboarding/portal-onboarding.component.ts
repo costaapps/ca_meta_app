@@ -73,6 +73,7 @@ export class PortalOnboardingComponent implements OnInit, OnDestroy {
   }
 
   startLabel(profile: OnboardingFlowProfile): string {
+    if (this.snapshot.pendingCreateFlowVariant === profile.flowVariant) return 'Retomar tentativa';
     if (profile.flowVariant !== 'WHATSAPP_COEXISTENCE') return 'Iniciar autorização';
     const completed = this.snapshot.attempts.some((attempt) =>
       attempt.flowVariant === 'WHATSAPP_COEXISTENCE' && attempt.status?.status === 'READY');
