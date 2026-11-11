@@ -57,7 +57,9 @@ describe('OnboardingSessionStore', () => {
     expect(store.remember(id, expiresAt, tenantContextRef)).toBe(true);
 
     expect(store.read(otherTenantContextRef)).toEqual([]);
-    expect(store.ensureAvailable(otherTenantContextRef)).toBe(true);
+    expect(store.ensureAvailable(otherTenantContextRef)).toBe(false);
+    expect(store.read(tenantContextRef)).toEqual([{ id, expiresAt }]);
+    expect(store.useContext(otherTenantContextRef)).toBe(true);
     expect(store.read(tenantContextRef)).toEqual([]);
     expect(JSON.parse(storage.getItem('ca.meta.portal.onboarding-refs.v1')!).tenantContextRef).toBe(otherTenantContextRef);
   });

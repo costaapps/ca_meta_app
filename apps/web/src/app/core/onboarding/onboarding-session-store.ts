@@ -70,7 +70,7 @@ export class OnboardingSessionStore {
     if (!CONTEXT_PATTERN.test(tenantContextRef)) return Object.freeze([]);
     try {
       const raw = this.documentRef.defaultView?.sessionStorage.getItem(STORAGE_KEY);
-      const partition = this.parse(raw);
+      const partition = this.parse(raw ?? null);
       if (!partition || partition.tenantContextRef !== tenantContextRef) return Object.freeze([]);
       const value = partition.references;
       const now = Date.now();

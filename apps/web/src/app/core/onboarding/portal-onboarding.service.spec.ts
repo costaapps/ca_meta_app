@@ -374,8 +374,8 @@ describe('PortalOnboardingService', () => {
     expect(store.read(tenantContextRef)).toEqual([]);
   });
 
-  it('does not let an unreadable non-Coexistence session block a server-authorized Coexistence start', async () => {
-    const existingId = onboardingIds[0];
+  it('does not let an unreadable prior session block a server-authorized Coexistence start', async () => {
+    const existingId = onboardingIds[1];
     const { service, http, statusFailures } = createHarness({
       refs: [{ id: existingId, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() }],
     });
