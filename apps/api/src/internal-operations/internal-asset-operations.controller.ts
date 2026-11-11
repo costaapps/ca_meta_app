@@ -13,7 +13,7 @@ import {
 export class InternalAssetOperationsController {
   constructor(private readonly operations: InternalAssetOperationsService) {}
 
-  @Post('/internal/v1/assets/:assetId/operations')
+  @Post('/internal/v2/assets/:assetId/operations')
   @HttpCode(HttpStatus.ACCEPTED)
   @PublicRoute()
   async execute(
@@ -36,7 +36,7 @@ export class InternalAssetOperationsController {
     }
   }
 
-  @Get('/internal/v1/operations/:operationId')
+  @Get('/internal/v2/operations/:operationId')
   @PublicRoute()
   async status(
     @Param('operationId', new ParseUUIDPipe({ version: '4' })) operationId: string,

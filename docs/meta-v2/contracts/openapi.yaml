@@ -2265,9 +2265,92 @@ paths:
           tenant.
         schema:
           type: string
-          format: uuid
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
     post:
       operationId: runInternalAssetOperation
+      tags:
+        - Internal Operations
+      summary: Execute an allowlisted tenant-scoped asset operation
+      description: Service-to-service only, with a dedicated short-lived internal service identity and
+        explicit tenant/asset/operation scopes. Server resolves the asset and credential; caller
+        cannot provide a Graph URL, token, credential, tenant override or raw SQL. `SEND_REPLY`,
+        `MARK_READ` and `REFRESH_STATUS` are distinct typed operations. This endpoint never decrypts
+        or returns a token.
+      security:
+        - internalServiceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InternalAssetOperationRequest"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  kind: SEND_REPLY
+                  messageRef: message_example_01
+                  text: Thanks, we will follow up shortly.
+      responses:
+        "202":
+          description: Sanitized success example
+          headers: *a24
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobAccepted"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    jobId: job_example_08
+                    status: PENDING
+                    location: /api/v1/jobs/job_example_08
+                    requestId: req_example_40
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+        default:
+          $ref: "#/components/responses/UnexpectedError"
+      x-external-effect: Operation-specific allowlisted provider effect/read; service scope is tenant +
+        asset + operation.
+      x-idempotency-scope: tenant + operation + Idempotency-Key and canonical payload hash.
+      x-retry-policy: Use the same UNKNOWN/reconciliation and bounded retry rules as the corresponding
+        public operation.
+  /internal/v2/assets/{assetId}/operations:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against the server-derived
+          tenant.
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: runInternalAssetOperationV2
       tags:
         - Internal Operations
       summary: Accept an allowlisted tenant-scoped asset operation
@@ -2282,7 +2365,7 @@ paths:
         No operation is reported as successful in their absence. Permanent Meta tokens are never returned
         or sent to the caller.
       security:
-        - internalServiceAuth: []
+        - internalServiceProofV2: []
       x-internal-authorization:
         requiredProof: "Authorization: Bearer <opaque service credential>"
         serverMapping: API_INTERNAL_SERVICE_CREDENTIAL_HASHES_JSON -> one principalId + tenantId
@@ -2301,7 +2384,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/InternalAssetOperationRequest"
+              $ref: "#/components/schemas/InternalAssetOperationV2Request"
             examples:
               sanitized_template_send:
                 summary: Typed template send; IDs are synthetic references, not provider IDs.
@@ -2319,7 +2402,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/InternalAssetOperationResult"
+                $ref: "#/components/schemas/InternalAssetOperationV2Result"
               examples:
                 unknown:
                   summary: Ambiguous external result requiring reconciliation by operationId.
@@ -2347,9 +2430,9 @@ paths:
       x-retry-policy: A unique UNKNOWN ledger row is committed before adapter invocation. Same key and body returns
         the stored status without another adapter call; same key with another body returns 409. Adapter timeout or
         response loss remains UNKNOWN and is never retried blindly.
-  /internal/v1/operations/{operationId}:
+  /internal/v2/operations/{operationId}:
     get:
-      operationId: readInternalAssetOperationStatus
+      operationId: readInternalAssetOperationStatusV2
       tags:
         - Internal Operations
       summary: Read a service operation outcome in its mapped tenant
@@ -2357,7 +2440,7 @@ paths:
         operation ID is readable only by the same service principal that submitted it in that tenant. Returns
         status and a fixed safe reason code only; no payload, provider ID, tenant ID, or credential is returned.
       security:
-        - internalServiceAuth: []
+        - internalServiceProofV2: []
       parameters:
         - name: operationId
           in: path
@@ -2371,7 +2454,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/InternalAssetOperationResult"
+                $ref: "#/components/schemas/InternalAssetOperationV2Result"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2537,6 +2620,12 @@ components:
       name: __Host-meta_preauth
       description: Browser-bound pre-auth cookie, distinct from the portal session and from any provider code.
     internalServiceAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: service token
+      description: Dedicated service identity with tenant/asset/operation scopes; never a Meta token or
+        user session.
+    internalServiceProofV2:
       type: http
       scheme: bearer
       bearerFormat: opaque high-entropy service proof
@@ -4340,6 +4429,37 @@ components:
       oneOf:
         - type: object
           additionalProperties: false
+          required:
+            - kind
+            - messageRef
+            - text
+          properties:
+            kind:
+              type: string
+              const: SEND_REPLY
+            messageRef:
+              type: string
+              minLength: 1
+              maxLength: 128
+            text:
+              type: string
+              minLength: 1
+              maxLength: 4096
+              writeOnly: true
+        - type: object
+          additionalProperties: false
+          required:
+            - kind
+          properties:
+            kind:
+              type: string
+              enum:
+                - MARK_READ
+                - REFRESH_STATUS
+    InternalAssetOperationV2Request:
+      oneOf:
+        - type: object
+          additionalProperties: false
           required: [operation, recipientRef, message]
           properties:
             operation: { type: string, const: SEND_MESSAGE }
@@ -4414,7 +4534,7 @@ components:
           properties:
             operation: { type: string, const: SUBSCRIBE_WEBHOOKS }
             action: { type: string, enum: [READ, RECONCILE] }
-    InternalAssetOperationResult:
+    InternalAssetOperationV2Result:
       type: object
       additionalProperties: false
       required: [operationId, status]

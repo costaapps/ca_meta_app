@@ -64,6 +64,8 @@ export function configureHttpBoundaries(app: INestApplication, environment: ApiE
       { path: 'ready', method: RequestMethod.GET },
       { path: 'internal/v1/assets/:assetId/operations', method: RequestMethod.POST },
       { path: 'internal/v1/operations/:operationId', method: RequestMethod.GET },
+      { path: 'internal/v2/assets/:assetId/operations', method: RequestMethod.POST },
+      { path: 'internal/v2/operations/:operationId', method: RequestMethod.GET },
     ],
   });
   app.useGlobalPipes(

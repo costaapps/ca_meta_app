@@ -1280,14 +1280,6 @@ export interface components {
             readonly location: string;
             readonly requestId: string;
         };
-        readonly InternalAssetOperationResult: {
-            /** Format: uuid */
-            readonly operationId: string;
-            /** @enum {string} */
-            readonly status: "UNKNOWN" | "SUCCEEDED" | "FAILED";
-            /** @enum {string} */
-            readonly reasonCode?: "OPERATION_ACCEPTED" | "PROVIDER_REJECTED" | "PROVIDER_RESULT_UNKNOWN" | "OPERATION_FAILED" | "OPERATION_UNSUPPORTED" | "CREDENTIAL_UNAVAILABLE";
-        };
         readonly WebhookChallengeResponse: {
             readonly challenge: string;
         };

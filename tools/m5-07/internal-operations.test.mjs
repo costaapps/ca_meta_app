@@ -12,7 +12,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const apiDist = process.env.M5_07_API_DIST;
 assert.ok(apiDist && apiDist.startsWith(root), 'the focused runner must provide a temporary compiled API path');
 const requireFromApi = createRequire(resolve(apiDist, 'app.module.js'));
-const { ConfiguredServiceCredentialVerifier } = requireFromApi('./identity/configured-service-credential.verifier.js');
+const { ConfiguredServiceProofVerifier } = requireFromApi('./identity/service-proof.verifier.js');
 const { ServiceTenantAuthorizationService } = requireFromApi('./identity/identity.service.js');
 const { IdentityDeniedError } = requireFromApi('./identity/identity.errors.js');
 const { InternalAssetOperationsService } = requireFromApi('./internal-operations/internal-asset-operations.service.js');
@@ -97,7 +97,7 @@ function setup(options = {}) {
   const appConfigurationId = options.appConfigurationId ?? '60000000-0000-4000-8000-000000000001';
   const flowVariant = options.flowVariant ?? 'WHATSAPP_EXCLUSIVE';
   const authVariant = options.authVariant ?? 'WHATSAPP_EMBEDDED_SIGNUP';
-  const verifier = new ConfiguredServiceCredentialVerifier([{ principalId: PRINCIPAL_A, tenantId: tenant, credentialSha256: HASH(proof) }]);
+  const verifier = new ConfiguredServiceProofVerifier([{ principalId: PRINCIPAL_A, tenantId: tenant, credentialSha256: HASH(proof) }]);
   const authorization = new ServiceTenantAuthorizationService({
     async findServiceTenantGrant(principalId, tenantId) {
       if (principalId !== PRINCIPAL_A || tenantId !== tenant || options.grantRevoked) return undefined;
@@ -162,13 +162,13 @@ function setup(options = {}) {
 }
 
 test('service proof rotation overlaps hashes; removing the old hash revokes it', async () => {
-  const rotating = new ConfiguredServiceCredentialVerifier([
+  const rotating = new ConfiguredServiceProofVerifier([
     { principalId: PRINCIPAL_A, tenantId: TENANT_A, credentialSha256: HASH(PROOF_A) },
     { principalId: PRINCIPAL_A, tenantId: TENANT_A, credentialSha256: HASH(PROOF_B) },
   ]);
   assert.equal((await rotating.verifyCredential(PROOF_A))?.tenantId, TENANT_A);
   assert.equal((await rotating.verifyCredential(PROOF_B))?.tenantId, TENANT_A);
-  const afterRevocation = new ConfiguredServiceCredentialVerifier([
+  const afterRevocation = new ConfiguredServiceProofVerifier([
     { principalId: PRINCIPAL_A, tenantId: TENANT_A, credentialSha256: HASH(PROOF_B) },
   ]);
   assert.equal(await afterRevocation.verifyCredential(PROOF_A), undefined);
@@ -176,7 +176,7 @@ test('service proof rotation overlaps hashes; removing the old hash revokes it',
 });
 
 test('proof verification is tenant-bound and a missing proof is rejected', async () => {
-  const verifier = new ConfiguredServiceCredentialVerifier([{ principalId: PRINCIPAL_A, tenantId: TENANT_A, credentialSha256: HASH(PROOF_A) }]);
+  const verifier = new ConfiguredServiceProofVerifier([{ principalId: PRINCIPAL_A, tenantId: TENANT_A, credentialSha256: HASH(PROOF_A) }]);
   assert.equal((await verifier.verifyCredential(PROOF_A))?.tenantId, TENANT_A);
   assert.equal(await verifier.verifyCredential(PROOF_B), undefined);
   assert.equal(await verifier.verifyCredential(undefined), undefined);
@@ -404,15 +404,18 @@ test('internal POST bypass is limited to the exact machine path and absent Origi
     await middleware(request, response, () => { continued = true; });
     return { continued, statusCode };
   }
-  const exact = await run(`/internal/v1/assets/${ASSET_A}/operations`);
+  const exact = await run(`/internal/v2/assets/${ASSET_A}/operations`);
   assert.equal(exact.continued, true);
-  const extra = await run(`/internal/v1/assets/${ASSET_A}/operations/other`);
+  const legacyV1 = await run(`/internal/v1/assets/${ASSET_A}/operations`);
+  assert.equal(legacyV1.continued, false, 'frozen v1 proposal is not an alias for the new v2 service-proof route');
+  assert.equal(legacyV1.statusCode, 403);
+  const extra = await run(`/internal/v2/assets/${ASSET_A}/operations/other`);
   assert.equal(extra.continued, false);
   assert.equal(extra.statusCode, 403);
-  const prefixed = await run(`/api/v1/internal/v1/assets/${ASSET_A}/operations`);
+  const prefixed = await run(`/api/v1/internal/v2/assets/${ASSET_A}/operations`);
   assert.equal(prefixed.continued, false);
   assert.equal(prefixed.statusCode, 403);
-  const browserOrigin = await run(`/internal/v1/assets/${ASSET_A}/operations`, 'https://evil.example');
+  const browserOrigin = await run(`/internal/v2/assets/${ASSET_A}/operations`, 'https://evil.example');
   assert.equal(browserOrigin.continued, false);
   assert.equal(browserOrigin.statusCode, 403);
 });

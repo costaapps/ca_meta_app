@@ -54,6 +54,12 @@ Domínio não depende de framework, HTTP da Meta ou tabelas legadas. Aplicação
 
 As primeiras cinco ADRs atendem ao pacote M1.04. Decisões sobre identidade Suite4, isolamento completo por tenant, variantes Meta, distribuição, migração e e-mail continuam especificadas como tópicos para suas issues M1/M2; a ADR-007 registra uma decisão de implementação da M2.09 sem afirmar que a infraestrutura esteja configurada. As ADRs desta etapa incluem contexto, opções, decisão, risco, consequência, verificação e condição de revisão. A [topologia de containers e responsabilidades](m1-04-container-topology.md) complementa a arquitetura sem afirmar que ela já está implantada.
 
+## Decisões posteriores relevantes
+
+| ADR | Decisão | Evidência/gate |
+|---|---|---|
+| [ADR-021 · M5.07 internal service operations](adrs/ADR-021-m5-07-internal-service-operations.md) | Hash-mapped service proof, tenant-bound grants, typed operations and idempotent status; preserves the frozen `/internal/v1` proposal and versions the new bridge under `/internal/v2`. | `openapi-v1.baseline.yaml` remains unchanged; breaking diff, contract checks, and M5.07 package harness must pass. Issue #62's route-version adjustment requires owner acceptance. |
+
 ## Organização alvo
 
 ```text

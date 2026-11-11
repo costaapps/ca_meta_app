@@ -9,7 +9,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
  * Runtime service proof verifier. Configuration contains only hashes and binds each proof to a
  * single tenant and principal; current tenant scopes are still resolved from the identity store.
  */
-export class ConfiguredServiceCredentialVerifier extends ServiceCredentialVerifier {
+export class ConfiguredServiceProofVerifier extends ServiceCredentialVerifier {
   private readonly credentials: readonly {
     readonly principalId: string;
     readonly tenantId: string;

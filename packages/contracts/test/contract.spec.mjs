@@ -131,6 +131,6 @@ test('public DTO schemas and event contracts exclude tenant authority and creden
   }
 
   const generatedTypes = await readFile(path.join(packageRoot, 'src/generated/openapi.d.ts'), 'utf8');
-  assert.doesNotMatch(generatedTypes, /\/internal\/v1\/assets\/\{assetId\}\/operations|InternalAssetOperationRequest/);
+  assert.doesNotMatch(generatedTypes, /\/internal\/v[12]\/assets\/\{assetId\}\/operations|\/internal\/v2\/operations\/\{operationId\}|InternalAssetOperation(?:V2)?Request|InternalAssetOperationV2Result/);
   assert.doesNotMatch(generatedTypes, /readonly (?:company_uuid|access_token|refresh_token|client_secret|appsecret_proof|ciphertext)\s*:/i);
 });

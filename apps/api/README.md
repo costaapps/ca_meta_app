@@ -236,14 +236,17 @@ health, or Meta access.
 ## Internal service operations
 
 The machine routes are excluded from the `/api/v1` prefix and are exactly
-`POST /internal/v1/assets/{assetId}/operations` and
-`GET /internal/v1/operations/{operationId}`. They require an `Authorization: Bearer ...` proof that
+`POST /internal/v2/assets/{assetId}/operations` and
+`GET /internal/v2/operations/{operationId}`. They require an `Authorization: Bearer ...` proof that
 is at least 32 bytes and is mapped by server-only `API_INTERNAL_SERVICE_CREDENTIAL_HASHES_JSON`
 configuration to one service principal and one tenant. The configuration stores only the SHA-256
 digest and the principal/tenant UUIDs; the raw proof belongs only in the calling service's protected
 secret store. The current database grant must also be active and include `META_CONNECTION_EXECUTE`
 and `CREDENTIAL_USE`; removing a hash or revoking a scope denies the next request. There is no global
 token fallback and no browser/web token path.
+
+The proposed `/internal/v1` operation remains frozen in the canonical contract and is not an alias
+for the v2 typed-proof request or authentication behavior; see ADR-021.
 
 For rotation, provision a new high-entropy proof in the caller secret store, add its digest as a
 second entry for the same principal and tenant, roll the API configuration to every replica, switch

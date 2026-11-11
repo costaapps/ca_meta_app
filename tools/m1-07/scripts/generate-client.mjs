@@ -34,8 +34,12 @@ for (const [route, item] of Object.entries(document.paths ?? {})) {
     delete document.paths[route];
   }
 }
-delete document.components.securitySchemes.internalServiceAuth;
-delete document.components.schemas.InternalAssetOperationRequest;
+for (const name of Object.keys(document.components.securitySchemes ?? {})) {
+  if (/^internal/i.test(name)) delete document.components.securitySchemes[name];
+}
+for (const name of Object.keys(document.components.schemas ?? {})) {
+  if (/^Internal/.test(name)) delete document.components.schemas[name];
+}
 
 const generated = await openapiTS(document, { cwd: path.dirname(contractPath), immutable: true });
 const source = typeof generated === 'string' ? generated : astToString(generated);

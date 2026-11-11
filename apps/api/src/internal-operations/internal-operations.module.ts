@@ -2,7 +2,7 @@ import { DynamicModule, Module } from '@nestjs/common';
 import type { ApiEnvironment } from '../config/environment.js';
 import { CredentialResolverService } from '../credentials/credential-resolver.service.js';
 import { ServiceTenantAuthorizationService } from '../identity/identity.service.js';
-import { ConfiguredServiceCredentialVerifier } from '../identity/configured-service-credential.verifier.js';
+import { ConfiguredServiceProofVerifier } from '../identity/service-proof.verifier.js';
 import { MetaAppConfigRegistry, META_APP_CONFIG_REGISTRY } from '../meta-config/meta-app-config.registry.js';
 import { AuditEventWriter } from '../privacy/audit.service.js';
 import { DURABLE_WORK_DATABASE } from '../jobs/jobs.module.js';
@@ -32,7 +32,7 @@ export class InternalAssetOperationsModule {
       imports: [identityModule, metaAssetsModule, metaAppConfigModule],
       controllers: [InternalAssetOperationsController],
       providers: [
-        { provide: ConfiguredServiceCredentialVerifier, useFactory: () => new ConfiguredServiceCredentialVerifier(environment.internalServiceCredentials ?? []) },
+        { provide: ConfiguredServiceProofVerifier, useFactory: () => new ConfiguredServiceProofVerifier(environment.internalServiceCredentials ?? []) },
         { provide: 'INTERNAL_OPERATIONS_ENVIRONMENT', useValue: { nodeEnv: environment.nodeEnv } },
         {
           provide: AuditEventWriter,
@@ -62,7 +62,7 @@ export class InternalAssetOperationsModule {
         {
           provide: InternalAssetOperationsService,
           useFactory: (
-            proofVerifier: ConfiguredServiceCredentialVerifier,
+            proofVerifier: ConfiguredServiceProofVerifier,
             authorization: ServiceTenantAuthorizationService,
             credentials: CredentialResolverService,
             registry: MetaAppConfigRegistry,
@@ -71,7 +71,7 @@ export class InternalAssetOperationsModule {
             targets: import('./internal-operations.types.js').InternalAssetOperationTargetResolver,
             adapter: InternalAssetOperationAdapter,
           ) => new InternalAssetOperationsService(proofVerifier, authorization, credentials, registry, assets, store, targets, adapter, environment),
-          inject: [ConfiguredServiceCredentialVerifier, ServiceTenantAuthorizationService, CredentialResolverService,
+          inject: [ConfiguredServiceProofVerifier, ServiceTenantAuthorizationService, CredentialResolverService,
             META_APP_CONFIG_REGISTRY, INTERNAL_ASSET_OPERATION_ASSET_REPOSITORY, INTERNAL_ASSET_OPERATION_STORE,
             INTERNAL_ASSET_OPERATION_TARGET_RESOLVER, INTERNAL_ASSET_OPERATION_ADAPTER],
         },

@@ -1,6 +1,6 @@
 # SPEC — Internal service asset operations
 
-Status: proposed; local API and synthetic harness implemented. Issue: [#62](https://github.com/costaapps/ca_meta_app/issues/62). Contracts: [canonical OpenAPI](../contracts/openapi.yaml), [credential resolver](credential-resolver.md), [M4.14 certification evidence](../../delivery/M4/M4.14.md), and [M4.02 Graph boundary](../adrs/ADR-011-m4-02-graph-transport-boundary.md). Functional owner: Msg4/Suite4 integration and backend; person unassigned. Code evidence base: `c3e9baa75ea793d74292e62038e0d8d11bb61295`; deployed consumers and production configuration are **Not confirmed**.
+Status: proposed; local API and synthetic harness implemented. Issue: [#62](https://github.com/costaapps/ca_meta_app/issues/62). Contracts: [canonical OpenAPI](../contracts/openapi.yaml), [credential resolver](credential-resolver.md), [M4.14 certification evidence](../../delivery/M4/M4.14.md), and [M4.02 Graph boundary](../adrs/ADR-011-m4-02-graph-transport-boundary.md). Route-version decision: [ADR-021](../adrs/ADR-021-m5-07-internal-service-operations.md) preserves the frozen v1 proposal and assigns the new typed-proof API to v2. Functional owner: Msg4/Suite4 integration and backend; person unassigned. Code evidence base: `c3e9baa75ea793d74292e62038e0d8d11bb61295`; deployed consumers and production configuration are **Not confirmed**.
 
 ## Scope and evidence boundary
 
@@ -23,8 +23,9 @@ Before any handler can be enabled, its caller needs an authenticated server prin
 
 ## Internal API contract
 
-- `POST /internal/v1/assets/{assetId}/operations` accepts a closed union: `SEND_MESSAGE`, `MANAGE_TEMPLATES`, `MANAGE_COMMENTS`, `READ_STATUS`, and `SUBSCRIBE_WEBHOOKS`.
-- `GET /internal/v1/operations/{operationId}` returns status only to the same server-mapped service principal and tenant that created the row.
+- `POST /internal/v2/assets/{assetId}/operations` accepts a closed union: `SEND_MESSAGE`, `MANAGE_TEMPLATES`, `MANAGE_COMMENTS`, `READ_STATUS`, and `SUBSCRIBE_WEBHOOKS`.
+- `GET /internal/v2/operations/{operationId}` returns status only to the same server-mapped service principal and tenant that created the row.
+- The prior `/internal/v1` proposal remains frozen and is not an alias for this typed-proof request or authentication contract; see [ADR-021](../adrs/ADR-021-m5-07-internal-service-operations.md).
 - The bearer proof is verified against a hash-only runtime allowlist entry mapping exactly one principal and tenant. Each call re-reads the active database service grant and requires `META_CONNECTION_EXECUTE`; operation execution also checks `CREDENTIAL_USE` before M3.08 resolution.
 - `tenantId`, app configuration, flow, auth variant, provider ID, credential family, and token are server-derived. Unknown keys and arbitrary URLs are rejected. `company_uuid` is not accepted as authority.
 - `recipientRef` and `commentRef` are internal Msg4 references. The API resolves them through a tenant/asset-bound target resolver before it claims an operation. No target-directory integration is present in this repository, so those operations currently fail closed.

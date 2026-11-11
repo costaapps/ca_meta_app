@@ -11,6 +11,8 @@
 
 The M5.07 issue requires `/internal/v1/assets/:id/operations`, least-privilege machine authentication, tenant context derived from the service identity, typed operations, per-asset grants, idempotency, status for ambiguous sends, and no global token fallback. Versioned PHP sources show global-token template/send/subscription paths; external operational consumers and the deployed PHP rewrite are not available in this repository.
 
+The earlier M1.07 v1 proposal at that path is already frozen in `openapi-v1.baseline.yaml`: it uses `kind` values `SEND_REPLY`, `MARK_READ`, and `REFRESH_STATUS`, a `JobAccepted` response with a `Location` header, HTTP 412/413/422/429 outcomes, and the original `internalServiceAuth` contract. Replacing that schema with M5's operation union, hash-mapped proof, status-only result, and reduced response set generated 25 breaking-diff items. The checker is correct; those changes cannot be called additive on v1.
+
 Existing code supplies the required boundaries: M3.08 issues one-use credential handles after checking service scope, asset, grant, lifecycle and policy; M3.09 records lifecycle state; M3.10 provides metadata-only redacted audit; M4.14/Graph client restrict provider transport and keep real Meta capability gates closed. The Meta-assets module installs fail-closed credential policy/audit adapters, and no real asset-operation provider adapter exists.
 
 ## Options
@@ -25,9 +27,11 @@ Existing code supplies the required boundaries: M3.08 issues one-use credential 
 
 Implement the third option for the local internal API. `API_INTERNAL_SERVICE_CREDENTIAL_HASHES_JSON` stores only SHA-256 digests and exact principal/tenant UUID mappings. Proofs must be high-entropy (at least 32 bytes). Every POST verifies the proof, resolves current service grant, checks `META_CONNECTION_EXECUTE` and `CREDENTIAL_USE`, loads one verified active asset authorization under that derived tenant, checks the server capability profile, resolves any recipient/comment reference within that tenant and asset, and asks M3.08 for a one-use credential handle. Status reads are bound to the same principal and tenant. Caller payloads cannot select tenant, auth flow, app configuration, provider object ID, credential, or Graph URL. The Msg4 target-directory adapter is absent, so send/reply commands remain unavailable.
 
+Preserve the v1 path, schema, security scheme and responses exactly as frozen in `openapi-v1.baseline.yaml`. Publish the M5 typed-proof request and status result additively at `POST /internal/v2/assets/{assetId}/operations` and `GET /internal/v2/operations/{operationId}`, using the separately named `InternalAssetOperationV2Request`, `InternalAssetOperationV2Result`, and `internalServiceProofV2` contract. Runtime exposes the v2 surface only; v1 is not an alias for v2. The issue's originally requested path version therefore changes and needs owner acceptance before PR acceptance. Do not edit the baseline or suppress the breaking checker.
+
 Allow only the typed operations declared in the canonical OpenAPI contract. `UNKNOWN` idempotency records are inserted before adapter invocation and never automatically retried. The ledger stores hashes and metadata, and M3.10 audit events store only fixed status/reason codes. Optional provider references are hashed before internal persistence. No success is fabricated when the operation adapter, current provider capability evidence, or credential policy is unavailable.
 
-The routes are excluded from Nest's `/api/v1` prefix, but still pass host and request security middleware. POST without a browser Origin is admitted only on the exact two internal paths and only to reach the controller's mandatory bearer verification. This is not a browser session or public portal path.
+The v2 routes are excluded from Nest's `/api/v1` prefix, but still pass host and request security middleware. POST without a browser Origin is admitted only on the exact v2 operations path and only to reach the controller's mandatory bearer verification. This is not a browser session or public portal path. The earlier v1 proposal is retained in the canonical contract but is not implemented by this typed-proof bridge.
 
 ## Security, effects, and reversibility
 
