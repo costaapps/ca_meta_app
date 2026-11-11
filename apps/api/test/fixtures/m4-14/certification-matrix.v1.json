@@ -89,10 +89,10 @@
       "scenario": "disconnect",
       "coverage": "PARTIAL_LOCAL",
       "cases": [
-        { "file": "apps/api/test/m4-13-connection-lifecycle.spec.ts", "name": "M4.13 requires resource scope for a shared authorization and disconnects only the selected asset binding", "assertion": "the default synthetic Facebook binding disconnects one selected asset and leaves external cleanup blocked" },
-        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "the exact Facebook Page binding changes locally while provider cleanup stays blocked" }
+        { "file": "apps/api/test/m4-13-connection-lifecycle.spec.ts", "name": "M4.13 requires resource scope for a shared authorization and disconnects only the selected asset binding", "assertion": "the test forwards the selected asset id to a fake lifecycle repository and blocks provider cleanup; persisted binding mutation and sibling isolation are not proven" },
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "the Facebook auth profile forwards the explicit selected assetRef to the lifecycle service boundary; the case does not prove a persisted binding update or sibling isolation" }
       ],
-      "gap": "Local command behavior only; no provider-side Facebook disconnect was exercised."
+      "gap": "Only assetRef forwarding to the service boundary is covered; persisted binding update and sibling asset isolation are unproven, and provider-side Facebook disconnect was not exercised."
     },
     {
       "flow": "INSTAGRAM",
@@ -157,9 +157,9 @@
       "scenario": "disconnect",
       "coverage": "PARTIAL_LOCAL",
       "cases": [
-        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "each Instagram auth profile changes only the selected local asset and keeps provider cleanup blocked" }
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "both exact Instagram auth profiles forward the explicit selected assetRef to the lifecycle service boundary; persisted binding update and sibling isolation are not proven" }
       ],
-      "gap": "Local asset-scoped lifecycle only; no provider-side Instagram disconnect was exercised."
+      "gap": "Only assetRef forwarding to the service boundary is covered; persisted binding update and sibling asset isolation are unproven, and provider-side Instagram disconnect was not exercised."
     },
     {
       "flow": "WHATSAPP_EXCLUSIVE",
@@ -224,9 +224,9 @@
       "scenario": "disconnect",
       "coverage": "PARTIAL_LOCAL",
       "cases": [
-        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "exclusive WhatsApp changes only the selected phone asset and keeps provider cleanup blocked" }
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "the exclusive WhatsApp auth profile forwards the explicit selected phone assetRef to the lifecycle service boundary; persisted binding update and sibling isolation are not proven" }
       ],
-      "gap": "Local asset-scoped lifecycle only; no provider-side WhatsApp disconnect was exercised."
+      "gap": "Only assetRef forwarding to the service boundary is covered; persisted binding update and sibling asset isolation are unproven, and provider-side WhatsApp disconnect was not exercised."
     },
     {
       "flow": "WHATSAPP_COEXISTENCE",
@@ -292,9 +292,9 @@
       "scenario": "disconnect",
       "coverage": "PARTIAL_LOCAL",
       "cases": [
-        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "Coexistence changes only the selected phone binding and leaves external cleanup blocked" }
+        { "file": "apps/api/test/m4-14-certification-matrix.spec.ts", "name": "M4.14 disconnects only the selected asset and blocks provider cleanup for all five exact auth profiles", "assertion": "the Coexistence auth profile forwards the explicit selected phone assetRef to the lifecycle service boundary; persisted binding update and sibling isolation are not proven" }
       ],
-      "gap": "Local asset-scoped lifecycle only; sibling-phone database behavior and provider cleanup are not exercised by this case."
+      "gap": "Only assetRef forwarding to the service boundary is covered; persisted binding update, sibling-phone database behavior and provider cleanup are not exercised by this case."
     }
   ],
   "additionalCases": [
@@ -345,7 +345,7 @@
       "gap": "Variant separation is local; only Facebook Login is represented by completed safe discovery, and no variant has live eligibility evidence."
     },
     {
-      "id": "drift-revocation-deletion-and-tenant-asset-isolation",
+      "id": "drift-revocation-and-tenant-asset-isolation",
       "coverage": "PARTIAL_LOCAL",
       "cases": [
         { "file": "apps/api/test/m4-12-asset-observation.spec.ts", "name": "M4.12 detects permission, subscription, and projection drift without repairing provider state", "assertion": "drift is detected without provider mutation" },
