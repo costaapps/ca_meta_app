@@ -28,6 +28,10 @@ export class PendingWhatsAppTemplateAttempts {
     const attempts = this.read();
     const existing = attempts.get(scope);
     if (existing) return existing;
+    // A newly submitted fingerprint is an explicit new request; keep only unresolved attempts plus the latest success marker.
+    for (const [priorScope, prior] of attempts) {
+      if (prior.succeeded) attempts.delete(priorScope);
+    }
     if (attempts.size >= MAX_PENDING_ATTEMPTS) throw new Error('Pending template attempt capacity reached.');
     const idempotencyKey = makeIdempotencyKey();
     if (!IDEMPOTENCY_KEY.test(idempotencyKey)) throw new Error('Invalid pending template idempotency key.');
@@ -57,6 +61,9 @@ export class PendingWhatsAppTemplateAttempts {
     const attempts = this.read();
     const current = attempts.get(scope);
     if (!current) return;
+    for (const [priorScope, prior] of attempts) {
+      if (priorScope !== scope && prior.succeeded) attempts.delete(priorScope);
+    }
     attempts.set(scope, Object.freeze({
       idempotencyKey: current.idempotencyKey,
       ...(current.jobId ? { jobId: current.jobId } : {}),

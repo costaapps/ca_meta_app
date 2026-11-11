@@ -4,7 +4,7 @@ import type { components } from '@ca-meta/contracts';
 import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalSessionService } from '../../core/portal/portal-session.service';
 import { WhatsAppTemplatesService, type TemplateAsset } from '../../core/portal/whatsapp-templates.service';
-import { PENDING_WHATSAPP_TEMPLATE_ATTEMPTS_STORAGE_KEY } from '../../core/portal/pending-whatsapp-template-attempts';
+import { PendingWhatsAppTemplateAttempts, PENDING_WHATSAPP_TEMPLATE_ATTEMPTS_STORAGE_KEY } from '../../core/portal/pending-whatsapp-template-attempts';
 import { WhatsAppTemplatesComponent } from './whatsapp-templates.component';
 
 const asset = {
@@ -64,6 +64,24 @@ async function createFixture(options: {
 }
 
 describe('WhatsAppTemplatesComponent', () => {
+  it('keeps successful dedupe markers bounded as new template requests are submitted', () => {
+    const attempts = new PendingWhatsAppTemplateAttempts(() => sessionStorage);
+    let lastScope = '';
+    let lastKey = '';
+    for (let index = 0; index < 101; index += 1) {
+      lastScope = index.toString(16).padStart(64, '0');
+      lastKey = `synthetic-idempotency-key-${index}`;
+      attempts.reserve(lastScope, () => lastKey);
+      attempts.recordJob(lastScope, `job_template_${index}`);
+      attempts.markSucceeded(lastScope);
+    }
+
+    const persisted = JSON.parse(sessionStorage.getItem(PENDING_WHATSAPP_TEMPLATE_ATTEMPTS_STORAGE_KEY) ?? '{}');
+    expect(Object.keys(persisted)).toEqual([lastScope]);
+    expect(persisted[lastScope]).toMatchObject({ idempotencyKey: lastKey, succeeded: true });
+    expect(attempts.reserve(lastScope, () => 'synthetic-different-idempotency-key')).toMatchObject({ idempotencyKey: lastKey });
+  });
+
   it('keeps list and create unavailable when local capability evidence is absent', async () => {
     const state = await createFixture({ capabilities: false });
     expect(state.list).not.toHaveBeenCalled();
