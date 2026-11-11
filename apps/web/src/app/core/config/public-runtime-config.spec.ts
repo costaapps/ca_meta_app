@@ -16,14 +16,52 @@ describe('resolveMetaApiBaseUrl', () => {
     expect(resolveMetaApiBaseUrl({}, '')).toBe('');
   });
 
-  it('treats an injected empty runtime config object as absent and uses validated defaults', () => {
+  it('injects validated settings for absent, supported and invalid runtime configs', () => {
     const original = window.__CA_META_PUBLIC_CONFIG__;
-    window.__CA_META_PUBLIC_CONFIG__ = {};
     try {
+      const configs = [
+        {
+          runtime: {},
+          metaApiBaseUrl: environment.metaApiBaseUrl,
+          suite4EmbedOrigins: [],
+          providerAuthorizationOrigins: [],
+        },
+        {
+          runtime: {
+            version: 1,
+            metaApiBaseUrl: '/api',
+            suite4EmbedOrigins: ['https://suite4.synthetic.invalid'],
+            providerAuthorizationOrigins: ['https://provider.synthetic.invalid'],
+          },
+          metaApiBaseUrl: '/api',
+          suite4EmbedOrigins: ['https://suite4.synthetic.invalid'],
+          providerAuthorizationOrigins: ['https://provider.synthetic.invalid'],
+        },
+        {
+          runtime: {
+            version: 1,
+            metaApiBaseUrl: '/api/v1',
+            suite4EmbedOrigins: ['https://suite4.synthetic.invalid'],
+            providerAuthorizationOrigins: ['https://provider.synthetic.invalid'],
+          },
+          metaApiBaseUrl: '/api/v1',
+          suite4EmbedOrigins: ['https://suite4.synthetic.invalid'],
+          providerAuthorizationOrigins: ['https://provider.synthetic.invalid'],
+        },
+      ] as const;
+
+      for (const config of configs) {
+        window.__CA_META_PUBLIC_CONFIG__ = config.runtime;
+        TestBed.configureTestingModule({});
+        expect(TestBed.inject(META_API_BASE_URL)).toBe(config.metaApiBaseUrl);
+        expect(TestBed.inject(SUITE4_EMBED_ORIGINS)).toEqual(config.suite4EmbedOrigins);
+        expect(TestBed.inject(PROVIDER_AUTHORIZATION_ORIGINS)).toEqual(config.providerAuthorizationOrigins);
+        TestBed.resetTestingModule();
+      }
+
+      window.__CA_META_PUBLIC_CONFIG__ = { version: 1, metaApiBaseUrl: 'https://api.synthetic.invalid' };
       TestBed.configureTestingModule({});
-      expect(TestBed.inject(META_API_BASE_URL)).toBe(environment.metaApiBaseUrl);
-      expect(TestBed.inject(SUITE4_EMBED_ORIGINS)).toEqual([]);
-      expect(TestBed.inject(PROVIDER_AUTHORIZATION_ORIGINS)).toEqual([]);
+      expect(() => TestBed.inject(META_API_BASE_URL)).toThrow();
     } finally {
       TestBed.resetTestingModule();
       if (original === undefined) delete window.__CA_META_PUBLIC_CONFIG__;

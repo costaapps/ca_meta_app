@@ -75,7 +75,7 @@ function publicConfig(): PublicRuntimeConfig | undefined {
 export const META_API_BASE_URL = new InjectionToken<string>('META_API_BASE_URL', {
   providedIn: 'root',
   factory: () => {
-    return resolveMetaApiBaseUrl(publicConfig()?.metaApiBaseUrl, environment.metaApiBaseUrl);
+    return validateBaseUrl(publicConfig()?.metaApiBaseUrl ?? environment.metaApiBaseUrl);
   },
 });
 
