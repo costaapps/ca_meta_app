@@ -163,6 +163,7 @@ export class MetaGraphNotificationActionAdapter implements NotificationActionAda
         targetRef: target.providerTargetRef, request: input.request, correlationId: input.correlationId }, signal);
       if (!result || result.outcome === 'UNKNOWN' || result.ambiguous) return { kind: 'UNKNOWN' };
       if (result.outcome === 'FAILED' || result.error) return { kind: 'FAILED_NO_EFFECT' };
+      if (result.outcome !== 'SUCCEEDED') return { kind: 'UNKNOWN' };
       return { kind: 'SUCCEEDED' };
     } catch {
       // The provider call may already have taken effect; its outcome is unknown and is never retried.

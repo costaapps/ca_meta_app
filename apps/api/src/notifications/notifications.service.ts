@@ -300,21 +300,30 @@ export class NotificationsService {
   /** Trusted server projection entry point. Summaries are selected from a fixed allowlist. */
   async recordProjection(scope: VerifiedServiceTenantScope, input: {
     readonly id: string; readonly assetId: string; readonly sourceEventRef: string;
-    readonly kind: keyof typeof SAFE_KIND_SUMMARY; readonly providerTargetRef?: string; readonly messageRef?: string;
+    readonly kind: keyof typeof SAFE_KIND_SUMMARY; readonly messageRef?: string;
   }): Promise<void> {
     if (!isVerifiedServiceTenantScope(scope) || !UUID.test(input.id) || !UUID.test(input.assetId) || !input.sourceEventRef ||
-        input.sourceEventRef.length > 512 || !Object.hasOwn(SAFE_KIND_SUMMARY, input.kind) ||
-        (input.messageRef !== undefined && !UUID.test(input.messageRef)) ||
-        (input.providerTargetRef !== undefined && !/^[A-Za-z0-9._:-]{1,191}$/.test(input.providerTargetRef))) throw new IdentityDeniedError();
-    await this.serviceAuthorization.authorize(scope, 'TENANT_RESOURCE_READ', scope.tenantId);
+        !/^[a-f0-9]{64}$/.test(input.sourceEventRef) || !Object.hasOwn(SAFE_KIND_SUMMARY, input.kind) ||
+        (input.messageRef !== undefined && !UUID.test(input.messageRef)) || Object.hasOwn(input, 'providerTargetRef')) {
+      throw new IdentityDeniedError();
+    }
+    await this.serviceAuthorization.authorize(scope, 'NOTIFICATION_PROJECTION_WRITE', scope.tenantId);
     const database = await this.database.getDataSource();
+    const eventRows = await database.query(
+      `SELECT id FROM ca_meta_webhook_events
+       WHERE tenant_id = ? AND asset_id = ? AND event_ref = ?
+         AND route_state = 'ROUTED' AND process_state = 'PROCESSED'
+       LIMIT 2`,
+      [scope.tenantId, input.assetId, input.sourceEventRef],
+    ) as Array<{ id: string }>;
+    if (eventRows.length !== 1) throw new IdentityDeniedError();
     await database.query(
       `INSERT IGNORE INTO ca_meta_notifications
         (id, tenant_id, asset_id, kind, message_ref, provider_target_ref, source_event_hash, status, safe_summary, created_at, updated_at)
-       SELECT ?, a.tenant_id, a.id, ?, ?, ?, ?, 'UNREAD', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
+       SELECT ?, a.tenant_id, a.id, ?, ?, NULL, ?, 'UNREAD', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
        FROM ca_meta_assets a WHERE a.tenant_id = ? AND a.id = ?`,
-      [input.id, input.kind, input.messageRef ?? null, input.providerTargetRef ?? null,
-        digest(input.sourceEventRef), SAFE_KIND_SUMMARY[input.kind], scope.tenantId, input.assetId],
+      [input.id, input.kind, input.messageRef ?? null, digest(input.sourceEventRef),
+        SAFE_KIND_SUMMARY[input.kind], scope.tenantId, input.assetId],
     );
   }
 

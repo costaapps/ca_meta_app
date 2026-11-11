@@ -4,15 +4,18 @@ import { test } from 'node:test';
 import type { EntityManager } from 'typeorm';
 import type { CredentialResolverService } from '../src/credentials/credential-resolver.service.js';
 import { ServiceTenantAuthorizationService } from '../src/identity/identity.service.js';
+import { IdentityDeniedError } from '../src/identity/identity.errors.js';
 import { ServiceCredentialVerifier } from '../src/identity/identity.trust.js';
 import type { IdentityRepository } from '../src/identity/identity.repository.js';
-import type { ServiceTenantGrant } from '../src/identity/identity.types.js';
+import type { ServiceScope, ServiceTenantGrant } from '../src/identity/identity.types.js';
 import { JOB_POLICIES } from '../src/jobs/event-validation.js';
 import type { ClaimedJob, JobOutcome, JobStore } from '../src/jobs/job-store.js';
 import { DurableWorker, type JobHandler } from '../src/worker/durable-worker.js';
 import type { JobExecutionAuthorizationPort } from '../src/jobs/job-execution-authorization.js';
 import type { MetaAppConfigRegistry } from '../src/meta-config/meta-app-config.registry.js';
 import type { MetaGraphCallResult } from '../src/meta-graph/meta-graph.types.js';
+import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
+import { NotificationsService } from '../src/notifications/notifications.service.js';
 import {
   MetaGraphNotificationActionAdapter,
   notificationActionFinalizer,
@@ -93,6 +96,40 @@ test('notification action resolves capability through the internal asset and ten
   assert.equal(providerInput.targetRef, targetId);
 });
 
+test('notification projections require a write-only grant, a processed event bound to the asset, and no forged target', async () => {
+  const queries: Array<{ sql: string; parameters?: readonly unknown[] }> = [];
+  const database = { async getDataSource() { return { async query(sql: string, parameters?: readonly unknown[]) {
+    queries.push({ sql, parameters });
+    return [];
+  } }; } } as unknown as DurableWorkDatabase;
+  async function projectionHarness(scopes: readonly ServiceScope[]) {
+    const grant: ServiceTenantGrant = { tenantId, principalId, principalKind: 'SERVICE', principalStatus: 'ACTIVE',
+      tenantStatus: 'ACTIVE', scopes };
+    const repository = { async findServiceTenantGrant(principal: string, tenant: string) {
+      return principal === principalId && tenant === tenantId ? grant : undefined;
+    } } as unknown as IdentityRepository;
+    const serviceAuthorization = new ServiceTenantAuthorizationService(repository);
+    const scope = await serviceAuthorization.resolveScope(new SyntheticCredentialVerifier().mint());
+    const service = new NotificationsService(database, {} as never, {} as never, serviceAuthorization);
+    return { service, scope };
+  }
+  const input = { id: randomUUID(), assetId, sourceEventRef: 'a'.repeat(64), kind: 'MESSAGE_RECEIVED' as const };
+
+  const readOnly = await projectionHarness(['TENANT_RESOURCE_READ']);
+  await assert.rejects(readOnly.service.recordProjection(readOnly.scope, input), IdentityDeniedError);
+  assert.equal(queries.length, 0, 'read-only producer grants cannot reach the database writer');
+
+  const writer = await projectionHarness(['NOTIFICATION_PROJECTION_WRITE']);
+  const forgedProjection = { ...input, providerTargetRef: targetId } as unknown as Parameters<typeof writer.service.recordProjection>[1];
+  await assert.rejects(writer.service.recordProjection(writer.scope, forgedProjection), IdentityDeniedError);
+  assert.equal(queries.length, 0, 'an arbitrary provider target is rejected before it can be stored');
+
+  await assert.rejects(writer.service.recordProjection(writer.scope, input), IdentityDeniedError);
+  assert.equal(queries.length, 1, 'the source event must already be processed for the exact tenant and asset');
+  assert.match(queries[0]?.sql ?? '', /tenant_id = \? AND asset_id = \? AND event_ref = \?/);
+  assert.deepEqual(queries[0]?.parameters, [tenantId, assetId, input.sourceEventRef]);
+});
+
 test('HTTP 200 error object and null provider results never become success; only exact success may mark READ', async () => {
   const scope = await serviceScope();
   let result: MetaGraphCallResult | null | undefined = failedHttp200();
@@ -113,6 +150,9 @@ test('HTTP 200 error object and null provider results never become success; only
   assert.deepEqual(await adapter.execute(input, new AbortController().signal), { kind: 'UNKNOWN' });
   result = undefined;
   assert.deepEqual(await adapter.execute(input, new AbortController().signal), { kind: 'UNKNOWN' });
+  result = { outcome: 'ACCEPTED' } as unknown as MetaGraphCallResult;
+  assert.deepEqual(await adapter.execute(input, new AbortController().signal), { kind: 'UNKNOWN' },
+    'only an explicit SUCCEEDED provider outcome is treated as success');
 
   const queries: string[] = [];
   const manager = { async query(sql: string) { queries.push(sql); return []; } } as unknown as EntityManager;
