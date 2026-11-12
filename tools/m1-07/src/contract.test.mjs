@@ -54,24 +54,28 @@ function operationList() {
     .map(([method, operation]) => ({ route, method, operation })));
 }
 
-function collectSchemaPropertyPaths(schema, result = new Set(), seen = new Set(), owner = 'inline') {
+function collectSchemaPropertyPaths(schema, result = new Set(), seen = new Set(), owner = 'inline', prefix = '') {
   if (!schema || typeof schema !== 'object') return result;
   if (typeof schema.$ref === 'string') {
     if (seen.has(schema.$ref)) return result;
-    seen.add(schema.$ref);
     const match = schema.$ref.match(/^#\/components\/schemas\/([^/]+)$/);
-    if (match) collectSchemaPropertyPaths(contract.components.schemas[match[1]], result, seen, match[1]);
+    if (match) {
+      const nextSeen = new Set(seen);
+      nextSeen.add(schema.$ref);
+      collectSchemaPropertyPaths(contract.components.schemas[match[1]], result, nextSeen, match[1]);
+    }
     return result;
   }
   if (schema.properties && typeof schema.properties === 'object') {
     for (const [name, child] of Object.entries(schema.properties)) {
-      result.add(`${owner}.${name}`);
-      collectSchemaPropertyPaths(child, result, seen, owner);
+      const path = prefix ? `${prefix}.${name}` : name;
+      result.add(`${owner}.${path}`);
+      collectSchemaPropertyPaths(child, result, seen, owner, path);
     }
   }
-  if (schema.items) collectSchemaPropertyPaths(schema.items, result, seen, owner);
+  if (schema.items) collectSchemaPropertyPaths(schema.items, result, seen, owner, prefix);
   for (const branch of [...(schema.oneOf ?? []), ...(schema.anyOf ?? []), ...(schema.allOf ?? [])]) {
-    collectSchemaPropertyPaths(branch, result, seen, owner);
+    collectSchemaPropertyPaths(branch, result, seen, owner, prefix);
   }
   return result;
 }
@@ -228,6 +232,9 @@ test('public success DTOs and event envelopes contain no credentials or raw mess
   assert.equal(templateBody.maxLength, 1024);
   assert.match(templateBody.description, /Sanitized BODY text/);
   assert.match(templateBody.description, /examples and other components are omitted/);
+  const nestedBodyPaths = collectSchemaPropertyPaths({ properties: { nested: { type: 'object', properties: { bodyText: { type: 'string' } } } } },
+    new Set(), new Set(), 'Template');
+  assert.ok(nestedBodyPaths.has('Template.nested.bodyText'), 'a nested raw body must not collapse to the Template.bodyText exception');
 
   for (const eventPath of eventPaths) {
     const schema = JSON.parse(await readFile(eventPath, 'utf8'));
