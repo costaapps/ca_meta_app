@@ -117,9 +117,8 @@ const actions = tableStep(
 );
 
 const definition = {
-  id: '202611110022-tenant-notifications',
-  // Provisional on the isolated M5.06 stack. Reindex to v24 when M5.03/#62, M5.03/#60, and M5.05/#59 are recomposed.
-  schemaVersion: 22,
+  id: '202611120024-tenant-notifications',
+  schemaVersion: 24,
   minimumSupportedApiVersion: 1,
   steps: [notifications, actions],
 } as const;
