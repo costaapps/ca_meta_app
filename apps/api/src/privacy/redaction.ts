@@ -11,6 +11,7 @@ const PHONE = /(?<!\w)\+?\d[\d ()-]{7,}\d(?!\w)/g;
 const OAUTH_QUERY_VALUE = /([?&](?:code|state)=)[^&#\s]*/gi;
 const UUID_REFERENCE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_DIAGNOSTIC_KEYS = new Set(['credentialHealth']);
+const SAFE_DIAGNOSTIC_STATES = new Set(['HEALTHY', 'ACTION_REQUIRED', 'PENDING', 'FAILED', 'UNKNOWN']);
 
 function matches(pattern: RegExp, value: string): boolean {
   pattern.lastIndex = 0;
@@ -39,7 +40,8 @@ export function redactDiagnosticValue(value: unknown, depth = 0): unknown {
 
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value).slice(0, MAX_ITEMS)) {
-    if ((SENSITIVE_KEY.test(key) && !SAFE_DIAGNOSTIC_KEYS.has(key)) || /^(?:code|state)$/i.test(key)) continue;
+    const safeDiagnosticState = key.toLowerCase() === 'state' && typeof item === 'string' && SAFE_DIAGNOSTIC_STATES.has(item);
+    if ((SENSITIVE_KEY.test(key) && !SAFE_DIAGNOSTIC_KEYS.has(key)) || (/^(?:code|state)$/i.test(key) && !safeDiagnosticState)) continue;
     result[key.slice(0, 80)] = redactDiagnosticValue(item, depth + 1);
   }
   return result;
