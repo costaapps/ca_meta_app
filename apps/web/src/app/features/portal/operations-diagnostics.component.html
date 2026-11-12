@@ -1,0 +1,87 @@
+<section class="diagnostics-page" aria-labelledby="diagnostics-title">
+  <header class="page-heading">
+    <div>
+      <p class="eyebrow">Ajuda e acompanhamento</p>
+      <h1 id="diagnostics-title">Status da conexão</h1>
+      <p class="intro">Veja o que o servidor confirmou e qual é o próximo passo recomendado.</p>
+    </div>
+    <button class="refresh-button" type="button" (click)="refresh()" [disabled]="loading || isRefreshing">
+      {{ isRefreshing ? 'Atualizando…' : 'Atualizar status' }}
+    </button>
+  </header>
+
+  <p class="identity-notice" role="status">
+    A identidade da empresa ainda não foi confirmada. Você pode consultar o status, mas pedidos de alteração ficam indisponíveis.
+  </p>
+
+  <p *ngIf="loading" class="loading" role="status">Consultando o status…</p>
+  <div *ngIf="errorMessage" class="error" role="alert">
+    <p>{{ errorMessage }}</p>
+    <p *ngIf="errorRequestId">Referência: {{ errorRequestId }}</p>
+  </div>
+
+  <ng-container *ngIf="diagnostics as report">
+    <section class="next-step" aria-labelledby="next-step-title">
+      <div>
+        <p class="eyebrow">Próximo passo</p>
+        <h2 id="next-step-title">{{ nextActionCopy(report.nextAction) }}</h2>
+        <div class="disabled-action" *ngIf="report.nextAction === 'REQUEST_REAUTHORIZATION'">
+          <button type="button" disabled>Solicitar atualização da autorização</button>
+          <p>Ação indisponível até que a empresa possa ser identificada com segurança.</p>
+        </div>
+        <div class="disabled-action" *ngIf="report.nextAction === 'REVIEW_SYNC' || report.nextAction === 'CHECK_CONNECTION'">
+          <button type="button" disabled>Revalidar status</button>
+          <p>Ação indisponível até que a empresa possa ser identificada com segurança.</p>
+        </div>
+      </div>
+      <span class="updated">Consultado em {{ report.generatedAt | date:'medium' }}</span>
+    </section>
+
+    <div class="status-grid">
+      <article class="status-card">
+        <div class="card-heading"><h2>Configuração</h2><span [attr.data-state]="report.onboarding.state">{{ stateCopy(report.onboarding) }}</span></div>
+        <p *ngIf="report.onboarding.nextAction">Próximo passo: {{ statusLabel(report.onboarding.nextAction) }}.</p>
+        <p *ngIf="report.onboarding.observedAt">Última atualização: {{ report.onboarding.observedAt | date:'medium' }}</p>
+        <p *ngIf="!report.onboarding.observedAt">Ainda não há uma atualização confirmada.</p>
+      </article>
+
+      <article class="status-card">
+        <div class="card-heading"><h2>Autorização</h2><span [attr.data-state]="report.credentialHealth.state">{{ stateCopy(report.credentialHealth) }}</span></div>
+        <p *ngIf="report.credentialHealth.observedAt">Verificada em {{ report.credentialHealth.observedAt | date:'medium' }}</p>
+        <p *ngIf="!report.credentialHealth.observedAt">A verificação da autorização não está disponível.</p>
+      </article>
+
+      <article class="status-card">
+        <div class="card-heading"><h2>Permissões da conexão</h2><span [attr.data-state]="report.grants.state">{{ stateCopy(report.grants) }}</span></div>
+        <p *ngIf="report.grants.grantedCount !== null">{{ report.grants.grantedCount }} permissão(ões) confirmada(s); {{ report.grants.revokedCount }} revogada(s).</p>
+        <p *ngIf="report.grants.grantedCount === null">A consulta de permissões não está disponível.</p>
+      </article>
+
+      <article class="status-card">
+        <div class="card-heading"><h2>Configuração de eventos</h2><span [attr.data-state]="report.subscription.state">{{ stateCopy(report.subscription) }}</span></div>
+        <p *ngIf="report.subscription.observedAt">Verificada em {{ report.subscription.observedAt | date:'medium' }}</p>
+        <p *ngIf="!report.subscription.observedAt">Ainda não há confirmação desta configuração.</p>
+      </article>
+
+      <article class="status-card">
+        <div class="card-heading"><h2>Atualizações recebidas</h2><span [attr.data-state]="report.webhook.state">{{ stateCopy(report.webhook) }}</span></div>
+        <p *ngIf="report.webhook.observedAt">Última atualização recebida em {{ report.webhook.observedAt | date:'medium' }}</p>
+        <p *ngIf="!report.webhook.observedAt">Nenhuma atualização recente foi confirmada.</p>
+      </article>
+
+      <article class="status-card">
+        <div class="card-heading"><h2>Tarefas</h2><span [attr.data-state]="report.jobs.state">{{ stateCopy(report.jobs) }}</span></div>
+        <p>{{ jobCount(report, 'QUEUED', 'RUNNING', 'RETRY_PENDING') }} em andamento · {{ jobCount(report, 'FAILED', 'DEAD_LETTER') }} precisam de revisão.</p>
+      </article>
+
+      <article class="status-card">
+        <div class="card-heading"><h2>Sincronização com o Msg4</h2><span [attr.data-state]="report.projection.state">{{ stateCopy(report.projection) }}</span></div>
+        <p *ngIf="report.projection.pendingCount !== null">{{ report.projection.pendingCount }} pendente(s) · {{ report.projection.failedCount }} com falha.</p>
+        <p *ngIf="report.projection.pendingCount === null">O atraso da sincronização não está disponível neste ambiente.</p>
+      </article>
+    </div>
+
+    <p class="privacy-note">Esta tela não exibe tokens, endereços do provedor nem conteúdo de mensagens.</p>
+    <a class="back-link" routerLink="/connections">Voltar às conexões</a>
+  </ng-container>
+</section>

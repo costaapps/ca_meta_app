@@ -43,9 +43,15 @@
 - **Decisão:** implementar uma projeção local de metadados com allowlist de conexões pré-construídas, checkpoint central por tenant/tupla completa/recurso, versão/hash, tombstone, retry e rebuild de snapshot confiável. Manter o runtime sem adapter registrado e não usar evento/request para selecionar database, company, DSN ou segredo. Preservar o envelope outbox v1 e não reclassificar `OUTBOX_DELIVER`.
 - **Consequência:** harness MariaDB usa somente schemas descartáveis e DDL de fixture provisório. Integração empresarial real, paridade de consumidores e rollout permanecem **Not confirmed**; a migration central foi reindexada como v25 após M5.06 v24.
 
-## D-M5-07 — Execução M5.09 sem liberar piloto real
+## D-M5-08 — Execução M5.09 sem liberar piloto real
 
 - **Contexto:** a issue #64 pede uma migração e piloto reais, mas este worktree não confirma acesso/leitura autorizada às bases empresariais, DDL/catálogo, mapeamento de tenant, grants Meta, topologia dos callbacks nem equivalência dos consumidores implantados. M3.11 oferece um ledger sintético metadata-only.
 - **Decisão:** entregar apenas o plano de controle: manifest redigido e contagens agregadas, espelho recuperável do checkpoint M3.11, detecção/reconciliação de drift por HMAC e snapshot hash, writer matrix versionada por tenant/canal/consumer/função que exige reconciliação atual antes de cada troca, shadow-read por porta apenas de leitura e rollback de rota sem ações em credential/grant. Se `CREDENTIAL_REFERENCE` veio de `LEGACY`, seu rollback mantém o escritor central para não reabrir uma credencial antiga/revogada. O MariaDB opcional usa schema e usuários temporários em loopback; nenhum endpoint ou adapter M5.09 é registrado.
 - **Consequência:** os testes comprovam a mecânica local e não contam como piloto, paridade real, ausência de double-send externo ou aceite integral de #64. Qualquer rota de webhook futura valida o raw body antes de roteamento e autentica independentemente envelope/ledger interno. A sequência de migrations é provisória (#62 v21, #60 v22, #59 v23, #61 v24, #63 v25, #64 v26); integrador confirma registro/checksums finais.
+
+## D-M5-09 — Diagnóstico operacional com grants e efeitos fail-closed
+
+- **Contexto:** #65 pede leitura por tenant, export redigido e ações de recuperação. A sessão atual não tem rótulo confiável da empresa, o grant de suporte permanece sem adapter, o reconciliador de subscription não tem semântica/grants Meta confirmados e a projeção M5.08 ainda não tem consumidor configurado.
+- **Decisão:** derivar tenant só da sessão/contexto atual; expor status/contagens/timestamps em allowlist; marcar fonte/adapter ausente como `UNKNOWN`; exportar somente após grant `SUPPORT` efêmero e auditoria anterior à leitura. Definir as cinco ações tipadas, mas retornar `UNAVAILABLE` quando identidade, role ou adapter não forem comprovados. Replay permanece no serviço M2 e aceita somente DLQ isolada por tenant/escopo e modo `SAFE_RETRY`/`IDEMPOTENT`, com chave determinística.
+- **Consequência:** a página `/status` pode ler os dados disponíveis e orienta o próximo passo sem revelar token, URL do Graph, mensagem ou payload. Ações de escrita e exportação continuam bloqueadas no runtime atual. Meta, Suite4, worker de projeção, DDL/consumidores empresariais e operação real permanecem **Not confirmed**.
 

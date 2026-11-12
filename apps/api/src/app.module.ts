@@ -26,6 +26,7 @@ import { MetaWebhooksModule } from './meta-webhooks/meta-webhooks.module.js';
 import { MetaSubscriptionsModule } from './meta-subscriptions/meta-subscriptions.module.js';
 import { FacebookPagesModule } from './meta-facebook/facebook-pages.module.js';
 import { InternalAssetOperationsModule } from './internal-operations/internal-operations.module.js';
+import { OperationsModule } from './operations/operations.module.js';
 
 @Module({})
 export class ApiModule {
@@ -38,6 +39,9 @@ export class ApiModule {
     const metaSubscriptionsModule = MetaSubscriptionsModule.register(metaAssetsModule, metaGraphModule, metaAppConfigModule, identityModule);
     const facebookPagesModule = FacebookPagesModule.register(identityModule, metaSubscriptionsModule);
     const internalAssetOperationsModule = InternalAssetOperationsModule.register(identityModule, metaAssetsModule, metaAppConfigModule, environment);
+    const privacyModule = PrivacyModule.register(environment);
+    const onboardingStatusModule = OnboardingStatusModule.register(identityModule, environment, metaAppConfigModule);
+    const operationsModule = OperationsModule.register(identityModule, metaAssetsModule, onboardingStatusModule, privacyModule, environment);
     const ticket = environment.portalEntryTicket;
     const authExchangeModule = ticket
       ? AuthExchangeModule.register({
@@ -62,13 +66,14 @@ export class ApiModule {
         identityModule,
         authExchangeModule,
         MagicLinkModule.register(environment),
-        PrivacyModule.register(environment),
-        OnboardingStatusModule.register(identityModule, environment, metaAppConfigModule),
+        privacyModule,
+        onboardingStatusModule,
         metaAppConfigModule,
         metaGraphModule,
         metaSubscriptionsModule,
         facebookPagesModule,
         internalAssetOperationsModule,
+        operationsModule,
       ],
       providers: [
         { provide: STRUCTURED_LOGGER, useClass: ConsoleStructuredLogger },

@@ -69,7 +69,7 @@ test('support diagnostics require a scoped short-lived grant, write actor/reason
     async record(event: Record<string, unknown>) { events.push(event); return '00000000-0000-4000-8000-000000000003'; },
   } as never;
   const authorization: SupportAccessAuthorizationPort = {
-    async authorize(input) { return { ...input, expiresAt: new Date(Date.now() + 10_000).toISOString() }; },
+    async authorize(input) { return { ...input, role: 'SUPPORT', expiresAt: new Date(Date.now() + 10_000).toISOString() }; },
   };
   const service = new SupportDiagnosticService(audit, authorization);
   const output = await service.read({

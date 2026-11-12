@@ -339,6 +339,66 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/operations/diagnostics": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Read safe diagnostics for the current tenant
+         * @description The tenant is derived from the authenticated portal session and current server-validated context. The request accepts no tenant ID. The read model contains status, counts, safe reason codes, timestamps, request correlation and contract/read-model versions only. Missing adapters remain UNKNOWN. Credential bytes, provider URLs and IDs, payloads, messages and contact details are excluded.
+         */
+        readonly get: operations["getOperationsDiagnostics"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/support/diagnostics/export": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Export audited support diagnostics for the current tenant
+         * @description The current tenant comes only from the authenticated session and server-validated context. A trusted SUPPORT grant (maximum lifetime 15 minutes) and fixed reason code are required and audited before the data is read. This route accepts no tenant ID. The export uses the same closed redaction and status-only allowlist as the portal read model.
+         */
+        readonly get: operations["exportSupportDiagnostics"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/operations/actions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Request a tenant-scoped operational action
+         * @description Every action requires a fixed reason code, current portal context and idempotency key. The request has no tenant field. User actions use current membership roles and existing typed handlers; tenant writes remain unavailable while the session has no trusted company identity. Support actions require a trusted SUPPORT grant with a maximum 15-minute lifetime. Unsupported adapters return a typed unavailable outcome. Replay is accepted only for a support-authorized dead letter whose stored effect mode and deterministic replay key permit it; UNKNOWN or ambiguous outcomes are never directly resent.
+         */
+        readonly post: operations["requestOperationsAction"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/connections": {
         readonly parameters: {
             readonly query?: never;
@@ -978,6 +1038,122 @@ export interface components {
             readonly received: true;
             /** @enum {string} */
             readonly result: "APPLIED" | "DUPLICATE" | "UNMAPPED";
+        };
+        /** @enum {string} */
+        readonly OperationsReasonCode: "INCIDENT" | "CUSTOMER_REQUEST" | "SECURITY_REVIEW";
+        readonly OperationsActionRequest: components["schemas"]["OperationsRevalidateRequest"] | components["schemas"]["OperationsResumeStageRequest"] | components["schemas"]["OperationsReconcileSubscriptionRequest"] | components["schemas"]["OperationsRequestReauthRequest"] | components["schemas"]["OperationsReplayJobRequest"];
+        readonly OperationsRevalidateRequest: {
+            /** @constant */
+            readonly action: "REVALIDATE";
+            /** Format: uuid */
+            readonly resourceRef: string;
+            readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+        };
+        readonly OperationsResumeStageRequest: {
+            /** @constant */
+            readonly action: "RESUME_STAGE";
+            /** Format: uuid */
+            readonly resourceRef: string;
+            /** @enum {string} */
+            readonly stage: "authorization" | "asset-verification" | "subscription" | "projection";
+            readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+        };
+        readonly OperationsReconcileSubscriptionRequest: {
+            /** @constant */
+            readonly action: "RECONCILE_SUBSCRIPTION";
+            /** Format: uuid */
+            readonly resourceRef: string;
+            readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+        };
+        readonly OperationsRequestReauthRequest: {
+            /** @constant */
+            readonly action: "REQUEST_REAUTH";
+            /** Format: uuid */
+            readonly resourceRef: string;
+            readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+        };
+        readonly OperationsReplayJobRequest: {
+            /** @constant */
+            readonly action: "REPLAY_JOB";
+            /** Format: uuid */
+            readonly resourceRef: string;
+            readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+        };
+        readonly OperationsActionResult: {
+            /** @enum {string} */
+            readonly action: "REVALIDATE" | "RESUME_STAGE" | "RECONCILE_SUBSCRIPTION" | "REQUEST_REAUTH" | "REPLAY_JOB";
+            /** @enum {string} */
+            readonly outcome: "ACCEPTED" | "DUPLICATE" | "UNAVAILABLE" | "REJECTED";
+            /** @enum {string} */
+            readonly reasonCode: "AUDIT_UNAVAILABLE" | "REFRESH_QUEUED" | "REFRESH_ADAPTER_UNAVAILABLE" | "TENANT_IDENTITY_NOT_CONFIRMED" | "STAGE_RESUME_QUEUED" | "ONBOARDING_ADAPTER_UNAVAILABLE" | "REAUTHORIZATION_REQUESTED" | "REAUTHORIZATION_NOT_CONFIGURED" | "SUPPORT_ROLE_NOT_CONFIRMED" | "SUBSCRIPTION_ADAPTER_NOT_CONFIRMED" | "DEAD_LETTER_NOT_FOUND" | "AUTHORIZATION_DENIED" | "AUTHORIZATION_UNAVAILABLE" | "AUTHORIZATION_EXPIRED" | "GRANT_INVALID" | "SCOPE_MISMATCH" | "AMBIGUOUS_EFFECT_NOT_REPLAYABLE" | "REPLAY_ENQUEUED" | "REPLAY_DUPLICATE" | "DRY_RUN_AUTHORIZED";
+            /** Format: uuid */
+            readonly requestId: string;
+            readonly operationRef: string | null;
+        };
+        readonly OperationsDiagnosticSection: {
+            /** @enum {string} */
+            readonly state: "HEALTHY" | "ACTION_REQUIRED" | "PENDING" | "FAILED" | "UNKNOWN";
+            readonly reasonCode: string | null;
+            /** Format: date-time */
+            readonly observedAt: string | null;
+        };
+        readonly OperationsOnboardingSection: {
+            /** @enum {string} */
+            readonly state: "HEALTHY" | "ACTION_REQUIRED" | "PENDING" | "FAILED" | "UNKNOWN";
+            readonly reasonCode: string | null;
+            /** Format: date-time */
+            readonly observedAt: string | null;
+            readonly nextAction: string | null;
+        };
+        readonly OperationsGrantsSection: {
+            /** @enum {string} */
+            readonly state: "HEALTHY" | "ACTION_REQUIRED" | "PENDING" | "FAILED" | "UNKNOWN";
+            readonly reasonCode: string | null;
+            /** Format: date-time */
+            readonly observedAt: string | null;
+            readonly grantedCount: number | null;
+            readonly revokedCount: number | null;
+        };
+        readonly OperationsJobsSection: {
+            /** @enum {string} */
+            readonly state: "HEALTHY" | "ACTION_REQUIRED" | "PENDING" | "FAILED" | "UNKNOWN";
+            readonly reasonCode: string | null;
+            /** Format: date-time */
+            readonly observedAt: string | null;
+            readonly counts: {
+                readonly [key: string]: number;
+            };
+        };
+        readonly OperationsProjectionSection: {
+            /** @enum {string} */
+            readonly state: "HEALTHY" | "ACTION_REQUIRED" | "PENDING" | "FAILED" | "UNKNOWN";
+            readonly reasonCode: string | null;
+            /** Format: date-time */
+            readonly observedAt: string | null;
+            readonly pendingCount: number | null;
+            readonly failedCount: number | null;
+            readonly lagSeconds: null;
+        };
+        readonly OperationsDiagnostics: {
+            /** Format: uuid */
+            readonly requestId: string;
+            /** Format: date-time */
+            readonly generatedAt: string;
+            readonly versions: {
+                /** @constant */
+                readonly contract: "1.0.0-proposed";
+                /** @constant */
+                readonly readModel: 1;
+            };
+            readonly onboarding: components["schemas"]["OperationsOnboardingSection"];
+            readonly credentialHealth: components["schemas"]["OperationsDiagnosticSection"];
+            readonly grants: components["schemas"]["OperationsGrantsSection"];
+            readonly subscription: components["schemas"]["OperationsDiagnosticSection"];
+            readonly webhook: components["schemas"]["OperationsDiagnosticSection"];
+            readonly jobs: components["schemas"]["OperationsJobsSection"];
+            readonly projection: components["schemas"]["OperationsProjectionSection"];
+            /** @enum {string} */
+            readonly nextAction: "REQUEST_REAUTHORIZATION" | "WAIT_FOR_PROCESSING" | "CONTACT_SUPPORT" | "REVIEW_SYNC" | "CHECK_CONNECTION" | "NO_ACTION" | "UNKNOWN";
         };
         readonly JobAccepted: {
             readonly jobId: string;
@@ -2230,6 +2406,111 @@ export interface operations {
             readonly 404: components["responses"]["NotFound"];
             readonly 409: components["responses"]["Conflict"];
             readonly 413: components["responses"]["PayloadTooLarge"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly getOperationsDiagnostics: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Safe current-tenant operational summary */
+            readonly 200: {
+                headers: {
+                    readonly "Cache-Control"?: "no-store";
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OperationsDiagnostics"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly exportSupportDiagnostics: {
+        readonly parameters: {
+            readonly query: {
+                readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+            };
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Sanitized export; support access is audited before the read */
+            readonly 200: {
+                headers: {
+                    readonly "Cache-Control"?: "no-store";
+                    readonly "Content-Disposition"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OperationsDiagnostics"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly requestOperationsAction: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+                /**
+                 * @description Random caller-generated request key; server scope is current tenant + operation + key. Same payload hash replays prior acceptance; different payload hash returns 409 with no new effect.
+                 * @example idem_example_key_01
+                 */
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["OperationsActionRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Typed action outcome; unavailable and ambiguous actions are never reported as accepted */
+            readonly 200: {
+                headers: {
+                    readonly "Cache-Control"?: "no-store";
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OperationsActionResult"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 404: components["responses"]["NotFound"];
+            readonly 409: components["responses"]["Conflict"];
             readonly 429: components["responses"]["TooManyRequests"];
             readonly 503: components["responses"]["Unavailable"];
             readonly default: components["responses"]["UnexpectedError"];

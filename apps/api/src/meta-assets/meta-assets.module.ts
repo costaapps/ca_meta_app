@@ -167,7 +167,7 @@ export class MetaAssetsModule {
             CREDENTIAL_RESOLUTION_AUDIT, CredentialVaultService],
         },
       ],
-      exports: [META_ASSETS_REPOSITORY, CredentialVaultService, CredentialResolverService, JobsModule],
+      exports: [META_ASSETS_REPOSITORY, AssetCatalogService, CredentialVaultService, CredentialResolverService, JobsModule],
     };
   }
 }
