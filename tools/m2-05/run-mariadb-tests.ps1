@@ -112,6 +112,7 @@ $portalRecoveryKey = New-HexSecret
 $sql = @"
 CREATE USER 'ca_meta_migrator'@'%' IDENTIFIED BY '$migrationPassword';
 GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES, TRIGGER ON ca_meta_m205.* TO 'ca_meta_migrator'@'%';
+GRANT DELETE ON ca_meta_m205.ca_meta_onboarding_coexistence_locks TO 'ca_meta_migrator'@'%';
 CREATE USER 'ca_meta_api'@'%' IDENTIFIED BY '$apiPassword';
 GRANT SELECT, INSERT, UPDATE, DELETE ON ca_meta_m205.* TO 'ca_meta_api'@'%';
 "@
