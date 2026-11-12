@@ -176,7 +176,7 @@ test('channel capabilities keep WhatsApp number and Facebook/Instagram reply fie
 });
 
 test('controller returns strong version ETags and rejects malformed preconditions', async () => {
-  const responseBody: components['schemas']['AutomationConfig'] = {
+  const responseBody: components['schemas']['AutomationChannelConfig'] = {
     assetId: numberOne,
     assetKind: 'WHATSAPP_PHONE_NUMBER',
     inheritanceMode: 'ASSET_ONLY',

@@ -5,8 +5,8 @@ import type { components } from '@ca-meta/contracts';
 import { META_API_BASE_URL } from '../config/public-runtime-config';
 import { normalizeApiV1BaseUrl } from './portal-session.service';
 
-export type AutomationConfig = components['schemas']['AutomationConfig'];
-export type AutomationConfigUpdate = components['schemas']['AutomationConfigUpdate'];
+export type AutomationConfig = components['schemas']['AutomationChannelConfig'];
+export type AutomationConfigUpdate = components['schemas']['AutomationChannelConfigUpdate'];
 
 export interface VersionedAutomationConfig {
   readonly config: AutomationConfig;
@@ -27,14 +27,14 @@ export class AutomationConfigService {
 
   async read(assetId: string): Promise<VersionedAutomationConfig> {
     const response = await firstValueFrom(this.http.get<AutomationConfig>(
-      `${this.baseUrl}/assets/${encodeURIComponent(assetId)}/automation-config`, { observe: 'response' },
+      `${this.baseUrl}/assets/${encodeURIComponent(assetId)}/automation-config/channels`, { observe: 'response' },
     ));
     return this.versioned(response);
   }
 
   async update(assetId: string, update: AutomationConfigUpdate, etag: string): Promise<VersionedAutomationConfig> {
     const response = await firstValueFrom(this.http.patch<AutomationConfig>(
-      `${this.baseUrl}/assets/${encodeURIComponent(assetId)}/automation-config`, update,
+      `${this.baseUrl}/assets/${encodeURIComponent(assetId)}/automation-config/channels`, update,
       { observe: 'response', headers: { 'If-Match': etag } },
     ));
     return this.versioned(response);

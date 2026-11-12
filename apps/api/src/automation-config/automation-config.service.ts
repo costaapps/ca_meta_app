@@ -48,7 +48,7 @@ export class AutomationConfigService {
     private readonly environment: MetaEnvironment,
   ) {}
 
-  async read(session: VerifiedPortalSession, contextRef: string, assetId: string, requestId: string): Promise<components['schemas']['AutomationConfig']> {
+  async read(session: VerifiedPortalSession, contextRef: string, assetId: string, requestId: string): Promise<components['schemas']['AutomationChannelConfig']> {
     const scope = await this.scope(session, contextRef);
     await this.authorization.authorize(scope, 'RESOURCE_READ', scope.tenantId);
     const asset = await this.findAsset(scope.tenantId, assetId);
@@ -59,7 +59,7 @@ export class AutomationConfigService {
   }
 
   async update(session: VerifiedPortalSession, contextRef: string, assetId: string, requestId: string,
-    ifMatchVersion: number, patch: AutomationConfigPatch): Promise<components['schemas']['AutomationConfig']> {
+    ifMatchVersion: number, patch: AutomationConfigPatch): Promise<components['schemas']['AutomationChannelConfig']> {
     const scope = await this.scope(session, contextRef);
     await this.authorization.authorize(scope, 'MANAGE_AUTOMATION_CONFIG', scope.tenantId);
     const asset = await this.findAsset(scope.tenantId, assetId);
@@ -92,7 +92,7 @@ export class AutomationConfigService {
   }
 
   private serialize(assetId: string, assetKind: components['schemas']['AutomationConfigAssetKind'],
-    state: Awaited<ReturnType<AutomationConfigRepository['read']>>, canEdit: boolean, requestId: string): components['schemas']['AutomationConfig'] {
+    state: Awaited<ReturnType<AutomationConfigRepository['read']>>, canEdit: boolean, requestId: string): components['schemas']['AutomationChannelConfig'] {
     return Object.freeze({
       assetId,
       assetKind,

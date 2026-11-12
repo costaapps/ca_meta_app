@@ -569,6 +569,33 @@ export interface paths {
          * @description Tenant and asset authorization are checked for the requested capability. ETag is returned for conditional updates.
          */
         readonly get: operations["getAutomationConfig"];
+        /**
+         * Replace automation/reply configuration conditionally
+         * @description Requires exact Origin, CSRF, current tenant context and If-Match from the latest representation. Unknown fields are rejected. This changes local configuration; delivery of a reply is a separate external effect.
+         */
+        readonly put: operations["replaceAutomationConfig"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/assets/{assetId}/automation-config/channels": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                readonly assetId: string;
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * Read automation/reply configuration
+         * @description Tenant and asset authorization are checked for the requested capability. ETag is returned for conditional updates.
+         */
+        readonly get: operations["getAutomationChannelConfig"];
         readonly put?: never;
         readonly post?: never;
         readonly delete?: never;
@@ -578,7 +605,7 @@ export interface paths {
          * Update channel-supported automation/reply fields conditionally
          * @description Requires exact Origin, CSRF, current tenant context and If-Match from the latest representation. Unknown fields are rejected. This changes local configuration; delivery of a reply is a separate external effect.
          */
-        readonly patch: operations["replaceAutomationConfig"];
+        readonly patch: operations["patchAutomationChannelConfig"];
         readonly trace?: never;
     };
     readonly "/api/v1/assets/{assetId}/replies": {
@@ -1187,6 +1214,15 @@ export interface components {
             readonly requestId: string;
         };
         readonly AutomationConfig: {
+            readonly assetId: string;
+            readonly enabled: boolean;
+            readonly replyText: string;
+            readonly version: number;
+            /** Format: date-time */
+            readonly updatedAt: string;
+            readonly requestId: string;
+        };
+        readonly AutomationChannelConfig: {
             /** Format: uuid */
             readonly assetId: string;
             readonly assetKind: components["schemas"]["AutomationConfigAssetKind"];
@@ -1220,6 +1256,10 @@ export interface components {
         /** @enum {string} */
         readonly AutomationConfigProjectionState: "UNKNOWN" | "PENDING" | "SYNCED" | "STALE" | "FAILED";
         readonly AutomationConfigUpdate: {
+            readonly enabled: boolean;
+            readonly replyText: string;
+        };
+        readonly AutomationChannelConfigUpdate: {
             readonly version: number;
             /** @description Empty text clears the local value for this asset. */
             readonly privateWelcomeMessage?: string;
@@ -2756,6 +2796,101 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["AutomationConfig"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 404: components["responses"]["NotFound"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 412: components["responses"]["PreconditionFailed"];
+            readonly 413: components["responses"]["PayloadTooLarge"];
+            readonly 422: components["responses"]["Unprocessable"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly getAutomationChannelConfig: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+            };
+            readonly path: {
+                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                readonly assetId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Sanitized success example */
+            readonly 200: {
+                headers: {
+                    readonly ETag?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AutomationChannelConfig"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 404: components["responses"]["NotFound"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 412: components["responses"]["PreconditionFailed"];
+            readonly 413: components["responses"]["PayloadTooLarge"];
+            readonly 422: components["responses"]["Unprocessable"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly patchAutomationChannelConfig: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /**
+                 * @description Exact configured browser Origin; wildcard matching is forbidden.
+                 * @example https://portal.example.invalid
+                 */
+                readonly Origin: components["parameters"]["Origin"];
+                /** @description Must match the configured exact-origin topology; cross-site, missing or invalid values fail. */
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                /** @description Session-bound anti-CSRF value; not a DTO property and not sufficient without the session cookie. */
+                readonly "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+                /**
+                 * @description ETag from the latest representation. Missing/stale precondition is rejected; no blind overwrite.
+                 * @example "automation-v7"
+                 */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+            };
+            readonly path: {
+                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                readonly assetId: string;
+            };
+            readonly cookie?: never;
+        };
+        /** @description Request uses a closed, size-bounded schema. */
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["AutomationChannelConfigUpdate"];
+            };
+        };
+        readonly responses: {
+            /** @description Sanitized success example */
+            readonly 200: {
+                headers: {
+                    readonly ETag?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AutomationChannelConfig"];
                 };
             };
             readonly 400: components["responses"]["BadRequest"];

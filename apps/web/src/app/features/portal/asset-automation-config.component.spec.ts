@@ -7,7 +7,7 @@ import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalTenantIdentityService } from '../../core/portal/portal-tenant-identity.service';
 import { AssetAutomationConfigComponent } from './asset-automation-config.component';
 
-type AutomationConfig = components['schemas']['AutomationConfig'];
+type AutomationConfig = components['schemas']['AutomationChannelConfig'];
 
 describe('AssetAutomationConfigComponent', () => {
   it('shows channel-supported fields and keeps edits disabled until the tenant identity gate is confirmed', async () => {

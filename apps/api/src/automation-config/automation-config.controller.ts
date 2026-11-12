@@ -81,7 +81,7 @@ function mapAutomationError(error: unknown): never {
 export class AutomationConfigController {
   constructor(private readonly config: AutomationConfigService) {}
 
-  @Get('assets/:assetId/automation-config')
+  @Get('assets/:assetId/automation-config/channels')
   @PublicRoute()
   @UseGuards(PortalSessionGuard)
   async read(
@@ -89,7 +89,7 @@ export class AutomationConfigController {
     @Req() request: PortalRequest,
     @Headers('x-tenant-context') headerContext?: string,
     @Res({ passthrough: true }) response?: Response,
-  ): Promise<components['schemas']['AutomationConfig']> {
+  ): Promise<components['schemas']['AutomationChannelConfig']> {
     try {
       const result = await this.config.read(request.portalSession, contextRef(request, headerContext), assetId, requestId(request));
       response?.setHeader('ETag', automationConfigEtag(result.version));
@@ -97,7 +97,7 @@ export class AutomationConfigController {
     } catch (error) { return mapAutomationError(error); }
   }
 
-  @Patch('assets/:assetId/automation-config')
+  @Patch('assets/:assetId/automation-config/channels')
   @PublicRoute()
   @UseGuards(PortalSessionGuard)
   async update(
@@ -107,7 +107,7 @@ export class AutomationConfigController {
     @Headers('x-tenant-context') headerContext?: string,
     @Headers('if-match') ifMatch?: string,
     @Res({ passthrough: true }) response?: Response,
-  ): Promise<components['schemas']['AutomationConfig']> {
+  ): Promise<components['schemas']['AutomationChannelConfig']> {
     try {
       const result = await this.config.update(request.portalSession, contextRef(request, headerContext), assetId,
         requestId(request), parseIfMatch(ifMatch), body);

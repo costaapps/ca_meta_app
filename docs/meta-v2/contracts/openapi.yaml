@@ -1781,6 +1781,122 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
+                    assetId: asset_example_01
+                    enabled: true
+                    replyText: Thanks for contacting our team.
+                    version: 7
+                    updatedAt: 2026-10-29T11:00:00Z
+                    requestId: req_example_30
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+    put:
+      operationId: replaceAutomationConfig
+      tags:
+        - Configuration
+      summary: Replace automation/reply configuration conditionally
+      description: Requires exact Origin, CSRF, current tenant context and If-Match from the latest
+        representation. Unknown fields are rejected. This changes local configuration; delivery of a
+        reply is a separate external effect.
+      security: *a10
+      parameters:
+        - *a26
+        - *a27
+        - *a28
+        - *a29
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutomationConfigUpdate"
+            examples:
+              sanitized:
+                summary: Sanitized request example
+                value:
+                  enabled: false
+                  replyText: ""
+      responses:
+        "200":
+          description: Sanitized success example
+          headers:
+            ETag:
+              schema:
+                type: string
+                example: '"automation-v8"'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationConfig"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    assetId: asset_example_01
+                    enabled: false
+                    replyText: ""
+                    version: 8
+                    updatedAt: 2026-10-29T12:02:00Z
+                    requestId: req_example_31
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-retry-policy: On 412, read the current representation and make an explicit new update.
+  /api/v1/assets/{assetId}/automation-config/channels:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against the server-derived
+          tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: getAutomationChannelConfig
+      tags:
+        - Configuration
+      summary: Read automation/reply configuration
+      description: Tenant and asset authorization are checked for the requested capability. ETag is
+        returned for conditional updates.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Sanitized success example
+          headers:
+            ETag:
+              schema:
+                type: string
+                example: '"automation-v7"'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationChannelConfig"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
                     assetId: 10000000-0000-4000-8000-000000000004
                     assetKind: WHATSAPP_PHONE_NUMBER
                     inheritanceMode: ASSET_ONLY
@@ -1807,7 +1923,7 @@ paths:
         "503": *a20
         default: *a21
     patch:
-      operationId: replaceAutomationConfig
+      operationId: patchAutomationChannelConfig
       tags:
         - Configuration
       summary: Update channel-supported automation/reply fields conditionally
@@ -1827,7 +1943,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AutomationConfigUpdate"
+              $ref: "#/components/schemas/AutomationChannelConfigUpdate"
             examples:
               whatsapp:
                 summary: Sanitized WhatsApp phone update
@@ -1845,7 +1961,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AutomationConfig"
+                $ref: "#/components/schemas/AutomationChannelConfig"
               examples:
                 sanitized:
                   summary: Sanitized success example
@@ -4125,6 +4241,36 @@ components:
       additionalProperties: false
       required:
         - assetId
+        - enabled
+        - replyText
+        - version
+        - updatedAt
+        - requestId
+      properties:
+        assetId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enabled:
+          type: boolean
+        replyText:
+          type: string
+          maxLength: 4096
+        version:
+          type: integer
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    AutomationChannelConfig:
+      type: object
+      additionalProperties: false
+      required:
+        - assetId
         - assetKind
         - inheritanceMode
         - supportedFields
@@ -4193,6 +4339,18 @@ components:
       type: string
       enum: [UNKNOWN, PENDING, SYNCED, STALE, FAILED]
     AutomationConfigUpdate:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - replyText
+      properties:
+        enabled:
+          type: boolean
+        replyText:
+          type: string
+          maxLength: 4096
+    AutomationChannelConfigUpdate:
       type: object
       additionalProperties: false
       minProperties: 2

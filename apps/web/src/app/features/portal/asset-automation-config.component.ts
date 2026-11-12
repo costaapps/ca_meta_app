@@ -10,9 +10,9 @@ import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalTenantIdentityService } from '../../core/portal/portal-tenant-identity.service';
 import { safeRequestId } from '../../core/portal/safe-api-error';
 
-type AutomationConfig = components['schemas']['AutomationConfig'];
+type AutomationConfig = components['schemas']['AutomationChannelConfig'];
 type AutomationConfigField = components['schemas']['AutomationConfigField'];
-type AutomationConfigUpdate = components['schemas']['AutomationConfigUpdate'];
+type AutomationConfigUpdate = components['schemas']['AutomationChannelConfigUpdate'];
 type EditableValues = {
   privateWelcomeMessage: string;
   commentPublicReply: string;

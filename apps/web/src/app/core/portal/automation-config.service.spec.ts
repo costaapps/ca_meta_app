@@ -5,7 +5,7 @@ import type { components } from '@ca-meta/contracts';
 import { META_API_BASE_URL } from '../config/public-runtime-config';
 import { AutomationConfigService } from './automation-config.service';
 
-type AutomationConfig = components['schemas']['AutomationConfig'];
+type AutomationConfig = components['schemas']['AutomationChannelConfig'];
 
 describe('AutomationConfigService', () => {
   let service: AutomationConfigService;
@@ -42,7 +42,7 @@ describe('AutomationConfigService', () => {
 
   it('uses the internal asset endpoint and enforces response ETag versioning for reads and updates', async () => {
     const loaded = service.read(config.assetId);
-    const readRequest = http.expectOne(`/api/v1/assets/${config.assetId}/automation-config`);
+    const readRequest = http.expectOne(`/api/v1/assets/${config.assetId}/automation-config/channels`);
     expect(readRequest.request.method).toBe('GET');
     readRequest.flush(config, { headers: { ETag: '"automation-v0"' } });
     const current = await loaded;
@@ -50,7 +50,7 @@ describe('AutomationConfigService', () => {
 
     const update = { version: 0, privateWelcomeMessage: 'Synthetic portal value' };
     const saving = service.update(config.assetId, update, current.etag);
-    const updateRequest = http.expectOne(`/api/v1/assets/${config.assetId}/automation-config`);
+    const updateRequest = http.expectOne(`/api/v1/assets/${config.assetId}/automation-config/channels`);
     expect(updateRequest.request.method).toBe('PATCH');
     expect(updateRequest.request.headers.get('If-Match')).toBe('"automation-v0"');
     expect(updateRequest.request.body).toEqual(update);
@@ -62,7 +62,7 @@ describe('AutomationConfigService', () => {
 
   it('rejects a response whose ETag does not match the body version', async () => {
     const loaded = service.read(config.assetId);
-    const request = http.expectOne(`/api/v1/assets/${config.assetId}/automation-config`);
+    const request = http.expectOne(`/api/v1/assets/${config.assetId}/automation-config/channels`);
     request.flush(config, { headers: { ETag: '"automation-v1"' } });
     await expect(loaded).rejects.toThrow('The automation config response is incomplete.');
   });
