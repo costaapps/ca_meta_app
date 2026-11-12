@@ -865,7 +865,10 @@ paths:
         signing key or trusted provider-launch configuration is unavailable. The
         signing key is runtime-configurable; its presence in any deployment is
         Not confirmed. A 201 or provider redirect means only that a flow was
-        created, never that a connection is READY.
+        created, never that a connection is READY. A distinct idempotency key
+        receives 409 COEXISTENCE_SESSION_ACTIVE while this tenant has another
+        unexpired, nonterminal WHATSAPP_COEXISTENCE session; a same-key retry
+        replays the existing session.
       security: *a10
       parameters: &a23
         - &a25
@@ -2785,6 +2788,7 @@ components:
             - OUTCOME_UNKNOWN
             - VERSION_CONFLICT
             - IDEMPOTENCY_KEY_REUSED
+            - COEXISTENCE_SESSION_ACTIVE
             - CONTEXT_CHANGED
             - ORIGIN_NOT_ALLOWED
             - HOST_NOT_ALLOWED
@@ -2821,6 +2825,9 @@ components:
         IDEMPOTENCY_KEY_REUSED:
           retryable: false
           action: USE_NEW_REQUEST_KEY
+        COEXISTENCE_SESSION_ACTIVE:
+          retryable: false
+          action: CHECK_STATUS
         HOST_NOT_ALLOWED:
           retryable: false
           action: CONTACT_ADMIN
@@ -4641,6 +4648,15 @@ components:
                 requestId: req_example_05
                 retryable: false
                 action: USE_NEW_REQUEST_KEY
+            coexistenceSessionActive:
+              summary: A WhatsApp Coexistence onboarding session is already active
+              value:
+                code: COEXISTENCE_SESSION_ACTIVE
+                safeMessage: A WhatsApp Coexistence onboarding session is already active for
+                  this company.
+                requestId: req_example_45
+                retryable: false
+                action: CHECK_STATUS
     PreconditionFailed:
       description: The supplied ETag is missing or stale.
       content:

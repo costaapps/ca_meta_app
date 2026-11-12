@@ -160,6 +160,7 @@ try {
   try {
     Invoke-Checked -FilePath 'docker' -ArgumentList @('compose', '-p', $composeProject, '-f', $composeFile, 'up', '-d', '--wait')
     Invoke-Checked -FilePath $npmCommand -ArgumentList @('exec', '--workspace=@ca-meta/api', '--', 'tsc', '-p', 'tsconfig.test.json')
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m2-05/prepare-current-schema.mjs')
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m2-08/prepare-test-reports.mjs')
     Write-Output 'M2.05 fixture: durable work and M3.05 onboarding.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(

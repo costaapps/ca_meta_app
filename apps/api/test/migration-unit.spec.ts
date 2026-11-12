@@ -20,6 +20,8 @@ import { ONBOARDING_CODE_TABLES, ONBOARDING_SAGA_MIGRATION } from '../src/databa
 import { ASSET_OBSERVATIONS_MIGRATION, ASSET_OBSERVATION_TABLES } from '../src/database/migrations/asset-observations.js';
 import { CONNECTION_LIFECYCLE_MIGRATION } from '../src/database/migrations/connection-lifecycle.js';
 import { INTERNAL_ASSET_OPERATIONS_MIGRATION } from '../src/database/migrations/internal-asset-operations.js';
+import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION, ONBOARDING_COEXISTENCE_LOCK_TABLES } from '../src/database/migrations/onboarding-coexistence-lock.js';
+import { assertMigrationGrantRecords, CoexistenceLockDeleteGrantRequiredError, safeMigrationError } from '../src/database/migrations/migration-runner.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -59,11 +61,52 @@ test('migration configuration rejects runtime account reuse and privileged built
   }), (error: unknown) => error instanceof MigrationEnvironmentError && error.fields.includes('MIGRATION_DATABASE_USER'));
 });
 
+test('migration grants require the lock-trigger definer privilege only on its exact table', () => {
+  const database = 'ca_meta_m5_03';
+  const schemaGrant = `GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES, TRIGGER ON \`${database}\`.* TO 'migrator'@'%'`;
+  const lockDeleteGrant = `GRANT DELETE ON \`${database}\`.\`ca_meta_onboarding_coexistence_locks\` TO 'migrator'@'%'`;
+  const usageGrant = "GRANT USAGE ON *.* TO 'migrator'@'%'";
+
+  assert.doesNotThrow(() => assertMigrationGrantRecords([usageGrant, schemaGrant, lockDeleteGrant], database));
+  assert.throws(() => assertMigrationGrantRecords([usageGrant, schemaGrant], database), /insufficient table-scoped/);
+  assert.doesNotThrow(() => assertMigrationGrantRecords([usageGrant, schemaGrant], database, {
+    allowMissingCoexistenceLockDelete: true,
+  }));
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant.replace('TRIGGER ON', 'DELETE, TRIGGER ON'),
+  ], database, { allowMissingCoexistenceLockDelete: true }), /unexpected database-scoped migration privileges/);
+  assert.equal(
+    safeMigrationError(new CoexistenceLockDeleteGrantRequiredError()),
+    'Migration paused before installing the v22 terminal-release trigger. Grant DELETE only on ca_meta_onboarding_coexistence_locks to the migration user, then rerun the migration command.',
+  );
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant.replace('TRIGGER ON', 'DELETE, TRIGGER ON'),
+    lockDeleteGrant,
+  ], database), /unexpected database-scoped migration privileges/);
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant,
+    lockDeleteGrant.replace('ca_meta_onboarding_coexistence_locks', 'ca_meta_onboarding_sessions'),
+  ], database), /unexpected table-scoped migration privileges/);
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant,
+    lockDeleteGrant.replace('GRANT DELETE ON', 'GRANT DELETE, SELECT ON'),
+  ], database), /unexpected table-scoped migration privileges/);
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant,
+    lockDeleteGrant.replace(`\`${database}\``, '`another_schema`'),
+  ], database), /unexpected table-scoped migration privileges/);
+});
+
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
   const schemaVersions = MIGRATIONS.map((migration) => migration.schemaVersion);
-  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
-  assert.equal(schemaVersions.at(-1), 21);
-  assert.equal(MIGRATIONS.length, 21);
+  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+  assert.equal(schemaVersions.at(-1), 22);
+  assert.equal(MIGRATIONS.length, 22);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -107,6 +150,17 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(CONNECTION_LIFECYCLE_MIGRATION.schemaVersion, 20);
   assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.id, '202611110021-internal-asset-operations');
   assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.schemaVersion, 21);
+  assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id, '202611120022-onboarding-coexistence-serialization');
+  assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.schemaVersion, 22);
+  const coexistenceLockTable = ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.find((step) => step.id === 'create-onboarding-coexistence-locks');
+  assert.ok(coexistenceLockTable && 'sql' in coexistenceLockTable);
+  assert.match(coexistenceLockTable.sql, /PRIMARY KEY \(tenant_id\)/);
+  assert.match(coexistenceLockTable.sql, /UNIQUE KEY uq_ca_meta_onboarding_coexistence_session/);
+  assert.match(coexistenceLockTable.sql, /FOREIGN KEY \(tenant_id, onboarding_session_id\)/);
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => step.id === 'validate-single-active-coexistence-session-per-tenant'));
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => 'runBatch' in step && step.id === 'backfill-active-onboarding-coexistence-locks'));
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => step.id === 'release-coexistence-lock-on-terminal-onboarding-status'));
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.deepEqual(ASSET_OBSERVATIONS_MIGRATION.steps.map((step) => step.id), [
     'create-meta-asset-observations', 'asset-observation-no-update', 'asset-observation-no-delete',
   ]);

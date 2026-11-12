@@ -1,5 +1,6 @@
 import { portalAuthGuard } from './core/portal/portal-auth.guard';
 import { routes } from './app.routes';
+import { PORTAL_NAVIGATION } from './features/portal/portal-shell.component';
 
 describe('portal route map', () => {
   const shellRoute = routes.find((route) => route.path === '');
@@ -13,11 +14,16 @@ describe('portal route map', () => {
     }
     expect(shellRoute?.component).toBeUndefined();
     expect(shellRoute?.loadComponent).toEqual(expect.any(Function));
-    for (const path of ['connections', 'connections/new/:flow', 'connections/:id', 'assets/:id', 'templates', 'notifications', 'setup/coexistence']) {
+    for (const path of ['connections', 'onboarding', 'connections/new/:flow', 'connections/:id', 'assets/:id', 'templates', 'notifications', 'setup/coexistence']) {
       const route = children.find((candidate) => candidate.path === path);
       expect(route?.component).toBeUndefined();
       expect(route?.loadComponent).toEqual(expect.any(Function));
     }
+  });
+
+  it('exposes onboarding from the authenticated portal navigation', () => {
+    expect(shellRoute?.canActivateChild).toContain(portalAuthGuard);
+    expect(PORTAL_NAVIGATION).toContainEqual({ path: '/onboarding', label: 'Autorizações', exact: true });
   });
 
   it('protects portal routes and retains the documented safe legacy aliases', () => {

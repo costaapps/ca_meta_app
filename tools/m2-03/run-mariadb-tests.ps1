@@ -80,6 +80,16 @@ try {
   Invoke-Checked -FilePath $npmCommand -ArgumentList @('--workspace=@ca-meta/api', 'run', 'test')
   Invoke-Checked -FilePath $npmCommand -ArgumentList @('--workspace=@ca-meta/api', 'run', 'migrate:deploy')
   Invoke-Checked -FilePath $npmCommand -ArgumentList @('--workspace=@ca-meta/api', 'run', 'migrate:status')
+  $migrationRegistryScript = "import('./apps/api/dist/database/migrations/migrations.js').then(({ MIGRATIONS }) => process.stdout.write(JSON.stringify(MIGRATIONS.map((migration) => migration.schemaVersion))))"
+  $migrationRegistryJson = & $nodeCommand --input-type=module -e $migrationRegistryScript
+  if ($LASTEXITCODE -ne 0) { throw 'Could not read the compiled migration registry for backup/restore verification.' }
+  $expectedMigrationVersions = @($migrationRegistryJson | ConvertFrom-Json)
+  if ($expectedMigrationVersions.Count -eq 0) { throw 'The compiled migration registry is empty.' }
+  $expectedMigrationVersionList = [string]::Join(',', [string[]]$expectedMigrationVersions)
+  $contiguousMigrationVersionList = [string]::Join(',', [string[]](1..$expectedMigrationVersions.Count))
+  if ($expectedMigrationVersionList -ne $contiguousMigrationVersionList) {
+    throw 'The compiled migration registry does not contain a contiguous schema-version sequence from 1.'
+  }
 
   # Back up the synthetic fixture with a transaction-consistent dump, restore into a fresh database,
   # then verify exact UTF-8 bytes, DATETIME(6), ledger state, and row counts without logging credentials.
@@ -101,11 +111,12 @@ try {
   $sourceLedgerSummary = & docker compose -p $composeProject -f $composeFile exec -T -e "MYSQL_PWD=$rootPassword" mariadb mariadb --user=root --database=ca_meta_m203 --batch --skip-column-names --execute $ledgerSummaryQuery
   if ($LASTEXITCODE -ne 0) { throw "Synthetic source migration-ledger verification failed with exit code $LASTEXITCODE." }
   $sourceLedgerValues = (($sourceLedgerSummary -join '').Trim() -split '\|')
-  if ($sourceLedgerValues.Count -ne 6 -or [int]$sourceLedgerValues[0] -ne 21 -or
+  if ($sourceLedgerValues.Count -ne 6 -or [int]$sourceLedgerValues[0] -ne $expectedMigrationVersions.Count -or
       [int]$sourceLedgerValues[0] -ne [int]$sourceLedgerValues[1] -or
-      [int]$sourceLedgerValues[0] -ne [int]$sourceLedgerValues[2] -or [int]$sourceLedgerValues[3] -ne 21 -or
-      $sourceLedgerValues[4] -ne '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21') {
-    throw 'Synthetic source database does not have the complete ordered 1–21 applied migration chain.'
+      [int]$sourceLedgerValues[0] -ne [int]$sourceLedgerValues[2] -or
+      [int]$sourceLedgerValues[3] -ne [int]$expectedMigrationVersions[-1] -or
+      $sourceLedgerValues[4] -ne $expectedMigrationVersionList) {
+    throw "Synthetic source database does not have the complete ordered 1–$($expectedMigrationVersions[-1]) applied migration chain."
   }
   $restoreQuery = "SET SESSION group_concat_max_len = 65535; SELECT CONCAT((SELECT COUNT(*) FROM ca_meta_assets),'|',(SELECT COUNT(*) FROM ca_meta_assets WHERE HEX(external_id)='3030302d3132337c5a61c5bcc3b3c582c48720f09fa7aa'),'|',(SELECT COUNT(*) FROM ca_meta_assets WHERE id='00000000-0000-4000-8000-000000010000' AND DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s.%f')='2026-10-29 12:34:56.123456'),'|',(SELECT CONCAT(COUNT(*),'|',COALESCE(SUM(state='APPLIED'),0),'|',COUNT(DISTINCT schema_version),'|',COALESCE(MAX(schema_version),0),'|',COALESCE(GROUP_CONCAT(schema_version ORDER BY schema_version SEPARATOR ','),''),'|',COALESCE(SHA2(GROUP_CONCAT(CONCAT_WS(':',schema_version,migration_id,checksum,state) ORDER BY schema_version,migration_id SEPARATOR ','),256),'empty')) FROM ca_meta_schema_migrations))"
   $restoreSummary = & docker compose -p $composeProject -f $composeFile exec -T -e "MYSQL_PWD=$rootPassword" mariadb mariadb --user=root --database=ca_meta_m203_restore --batch --skip-column-names --execute $restoreQuery
