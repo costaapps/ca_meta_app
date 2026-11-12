@@ -24,6 +24,7 @@ import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION, ONBOARDING_COEXISTENCE_LOCK_TABL
 import { AUTOMATION_CONFIG_MIGRATION, AUTOMATION_CONFIG_TABLES } from './automation-config.js';
 import { NOTIFICATIONS_MIGRATION, NOTIFICATION_TABLES } from './notifications.js';
 import { LEGACY_PROJECTION_MIGRATION, LEGACY_PROJECTION_TABLES } from './legacy-projection.js';
+import { MIGRATION_EXECUTION_CONTROL_MIGRATION, MIGRATION_EXECUTION_CONTROL_TABLES } from './migration-execution-control.js';
 
 function ddl(
   id: string,
@@ -299,6 +300,7 @@ const migrationsWithoutChecksums = [
   AUTOMATION_CONFIG_MIGRATION,
   NOTIFICATIONS_MIGRATION,
   LEGACY_PROJECTION_MIGRATION,
+  MIGRATION_EXECUTION_CONTROL_MIGRATION,
 ] as const;
 
 export const MIGRATIONS: readonly VersionedMigration[] = migrationsWithoutChecksums.map((migration) => ({
@@ -335,5 +337,6 @@ export const DOMAIN_TABLES = [
   ...AUTOMATION_CONFIG_TABLES,
   ...NOTIFICATION_TABLES,
   ...LEGACY_PROJECTION_TABLES,
+  ...MIGRATION_EXECUTION_CONTROL_TABLES,
 ] as const;
 

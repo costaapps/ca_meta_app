@@ -23,6 +23,7 @@ These specs turn accepted M1 contracts into bounded implementation slices. They 
 | [Legacy bridge](legacy-bridge.md) | #10, #11, #16 | baseline inventory, field mapping, transition strategy | `tools/m1-01/`, `tools/m1-02/`, `tools/m1-09/` |
 | [Internal service asset operations](internal-service-operations.md) | #62 | M1.01/M1.07 consumer contracts; M3.08 credential resolver; M3.09 lifecycle; M3.10 audit; M4.02 transport and M4.14 certification evidence; ADR-021 | `tools/m5-07/` |
 | [Legacy import preflight](legacy-import.md) | #39 | legacy schema, read-only preflight, ADR-005 | `apps/api/test/m3-11-legacy-import.spec.ts`, `tools/m3-11/` |
+| [Migration execution control](migration-execution.md) | #64 | M3.11 import ledger, M5.05–M5.08 metadata contracts, ADR-022 | `apps/api/test/m5-09-migration-execution.spec.ts`, `tools/m5-09/` |
 
 ### Status interpretation
 
