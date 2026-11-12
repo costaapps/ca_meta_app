@@ -19,7 +19,7 @@ M3.11 supplies a synthetic-only planner and a metadata-only, resumable ledger. M
 
 - The local candidate demonstrates data/control-plane mechanics, not customer migration, provider authorization or end-to-end cutover. Issue #64 stays partially evidenced until externally authorized pilot evidence exists.
 - The API exposes policy/repository classes only; no command enables production apply and no M5.09 runtime route is registered.
-- The candidate re-read and control database CAS do not share a transaction. A candidate source can still change after the re-read and before the CAS; a future real adapter needs pinned-snapshot or version-CAS support to close that residual window.
+- The candidate re-read and control database CAS do not share a transaction. A candidate source can change after the re-read until the control transaction commits, including after the CAS statement executes; a future real adapter needs pinned-snapshot or version-CAS support to close that residual window.
 - Migration numbering is provisional because #60 / M5.03 v22 is absent from this worktree. Current candidate sequence: #62 v21, #60 v22, #59 v23, #61 v24, #63 v25, #64 v26. The integrator must validate the complete final registry order and checksums before release.
 - Meta's official webhook documentation was unavailable during discovery (rate limited); callback ownership/sharing is therefore **Not confirmed**. No behavior is inferred from that unavailable source.
 
