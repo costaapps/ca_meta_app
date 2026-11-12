@@ -374,13 +374,14 @@ export function enableMigrationShadowRead(entries: readonly MigrationWriterAssig
   });
 }
 
-export function switchMigrationWriter(
+export async function switchMigrationWriter(
   entry: MigrationWriterAssignment,
   expectedVersion: number,
   nextOwner: MigrationWriterOwner,
   driftReconciliation: MigrationDriftReconciliation,
   shadowReadReport: ShadowReadReport | undefined,
-): MigrationWriterAssignment {
+  currentCandidatePort: ShadowReadPort,
+): Promise<MigrationWriterAssignment> {
   assertWriterAssignment(entry);
   if (!driftReconciliation || entry.version !== expectedVersion || entry.phase !== 'SHADOW_READ' ||
       !entry.shadowReadEnabled || nextOwner === 'LEGACY' ||
@@ -389,6 +390,7 @@ export function switchMigrationWriter(
       !DIGEST.test(driftReconciliation.baselineSnapshotHash) || !DIGEST.test(driftReconciliation.currentSnapshotHash) ||
       !shadowReadReport || shadowReadReport.mode !== 'SHADOW_READ' || shadowReadReport.readOnly !== true ||
       shadowReadReport.matches !== true || !shadowReadReport.scope ||
+      !currentCandidatePort || typeof currentCandidatePort.readSanitizedSnapshot !== 'function' ||
       !DIGEST.test(shadowReadReport.legacySnapshotHash) ||
       !DIGEST.test(shadowReadReport.candidateSnapshotHash) ||
       shadowReadReport.legacySnapshotHash !== driftReconciliation.currentSnapshotHash ||
@@ -396,6 +398,24 @@ export function switchMigrationWriter(
       shadowReadReport.scope.channelFamily !== entry.channelFamily || shadowReadReport.scope.consumerKind !== entry.consumerKind) {
     throw new MigrationExecutionInputError('Writer change is stale or outside the allowed phase transition.');
   }
+
+  let currentCandidateSnapshotValue: unknown;
+  try {
+    currentCandidateSnapshotValue = await currentCandidatePort.readSanitizedSnapshot({
+      cohortId: entry.cohortId,
+      tenantId: entry.tenantId,
+      channelFamily: entry.channelFamily,
+      consumerKind: entry.consumerKind,
+    });
+  } catch {
+    throw new MigrationExecutionInputError('Current candidate shadow snapshot could not be verified before cutover.');
+  }
+  const currentCandidateSnapshot = parseShadowSnapshot(currentCandidateSnapshotValue);
+  if (currentCandidateSnapshot.snapshotHash !== shadowReadReport.candidateSnapshotHash ||
+      currentCandidateSnapshot.sourceVersion !== shadowReadReport.candidateVersion) {
+    throw new MigrationExecutionInputError('Candidate shadow snapshot changed after the matched report was produced.');
+  }
+
   return {
     ...entry,
     previousWriterOwner: entry.writerOwner,

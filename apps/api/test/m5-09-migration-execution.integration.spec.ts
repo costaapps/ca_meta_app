@@ -164,7 +164,6 @@ test('M5.09 MariaDB persists redacted provenance, resumes M3.11 checkpoints, and
     assert.equal(safeJson.includes('synthetic-company'), false);
 
     const cohortScope = { cohortId: '', tenantId, channelFamily: 'WHATSAPP_EXCLUSIVE' as const, consumerKind: 'PORTAL' as const };
-    const writerRepository = new MysqlMigrationCohortWriterRepository(database);
     const emptyDrift = detectMigrationSourceDrift({ snapshotHash: hasher.digest('empty-before'), records: [] },
       { snapshotHash: hasher.digest('empty-current'), records: [] });
     const readyForCutover = reconcileMigrationSourceDrift(emptyDrift, {
@@ -184,6 +183,7 @@ test('M5.09 MariaDB persists redacted provenance, resumes M3.11 checkpoints, and
     const candidateShadow: ShadowReadPort = { readSanitizedSnapshot: async () => ({
       sourceVersion: 'candidate-current-v1', snapshotHash: hasher.digest('candidate-current'), resources: [shadowResource],
     }) };
+    const writerRepository = new MysqlMigrationCohortWriterRepository(database, candidateShadow);
     const shadowReadReport = await runMigrationShadowRead(legacyShadow, candidateShadow, cohortScope);
     assert.equal(shadowReadReport.matches, true);
     let matrix = await writerRepository.initialize(initial);
@@ -214,7 +214,7 @@ test('M5.09 MariaDB persists redacted provenance, resumes M3.11 checkpoints, and
     // A process can stop after only some per-function CAS transitions. A fresh
     // repository instance resumes from durable state and rolls the whole cohort
     // back without sending credential references or grants to legacy.
-    const resumedWriterRepository = new MysqlMigrationCohortWriterRepository(database);
+    const resumedWriterRepository = new MysqlMigrationCohortWriterRepository(database, candidateShadow);
     matrix = await resumedWriterRepository.readMatrix(cohortScope);
     assert.equal(matrix.filter((entry) => entry.phase === 'CUTOVER').length, 2);
     assert.equal(matrix.filter((entry) => entry.phase === 'SHADOW_READ').length, 2);

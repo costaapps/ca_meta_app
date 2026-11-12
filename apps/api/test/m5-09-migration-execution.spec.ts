@@ -221,9 +221,6 @@ test('M5.09 writer cutover requires current matched shadow evidence and partial 
     addedSourceRecordHashes: [], changedSourceRecordHashes: [], removedSourceRecordHashes: [],
   });
   const credentialEntry = shadow.find((entry) => entry.functionName === 'CREDENTIAL_REFERENCE')!;
-  assert.throws(() => switchMigrationWriter(credentialEntry, credentialEntry.version, 'CENTRAL', readyForCutover, undefined),
-    MigrationExecutionInputError, 'a current shadow-read report is required');
-
   const reportScope = {
     cohortId: credentialEntry.cohortId, tenantId: credentialEntry.tenantId,
     channelFamily: credentialEntry.channelFamily, consumerKind: credentialEntry.consumerKind,
@@ -233,11 +230,17 @@ test('M5.09 writer cutover requires current matched shadow evidence and partial 
     metadataHmac: fingerprint('metadata'), statusHmac: fingerprint('status'),
     configurationHmac: fingerprint('configuration'), relationshipHmac: fingerprint('relationship'),
   };
+  let currentCandidateHash = fingerprint('candidate-current');
+  let currentCandidateVersion = 'candidate-current-v1';
+  const candidatePort: ShadowReadPort = { readSanitizedSnapshot: async () => ({
+    sourceVersion: currentCandidateVersion, snapshotHash: currentCandidateHash, resources: [resource],
+  }) };
+  await assert.rejects(switchMigrationWriter(credentialEntry, credentialEntry.version, 'CENTRAL', readyForCutover,
+    undefined, candidatePort),
+    MigrationExecutionInputError, 'a current shadow-read report is required');
+
   const legacyPort: ShadowReadPort = { readSanitizedSnapshot: async () => ({
     sourceVersion: 'legacy-current-v1', snapshotHash: emptyDrift.currentSnapshotHash, resources: [resource],
-  }) };
-  const candidatePort: ShadowReadPort = { readSanitizedSnapshot: async () => ({
-    sourceVersion: 'candidate-current-v1', snapshotHash: fingerprint('candidate-current'), resources: [resource],
   }) };
   const matchedReport = await runMigrationShadowRead(legacyPort, candidatePort, reportScope);
   assert.equal(matchedReport.matches, true);
@@ -248,11 +251,20 @@ test('M5.09 writer cutover requires current matched shadow evidence and partial 
     }),
   }, reportScope);
   assert.equal(mismatchedReport.matches, false);
-  assert.throws(() => switchMigrationWriter(credentialEntry, credentialEntry.version, 'CENTRAL',
-    readyForCutover, mismatchedReport), MigrationExecutionInputError, 'a mismatched shadow-read report blocks cutover');
+  await assert.rejects(switchMigrationWriter(credentialEntry, credentialEntry.version, 'CENTRAL',
+    readyForCutover, mismatchedReport, candidatePort), MigrationExecutionInputError,
+  'a mismatched shadow-read report blocks cutover');
 
-  const switchedCredential = switchMigrationWriter(credentialEntry, credentialEntry.version, 'CENTRAL',
-    readyForCutover, matchedReport);
+  currentCandidateHash = fingerprint('candidate-updated-after-shadow-read');
+  currentCandidateVersion = 'candidate-current-v2';
+  await assert.rejects(switchMigrationWriter(credentialEntry, credentialEntry.version, 'CENTRAL',
+    readyForCutover, matchedReport, candidatePort), MigrationExecutionInputError,
+  'a previously matched report is rejected when the current candidate snapshot changed');
+  currentCandidateHash = fingerprint('candidate-current');
+  currentCandidateVersion = 'candidate-current-v1';
+
+  const switchedCredential = await switchMigrationWriter(credentialEntry, credentialEntry.version, 'CENTRAL',
+    readyForCutover, matchedReport, candidatePort);
   assert.equal(switchedCredential.driftReconciledSnapshotHash, emptyDrift.currentSnapshotHash);
   assert.equal(switchedCredential.shadowReadCandidateSnapshotHash, matchedReport.candidateSnapshotHash);
   const partial = shadow.map((entry) => entry.functionName === 'CREDENTIAL_REFERENCE' ? switchedCredential : entry);

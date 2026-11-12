@@ -20,6 +20,7 @@ import {
   type MigrationFunction,
   type MigrationSurfaceCounts,
   type ShadowReadReport,
+  type ShadowReadPort,
   type MigrationWriterAssignment,
   type MigrationWriterOwner,
   type MigrationWriterRollbackResult,
@@ -364,7 +365,10 @@ export class MysqlMigrationBatchManifestRepository {
 }
 
 export class MysqlMigrationCohortWriterRepository {
-  constructor(private readonly database: DurableWorkDatabase) {}
+  constructor(
+    private readonly database: DurableWorkDatabase,
+    private readonly currentCandidatePort: ShadowReadPort,
+  ) {}
 
   async initialize(entries: readonly MigrationWriterAssignment[]): Promise<readonly MigrationWriterAssignment[]> {
     const matrix = validateMigrationWriterMatrix(entries);
@@ -458,8 +462,8 @@ export class MysqlMigrationCohortWriterRepository {
             candidate.shadowReadCandidateSnapshotHash !== input.shadowReadReport?.candidateSnapshotHash))) {
         throw new MigrationControlConflictError('Partial cutover already uses different source or shadow evidence.');
       }
-      const changed = switchMigrationWriter(entry, input.expectedVersion, input.nextOwner,
-        input.driftReconciliation, input.shadowReadReport);
+      const changed = await switchMigrationWriter(entry, input.expectedVersion, input.nextOwner,
+        input.driftReconciliation, input.shadowReadReport, this.currentCandidatePort);
       await updateWriterRow(manager, changed, input.expectedVersion);
       const result = (await writerRows(manager, input.scope)).find((candidate) => candidate.functionName === input.functionName);
       if (!result) throw new MigrationControlConflictError('Writer transition was not persisted.');

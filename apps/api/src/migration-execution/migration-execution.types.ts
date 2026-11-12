@@ -88,12 +88,13 @@ export interface ShadowReadFingerprint {
 }
 
 export interface ShadowReadSnapshot {
+  /** Opaque version and digest must identify the same complete sanitized snapshot. */
   readonly sourceVersion: string;
   readonly snapshotHash: string;
   readonly resources: readonly ShadowReadFingerprint[];
 }
 
-/** This read-only port deliberately has no write/send/subscription methods. */
+/** This read-only port returns a fresh source view and deliberately has no write/send/subscription methods. */
 export interface ShadowReadPort {
   readSanitizedSnapshot(scope: MigrationCohortScope): Promise<ShadowReadSnapshot>;
 }
