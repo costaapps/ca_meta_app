@@ -174,6 +174,8 @@ export interface AssetCatalogReadModel {
   /** Internal app configuration reference; omitted from API serializers. */
   readonly appConfigurationId: string;
   readonly kind: MetaAssetKind;
+  /** Sanitized server-owned label; never an external provider identifier. */
+  readonly displayLabel: string | null;
   readonly status: AssetCatalogStatus;
   readonly authorizationStatus: AssetCatalogAuthorizationStatus;
   readonly observedAt: string;
@@ -207,6 +209,7 @@ export interface AssetCatalogPage {
 export type PublicMetaFlowVariant = 'FACEBOOK_LOGIN' | 'INSTAGRAM_VIA_FACEBOOK_LOGIN' | 'INSTAGRAM_LOGIN' |
   'WHATSAPP_CLOUD_API' | 'WHATSAPP_COEXISTENCE';
 export type ConnectionCatalogStatus = 'ACTIVE' | 'PARTIAL' | 'REAUTH_REQUIRED' | 'UNKNOWN' | 'DISCONNECTED';
+export type ConnectionCatalogFilterStatus = ConnectionCatalogStatus | 'STALE';
 export type ConnectionReadiness = 'READY' | 'PARTIAL' | 'UNKNOWN';
 
 export interface ConnectionCatalogReadModel {
@@ -243,8 +246,9 @@ export interface ConnectionCatalogPageQuery {
   readonly cursor?: string;
   readonly limit: number;
   readonly channel?: AssetCatalogChannel;
+  readonly flowVariant?: ConnectionCatalogReadModel['flowVariant'];
   readonly number?: string;
-  readonly status?: ConnectionCatalogStatus;
+  readonly status?: ConnectionCatalogFilterStatus;
 }
 
 export interface ConnectionCatalogPage {

@@ -13,7 +13,7 @@ describe('portal route map', () => {
     }
     expect(shellRoute?.component).toBeUndefined();
     expect(shellRoute?.loadComponent).toEqual(expect.any(Function));
-    for (const path of ['connections', 'connections/new/:flow', 'assets/:id', 'templates', 'notifications', 'setup/coexistence']) {
+    for (const path of ['connections', 'connections/new/:flow', 'connections/:id', 'assets/:id', 'templates', 'notifications', 'setup/coexistence']) {
       const route = children.find((candidate) => candidate.path === path);
       expect(route?.component).toBeUndefined();
       expect(route?.loadComponent).toEqual(expect.any(Function));

@@ -7,6 +7,14 @@ describe('safeReturnUrl', () => {
     );
   });
 
+  it('allows one constrained connection detail segment and rejects nested or invalid IDs', () => {
+    expect(safeReturnUrl('/connections/asset_123-abc')).toBe('/connections/asset_123-abc');
+    expect(safeReturnUrl(`/connections/${'a'.repeat(128)}`)).toBe(`/connections/${'a'.repeat(128)}`);
+    expect(safeReturnUrl('/connections/asset_123/child')).toBe('/connections');
+    expect(safeReturnUrl(`/connections/${'a'.repeat(129)}`)).toBe('/connections');
+    expect(safeReturnUrl('/connections/asset.123')).toBe('/connections');
+  });
+
   it('does not carry cUUID, ticket or callback success claims into a post-entry redirect', () => {
     expect(safeReturnUrl('/setup?cUUID=tenant-secret&auth_success=true&ticket=synthetic')).toBe('/connections');
     expect(safeReturnUrl('/connections?cUUID=old-tenant&ticket=synthetic')).toBe('/connections');

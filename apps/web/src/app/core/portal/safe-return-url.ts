@@ -4,7 +4,8 @@ export function safeReturnUrl(value: string): string {
   if (path === '/access' || path === '/embed' || path === '/oauth/return' || path === '/setup' ||
       path.startsWith('/setup/') || path === '/channels') return '/connections';
   const safePaths = path === '/connections' || path === '/templates' || path === '/notifications' ||
-    /^\/connections\/new\/[a-z-]+$/.test(path) || /^\/assets\/[A-Za-z0-9_-]{1,128}$/.test(path);
+    /^\/connections\/new\/[a-z-]+$/.test(path) || /^\/connections\/[A-Za-z0-9_-]{1,128}$/.test(path) ||
+    /^\/assets\/[A-Za-z0-9_-]{1,128}$/.test(path);
   if (!safePaths) return '/connections';
   const parameters = new URLSearchParams(query);
   const safeParameters = new URLSearchParams();
