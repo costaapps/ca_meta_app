@@ -167,8 +167,8 @@ const terminalRelease: DdlStep = {
 };
 
 const definition = {
-  id: '202611110021-onboarding-coexistence-serialization',
-  schemaVersion: 21,
+  id: '202611120022-onboarding-coexistence-serialization',
+  schemaVersion: 22,
   minimumSupportedApiVersion: 1,
   steps: [validateExistingSessions, createLocks, backfillLocks, terminalRelease],
 } as const;

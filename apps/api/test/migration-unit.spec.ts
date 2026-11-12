@@ -93,9 +93,9 @@ test('migration grants require the lock-trigger definer privilege only on its ex
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
   const schemaVersions = MIGRATIONS.map((migration) => migration.schemaVersion);
-  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
-  assert.equal(schemaVersions.at(-1), 21);
-  assert.equal(MIGRATIONS.length, 21);
+  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+  assert.equal(schemaVersions.at(-1), 22);
+  assert.equal(MIGRATIONS.length, 22);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -139,8 +139,8 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(CONNECTION_LIFECYCLE_MIGRATION.schemaVersion, 20);
   assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.id, '202611110021-internal-asset-operations');
   assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.schemaVersion, 21);
-  assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id, '202611110021-onboarding-coexistence-serialization');
-  assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.schemaVersion, 21);
+  assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id, '202611120022-onboarding-coexistence-serialization');
+  assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.schemaVersion, 22);
   const coexistenceLockTable = ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.find((step) => step.id === 'create-onboarding-coexistence-locks');
   assert.ok(coexistenceLockTable && 'sql' in coexistenceLockTable);
   assert.match(coexistenceLockTable.sql, /PRIMARY KEY \(tenant_id\)/);
