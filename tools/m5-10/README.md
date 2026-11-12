@@ -20,7 +20,13 @@ Run API build and test TypeScript project checks:
 npm run typecheck:m5-10 --workspace=@ca-meta/api
 ```
 
-Both runners use Node 24 and compile against the current checkout's generated contract declarations. This explicit path mapping avoids relying on an unrelated external workspace junction if one exists under `node_modules/@ca-meta/contracts`. The test harness runs only `m5-10-operations-diagnostics.spec.ts`; it does not run a broad suite or use MariaDB. Each script creates a uniquely named directory under the ignored repository `tmp/` folder and removes only that exact directory in a `finally` block. No credentials or test env file is needed.
+Run the focused `/status` count regression test:
+
+```powershell
+npm run test:m5-10 --workspace=@ca-meta/web
+```
+
+The runners use Node 24 and compile against the current checkout's generated contract declarations. This explicit API path mapping avoids relying on an unrelated external workspace junction if one exists under `node_modules/@ca-meta/contracts`. The API harness runs only `m5-10-operations-diagnostics.spec.ts`; the Angular harness includes only `operations-diagnostics.component.spec.ts`. Neither test uses MariaDB. Each harness creates a uniquely named directory under an ignored workspace-local folder and removes only that exact directory in a `finally` block. No credentials or test env file is needed.
 
 ## Coverage
 
@@ -29,5 +35,6 @@ Both runners use Node 24 and compile against the current checkout's generated co
 - Fixed reason-code export requires a short-lived `SUPPORT` role grant; audit is recorded before read; token/message/payload sentinels are removed.
 - Tenant refresh is audited but fail-closed while the company identity label is unconfirmed.
 - Replay requires current tenant membership and a support grant; the M2 deterministic dead-letter key produces a duplicate on a repeated eligible request; ambiguous jobs are refused without enqueue.
+- The `/status` component shows queued/running/retry-pending jobs separately and includes failed, dead-letter and `UNKNOWN` jobs in the review count.
 
 Tests use synthetic tenant/resource IDs and in-memory ports only. They do not call Meta, send messages, change subscriptions, access production databases or run a real replay.

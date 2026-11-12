@@ -71,7 +71,7 @@
 
       <article class="status-card">
         <div class="card-heading"><h2>Tarefas</h2><span [attr.data-state]="report.jobs.state">{{ stateCopy(report.jobs) }}</span></div>
-        <p>{{ jobCount(report, 'QUEUED', 'RUNNING', 'RETRY_PENDING') }} em andamento · {{ jobCount(report, 'FAILED', 'DEAD_LETTER') }} precisam de revisão.</p>
+        <p>{{ jobCount(report, 'QUEUED', 'RUNNING', 'RETRY_PENDING') }} em andamento · {{ jobCount(report, 'FAILED', 'DEAD_LETTER', 'UNKNOWN') }} precisam de revisão.</p>
       </article>
 
       <article class="status-card">
