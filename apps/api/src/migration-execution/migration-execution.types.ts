@@ -89,19 +89,23 @@ export interface ShadowReadFingerprint {
 
 export interface ShadowReadSnapshot {
   readonly sourceVersion: string;
+  readonly snapshotHash: string;
   readonly resources: readonly ShadowReadFingerprint[];
 }
 
 /** This read-only port deliberately has no write/send/subscription methods. */
 export interface ShadowReadPort {
-  readSanitizedSnapshot(): Promise<ShadowReadSnapshot>;
+  readSanitizedSnapshot(scope: MigrationCohortScope): Promise<ShadowReadSnapshot>;
 }
 
 export interface ShadowReadReport {
   readonly mode: 'SHADOW_READ';
   readonly readOnly: true;
+  readonly scope: MigrationCohortScope;
   readonly legacyVersion: string;
   readonly candidateVersion: string;
+  readonly legacySnapshotHash: string;
+  readonly candidateSnapshotHash: string;
   readonly comparedCount: number;
   readonly missingCount: number;
   readonly addedCount: number;
@@ -122,6 +126,7 @@ export interface MigrationWriterAssignment {
   readonly previousWriterOwner: MigrationWriterOwner | null;
   readonly phase: MigrationCohortPhase;
   readonly shadowReadEnabled: boolean;
+  readonly shadowReadCandidateSnapshotHash: string | null;
   readonly legacyRouteVerified: boolean;
   readonly unresolvedExternalEffects: number;
   readonly driftReconciledSnapshotHash: string | null;
@@ -137,6 +142,8 @@ export interface MigrationCohortScope {
 
 export interface MigrationWriterRollbackResult {
   readonly assignments: readonly MigrationWriterAssignment[];
+  readonly cutoverFunctions: readonly MigrationFunction[];
+  readonly abortedBeforeCutoverFunctions: readonly MigrationFunction[];
   /** Credential references stay with the central owner when the prior route was legacy. */
   readonly credentialReferencesKeptCentral: boolean;
   readonly credentialAction: 'NONE';

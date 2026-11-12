@@ -13,7 +13,7 @@ const batchColumns = [
 
 const writerColumns = [
   'cohort_id', 'tenant_id', 'channel_family', 'consumer_kind', 'function_name', 'writer_owner',
-  'previous_writer_owner', 'phase', 'shadow_read_enabled', 'legacy_route_verified',
+  'previous_writer_owner', 'phase', 'shadow_read_enabled', 'shadow_read_candidate_snapshot_hash', 'legacy_route_verified',
   'unresolved_external_effects', 'drift_reconciled_snapshot_hash', 'version', 'created_at', 'updated_at',
 ] as const;
 
@@ -107,6 +107,7 @@ const cohortWriters: DdlStep = {
     previous_writer_owner VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
     phase VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     shadow_read_enabled TINYINT(1) NOT NULL DEFAULT 0,
+    shadow_read_candidate_snapshot_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
     legacy_route_verified TINYINT(1) NOT NULL DEFAULT 0,
     unresolved_external_effects INT UNSIGNED NOT NULL DEFAULT 0,
     drift_reconciled_snapshot_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,

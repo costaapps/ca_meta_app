@@ -11,9 +11,11 @@ import { MysqlLegacyImportLedger } from '../src/legacy-import/mysql-legacy-impor
 import { MigrationManifestTrackingApplyPort } from '../src/migration-execution/migration-execution.port.js';
 import { MysqlMigrationBatchManifestRepository, MysqlMigrationCohortWriterRepository } from '../src/migration-execution/migration-execution-control.store.js';
 import {
-  createMigrationBatchManifest, detectMigrationSourceDrift, reconcileMigrationSourceDrift,
+  createMigrationBatchManifest, detectMigrationSourceDrift, reconcileMigrationSourceDrift, runMigrationShadowRead,
 } from '../src/migration-execution/migration-execution.policy.js';
-import type { MigrationSurfaceCounts, MigrationWriterAssignment, MigrationWriterOwner } from '../src/migration-execution/migration-execution.types.js';
+import type {
+  MigrationSurfaceCounts, MigrationWriterAssignment, MigrationWriterOwner, ShadowReadPort,
+} from '../src/migration-execution/migration-execution.types.js';
 
 const enabled = process.env.M5_09_TEST === '1';
 const catalogRef = 'synthetic-m5-09-mariadb';
@@ -53,7 +55,8 @@ function newWriterMatrix(tenantId: string): MigrationWriterAssignment[] {
   return definitions.map(([functionName, writerOwner]) => ({
     cohortId, tenantId, channelFamily: 'WHATSAPP_EXCLUSIVE', consumerKind: 'PORTAL', functionName,
     writerOwner, previousWriterOwner: null, phase: 'PREPARED', shadowReadEnabled: false,
-    legacyRouteVerified: true, unresolvedExternalEffects: 0, driftReconciledSnapshotHash: null, version: 1,
+    shadowReadCandidateSnapshotHash: null, legacyRouteVerified: true, unresolvedExternalEffects: 0,
+    driftReconciledSnapshotHash: null, version: 1,
   }));
 }
 
@@ -170,6 +173,19 @@ test('M5.09 MariaDB persists redacted provenance, resumes M3.11 checkpoints, and
     });
     const initial = newWriterMatrix(tenantId);
     cohortScope.cohortId = initial[0]!.cohortId;
+    const shadowResource = {
+      resourceRefHash: hasher.digest('shadow-resource'), kind: 'ASSET' as const,
+      metadataHmac: hasher.digest('metadata'), statusHmac: hasher.digest('status'),
+      configurationHmac: hasher.digest('configuration'), relationshipHmac: hasher.digest('relationship'),
+    };
+    const legacyShadow: ShadowReadPort = { readSanitizedSnapshot: async () => ({
+      sourceVersion: 'legacy-current-v1', snapshotHash: emptyDrift.currentSnapshotHash, resources: [shadowResource],
+    }) };
+    const candidateShadow: ShadowReadPort = { readSanitizedSnapshot: async () => ({
+      sourceVersion: 'candidate-current-v1', snapshotHash: hasher.digest('candidate-current'), resources: [shadowResource],
+    }) };
+    const shadowReadReport = await runMigrationShadowRead(legacyShadow, candidateShadow, cohortScope);
+    assert.equal(shadowReadReport.matches, true);
     let matrix = await writerRepository.initialize(initial);
     matrix = await writerRepository.enableShadowRead(cohortScope);
     assert.ok(matrix.every((entry) => entry.shadowReadEnabled && entry.writerOwner === 'LEGACY'));
@@ -180,29 +196,35 @@ test('M5.09 MariaDB persists redacted provenance, resumes M3.11 checkpoints, and
     const configuration = matrix.find((entry) => entry.functionName === 'CONFIGURATION')!;
     const races = await Promise.allSettled([
       writerRepository.switchWriter({ scope: cohortScope, functionName: 'CONFIGURATION', expectedVersion: configuration.version,
-        nextOwner: targets.CONFIGURATION, driftReconciliation: readyForCutover }),
+        nextOwner: targets.CONFIGURATION, driftReconciliation: readyForCutover, shadowReadReport }),
       writerRepository.switchWriter({ scope: cohortScope, functionName: 'CONFIGURATION', expectedVersion: configuration.version,
-        nextOwner: targets.CONFIGURATION, driftReconciliation: readyForCutover }),
+        nextOwner: targets.CONFIGURATION, driftReconciliation: readyForCutover, shadowReadReport }),
     ]);
     assert.equal(races.filter((result) => result.status === 'fulfilled').length, 1);
     assert.equal(races.filter((result) => result.status === 'rejected').length, 1);
-    matrix = await writerRepository.enableShadowRead(cohortScope);
+    matrix = await writerRepository.readMatrix(cohortScope);
     assert.equal(matrix.find((entry) => entry.functionName === 'CONFIGURATION')?.driftReconciledSnapshotHash,
       emptyDrift.currentSnapshotHash);
-    for (const entry of matrix) {
-      if (entry.writerOwner === 'LEGACY') {
-        await writerRepository.switchWriter({
-          scope: cohortScope, functionName: entry.functionName, expectedVersion: entry.version,
-          nextOwner: targets[entry.functionName], driftReconciliation: readyForCutover,
-        });
-      }
-    }
-    matrix = await writerRepository.enableShadowRead(cohortScope);
+
+    const credential = matrix.find((entry) => entry.functionName === 'CREDENTIAL_REFERENCE')!;
+    await writerRepository.switchWriter({ scope: cohortScope, functionName: credential.functionName,
+      expectedVersion: credential.version, nextOwner: targets.CREDENTIAL_REFERENCE,
+      driftReconciliation: readyForCutover, shadowReadReport });
+
+    // A process can stop after only some per-function CAS transitions. A fresh
+    // repository instance resumes from durable state and rolls the whole cohort
+    // back without sending credential references or grants to legacy.
+    const resumedWriterRepository = new MysqlMigrationCohortWriterRepository(database);
+    matrix = await resumedWriterRepository.readMatrix(cohortScope);
+    assert.equal(matrix.filter((entry) => entry.phase === 'CUTOVER').length, 2);
+    assert.equal(matrix.filter((entry) => entry.phase === 'SHADOW_READ').length, 2);
     const expectedVersions = Object.fromEntries(matrix.map((entry) => [entry.functionName, entry.version]));
-    const rollback = await writerRepository.rollbackCohort({ scope: cohortScope, expectedVersions });
+    const rollback = await resumedWriterRepository.rollbackCohort({ scope: cohortScope, expectedVersions });
     assert.ok(rollback.assignments.every((entry) => entry.phase === 'ROLLED_BACK'));
     assert.ok(rollback.assignments.filter((entry) => entry.functionName !== 'CREDENTIAL_REFERENCE')
       .every((entry) => entry.writerOwner === 'LEGACY'));
+    assert.deepEqual([...rollback.cutoverFunctions].sort(), ['CONFIGURATION', 'CREDENTIAL_REFERENCE']);
+    assert.deepEqual([...rollback.abortedBeforeCutoverFunctions].sort(), ['LEGACY_PROJECTION', 'OPERATION_RELAY']);
     assert.equal(rollback.assignments.find((entry) => entry.functionName === 'CREDENTIAL_REFERENCE')?.writerOwner, 'CENTRAL');
     assert.equal(rollback.credentialReferencesKeptCentral, true);
     assert.equal(rollback.credentialAction, 'NONE');

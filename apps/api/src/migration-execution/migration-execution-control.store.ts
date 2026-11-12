@@ -19,6 +19,7 @@ import {
   type MigrationConsumerKind,
   type MigrationFunction,
   type MigrationSurfaceCounts,
+  type ShadowReadReport,
   type MigrationWriterAssignment,
   type MigrationWriterOwner,
   type MigrationWriterRollbackResult,
@@ -69,6 +70,7 @@ interface WriterRow {
   previous_writer_owner: MigrationWriterOwner | null;
   phase: MigrationCohortPhase;
   shadow_read_enabled: number | boolean;
+  shadow_read_candidate_snapshot_hash: string | null;
   legacy_route_verified: number | boolean;
   unresolved_external_effects: number | string;
   drift_reconciled_snapshot_hash: string | null;
@@ -155,6 +157,7 @@ function writerFromRow(row: WriterRow): MigrationWriterAssignment {
     previousWriterOwner: row.previous_writer_owner,
     phase: row.phase,
     shadowReadEnabled: Boolean(row.shadow_read_enabled),
+    shadowReadCandidateSnapshotHash: row.shadow_read_candidate_snapshot_hash,
     legacyRouteVerified: Boolean(row.legacy_route_verified),
     unresolvedExternalEffects: Number(row.unresolved_external_effects),
     driftReconciledSnapshotHash: row.drift_reconciled_snapshot_hash,
@@ -179,7 +182,7 @@ async function writerRows(manager: EntityManager, scope: {
 }): Promise<MigrationWriterAssignment[]> {
   const rows = await manager.query(
     `SELECT cohort_id, tenant_id, channel_family, consumer_kind, function_name, writer_owner,
-       previous_writer_owner, phase, shadow_read_enabled, legacy_route_verified,
+       previous_writer_owner, phase, shadow_read_enabled, shadow_read_candidate_snapshot_hash, legacy_route_verified,
        unresolved_external_effects, drift_reconciled_snapshot_hash, version
      FROM ca_meta_migration_cohort_writers
      WHERE cohort_id = ? AND tenant_id = ? AND channel_family = ? AND consumer_kind = ?
@@ -192,10 +195,11 @@ async function writerRows(manager: EntityManager, scope: {
 async function updateWriterRow(manager: EntityManager, assignment: MigrationWriterAssignment, expectedVersion: number): Promise<void> {
   const result = await manager.query(
     `UPDATE ca_meta_migration_cohort_writers SET writer_owner = ?, previous_writer_owner = ?, phase = ?,
-       shadow_read_enabled = ?, drift_reconciled_snapshot_hash = ?, version = version + 1, updated_at = UTC_TIMESTAMP(6)
+       shadow_read_enabled = ?, shadow_read_candidate_snapshot_hash = ?, drift_reconciled_snapshot_hash = ?,
+       version = version + 1, updated_at = UTC_TIMESTAMP(6)
      WHERE tenant_id = ? AND channel_family = ? AND consumer_kind = ? AND function_name = ? AND cohort_id = ? AND version = ?`,
     [assignment.writerOwner, assignment.previousWriterOwner, assignment.phase, assignment.shadowReadEnabled ? 1 : 0,
-      assignment.driftReconciledSnapshotHash,
+      assignment.shadowReadCandidateSnapshotHash, assignment.driftReconciledSnapshotHash,
       assignment.tenantId, assignment.channelFamily, assignment.consumerKind, assignment.functionName,
       assignment.cohortId, expectedVersion],
   );
@@ -372,12 +376,13 @@ export class MysqlMigrationCohortWriterRepository {
         await manager.query(
           `INSERT IGNORE INTO ca_meta_migration_cohort_writers
            (cohort_id, tenant_id, channel_family, consumer_kind, function_name, writer_owner,
-            previous_writer_owner, phase, shadow_read_enabled, legacy_route_verified,
+           previous_writer_owner, phase, shadow_read_enabled, shadow_read_candidate_snapshot_hash, legacy_route_verified,
             unresolved_external_effects, drift_reconciled_snapshot_hash, version, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
           [entry.cohortId, entry.tenantId, entry.channelFamily, entry.consumerKind, entry.functionName,
             entry.writerOwner, entry.previousWriterOwner, entry.phase, entry.shadowReadEnabled ? 1 : 0,
-            entry.legacyRouteVerified ? 1 : 0, entry.unresolvedExternalEffects, entry.driftReconciledSnapshotHash, entry.version],
+            entry.shadowReadCandidateSnapshotHash, entry.legacyRouteVerified ? 1 : 0,
+            entry.unresolvedExternalEffects, entry.driftReconciledSnapshotHash, entry.version],
         );
       }
       const stored = await writerRows(manager, {
@@ -388,7 +393,9 @@ export class MysqlMigrationCohortWriterRepository {
       if (stored.length !== matrix.length || stored.some((actual) => {
         const expected = matrix.find((entry) => entry.functionName === actual.functionName);
         return !expected || expected.writerOwner !== actual.writerOwner || expected.phase !== actual.phase ||
-          expected.shadowReadEnabled !== actual.shadowReadEnabled || expected.legacyRouteVerified !== actual.legacyRouteVerified ||
+          expected.shadowReadEnabled !== actual.shadowReadEnabled ||
+          expected.shadowReadCandidateSnapshotHash !== actual.shadowReadCandidateSnapshotHash ||
+          expected.legacyRouteVerified !== actual.legacyRouteVerified ||
           expected.unresolvedExternalEffects !== actual.unresolvedExternalEffects ||
           expected.driftReconciledSnapshotHash !== actual.driftReconciledSnapshotHash || expected.version !== actual.version;
       })) throw new MigrationControlConflictError('Cohort ID is already bound to a different writer matrix.');
@@ -433,18 +440,41 @@ export class MysqlMigrationCohortWriterRepository {
     readonly expectedVersion: number;
     readonly nextOwner: MigrationWriterOwner;
     readonly driftReconciliation: import('./migration-execution.types.js').MigrationDriftReconciliation;
+    readonly shadowReadReport: ShadowReadReport | undefined;
   }): Promise<MigrationWriterAssignment> {
     const dataSource = await this.database.getDataSource();
     return dataSource.transaction(async (manager) => {
       const current = await writerRows(manager, input.scope);
+      validateMigrationWriterMatrix(current);
       const entry = current.find((candidate) => candidate.functionName === input.functionName);
       if (!entry) throw new MigrationControlConflictError('Writer matrix function is not configured.');
-      const changed = switchMigrationWriter(entry, input.expectedVersion, input.nextOwner, input.driftReconciliation);
+      if (!input.driftReconciliation) throw new MigrationControlConflictError('Current drift reconciliation is required before cutover.');
+      if (current.some((candidate) => !candidate.shadowReadEnabled ||
+          (candidate.phase !== 'SHADOW_READ' && candidate.phase !== 'CUTOVER'))) {
+        throw new MigrationControlConflictError('Every cohort function must have entered shadow-read before cutover.');
+      }
+      if (current.some((candidate) => candidate.phase === 'CUTOVER' &&
+          (candidate.driftReconciledSnapshotHash !== input.driftReconciliation.currentSnapshotHash ||
+            candidate.shadowReadCandidateSnapshotHash !== input.shadowReadReport?.candidateSnapshotHash))) {
+        throw new MigrationControlConflictError('Partial cutover already uses different source or shadow evidence.');
+      }
+      const changed = switchMigrationWriter(entry, input.expectedVersion, input.nextOwner,
+        input.driftReconciliation, input.shadowReadReport);
       await updateWriterRow(manager, changed, input.expectedVersion);
       const result = (await writerRows(manager, input.scope)).find((candidate) => candidate.functionName === input.functionName);
       if (!result) throw new MigrationControlConflictError('Writer transition was not persisted.');
       return result;
     });
+  }
+
+  async readMatrix(scope: {
+    readonly cohortId: string;
+    readonly tenantId: string;
+    readonly channelFamily: MigrationChannelFamily;
+    readonly consumerKind: MigrationConsumerKind;
+  }): Promise<readonly MigrationWriterAssignment[]> {
+    const dataSource = await this.database.getDataSource();
+    return dataSource.transaction(async (manager) => validateMigrationWriterMatrix(await writerRows(manager, scope)));
   }
 
   async rollbackCohort(input: {

@@ -4,6 +4,7 @@ import {
   type MigrationBatchManifest,
   type MigrationBatchManifestReport,
   type MigrationChannelFamily,
+  type MigrationCohortScope,
   type MigrationCohortPhase,
   type MigrationConsumerKind,
   type MigrationCountKey,
@@ -238,22 +239,33 @@ function parseFingerprint(value: unknown): ShadowReadFingerprint {
 
 function parseShadowSnapshot(value: unknown): ShadowReadSnapshot {
   if (!isRecord(value)) throw new MigrationExecutionInputError('Shadow-read adapter returned an invalid snapshot.');
-  exactKeys(value, ['sourceVersion', 'resources']);
+  exactKeys(value, ['sourceVersion', 'snapshotHash', 'resources']);
   if (typeof value.sourceVersion !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.sourceVersion) ||
-      !Array.isArray(value.resources)) throw new MigrationExecutionInputError('Shadow-read adapter returned an invalid snapshot.');
+      typeof value.snapshotHash !== 'string' || !DIGEST.test(value.snapshotHash) || !Array.isArray(value.resources)) {
+    throw new MigrationExecutionInputError('Shadow-read adapter returned an invalid snapshot.');
+  }
   const resources = value.resources.map(parseFingerprint);
   if (new Set(resources.map((row) => row.resourceRefHash)).size !== resources.length) {
     throw new MigrationExecutionInputError('Shadow-read adapter returned ambiguous resource fingerprints.');
   }
-  return { sourceVersion: value.sourceVersion, resources };
+  return { sourceVersion: value.sourceVersion, snapshotHash: value.snapshotHash, resources };
+}
+
+function assertCohortScope(scope: MigrationCohortScope): void {
+  if (!UUID.test(scope.cohortId) || !UUID.test(scope.tenantId) ||
+      !CHANNELS.includes(scope.channelFamily) || !CONSUMERS.includes(scope.consumerKind)) {
+    throw new MigrationExecutionInputError('Shadow-read cohort scope is invalid.');
+  }
 }
 
 export async function runMigrationShadowRead(
   legacy: ShadowReadPort,
   candidate: ShadowReadPort,
+  scope: MigrationCohortScope,
 ): Promise<ShadowReadReport> {
+  assertCohortScope(scope);
   const [legacySnapshotValue, candidateSnapshotValue] = await Promise.all([
-    legacy.readSanitizedSnapshot(), candidate.readSanitizedSnapshot(),
+    legacy.readSanitizedSnapshot(scope), candidate.readSanitizedSnapshot(scope),
   ]);
   const legacySnapshot = parseShadowSnapshot(legacySnapshotValue);
   const candidateSnapshot = parseShadowSnapshot(candidateSnapshotValue);
@@ -276,7 +288,9 @@ export async function runMigrationShadowRead(
   const comparedCount = [...oldRows.keys()].filter((key) => newRows.has(key)).length;
   return {
     mode: 'SHADOW_READ', readOnly: true,
+    scope: { ...scope },
     legacyVersion: legacySnapshot.sourceVersion, candidateVersion: candidateSnapshot.sourceVersion,
+    legacySnapshotHash: legacySnapshot.snapshotHash, candidateSnapshotHash: candidateSnapshot.snapshotHash,
     comparedCount, missingCount, addedCount, metadataMismatchCount, statusMismatchCount,
     configurationMismatchCount, relationshipMismatchCount,
     matches: missingCount === 0 && addedCount === 0 && metadataMismatchCount === 0 && statusMismatchCount === 0 &&
@@ -307,9 +321,23 @@ function assertWriterAssignment(entry: MigrationWriterAssignment): void {
       typeof entry.legacyRouteVerified !== 'boolean' || !Number.isSafeInteger(entry.unresolvedExternalEffects) ||
       entry.unresolvedExternalEffects < 0 ||
       (entry.driftReconciledSnapshotHash !== null && !DIGEST.test(entry.driftReconciledSnapshotHash)) ||
+      (entry.shadowReadCandidateSnapshotHash !== null && !DIGEST.test(entry.shadowReadCandidateSnapshotHash)) ||
       !Number.isSafeInteger(entry.version) || entry.version < 1 ||
       !allowedOwners(entry.functionName).includes(entry.writerOwner)) {
     throw new MigrationExecutionInputError('Writer assignment violates the cohort matrix contract.');
+  }
+  if ((entry.phase === 'PREPARED' &&
+        (entry.writerOwner !== 'LEGACY' || entry.previousWriterOwner !== null || entry.shadowReadEnabled ||
+          entry.driftReconciledSnapshotHash !== null || entry.shadowReadCandidateSnapshotHash !== null)) ||
+      (entry.phase === 'SHADOW_READ' &&
+        (entry.writerOwner !== 'LEGACY' || entry.previousWriterOwner !== null || !entry.shadowReadEnabled ||
+          entry.driftReconciledSnapshotHash !== null || entry.shadowReadCandidateSnapshotHash !== null)) ||
+      (entry.phase === 'CUTOVER' &&
+        (entry.writerOwner === 'LEGACY' || entry.previousWriterOwner === null || !entry.shadowReadEnabled ||
+          entry.driftReconciledSnapshotHash === null || entry.shadowReadCandidateSnapshotHash === null)) ||
+      (entry.phase === 'ROLLED_BACK' &&
+        (entry.previousWriterOwner !== null || entry.shadowReadEnabled))) {
+    throw new MigrationExecutionInputError('Writer phase and owner state are inconsistent.');
   }
 }
 
@@ -351,12 +379,21 @@ export function switchMigrationWriter(
   expectedVersion: number,
   nextOwner: MigrationWriterOwner,
   driftReconciliation: MigrationDriftReconciliation,
+  shadowReadReport: ShadowReadReport | undefined,
 ): MigrationWriterAssignment {
   assertWriterAssignment(entry);
-  if (entry.version !== expectedVersion || entry.phase === 'ROLLED_BACK' || nextOwner === 'LEGACY' ||
+  if (!driftReconciliation || entry.version !== expectedVersion || entry.phase !== 'SHADOW_READ' ||
+      !entry.shadowReadEnabled || nextOwner === 'LEGACY' ||
       !allowedOwners(entry.functionName).includes(nextOwner) || nextOwner === entry.writerOwner ||
       !driftReconciliation.readyForCutover || driftReconciliation.unresolvedCount !== 0 ||
-      !DIGEST.test(driftReconciliation.baselineSnapshotHash) || !DIGEST.test(driftReconciliation.currentSnapshotHash)) {
+      !DIGEST.test(driftReconciliation.baselineSnapshotHash) || !DIGEST.test(driftReconciliation.currentSnapshotHash) ||
+      !shadowReadReport || shadowReadReport.mode !== 'SHADOW_READ' || shadowReadReport.readOnly !== true ||
+      shadowReadReport.matches !== true || !shadowReadReport.scope ||
+      !DIGEST.test(shadowReadReport.legacySnapshotHash) ||
+      !DIGEST.test(shadowReadReport.candidateSnapshotHash) ||
+      shadowReadReport.legacySnapshotHash !== driftReconciliation.currentSnapshotHash ||
+      shadowReadReport.scope.cohortId !== entry.cohortId || shadowReadReport.scope.tenantId !== entry.tenantId ||
+      shadowReadReport.scope.channelFamily !== entry.channelFamily || shadowReadReport.scope.consumerKind !== entry.consumerKind) {
     throw new MigrationExecutionInputError('Writer change is stale or outside the allowed phase transition.');
   }
   return {
@@ -365,6 +402,7 @@ export function switchMigrationWriter(
     writerOwner: nextOwner,
     phase: 'CUTOVER',
     driftReconciledSnapshotHash: driftReconciliation.currentSnapshotHash,
+    shadowReadCandidateSnapshotHash: shadowReadReport.candidateSnapshotHash,
     version: entry.version + 1,
   };
 }
@@ -375,16 +413,26 @@ export function rollbackMigrationCohort(
 ): MigrationWriterRollbackResult {
   const matrix = validateMigrationWriterMatrix(entries);
   let credentialReferencesKeptCentral = false;
+  const cutoverFunctions: MigrationFunction[] = [];
+  const abortedBeforeCutoverFunctions: MigrationFunction[] = [];
   const assignments = matrix.map((entry) => {
-    if (entry.version !== expectedVersions[entry.functionName] || entry.phase !== 'CUTOVER' ||
-        entry.previousWriterOwner === null || !entry.legacyRouteVerified || entry.unresolvedExternalEffects !== 0) {
+    if (entry.version !== expectedVersions[entry.functionName] || !entry.legacyRouteVerified ||
+        entry.unresolvedExternalEffects !== 0) {
       throw new MigrationExecutionInputError('Cohort rollback requires current route evidence and reconciled external outcomes.');
     }
+    const switched = entry.phase === 'CUTOVER';
+    const notSwitched = entry.phase === 'PREPARED' || entry.phase === 'SHADOW_READ';
+    if ((!switched && !notSwitched) ||
+        (switched && (entry.previousWriterOwner === null || entry.writerOwner === 'LEGACY')) ||
+        (notSwitched && (entry.previousWriterOwner !== null || entry.writerOwner !== 'LEGACY'))) {
+      throw new MigrationExecutionInputError('Cohort rollback found an unknown or inconsistent partial transition.');
+    }
+    (switched ? cutoverFunctions : abortedBeforeCutoverFunctions).push(entry.functionName);
     // Returning credential lookup to a legacy path could make an old/revoked
     // credential usable again. Keep that function central while rolling back
     // the other cohort writers; no credential or grant mutation is performed.
-    let writerOwner = entry.previousWriterOwner;
-    if (entry.functionName === 'CREDENTIAL_REFERENCE' && entry.previousWriterOwner === 'LEGACY') {
+    let writerOwner = switched ? entry.previousWriterOwner! : entry.writerOwner;
+    if (switched && entry.functionName === 'CREDENTIAL_REFERENCE' && entry.previousWriterOwner === 'LEGACY') {
       credentialReferencesKeptCentral = true;
       writerOwner = entry.writerOwner;
     }
@@ -399,6 +447,8 @@ export function rollbackMigrationCohort(
   });
   return {
     assignments,
+    cutoverFunctions,
+    abortedBeforeCutoverFunctions,
     credentialReferencesKeptCentral,
     credentialAction: 'NONE',
     grantAction: 'NONE',

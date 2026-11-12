@@ -116,7 +116,6 @@ test('M5.09 detects and reconciles concurrent source drift before cutover', () =
   });
   assert.equal(blocked.readyForCutover, false);
   assert.equal(blocked.unresolvedCount, 3);
-  assert.throws(() => switchMigrationWriter(writerMatrix()[0]!, 1, 'CENTRAL', blocked), MigrationExecutionInputError);
   const reconciled = reconcileMigrationSourceDrift(drift, {
     currentSnapshotHash: drift.currentSnapshotHash,
     addedSourceRecordHashes: drift.addedSourceRecordHashes,
@@ -147,18 +146,26 @@ test('M5.09 shadow-read compares keyed metadata fingerprints through read-only p
     configurationHmac: fingerprint('configuration-legacy'),
     relationshipHmac: fingerprint('relationship'),
   };
+  const cohortScope = {
+    cohortId: '52222222-2222-4222-8222-222222222222', tenantId,
+    channelFamily: 'WHATSAPP_EXCLUSIVE' as const, consumerKind: 'PORTAL' as const,
+  };
   let legacyReads = 0;
   let candidateReads = 0;
   const legacy: ShadowReadPort = { readSanitizedSnapshot: async () => {
     legacyReads += 1;
-    return { sourceVersion: 'legacy-v1', resources: [common] };
+    return { sourceVersion: 'legacy-v1', snapshotHash: fingerprint('legacy-snapshot'), resources: [common] };
   } };
   const candidate: ShadowReadPort = { readSanitizedSnapshot: async () => {
     candidateReads += 1;
-    return { sourceVersion: 'candidate-v1', resources: [{ ...common, configurationHmac: fingerprint('configuration-new') }] };
+    return { sourceVersion: 'candidate-v1', snapshotHash: fingerprint('candidate-snapshot'),
+      resources: [{ ...common, configurationHmac: fingerprint('configuration-new') }] };
   } };
-  const report = await runMigrationShadowRead(legacy, candidate);
+  const report = await runMigrationShadowRead(legacy, candidate, cohortScope);
   assert.equal(report.readOnly, true);
+  assert.deepEqual(report.scope, cohortScope);
+  assert.equal(report.legacySnapshotHash, fingerprint('legacy-snapshot'));
+  assert.equal(report.candidateSnapshotHash, fingerprint('candidate-snapshot'));
   assert.equal(report.comparedCount, 1);
   assert.equal(report.configurationMismatchCount, 1);
   assert.equal(report.matches, false);
@@ -167,9 +174,10 @@ test('M5.09 shadow-read compares keyed metadata fingerprints through read-only p
   assert.equal(JSON.stringify(report).includes(common.configurationHmac), false);
   const unsafe: ShadowReadPort = { readSanitizedSnapshot: async () => ({
     sourceVersion: 'legacy-v1',
+    snapshotHash: fingerprint('legacy-snapshot'),
     resources: [{ ...common, accessToken: 'synthetic-secret' } as unknown as typeof common],
   }) };
-  await assert.rejects(runMigrationShadowRead(unsafe, candidate), MigrationExecutionInputError);
+  await assert.rejects(runMigrationShadowRead(unsafe, candidate, cohortScope), MigrationExecutionInputError);
 });
 
 function writerMatrix(input: {
@@ -192,6 +200,7 @@ function writerMatrix(input: {
     consumerKind: input.consumerKind ?? 'PORTAL',
     functionName, writerOwner, previousWriterOwner: null,
     phase: input.phase ?? 'PREPARED', shadowReadEnabled: false,
+    shadowReadCandidateSnapshotHash: null,
     legacyRouteVerified: input.legacyRouteVerified ?? true,
     unresolvedExternalEffects: input.unresolvedExternalEffects ?? 0,
     driftReconciledSnapshotHash: null,
@@ -199,40 +208,74 @@ function writerMatrix(input: {
   }));
 }
 
-test('M5.09 writer matrix enforces one owner; cohort rollback changes routes only', () => {
+test('M5.09 writer cutover requires current matched shadow evidence and partial rollback is safe', async () => {
   const initial = writerMatrix();
   assert.equal(validateMigrationWriterMatrix(initial).length, 4);
   assert.throws(() => validateMigrationWriterMatrix([...initial, initial[0]!]), MigrationExecutionInputError);
   const shadow = enableMigrationShadowRead(initial);
   assert.ok(shadow.every((entry) => entry.shadowReadEnabled && entry.writerOwner === 'LEGACY' && entry.phase === 'SHADOW_READ'));
-  const targets: Record<MigrationFunction, MigrationWriterOwner> = {
-    CONFIGURATION: 'CENTRAL', CREDENTIAL_REFERENCE: 'CENTRAL',
-    LEGACY_PROJECTION: 'PROJECTOR', OPERATION_RELAY: 'RELAY', WEBHOOK_DISPATCH: 'NEW',
-  };
   const emptyDrift = detectMigrationSourceDrift({ snapshotHash: fingerprint('empty-before'), records: [] },
     { snapshotHash: fingerprint('empty-current'), records: [] });
   const readyForCutover = reconcileMigrationSourceDrift(emptyDrift, {
     currentSnapshotHash: emptyDrift.currentSnapshotHash,
     addedSourceRecordHashes: [], changedSourceRecordHashes: [], removedSourceRecordHashes: [],
   });
-  const cutover = shadow.map((entry) => switchMigrationWriter(entry, entry.version, targets[entry.functionName], readyForCutover));
-  assert.ok(cutover.every((entry) => entry.driftReconciledSnapshotHash === emptyDrift.currentSnapshotHash));
+  const credentialEntry = shadow.find((entry) => entry.functionName === 'CREDENTIAL_REFERENCE')!;
+  assert.throws(() => switchMigrationWriter(credentialEntry, credentialEntry.version, 'CENTRAL', readyForCutover, undefined),
+    MigrationExecutionInputError, 'a current shadow-read report is required');
+
+  const reportScope = {
+    cohortId: credentialEntry.cohortId, tenantId: credentialEntry.tenantId,
+    channelFamily: credentialEntry.channelFamily, consumerKind: credentialEntry.consumerKind,
+  };
+  const resource = {
+    resourceRefHash: fingerprint('shadow-resource'), kind: 'ASSET' as const,
+    metadataHmac: fingerprint('metadata'), statusHmac: fingerprint('status'),
+    configurationHmac: fingerprint('configuration'), relationshipHmac: fingerprint('relationship'),
+  };
+  const legacyPort: ShadowReadPort = { readSanitizedSnapshot: async () => ({
+    sourceVersion: 'legacy-current-v1', snapshotHash: emptyDrift.currentSnapshotHash, resources: [resource],
+  }) };
+  const candidatePort: ShadowReadPort = { readSanitizedSnapshot: async () => ({
+    sourceVersion: 'candidate-current-v1', snapshotHash: fingerprint('candidate-current'), resources: [resource],
+  }) };
+  const matchedReport = await runMigrationShadowRead(legacyPort, candidatePort, reportScope);
+  assert.equal(matchedReport.matches, true);
+  const mismatchedReport = await runMigrationShadowRead(legacyPort, {
+    readSanitizedSnapshot: async () => ({
+      sourceVersion: 'candidate-current-v1', snapshotHash: fingerprint('candidate-mismatch'),
+      resources: [{ ...resource, configurationHmac: fingerprint('different-configuration') }],
+    }),
+  }, reportScope);
+  assert.equal(mismatchedReport.matches, false);
+  assert.throws(() => switchMigrationWriter(credentialEntry, credentialEntry.version, 'CENTRAL',
+    readyForCutover, mismatchedReport), MigrationExecutionInputError, 'a mismatched shadow-read report blocks cutover');
+
+  const switchedCredential = switchMigrationWriter(credentialEntry, credentialEntry.version, 'CENTRAL',
+    readyForCutover, matchedReport);
+  assert.equal(switchedCredential.driftReconciledSnapshotHash, emptyDrift.currentSnapshotHash);
+  assert.equal(switchedCredential.shadowReadCandidateSnapshotHash, matchedReport.candidateSnapshotHash);
+  const partial = shadow.map((entry) => entry.functionName === 'CREDENTIAL_REFERENCE' ? switchedCredential : entry);
+  assert.equal(partial.filter((entry) => entry.phase === 'CUTOVER').length, 1);
+  assert.equal(partial.filter((entry) => entry.phase === 'SHADOW_READ').length, 3);
   const revokedBefore = Object.freeze({ credential: 'REVOKED', grant: 'REVOKED' });
-  const rolledBack = rollbackMigrationCohort(cutover, Object.fromEntries(cutover.map((entry) => [entry.functionName, entry.version])));
+  const rolledBack = rollbackMigrationCohort(partial, Object.fromEntries(partial.map((entry) => [entry.functionName, entry.version])));
   assert.ok(rolledBack.assignments.every((entry) => entry.phase === 'ROLLED_BACK'));
   assert.ok(rolledBack.assignments.filter((entry) => entry.functionName !== 'CREDENTIAL_REFERENCE')
     .every((entry) => entry.writerOwner === 'LEGACY'));
   assert.equal(rolledBack.assignments.find((entry) => entry.functionName === 'CREDENTIAL_REFERENCE')?.writerOwner, 'CENTRAL');
   assert.equal(rolledBack.credentialReferencesKeptCentral, true);
+  assert.deepEqual(rolledBack.cutoverFunctions, ['CREDENTIAL_REFERENCE']);
+  assert.deepEqual([...rolledBack.abortedBeforeCutoverFunctions].sort(), ['CONFIGURATION', 'LEGACY_PROJECTION', 'OPERATION_RELAY']);
   assert.equal(rolledBack.credentialAction, 'NONE');
   assert.equal(rolledBack.grantAction, 'NONE');
   assert.equal(rolledBack.providerEffectsReconciled, false);
   assert.deepEqual(revokedBefore, { credential: 'REVOKED', grant: 'REVOKED' });
-  const notReady = cutover.map((entry) => entry.functionName === 'CONFIGURATION'
+  const notReady = partial.map((entry) => entry.functionName === 'CONFIGURATION'
     ? { ...entry, legacyRouteVerified: false } : entry);
   assert.throws(() => rollbackMigrationCohort(notReady,
     Object.fromEntries(notReady.map((entry) => [entry.functionName, entry.version]))), MigrationExecutionInputError);
-  const unresolved = cutover.map((entry) => entry.functionName === 'OPERATION_RELAY'
+  const unresolved = partial.map((entry) => entry.functionName === 'OPERATION_RELAY'
     ? { ...entry, unresolvedExternalEffects: 1 } : entry);
   assert.throws(() => rollbackMigrationCohort(unresolved,
     Object.fromEntries(unresolved.map((entry) => [entry.functionName, entry.version]))), MigrationExecutionInputError);
