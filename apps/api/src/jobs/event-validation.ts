@@ -2,6 +2,7 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 import { createRequire } from 'node:module';
 import type { MetaAuthVariant, MetaFlowVariant } from '../credentials/credential-resolver.types.js';
+import type { TemplateCreateRequest } from '../whatsapp-templates/template-body.js';
 
 export interface InboxEventEnvelope {
   readonly eventId: string;
@@ -36,7 +37,7 @@ export interface OutboxEventEnvelope {
   readonly data: Readonly<Record<string, unknown>>;
 }
 
-export type JobType = 'INBOX_PROCESS' | 'OUTBOX_DELIVER' | 'ONBOARDING_STEP' | 'PROJECTION_RECONCILE' | 'HISTORY_SYNC' | 'CREDENTIAL_INSPECTION' | 'ASSET_REFRESH';
+export type JobType = 'INBOX_PROCESS' | 'OUTBOX_DELIVER' | 'ONBOARDING_STEP' | 'PROJECTION_RECONCILE' | 'HISTORY_SYNC' | 'CREDENTIAL_INSPECTION' | 'ASSET_REFRESH' | 'TEMPLATE_CREATE';
 
 export type JobPayload =
   | { readonly kind: 'INBOX_PROCESS'; readonly inboxEventRef: string }
@@ -55,6 +56,10 @@ export type JobPayload =
   | {
     readonly kind: 'ASSET_REFRESH'; readonly assetId: string; readonly appConfigurationId: string;
     readonly environment: 'development' | 'test' | 'staging' | 'production';
+  }
+  | {
+    readonly kind: 'TEMPLATE_CREATE'; readonly assetId: string; readonly appConfigurationId: string;
+    readonly environment: 'development' | 'test' | 'staging' | 'production'; readonly request: TemplateCreateRequest;
   };
 
 export type JobLane = 'WEBHOOK_URGENT' | 'ONBOARDING' | 'HISTORICAL_PROJECTION';
@@ -101,6 +106,11 @@ export const JOB_POLICIES: Readonly<Record<JobType, JobPolicy>> = Object.freeze(
   ASSET_REFRESH: {
     lane: 'HISTORICAL_PROJECTION', effectMode: 'SAFE_RETRY', maxAttempts: 3,
     maxElapsedMs: 15 * 60_000, maxHandlerMs: 60_000, retryBaseMs: 2_000, retryMaxMs: 60_000,
+  },
+  TEMPLATE_CREATE: {
+    // A provider template submission is ambiguous after a timeout; the worker never repeats it.
+    lane: 'ONBOARDING', effectMode: 'AMBIGUOUS', maxAttempts: 1,
+    maxElapsedMs: 15 * 60_000, maxHandlerMs: 60_000, retryBaseMs: 1_000, retryMaxMs: 1_000,
   },
 });
 
@@ -170,6 +180,24 @@ const jobPayloadSchemas: Readonly<Record<JobType, object>> = {
     properties: {
       kind: { const: 'ASSET_REFRESH' }, assetId: { type: 'string', format: 'uuid' },
       appConfigurationId: { type: 'string', format: 'uuid' }, environment: { enum: ['development', 'test', 'staging', 'production'] },
+    },
+  },
+  TEMPLATE_CREATE: {
+    type: 'object', additionalProperties: false,
+    required: ['kind', 'assetId', 'appConfigurationId', 'environment', 'request'],
+    properties: {
+      kind: { const: 'TEMPLATE_CREATE' }, assetId: { type: 'string', format: 'uuid' },
+      appConfigurationId: { type: 'string', format: 'uuid' }, environment: { enum: ['development', 'test', 'staging', 'production'] },
+      request: {
+        type: 'object', additionalProperties: false, required: ['name', 'language', 'category', 'bodyText'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[a-z0-9_]+$' },
+          language: { type: 'string', minLength: 2, maxLength: 16 },
+          category: { enum: ['AUTHENTICATION', 'MARKETING', 'UTILITY'] },
+          bodyText: { type: 'string', minLength: 1, maxLength: 1024 },
+          exampleValues: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 1024 } },
+        },
+      },
     },
   },
 };

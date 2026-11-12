@@ -23,6 +23,7 @@ import { MysqlOnboardingCodeConsumer } from '../onboarding/onboarding-code-submi
 import { createOnboardingSagaHandler } from '../onboarding/onboarding-saga.worker.js';
 import { MetaOnboardingConfigurationResolver } from '../onboarding/meta-onboarding-configuration.resolver.js';
 import { MetaAppConfigRegistry } from '../meta-config/meta-app-config.registry.js';
+import { createTemplateCreateJobHandler, type WhatsAppTemplateDispatchAdapter } from '../whatsapp-templates/template-create.worker.js';
 
 interface CredentialLifecycleAdapters {
   readonly policies: CredentialLifecyclePolicyPort;
@@ -42,6 +43,11 @@ function configuredMetaAssetRefreshAdapter(): MetaAssetRefreshAdapter | undefine
 
 /** No reviewed Meta onboarding adapter is installed; all provider exchange effects stay disabled. */
 function configuredMetaOnboardingSagaAdapter(): OnboardingSagaAdapter | undefined {
+  return undefined;
+}
+
+/** No reviewed template adapter is installed; create jobs are not claimed by the default worker. */
+function configuredWhatsAppTemplateDispatchAdapter(): WhatsAppTemplateDispatchAdapter | undefined {
   return undefined;
 }
 
@@ -107,6 +113,8 @@ export async function bootstrapWorker(): Promise<void> {
         new MetaAppConfigRegistry(environment.metaAppConfigurations ?? []), environment.nodeEnv);
       handlers.set('ONBOARDING_STEP', createOnboardingSagaHandler(database, codeConsumer, onboardingSagaAdapter, undefined, configurations));
     }
+    const templateAdapter = configuredWhatsAppTemplateDispatchAdapter();
+    if (templateAdapter) handlers.set('TEMPLATE_CREATE', createTemplateCreateJobHandler(templateAdapter));
     let authorization: JobExecutionAuthorizationPort = new FailClosedJobExecutionAuthorizationPort();
     if (handlers.size > 0) {
       const configuredIdentity = new WorkerServiceIdentityVerifier(environment.identity?.workerServiceCredentials ?? [])

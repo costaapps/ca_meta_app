@@ -59,6 +59,7 @@ const REQUIRED_JOB_SCOPES: Readonly<Partial<Record<JobType, ServiceScope>>> = Ob
   HISTORY_SYNC: 'TENANT_RESOURCE_READ',
   CREDENTIAL_INSPECTION: 'CREDENTIAL_USE',
   ASSET_REFRESH: 'META_CONNECTION_EXECUTE',
+  TEMPLATE_CREATE: 'CREDENTIAL_USE',
 } as const satisfies Readonly<Partial<Record<JobType, ServiceScope>>>);
 
 function resourceReference(type: JobType, payload: JobPayload): string | undefined {
@@ -71,6 +72,7 @@ function resourceReference(type: JobType, payload: JobPayload): string | undefin
     case 'HISTORY_SYNC': return undefined;
     case 'CREDENTIAL_INSPECTION': return payload.credentialId;
     case 'ASSET_REFRESH': return payload.assetId;
+    case 'TEMPLATE_CREATE': return payload.assetId;
   }
 }
 
@@ -264,6 +266,29 @@ export class MysqlJobExecutionAuthorizationPort implements JobExecutionAuthoriza
           [tenantId, payload.assetId, payload.appConfigurationId, payload.environment],
         ) as Array<{ id: string }>;
         // Match the current usable-authorization states required by the M3.08 credential resolver.
+        return rows.length === 1;
+      }
+      case 'TEMPLATE_CREATE': {
+        const rows = await database.query(
+          `SELECT a.id
+           FROM ca_meta_assets AS a
+           INNER JOIN ca_meta_asset_authorizations AS aa ON aa.tenant_id = a.tenant_id AND aa.asset_id = a.id
+             AND aa.app_configuration_id = a.app_configuration_id AND aa.provider = a.provider AND aa.environment = a.environment
+           INNER JOIN ca_meta_authorizations AS auth ON auth.tenant_id = aa.tenant_id AND auth.id = aa.authorization_id
+             AND auth.app_configuration_id = aa.app_configuration_id AND auth.provider = aa.provider AND auth.environment = aa.environment
+           INNER JOIN ca_meta_asset_grants AS g ON g.tenant_id = aa.tenant_id AND g.authorization_id = aa.authorization_id
+             AND g.asset_id = aa.asset_id AND g.app_configuration_id = aa.app_configuration_id
+             AND g.provider = aa.provider AND g.environment = aa.environment
+           WHERE a.tenant_id = ? AND a.id = ? AND a.app_configuration_id = ? AND a.environment = ?
+             AND a.provider = 'META' AND a.asset_kind = 'WHATSAPP_BUSINESS_ACCOUNT'
+             AND aa.state = 'ACTIVE' AND aa.verification_state = 'VERIFIED'
+             AND auth.authorization_state IN ('ACTIVE', 'PARTIAL')
+             AND auth.flow_variant = 'WHATSAPP_EXCLUSIVE' AND auth.auth_variant = 'WHATSAPP_EMBEDDED_SIGNUP'
+             AND g.grant_name = 'whatsapp_business_management' AND g.status = 'GRANTED'
+           LIMIT 1`,
+          [tenantId, payload.assetId, payload.appConfigurationId, payload.environment],
+        ) as Array<{ id: string }>;
+        // The operation grant name is a candidate only; real Meta eligibility remains a release gate.
         return rows.length === 1;
       }
     }

@@ -33,6 +33,12 @@ import { AssetCatalogController } from './asset-catalog.controller.js';
 import { AssetCatalogService, META_FLOW_ADAPTER_VARIANTS } from './asset-catalog.service.js';
 import { AssetRefreshCoordinator, META_ASSET_REFRESH_ADAPTER, type MetaAssetRefreshAdapter } from './asset-refresh.service.js';
 import type { FlowCatalogVariant } from './meta-assets.types.js';
+import { WhatsAppTemplatesController } from '../whatsapp-templates/whatsapp-templates.controller.js';
+import {
+  META_WHATSAPP_TEMPLATES_ACCOUNT_DIRECTORY, META_WHATSAPP_TEMPLATES_CREATE_ENABLED, META_WHATSAPP_TEMPLATES_PROVIDER,
+  MysqlWhatsAppTemplatesAccountDirectory, WhatsAppTemplatesService,
+} from '../whatsapp-templates/whatsapp-templates.service.js';
+import type { WhatsAppTemplatesProvider } from '../whatsapp-templates/whatsapp-templates.service.js';
 
 @Module({})
 export class MetaAssetsModule {
@@ -40,7 +46,7 @@ export class MetaAssetsModule {
     return {
       module: MetaAssetsModule,
       imports: [identityModule, JobsModule.register(environment), PrivacyModule.register(environment)],
-      controllers: [AssetCatalogController],
+      controllers: [AssetCatalogController, WhatsAppTemplatesController],
       providers: [
         {
           provide: PortalSessionGuard,
@@ -55,6 +61,23 @@ export class MetaAssetsModule {
             new AssetCatalogService(repository, contexts, authorization, environment.nodeEnv, refresh, flowVariants),
           inject: [META_ASSETS_REPOSITORY, TenantContextService, TenantAuthorizationService,
             AssetRefreshCoordinator, META_FLOW_ADAPTER_VARIANTS],
+        },
+        {
+          provide: META_WHATSAPP_TEMPLATES_ACCOUNT_DIRECTORY,
+          useFactory: (database: DurableWorkDatabase) => new MysqlWhatsAppTemplatesAccountDirectory(database, environment.nodeEnv),
+          inject: [DURABLE_WORK_DATABASE],
+        },
+        // The provider list adapter and create worker are absent until current grant/capability eligibility is confirmed.
+        { provide: META_WHATSAPP_TEMPLATES_PROVIDER, useValue: null },
+        { provide: META_WHATSAPP_TEMPLATES_CREATE_ENABLED, useValue: false },
+        {
+          provide: WhatsAppTemplatesService,
+          useFactory: (contexts: TenantContextService, authorization: TenantAuthorizationService,
+            accounts: MysqlWhatsAppTemplatesAccountDirectory, provider: WhatsAppTemplatesProvider | null,
+            createEnabled: boolean, database: DurableWorkDatabase, jobs: DurableJobStore) =>
+            new WhatsAppTemplatesService(contexts, authorization, accounts, provider, createEnabled, database, jobs),
+          inject: [TenantContextService, TenantAuthorizationService, META_WHATSAPP_TEMPLATES_ACCOUNT_DIRECTORY,
+            META_WHATSAPP_TEMPLATES_PROVIDER, META_WHATSAPP_TEMPLATES_CREATE_ENABLED, DURABLE_WORK_DATABASE, DURABLE_JOB_STORE],
         },
         // No real flow adapter is installed in this runtime.
         { provide: META_FLOW_ADAPTER_VARIANTS, useFactory: (): ReadonlySet<FlowCatalogVariant> => new Set() },
