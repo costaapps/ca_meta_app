@@ -29,16 +29,15 @@ describe('OperationsDiagnosticsComponent', () => {
       imports: [OperationsDiagnosticsComponent],
       providers: [
         provideRouter([]),
-        { provide: OperationsDiagnosticsService, useValue: { read: vi.fn().mockResolvedValue(report) } },
+        { provide: OperationsDiagnosticsService, useValue: {
+          read: vi.fn(() => new Promise<OperationsDiagnostics>(() => {})),
+        } },
         { provide: PortalContextStore, useValue: { contextChanged$: new Subject<void>() } },
       ],
     }).compileComponents();
 
     const fixture = TestBed.createComponent(OperationsDiagnosticsComponent);
-    fixture.detectChanges();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    fixture.componentInstance.diagnostics = report;
     fixture.detectChanges();
 
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('3 em andamento · 7 precisam de revisão.');
