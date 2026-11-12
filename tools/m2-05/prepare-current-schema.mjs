@@ -17,15 +17,17 @@ assert.equal(migrationUser, 'ca_meta_migrator', 'the setup must use its dedicate
 assert.match(databaseName, /^[A-Za-z0-9_]+$/);
 assert.match(migrationUser, /^[A-Za-z0-9_]+$/);
 assert.ok(process.env.M2_ROOT_PASSWORD, 'the disposable M2.05 harness provides its synthetic root credential');
+const stagedSchemaVersion = 22;
+assert.ok(MIGRATIONS.some((migration) => migration.schemaVersion === stagedSchemaVersion), 'the coexistence-lock migration must be present');
 
 const before = await readMigrationStatus(environment);
 assert.deepEqual(before.migrations, [], 'the M2.05 Compose project starts with a fresh schema');
 assert.ok(MIGRATIONS.length >= 2, 'the current migration registry has a terminal migration');
 
-// Apply the existing chain, then let the v22 runner create its table and pause without DELETE.
-await deployMigrations(environment, MIGRATIONS.slice(0, -1));
+// Apply versions before v22, then let v22 create its table and pause without DELETE.
+await deployMigrations(environment, MIGRATIONS.filter((migration) => migration.schemaVersion < stagedSchemaVersion));
 await assert.rejects(
-  deployMigrations(environment),
+  deployMigrations(environment, MIGRATIONS.filter((migration) => migration.schemaVersion <= stagedSchemaVersion)),
   (error) => error instanceof CoexistenceLockDeleteGrantRequiredError,
   'the synthetic schema pauses before the v22 trigger until its exact table grant is provided',
 );
