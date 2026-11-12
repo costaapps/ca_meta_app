@@ -1,6 +1,6 @@
 # ADR-022 — M5.09 migration execution control
 
-Status: implementation candidate. Issue/spec: [#64](https://github.com/costaapps/ca_meta_app/issues/64), [migration execution control](../specs/migration-execution.md). Functional owner role: backend / data / DBA. The focused code candidate `dbd946758ee688890f66289b61247e07b979d827` passed the synthetic/MariaDB harness, API typecheck and diff-check; see the [delivery evidence](../../delivery/M5/M5.09.md). No production source was accessed.
+Status: implementation candidate. Issue/spec: [#64](https://github.com/costaapps/ca_meta_app/issues/64), [migration execution control](../specs/migration-execution.md). Functional owner role: backend / data / DBA. The latest code candidate `45d54bbbe411532bef6cc6eb363261adfd5f9630` passed the focused synthetic harness, API typecheck and diff-check; the previous candidate `dbd946758ee688890f66289b61247e07b979d827` passed the isolated MariaDB harness. See the [delivery evidence](../../delivery/M5/M5.09.md). No production source was accessed.
 
 ## Context
 
