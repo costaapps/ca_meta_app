@@ -30,7 +30,7 @@ function run(args) {
 try {
   await mkdir(outputRoot, { recursive: true });
   await mkdir(temporaryOutput, { recursive: false });
-  process.stdout.write(`M5.05 focused API tests — Node ${process.version}\n`);
+  process.stdout.write(`M5.05 focused API + CORS regression tests — Node ${process.version}\n`);
 
   if (!run([compiler, '--project', join(apiRoot, 'tsconfig.build.json'), '--pretty', 'false'])) {
     process.exitCode = 1;
@@ -53,6 +53,7 @@ try {
       '--test', '--test-concurrency=1',
       join(temporaryOutput, 'test', 'm5-05-automation-config.spec.js'),
       join(temporaryOutput, 'test', 'm5-05-automation-config.integration.spec.js'),
+      join(temporaryOutput, 'test', 'm3-04-session.spec.js'),
     ])) {
       process.exitCode = 1;
     }
