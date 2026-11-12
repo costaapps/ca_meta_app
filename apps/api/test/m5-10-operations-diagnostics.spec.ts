@@ -116,8 +116,9 @@ test('diagnostics read uses the verified tenant, strips unsafe values and keeps 
   assert.equal(serialized.includes('TOKEN_SECRET_SENTINEL'), false);
   assert.equal(serialized.includes('payload'), false);
 
+  const readsBeforeForgedTenant = queriedTenants.length;
   await assert.rejects(() => service.read({ tenantId: tenantB } as never, requestRef()), IdentityDeniedError);
-  assert.ok(queriedTenants.every((tenant) => tenant !== tenantB));
+  assert.equal(queriedTenants.length, readsBeforeForgedTenant, 'a forged tenant scope is rejected before repository access');
 });
 
 test('diagnostic export demands a current SUPPORT role grant, audits before reading and redacts payload markers', async () => {
