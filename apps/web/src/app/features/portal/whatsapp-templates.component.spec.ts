@@ -100,7 +100,21 @@ describe('WhatsAppTemplatesComponent', () => {
     expect(state.create).toHaveBeenCalledWith(asset.id, {
       name: 'order_update', language: 'en', category: 'UTILITY', bodyText: 'Hello {{1}}, code {{2}} and again {{1}}', exampleValues: ['Ana', '1234'],
     }, expect.stringMatching(/^[A-Za-z0-9._~-]{16,128}$/));
-    expect(state.component.statusMessage).toContain('não confirma aprovação do modelo pela Meta');
+    expect(state.job).toHaveBeenCalledWith('job_template_01');
+    expect(state.component.jobStatus?.status).toBe('UNKNOWN');
+    expect(state.component.statusMessage).toContain('não libera outro pedido igual');
+    expect(state.component.statusMessage).toContain('não confirma aprovação da Meta');
+    state.component.ngOnDestroy();
+  });
+
+  it('keeps the BODY text and unique placeholders available to the list view', async () => {
+    const state = await createFixture();
+    const bodyText = 'Hello {{1}}, code {{2}} and again {{1}}';
+    state.component.templates = [{ id: 'provider-template-1', name: 'order_update', language: 'en', status: 'APPROVED',
+      category: 'UTILITY', bodyText, updatedAt: '2026-11-10T12:00:00.000Z' }];
+    expect(state.component.templates[0]?.bodyText).toBe(bodyText);
+    expect(state.component.getBodyPlaceholders(state.component.templates[0]?.bodyText ?? null)).toEqual(['{{1}}', '{{2}}']);
+    expect(state.component.getBodyPlaceholders(null)).toEqual([]);
     state.component.ngOnDestroy();
   });
 
@@ -115,9 +129,8 @@ describe('WhatsAppTemplatesComponent', () => {
     expect(state.component.formError).toContain('Consulte o status');
     await state.component.createTemplate();
     expect(create.mock.calls[0]?.[2]).toBe(create.mock.calls[1]?.[2]);
-    await state.component.checkJobStatus();
     expect(state.component.jobStatus?.status).toBe('UNKNOWN');
-    expect(state.component.statusMessage).toContain('resultado ainda não está confirmado');
+    expect(state.component.statusMessage).toContain('não libera outro pedido igual');
     expect(sessionStorage.getItem(PENDING_WHATSAPP_TEMPLATE_ATTEMPTS_STORAGE_KEY)).not.toBeNull();
     state.component.ngOnDestroy();
   });

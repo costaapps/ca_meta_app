@@ -36,17 +36,23 @@
         <p *ngIf="isLoadingTemplates" class="state" role="status">Consultando modelos…</p>
         <p *ngIf="listError" class="error" role="alert">{{ listError }}</p>
         <p *ngIf="!isLoadingTemplates && !listError && templates.length === 0" class="empty-state">Esta conta não retornou modelos nesta página.</p>
+        <p *ngIf="templates.length > 0" class="observation-note">Estado e categoria são valores informados pelo provedor; o estado não confirma aprovação do modelo.</p>
 
         <div *ngIf="templates.length > 0" class="template-list">
           <article class="template-card" *ngFor="let item of templates; trackBy: trackByTemplate">
             <div class="template-title-row">
               <h3>{{ item.name }}</h3>
-              <span class="status">{{ item.status }}</span>
+              <span class="status">Estado informado: {{ item.status }}</span>
             </div>
             <dl>
               <div><dt>Idioma</dt><dd>{{ item.language }}</dd></div>
               <div><dt>Categoria informada</dt><dd>{{ item.category }}</dd></div>
               <div><dt>Última atualização observada</dt><dd>{{ item.updatedAt }}</dd></div>
+              <div class="template-body-field"><dt>Texto BODY</dt><dd class="template-body">{{ item.bodyText ?? 'Texto BODY não disponível.' }}</dd></div>
+              <div class="template-body-field" *ngIf="getBodyPlaceholders(item.bodyText).length > 0">
+                <dt>Marcadores do BODY</dt>
+                <dd>{{ getBodyPlaceholders(item.bodyText).join(', ') }}</dd>
+              </div>
             </dl>
           </article>
         </div>

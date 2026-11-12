@@ -46,10 +46,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .template-list { display: grid; gap: .75rem; }
 .template-card { padding: 1rem; border: 1px solid #e1e6ea; border-radius: 6px; }
 .status { padding: .2rem .5rem; border-radius: 20px; background: #f1f4f6; color: #3a4650; font-size: .8rem; }
+.observation-note { color: #63717c; font-size: .9rem; }
 dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin: .8rem 0 0; }
 dl div { min-width: 0; }
+.template-body-field { grid-column: 1 / -1; }
 dt { color: #63717c; font-size: .78rem; }
 dd { overflow-wrap: anywhere; margin: .15rem 0 0; }
+.template-body { white-space: pre-wrap; }
 
 .pagination { display: flex; justify-content: center; align-items: center; gap: 1rem; margin: 1rem 0; }
 .support-details { margin: .8rem 0; color: #63717c; }

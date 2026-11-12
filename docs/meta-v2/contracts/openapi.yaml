@@ -4262,6 +4262,7 @@ components:
         - language
         - status
         - category
+        - bodyText
         - updatedAt
       properties:
         id:
@@ -4278,23 +4279,20 @@ components:
           maxLength: 16
         status:
           type: string
-          description: Local normalized vocabulary. Do not map a provider value until its current status and approval
-            semantics have been confirmed; current provider values and meanings are Not confirmed.
-          enum:
-            - PENDING
-            - APPROVED
-            - REJECTED
-            - PAUSED
-            - UNKNOWN
+          minLength: 1
+          maxLength: 64
+          description: Bounded provider-observed label. It is returned without mapping to local status semantics and does not establish approval.
         category:
           type: string
-          description: Local normalized vocabulary. Do not map a provider value until its current category mapping
-            has been confirmed; current provider values and meanings are Not confirmed.
-          enum:
-            - AUTHENTICATION
-            - MARKETING
-            - UTILITY
-            - UNKNOWN
+          minLength: 1
+          maxLength: 64
+          description: Bounded provider-observed label. It is returned without mapping to local category semantics.
+        bodyText:
+          type:
+            - string
+            - "null"
+          maxLength: 1024
+          description: Sanitized BODY text, including any literal placeholders. Provider examples and other components are omitted; null means no safe BODY text was available.
         updatedAt:
           type: string
           format: date-time

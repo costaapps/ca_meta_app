@@ -1233,16 +1233,12 @@ export interface components {
             readonly id: string;
             readonly name: string;
             readonly language: string;
-            /**
-             * @description Local normalized vocabulary. Do not map a provider value until its current status and approval semantics have been confirmed; current provider values and meanings are Not confirmed.
-             * @enum {string}
-             */
-            readonly status: "PENDING" | "APPROVED" | "REJECTED" | "PAUSED" | "UNKNOWN";
-            /**
-             * @description Local normalized vocabulary. Do not map a provider value until its current category mapping has been confirmed; current provider values and meanings are Not confirmed.
-             * @enum {string}
-             */
-            readonly category: "AUTHENTICATION" | "MARKETING" | "UTILITY" | "UNKNOWN";
+            /** @description Bounded provider-observed label. It is returned without mapping to local status semantics and does not establish approval. */
+            readonly status: string;
+            /** @description Bounded provider-observed label. It is returned without mapping to local category semantics. */
+            readonly category: string;
+            /** @description Sanitized BODY text, including any literal placeholders. Provider examples and other components are omitted; null means no safe BODY text was available. */
+            readonly bodyText: string | null;
             /** Format: date-time */
             readonly updatedAt: string;
         };

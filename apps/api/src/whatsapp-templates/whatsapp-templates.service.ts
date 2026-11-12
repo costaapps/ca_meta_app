@@ -8,6 +8,7 @@ import { isVerifiedServiceTenantScope, TenantAuthorizationService, TenantContext
 import type { MetaEnvironment } from '../meta-assets/meta-assets.types.js';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { DurableJobStore } from '../jobs/job-store.js';
+import { canonicalJson, parseJobPayload } from '../jobs/event-validation.js';
 import { TemplateInputError, parseTemplateCreateRequest, type TemplateCreateRequest } from './template-body.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -31,7 +32,7 @@ export interface WhatsAppTemplatesAccountDirectory {
 
 export interface WhatsAppTemplatesProvider {
   list(account: WhatsAppTemplatesAccount, input: { readonly cursor?: string; readonly limit: number; readonly requestId: string }):
-    Promise<components['schemas']['TemplateListPage']>;
+    Promise<unknown>;
 }
 
 export const META_WHATSAPP_TEMPLATES_ACCOUNT_DIRECTORY = Symbol('META_WHATSAPP_TEMPLATES_ACCOUNT_DIRECTORY');
@@ -135,22 +136,57 @@ export class WhatsAppTemplatesService {
     const { scope, account } = await this.authorizedAccount(session, tenantContextRef, assetId, 'CONNECT');
     if (!this.createEnabled) throw new WhatsAppTemplatesUnavailableError();
 
-    const digest = createHash('sha256').update(idempotencyKey, 'utf8').digest('hex');
-    const correlationId = stableCorrelationId(scope.tenantId, digest);
+    const keyDigest = createHash('sha256').update(idempotencyKey, 'utf8').digest('hex');
+    const idempotencyRef = `templates:${keyDigest}`;
+    const correlationId = stableCorrelationId(scope.tenantId, keyDigest);
+    const payload = parseJobPayload('TEMPLATE_CREATE', { kind: 'TEMPLATE_CREATE', assetId: account.assetId,
+      appConfigurationId: account.appConfigurationId, environment: account.environment, request });
+    const payloadHash = createHash('sha256').update(canonicalJson(payload), 'utf8').digest();
     const dataSource = await this.database.getDataSource();
     let jobId: string;
     try {
-      const queued = await dataSource.transaction((manager) => this.jobs.enqueueWithin(manager, {
-        tenantId: scope.tenantId,
-        type: 'TEMPLATE_CREATE',
-        idempotencyKey: `templates:${digest}`,
-        correlationId,
-        resourceScopeRef: account.assetId,
-        payload: { kind: 'TEMPLATE_CREATE', assetId: account.assetId,
-          appConfigurationId: account.appConfigurationId, environment: account.environment, request },
-      }));
-      jobId = queued.id;
+      jobId = await dataSource.transaction(async (manager) => {
+        // Serialize all template-create submissions for this tenant before checking key and payload indexes.
+        const tenantRows = await manager.query('SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE', [scope.tenantId]) as Array<{ id: string }>;
+        if (tenantRows.length !== 1) throw new Error('Internal tenant reference does not exist.');
+
+        // A caller must not evade same-key/different-payload conflicts through semantic deduplication.
+        const keyed = await manager.query(
+          `SELECT id, HEX(payload_hash) AS payload_hash, correlation_id, causation_id, resource_scope_ref
+           FROM ca_meta_jobs WHERE tenant_id = ? AND job_type = 'TEMPLATE_CREATE' AND idempotency_key = ? FOR UPDATE`,
+          [scope.tenantId, idempotencyRef],
+        ) as Array<{ id: string; payload_hash: string; correlation_id: string; causation_id: string | null; resource_scope_ref: string }>;
+        const keyedJob = keyed[0];
+        if (keyedJob) {
+          if (keyedJob.payload_hash.toLowerCase() !== payloadHash.toString('hex') ||
+              keyedJob.correlation_id !== correlationId || keyedJob.causation_id !== null ||
+              keyedJob.resource_scope_ref !== account.assetId) throw new WhatsAppTemplateIdempotencyConflictError();
+          return keyedJob.id;
+        }
+
+        // Same-body requests from separate tabs can have different keys. Reuse jobs whose effects may
+        // still be pending, ambiguous, or known accepted; confirmed failures may be explicitly retried.
+        const semantic = await manager.query(
+          `SELECT id FROM ca_meta_jobs
+           WHERE tenant_id = ? AND job_type = 'TEMPLATE_CREATE' AND resource_scope_ref = ? AND payload_hash = ?
+             AND status IN ('QUEUED', 'RUNNING', 'RETRY_PENDING', 'UNKNOWN', 'SUCCEEDED')
+           ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE`,
+          [scope.tenantId, account.assetId, payloadHash],
+        ) as Array<{ id: string }>;
+        if (semantic[0]) return semantic[0].id;
+
+        const queued = await this.jobs.enqueueWithin(manager, {
+          tenantId: scope.tenantId,
+          type: 'TEMPLATE_CREATE',
+          idempotencyKey: idempotencyRef,
+          correlationId,
+          resourceScopeRef: account.assetId,
+          payload,
+        });
+        return queued.id;
+      });
     } catch (error) {
+      if (error instanceof WhatsAppTemplateIdempotencyConflictError) throw error;
       if (error instanceof Error && error.message === 'Idempotency key conflicts with an existing job.') {
         throw new WhatsAppTemplateIdempotencyConflictError();
       }
@@ -197,11 +233,28 @@ function sanitizeTemplatePage(value: unknown, requestId: string): components['sc
         typeof item.updatedAt !== 'string' || !Number.isFinite(Date.parse(item.updatedAt))) {
       throw new WhatsAppTemplatesUnavailableError();
     }
-    // Exact current provider status/category meanings are Not confirmed; do not infer approval.
-    items.push(Object.freeze({ id: item.id, name: item.name, language: item.language, status: 'UNKNOWN', category: 'UNKNOWN',
+    const status = observedLabel(item.status);
+    const category = observedLabel(item.category);
+    const bodyText = observedBodyText(item);
+    // Keep provider labels as observations. They do not establish approval or local category semantics.
+    items.push(Object.freeze({ id: item.id, name: item.name, language: item.language, status, category, bodyText,
       updatedAt: new Date(item.updatedAt).toISOString() }));
   }
   return Object.freeze({ items: Object.freeze(items), nextCursor: value.nextCursor as string | null, requestId });
+}
+
+function observedLabel(value: unknown): string {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= 64 &&
+    !/[\u0000-\u001f\u007f]/.test(value) ? value : 'UNKNOWN';
+}
+
+function observedBodyText(item: Record<string, unknown>): string | null {
+  const direct = item.bodyText;
+  const components = Array.isArray(item.components) ? item.components : [];
+  const body = components.find((component) => record(component) && component.type === 'BODY');
+  const value = typeof direct === 'string' ? direct : record(body) ? body.text : undefined;
+  return typeof value === 'string' && value.length >= 1 && value.length <= 1024 &&
+    !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value) ? value : null;
 }
 
 function stableCorrelationId(tenantId: string, digest: string): string {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { IdentityDeniedError } from '../src/identity/identity.errors.js';
 import { PortalSessionVerifier, type VerifiedPortalSession } from '../src/identity/identity.trust.js';
@@ -11,6 +12,7 @@ import { submitAndReconcileTemplateCreate, type WhatsAppTemplateDispatchAdapter,
 import type { AuthorizedTenantScope } from '../src/identity/identity.types.js';
 import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import type { DurableJobStore, EnqueueJobInput } from '../src/jobs/job-store.js';
+import { canonicalJson, parseJobPayload } from '../src/jobs/event-validation.js';
 import type { WhatsAppTemplatesAccount } from '../src/whatsapp-templates/whatsapp-templates.service.js';
 
 const tenantId = '00000000-0000-4000-8000-000000000001';
@@ -44,9 +46,36 @@ function setup(options: { readonly currentTenant?: string; readonly allow?: bool
   readonly createEnabled?: boolean;
   readonly accountFor?: (tenant: string, assetRef: string) => WhatsAppTemplatesAccount | undefined } = {}) {
   const enqueued = new Map<string, { readonly id: string; readonly input: EnqueueJobInput }>();
+  const jobStatuses = new Map<string, string>();
+  const queryLog: string[] = [];
   let insertionCount = 0;
   let transactionTail = Promise.resolve();
-  const manager = {};
+  const payloadHash = (input: EnqueueJobInput): string => createHash('sha256')
+    .update(canonicalJson(parseJobPayload(input.type, input.payload)), 'utf8').digest('hex');
+  const rowFor = (job: { readonly id: string; readonly input: EnqueueJobInput }) => ({ id: job.id,
+    payload_hash: payloadHash(job.input), correlation_id: job.input.correlationId,
+    causation_id: job.input.causationId ?? null, resource_scope_ref: job.input.resourceScopeRef ?? '' });
+  const manager = {
+    async query(statement: string, parameters: readonly unknown[] = []): Promise<unknown[]> {
+      queryLog.push(statement);
+      if (statement.includes('SELECT id FROM ca_meta_tenants')) return [{ id: parameters[0] }];
+      if (statement.includes('AND idempotency_key = ? FOR UPDATE')) {
+        const [tenant, idempotencyKey] = parameters;
+        const found = [...enqueued.values()].find(({ input }) => input.tenantId === tenant && input.type === 'TEMPLATE_CREATE' &&
+          input.idempotencyKey === idempotencyKey);
+        return found ? [rowFor(found)] : [];
+      }
+      if (statement.includes('payload_hash = ?') && statement.includes('status IN')) {
+        const [tenant, resource, hash] = parameters;
+        const hashHex = Buffer.isBuffer(hash) ? hash.toString('hex') : String(hash);
+        return [...enqueued.values()]
+          .filter(({ id, input }) => input.tenantId === tenant && input.type === 'TEMPLATE_CREATE' && input.resourceScopeRef === resource &&
+            payloadHash(input) === hashHex && ['QUEUED', 'RUNNING', 'RETRY_PENDING', 'UNKNOWN', 'SUCCEEDED'].includes(jobStatuses.get(id) ?? 'QUEUED'))
+          .map(({ id }) => ({ id }));
+      }
+      throw new Error(`Unexpected synthetic query: ${statement}`);
+    },
+  };
   const databaseSource = {
     async transaction<T>(work: (transactionManager: object) => Promise<T>): Promise<T> {
       const result = transactionTail.then(() => work(manager));
@@ -67,6 +96,7 @@ function setup(options: { readonly currentTenant?: string; readonly allow?: bool
       }
       const id = `job_template_${++insertionCount}`;
       enqueued.set(key, { id, input });
+      jobStatuses.set(id, 'QUEUED');
       return { id, duplicate: false };
     },
   } as unknown as DurableJobStore;
@@ -75,7 +105,8 @@ function setup(options: { readonly currentTenant?: string; readonly allow?: bool
     async list(target: WhatsAppTemplatesAccount, input: { readonly cursor?: string; readonly limit: number }) {
       calls.push({ account: target, ...input });
       return { items: [{ id: 'provider-template-1', name: 'order_update', language: 'en', status: 'APPROVED',
-        category: 'UTILITY', updatedAt: '2026-11-10T12:00:00Z' }], nextCursor: null, requestId: 'discarded' };
+        category: 'UTILITY', components: [{ type: 'BODY', text: 'Hello {{1}}, code {{2}} and again {{1}}',
+          example: { body_text: [['PRIVATE PROVIDER EXAMPLE']] } }], updatedAt: '2026-11-10T12:00:00Z' }], nextCursor: null, requestId: 'discarded' };
     },
   };
   const tenant = options.currentTenant ?? tenantId;
@@ -93,7 +124,7 @@ function setup(options: { readonly currentTenant?: string; readonly allow?: bool
       authorizedScope.tenantId === tenantId && assetRef === assetId ? account : undefined;
   }, async resolveForWorker() { return undefined; } };
   const service = new WhatsAppTemplatesService(contexts, authorization, accounts, provider as never, options.createEnabled ?? true, database, jobs);
-  return { service, calls, enqueued, get insertions() { return insertionCount; } };
+  return { service, calls, enqueued, queryLog, jobStatuses, get insertions() { return insertionCount; } };
 }
 
 const baseBody = Object.freeze({ name: 'order_update', language: 'en', category: 'UTILITY',
@@ -131,13 +162,16 @@ test('M5.04 account directory constrains lookup to the tenant WABA and active ve
   assert.match(sql, /g\.grant_name = 'whatsapp_business_management' AND g\.status = 'GRANTED'/);
 });
 
-test('M5.04 listing scopes the internal WABA, forwards pagination and maps unknown provider fields safely', async () => {
+test('M5.04 listing preserves observed labels and sanitized BODY text while omitting examples', async () => {
   const fixture = setup();
   const page = await fixture.service.list(await sessionFor(), contextRef, assetId, { cursor: 'opaque/+cursor=', limit: 23 }, 'req-list-01');
   assert.deepEqual(fixture.calls[0], { account, cursor: 'opaque/+cursor=', limit: 23, requestId: 'req-list-01' });
   assert.equal(page.requestId, 'req-list-01');
-  assert.equal(page.items[0]?.status, 'UNKNOWN');
-  assert.equal(page.items[0]?.category, 'UNKNOWN');
+  assert.equal(page.items[0]?.status, 'APPROVED');
+  assert.equal(page.items[0]?.category, 'UTILITY');
+  assert.equal(page.items[0]?.bodyText, 'Hello {{1}}, code {{2}} and again {{1}}');
+  assert.equal('components' in (page.items[0] ?? {}), false);
+  assert.equal(JSON.stringify(page.items).includes('PRIVATE PROVIDER EXAMPLE'), false);
   const session = await sessionFor();
   await assert.rejects(() => fixture.service.list(session, contextRef, assetId, { cursor: 'bad cursor', limit: 23 }, 'req-list-02'), TemplateInputError);
   assert.equal(fixture.calls.length, 1);
@@ -173,12 +207,35 @@ test('M5.04 create uses tenant-scoped durable idempotency sequentially and concu
   const repeated = await submit();
   const [concurrentA, concurrentB] = await Promise.all([submit(), submit()]);
   assert.deepEqual([first.jobId, repeated.jobId, concurrentA.jobId, concurrentB.jobId], Array(4).fill(first.jobId));
+  const otherTab = await fixture.service.create(session, contextRef, assetId, 'different-tab-template-key-0002', baseBody, 'req-create-tab-02');
+  assert.equal(otherTab.jobId, first.jobId);
   assert.equal(fixture.insertions, 1);
   assert.equal(fixture.enqueued.values().next().value?.input.type, 'TEMPLATE_CREATE');
+  fixture.queryLog.length = 0;
   await assert.rejects(() => fixture.service.create(session, contextRef, assetId, 'stable-template-create-key-0001',
     { ...baseBody, bodyText: 'Different {{1}} body {{2}}' }, 'req-create-02'), WhatsAppTemplateIdempotencyConflictError);
+  assert.equal(fixture.queryLog.some((sql) => sql.includes('payload_hash = ?') && sql.includes('status IN')), false,
+    'same-key payload conflicts must be resolved before semantic deduplication');
   await assert.rejects(() => fixture.service.create(session, contextRef, assetId, 'stable-template-create-key-0001',
     { ...baseBody, cUUID: 'forbidden' }, 'req-create-03'), TemplateInputError);
+});
+
+test('M5.04 semantic create dedupe is atomic across tabs for active, UNKNOWN and SUCCEEDED jobs', async () => {
+  for (const status of ['QUEUED', 'RUNNING', 'RETRY_PENDING', 'UNKNOWN', 'SUCCEEDED']) {
+    const fixture = setup();
+    const session = await sessionFor();
+    const original = await fixture.service.create(session, contextRef, assetId, `template-key-original-${status.toLowerCase()}`, baseBody,
+      `req-create-${status.toLowerCase()}-01`);
+    fixture.jobStatuses.set(original.jobId, status);
+    const [tabA, tabB] = await Promise.all([
+      fixture.service.create(session, contextRef, assetId, `template-key-tab-a-${status.toLowerCase()}`, baseBody,
+        `req-create-${status.toLowerCase()}-02`),
+      fixture.service.create(session, contextRef, assetId, `template-key-tab-b-${status.toLowerCase()}`, baseBody,
+        `req-create-${status.toLowerCase()}-03`),
+    ]);
+    assert.deepEqual([tabA.jobId, tabB.jobId], [original.jobId, original.jobId], `${status} must reuse the existing job`);
+    assert.equal(fixture.insertions, 1, `${status} must not enqueue another durable job`);
+  }
 });
 
 test('M5.04 read-only reconciliation handles accepted, rejected, null and ambiguous outcomes without retry', async () => {

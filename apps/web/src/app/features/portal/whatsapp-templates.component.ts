@@ -169,6 +169,9 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
       this.jobStatus = null;
       this.jobStatusError = '';
       this.statusMessage = 'Pedido enviado para processamento. A aceitação da solicitação não confirma aprovação do modelo pela Meta.';
+      // A 202 response acknowledges the durable request; the existing job may already be terminal
+      // when this call reused an idempotent or semantically equivalent submission.
+      await this.checkJobStatus();
     } catch (error: unknown) {
       if (generation !== this.accountGeneration || assetId !== this.selectedAssetId) return;
       if (!dispatched) {
@@ -197,7 +200,7 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
       if (this.jobStatus.status === 'SUCCEEDED') {
         this.statusMessage = 'O pedido foi encaminhado ao provedor. O estado do trabalho não confirma aprovação do modelo pela Meta.';
       } else if (this.jobStatus.status === 'UNKNOWN') {
-        this.statusMessage = 'O resultado ainda não está confirmado. Atualize a lista de modelos antes de fazer outro pedido.';
+        this.statusMessage = 'O resultado continua inconclusivo e este estado não confirma aprovação da Meta. Atualizar a lista pode ajudar a verificar se o modelo apareceu, mas não libera outro pedido igual. Não reenvie este modelo; contate o suporte com o identificador do pedido para uma reconciliação segura.';
       } else if (this.jobStatus.status === 'FAILED') {
         this.statusMessage = 'O pedido não foi concluído. Consulte os detalhes seguros do trabalho antes de tentar novamente.';
       } else {
@@ -220,6 +223,10 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
 
   trackByAsset(_index: number, asset: TemplateAsset): string { return asset.id; }
   trackByTemplate(_index: number, item: TemplateRecord): string { return `${item.id}:${item.language}`; }
+
+  getBodyPlaceholders(bodyText: string | null): readonly string[] {
+    return Object.freeze([...new Set(bodyText?.match(/\{\{[1-9][0-9]{0,2}\}\}/g) ?? [])]);
+  }
 
   private async loadAccounts(): Promise<void> {
     const generation = ++this.accountGeneration;
