@@ -4696,6 +4696,14 @@ components:
                 requestId: req_example_05
                 retryable: false
                 action: USE_NEW_REQUEST_KEY
+            coexistenceSessionActive:
+              summary: A WhatsApp Coexistence onboarding session is already active
+              value:
+                code: COEXISTENCE_SESSION_ACTIVE
+                safeMessage: A WhatsApp Coexistence onboarding session is already active for this company.
+                requestId: req_example_45
+                retryable: false
+                action: CHECK_STATUS
     PreconditionFailed:
       description: The supplied ETag is missing or stale.
       content:

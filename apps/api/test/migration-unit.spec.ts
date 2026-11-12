@@ -21,7 +21,7 @@ import { ASSET_OBSERVATIONS_MIGRATION, ASSET_OBSERVATION_TABLES } from '../src/d
 import { CONNECTION_LIFECYCLE_MIGRATION } from '../src/database/migrations/connection-lifecycle.js';
 import { INTERNAL_ASSET_OPERATIONS_MIGRATION } from '../src/database/migrations/internal-asset-operations.js';
 import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION, ONBOARDING_COEXISTENCE_LOCK_TABLES } from '../src/database/migrations/onboarding-coexistence-lock.js';
-import { assertMigrationGrantRecords } from '../src/database/migrations/migration-runner.js';
+import { assertMigrationGrantRecords, CoexistenceLockDeleteGrantRequiredError, safeMigrationError } from '../src/database/migrations/migration-runner.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -69,6 +69,17 @@ test('migration grants require the lock-trigger definer privilege only on its ex
 
   assert.doesNotThrow(() => assertMigrationGrantRecords([usageGrant, schemaGrant, lockDeleteGrant], database));
   assert.throws(() => assertMigrationGrantRecords([usageGrant, schemaGrant], database), /insufficient table-scoped/);
+  assert.doesNotThrow(() => assertMigrationGrantRecords([usageGrant, schemaGrant], database, {
+    allowMissingCoexistenceLockDelete: true,
+  }));
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant.replace('TRIGGER ON', 'DELETE, TRIGGER ON'),
+  ], database, { allowMissingCoexistenceLockDelete: true }), /unexpected database-scoped migration privileges/);
+  assert.equal(
+    safeMigrationError(new CoexistenceLockDeleteGrantRequiredError()),
+    'Migration paused before installing the v22 terminal-release trigger. Grant DELETE only on ca_meta_onboarding_coexistence_locks to the migration user, then rerun the migration command.',
+  );
   assert.throws(() => assertMigrationGrantRecords([
     usageGrant,
     schemaGrant.replace('TRIGGER ON', 'DELETE, TRIGGER ON'),

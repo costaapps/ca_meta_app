@@ -7,9 +7,10 @@ import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import type { AuditEventWriter } from '../src/privacy/audit.service.js';
 import { readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
-import { MIGRATION_STEP_LEDGER, deployMigrations, migrationLockName, readMigrationStatus } from '../src/database/migrations/migration-runner.js';
+import { CoexistenceLockDeleteGrantRequiredError, MIGRATION_STEP_LEDGER, deployMigrations, migrationLockName, readMigrationStatus } from '../src/database/migrations/migration-runner.js';
 import { MIGRATIONS } from '../src/database/migrations/migrations.js';
 import { CREDENTIAL_LIFECYCLE_MIGRATION } from '../src/database/migrations/credential-lifecycle.js';
+import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION } from '../src/database/migrations/onboarding-coexistence-lock.js';
 import { IdentityAdministrationService } from '../src/identity/identity-administration.service.js';
 import { IdentityAdministrationConflictError } from '../src/identity/mysql-identity-administration.repository.js';
 import { MysqlIdentityAdministrationRepository } from '../src/identity/mysql-identity-administration.repository.js';
@@ -77,7 +78,32 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
   };
 
   const admin = await createConnection(connectionOptions);
+  let root: Connection | undefined;
   try {
+    const databaseName = environment.database.name;
+    const migrationUser = environment.database.user;
+    assert.match(databaseName, /^[A-Za-z0-9_]+$/, 'the synthetic database identifier is safe to quote');
+    assert.match(migrationUser, /^[A-Za-z0-9_]+$/, 'the configured migration account is safe to quote');
+    assert.notEqual(migrationUser.toLowerCase(), 'root');
+    assert.ok(process.env.M2_ROOT_PASSWORD, 'the M2.03 disposable MariaDB harness provides its synthetic root credential');
+    root = await createConnection({
+      host: environment.database.host,
+      port: environment.database.port,
+      database: databaseName,
+      user: 'root',
+      password: process.env.M2_ROOT_PASSWORD,
+      connectTimeout: environment.database.connectTimeoutMs,
+      multipleStatements: false,
+      dateStrings: true,
+      charset: 'utf8mb4',
+    });
+    const grantAdmin = root;
+    const rootContext = await queryRows<{ database_name: string; database_account: string }>(grantAdmin,
+      "SELECT DATABASE() AS database_name, SUBSTRING_INDEX(CURRENT_USER(), '@', 1) AS database_account",
+    );
+    assert.equal(rootContext[0]?.database_name, databaseName);
+    assert.equal(rootContext[0]?.database_account, 'root', 'the grant connection is the synthetic root account');
+
     await admin.query("SET time_zone = '+00:00'");
     await admin.query("SET SESSION sql_mode = CONCAT(@@session.sql_mode, ',STRICT_ALL_TABLES')");
     const before = await readMigrationStatus(environment);
@@ -175,7 +201,52 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
       [CREDENTIAL_LIFECYCLE_MIGRATION.id, 'add-authorization-flow-auth-context'],
     );
     assert.equal(lifecycleFlowContextStep[0]?.state, 'STARTED', 'committed v13 DDL is journaled STARTED when the worker exits before ACK');
+    await assert.rejects(
+      deployMigrations(environment),
+      (error: unknown) => error instanceof CoexistenceLockDeleteGrantRequiredError,
+      'the fresh schema pauses safely at v22 when the table-only trigger-definer grant is absent',
+    );
+    const stagedStatus = await readMigrationStatus(environment);
+    assert.equal(stagedStatus.migrations.length, MIGRATIONS.length);
+    assert.ok(stagedStatus.migrations.slice(0, -1).every((migration) => migration.state === 'APPLIED' && migration.checksumMatches));
+    assert.equal(stagedStatus.migrations.at(-1)?.id, ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id);
+    assert.equal(stagedStatus.migrations.at(-1)?.state, 'RUNNING');
+    const stagedSteps = await queryRows<{ step_id: string; state: string }>(grantAdmin,
+      `SELECT step_id, state FROM ${MIGRATION_STEP_LEDGER} WHERE migration_id = ?`,
+      [ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id],
+    );
+    const stateByStep = new Map(stagedSteps.map((step) => [step.step_id, step.state]));
+    assert.equal(stateByStep.get('create-onboarding-coexistence-locks'), 'APPLIED');
+    assert.equal(stateByStep.get('backfill-active-onboarding-coexistence-locks'), 'APPLIED');
+    assert.equal(stateByStep.get('release-coexistence-lock-on-terminal-onboarding-status'), 'STARTED');
+    const lockTable = await queryRows<{ table_name: string }>(grantAdmin,
+      'SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_name = ?',
+      [databaseName, 'ca_meta_onboarding_coexistence_locks'],
+    );
+    assert.equal(lockTable.length, 1, 'the migration runner creates the lock table before pausing for the trigger grant');
+    const triggerBeforeGrant = await queryRows<{ trigger_name: string }>(grantAdmin,
+      'SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema = ? AND trigger_name = ?',
+      [databaseName, 'tr_ca_meta_onboarding_coexistence_lock_release'],
+    );
+    assert.equal(triggerBeforeGrant.length, 0, 'the release trigger is absent while the required grant is missing');
+
+    await grantAdmin.query(
+      `GRANT DELETE ON \`${databaseName}\`.\`ca_meta_onboarding_coexistence_locks\` TO '${migrationUser}'@'%'`,
+    );
     await deployMigrations(environment);
+    const recoveredStatus = await readMigrationStatus(environment);
+    assert.equal(recoveredStatus.migrations.length, 22);
+    assert.ok(recoveredStatus.migrations.every((migration) => migration.state === 'APPLIED' && migration.checksumMatches));
+    const recoveredTrigger = await queryRows<{ trigger_name: string }>(grantAdmin,
+      'SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema = ? AND trigger_name = ?',
+      [databaseName, 'tr_ca_meta_onboarding_coexistence_lock_release'],
+    );
+    assert.equal(recoveredTrigger.length, 1, 'the trigger is installed after granting DELETE on the exact lock table');
+    const recoveredTriggerStep = await queryRows<{ state: string }>(grantAdmin,
+      `SELECT state FROM ${MIGRATION_STEP_LEDGER} WHERE migration_id = ? AND step_id = ?`,
+      [ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id, 'release-coexistence-lock-on-terminal-onboarding-status'],
+    );
+    assert.equal(recoveredTriggerStep[0]?.state, 'APPLIED');
     const recoveredFlowContextStep = await queryRows<{ state: string }>(admin,
       `SELECT state FROM ${MIGRATION_STEP_LEDGER} WHERE migration_id = ? AND step_id = ?`,
       [CREDENTIAL_LIFECYCLE_MIGRATION.id, 'add-authorization-flow-auth-context'],
@@ -602,6 +673,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     const finalStatus = await readMigrationStatus(environment);
     assert.ok(finalStatus.migrations.every((migration) => migration.state === 'APPLIED' && migration.checksumMatches));
   } finally {
+    if (root) await root.end();
     await admin.end();
   }
 });
