@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { DataSource } from 'typeorm';
+import type { DataSource, EntityManager } from 'typeorm';
 import { destinationKeyHash, projectionContentHash, validateProjectionRecord, validateProjectionTarget } from './legacy-projection.mapper.js';
 import type {
   LegacyProjectionCheckpoint,
@@ -10,10 +10,9 @@ import type {
 } from './legacy-projection.types.js';
 import { LegacyProjectionError } from './legacy-projection.types.js';
 
-interface ExistingTargetRow { ProjectionVersion: number | string; ContentHash: string }
 interface RebuildTargetRow {
-  IdAsset: string; CentralAssetRef: string | null; ExternalId?: string | null; DisplayName?: string | null;
-  AssetKind?: string | null; ParentLegacyAssetRef?: string | null; CapabilitiesJson?: string | Buffer | unknown;
+  IdAsset: string; CentralAssetRef: string | null; ExternalId: string | null; DisplayName: string | null;
+  AssetKind: string | null; ParentLegacyAssetRef: string | null; CapabilitiesJson: string | Buffer | unknown;
   ConfigVersion?: number | string | null; Status: string; ProjectionVersion: number | string;
   ProjectionSchemaVersion: number | string; ContentHash: string; IsDeleted: number | string;
 }
@@ -63,6 +62,84 @@ function targetTable(record: LegacyProjectionRecord): 'MetaConnectedPages' | 'Me
   return 'MetaAssetAutomationConfigs';
 }
 
+function selectTargetRows(table: typeof PROJECTOR_TABLES[number], forUpdate: boolean, byAsset = false): string {
+  const fields = table === 'MetaAssetAutomationConfigs'
+    ? 'IdAsset, CentralAssetRef, ConfigVersion, Status, ProjectionVersion, ProjectionSchemaVersion, ContentHash, IsDeleted'
+    : 'IdAsset, CentralAssetRef, ExternalId, DisplayName, AssetKind, ParentLegacyAssetRef, CapabilitiesJson, Status, ProjectionVersion, ProjectionSchemaVersion, ContentHash, IsDeleted';
+  return `SELECT ${fields} FROM ${table} WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ?${byAsset ? ' AND IdAsset = ?' : ''}${forUpdate ? ' FOR UPDATE' : ''}`;
+}
+
+function recordFromDestinationRow(table: typeof PROJECTOR_TABLES[number], row: RebuildTargetRow): LegacyProjectionRecord {
+  const sourceVersion = Number(row.ProjectionVersion);
+  const tombstone = Number(row.IsDeleted) === 1;
+  if (table === 'MetaAssetAutomationConfigs') {
+    return validateProjectionRecord({
+      kind: 'AUTOMATION_CONFIG', centralRef: row.CentralAssetRef ?? '', legacyAssetRef: row.IdAsset,
+      sourceVersion, status: row.Status as LegacyProjectionRecord['status'], externalId: null, displayName: null,
+      assetKind: null, parentLegacyAssetRef: null, capabilities: Object.freeze([]),
+      configVersion: row.ConfigVersion === null || row.ConfigVersion === undefined ? null : Number(row.ConfigVersion), tombstone,
+    });
+  }
+  return validateProjectionRecord({
+    kind: table === 'MetaConnectedPages' ? 'PAGE' : 'WHATSAPP_NUMBER',
+    centralRef: row.CentralAssetRef ?? '', legacyAssetRef: row.IdAsset, sourceVersion,
+    status: row.Status as LegacyProjectionRecord['status'], externalId: row.ExternalId ?? null,
+    displayName: row.DisplayName ?? null, assetKind: row.AssetKind ?? null,
+    parentLegacyAssetRef: row.ParentLegacyAssetRef ?? null, capabilities: parseCapabilities(row.CapabilitiesJson),
+    configVersion: null, tombstone,
+  });
+}
+
+function contentHashFromDestinationRow(table: typeof PROJECTOR_TABLES[number], row: RebuildTargetRow): string | undefined {
+  try {
+    return projectionContentHash(recordFromDestinationRow(table, row));
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeProjectionRecord(
+  manager: EntityManager,
+  target: LegacyProjectionTargetKey,
+  record: LegacyProjectionRecord,
+  projectionSchemaVersion: number,
+): Promise<void> {
+  const table = targetTable(record);
+  const hash = projectionContentHash(record);
+  if (record.kind === 'AUTOMATION_CONFIG') {
+    await manager.query(
+      `INSERT INTO MetaAssetAutomationConfigs
+       (IdDatabase, IdCompany, Environment, IdAsset, CentralAssetRef, ConfigVersion, Status, ProjectionVersion,
+        ProjectionSchemaVersion, ContentHash, IsDeleted, UpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))
+       ON DUPLICATE KEY UPDATE CentralAssetRef = VALUES(CentralAssetRef), ConfigVersion = VALUES(ConfigVersion),
+         Status = VALUES(Status), ProjectionVersion = VALUES(ProjectionVersion),
+         ProjectionSchemaVersion = VALUES(ProjectionSchemaVersion), ContentHash = VALUES(ContentHash),
+         IsDeleted = VALUES(IsDeleted), UpdatedAt = VALUES(UpdatedAt)`,
+      [target.legacyDatabaseId, target.legacyCompanyId, target.environment, record.legacyAssetRef, record.centralRef,
+        record.configVersion, record.status, record.sourceVersion, projectionSchemaVersion, hash, record.tombstone ? 1 : 0],
+    );
+    return;
+  }
+  await manager.query(
+    `INSERT INTO ${table}
+     (IdDatabase, IdCompany, Environment, IdAsset, CentralAssetRef, ExternalId, DisplayName, AssetKind,
+      ParentLegacyAssetRef, CapabilitiesJson, Status, ProjectionVersion, ProjectionSchemaVersion,
+      ContentHash, IsDeleted, UpdatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))
+     ON DUPLICATE KEY UPDATE CentralAssetRef = VALUES(CentralAssetRef), ExternalId = VALUES(ExternalId),
+       DisplayName = VALUES(DisplayName), AssetKind = VALUES(AssetKind),
+       ParentLegacyAssetRef = VALUES(ParentLegacyAssetRef), CapabilitiesJson = VALUES(CapabilitiesJson),
+       Status = VALUES(Status), ProjectionVersion = VALUES(ProjectionVersion),
+       ProjectionSchemaVersion = VALUES(ProjectionSchemaVersion), ContentHash = VALUES(ContentHash),
+       IsDeleted = VALUES(IsDeleted), UpdatedAt = VALUES(UpdatedAt)`,
+    [target.legacyDatabaseId, target.legacyCompanyId, target.environment, record.legacyAssetRef, record.centralRef,
+      record.externalId, record.displayName, record.assetKind, record.parentLegacyAssetRef,
+      JSON.stringify(record.capabilities), record.status, record.sourceVersion, projectionSchemaVersion,
+      hash, record.tombstone ? 1 : 0],
+  );
+}
+
 /** Writes only the synthetic/approved target column set; this class does not create or alter destination schemas. */
 export class MysqlLegacyProjectionDestination implements LegacyProjectionDestination {
   private readonly keyHash: string;
@@ -86,54 +163,25 @@ export class MysqlLegacyProjectionDestination implements LegacyProjectionDestina
         const record = validateProjectionRecord(unchecked);
         const table = targetTable(record);
         const existingRows = await manager.query(
-          `SELECT ProjectionVersion, ContentHash FROM ${table}
-           WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ? FOR UPDATE`,
+          selectTargetRows(table, true, true),
           [input.target.legacyDatabaseId, input.target.legacyCompanyId, input.target.environment, record.legacyAssetRef],
-        ) as ExistingTargetRow[];
+        ) as RebuildTargetRow[];
         const existing = existingRows[0];
         const hash = projectionContentHash(record);
         if (existing) {
           const version = Number(existing.ProjectionVersion);
           if (record.sourceVersion < version) continue;
           if (record.sourceVersion === version) {
-            if (hash !== existing.ContentHash) {
+            const actualHash = contentHashFromDestinationRow(table, existing);
+            if (actualHash === hash && existing.ContentHash === hash) continue;
+            if (actualHash !== undefined && actualHash !== hash && existing.ContentHash === actualHash) {
               throw new LegacyProjectionError('PROJECTION_VERSION_CONFLICT', 'Destination revision conflicts with different content.');
             }
-            continue;
+            // A stale ContentHash or a field hash that no longer matches it is repairable
+            // from this trusted current snapshot, even when the stored revision is unchanged.
           }
         }
-        if (record.kind === 'AUTOMATION_CONFIG') {
-          await manager.query(
-            `INSERT INTO MetaAssetAutomationConfigs
-             (IdDatabase, IdCompany, Environment, IdAsset, CentralAssetRef, ConfigVersion, Status, ProjectionVersion,
-              ProjectionSchemaVersion, ContentHash, IsDeleted, UpdatedAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))
-             ON DUPLICATE KEY UPDATE CentralAssetRef = VALUES(CentralAssetRef), ConfigVersion = VALUES(ConfigVersion),
-               Status = VALUES(Status), ProjectionVersion = VALUES(ProjectionVersion),
-               ProjectionSchemaVersion = VALUES(ProjectionSchemaVersion), ContentHash = VALUES(ContentHash),
-               IsDeleted = VALUES(IsDeleted), UpdatedAt = VALUES(UpdatedAt)`,
-            [input.target.legacyDatabaseId, input.target.legacyCompanyId, input.target.environment, record.legacyAssetRef, record.centralRef,
-              record.configVersion, record.status, record.sourceVersion, input.projectionSchemaVersion, hash, record.tombstone ? 1 : 0],
-          );
-        } else {
-          await manager.query(
-            `INSERT INTO ${table}
-             (IdDatabase, IdCompany, Environment, IdAsset, CentralAssetRef, ExternalId, DisplayName, AssetKind,
-              ParentLegacyAssetRef, CapabilitiesJson, Status, ProjectionVersion, ProjectionSchemaVersion,
-              ContentHash, IsDeleted, UpdatedAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))
-             ON DUPLICATE KEY UPDATE CentralAssetRef = VALUES(CentralAssetRef), ExternalId = VALUES(ExternalId),
-               DisplayName = VALUES(DisplayName), AssetKind = VALUES(AssetKind),
-               ParentLegacyAssetRef = VALUES(ParentLegacyAssetRef), CapabilitiesJson = VALUES(CapabilitiesJson),
-               Status = VALUES(Status), ProjectionVersion = VALUES(ProjectionVersion),
-               ProjectionSchemaVersion = VALUES(ProjectionSchemaVersion), ContentHash = VALUES(ContentHash),
-               IsDeleted = VALUES(IsDeleted), UpdatedAt = VALUES(UpdatedAt)`,
-            [input.target.legacyDatabaseId, input.target.legacyCompanyId, input.target.environment, record.legacyAssetRef, record.centralRef,
-              record.externalId, record.displayName, record.assetKind, record.parentLegacyAssetRef,
-              JSON.stringify(record.capabilities), record.status, record.sourceVersion, input.projectionSchemaVersion,
-              hash, record.tombstone ? 1 : 0],
-          );
-        }
+        await writeProjectionRecord(manager, input.target, record, input.projectionSchemaVersion);
       }
     });
   }
@@ -162,22 +210,30 @@ export class MysqlLegacyProjectionDestination implements LegacyProjectionDestina
     const actualEntries: string[] = [];
     let reconciledExtraCount = 0;
     let ambiguousExtraCount = 0;
-    const expectedIds = [...expected.keys()];
-
     await this.dataSource.transaction(async (manager) => {
       for (const table of PROJECTOR_TABLES) {
-        const select = table === 'MetaAssetAutomationConfigs'
-          ? `SELECT IdAsset, CentralAssetRef, ConfigVersion, Status, ProjectionVersion,
-                    ProjectionSchemaVersion, ContentHash, IsDeleted
-             FROM ${table} WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? FOR UPDATE`
-          : `SELECT IdAsset, CentralAssetRef, ExternalId, DisplayName, AssetKind, ParentLegacyAssetRef,
-                    CapabilitiesJson, Status, ProjectionVersion, ProjectionSchemaVersion, ContentHash, IsDeleted
-             FROM ${table} WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? FOR UPDATE`;
-        const rows = await manager.query(select, [input.target.legacyDatabaseId, input.target.legacyCompanyId, input.target.environment]) as RebuildTargetRow[];
+        const rows = await manager.query(
+          selectTargetRows(table, true),
+          [input.target.legacyDatabaseId, input.target.legacyCompanyId, input.target.environment],
+        ) as RebuildTargetRow[];
         for (const row of rows) {
           const centralRef = row.CentralAssetRef;
           if (centralRef && expected.has(centralRef)) {
-            actualEntries.push(`${centralRef}:${row.ContentHash}`);
+            const expectedRecord = expected.get(centralRef)!;
+            const expectedHash = projectionContentHash(expectedRecord);
+            const actualHash = contentHashFromDestinationRow(table, row);
+            const rowVersion = Number(row.ProjectionVersion);
+            if (table === targetTable(expectedRecord) && actualHash !== expectedHash &&
+                Number.isSafeInteger(rowVersion) && rowVersion <= expectedRecord.sourceVersion) {
+              await writeProjectionRecord(manager, input.target, expectedRecord, input.projectionSchemaVersion);
+            } else if (table === targetTable(expectedRecord) && actualHash === expectedHash && row.ContentHash !== actualHash) {
+              await manager.query(
+                `UPDATE ${table} SET ContentHash = ?
+                 WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ? AND CentralAssetRef = ?`,
+                [actualHash, input.target.legacyDatabaseId, input.target.legacyCompanyId, input.target.environment,
+                  row.IdAsset, centralRef],
+              );
+            }
             continue;
           }
           const checkpoint = centralRef ? known.get(centralRef) : undefined;
@@ -189,6 +245,7 @@ export class MysqlLegacyProjectionDestination implements LegacyProjectionDestina
           }
           let tombstone = tombstoneFromRow(table, row, rowVersion);
           const alreadyTombstoned = Number(row.IsDeleted) === 1 && row.Status === 'REMOVED' &&
+            contentHashFromDestinationRow(table, row) === projectionContentHash(tombstone) &&
             projectionContentHash(tombstone) === row.ContentHash;
           if (!alreadyTombstoned) {
             const nextVersion = Math.max(rowVersion, checkpoint.sourceVersion) + 1;
@@ -208,6 +265,20 @@ export class MysqlLegacyProjectionDestination implements LegacyProjectionDestina
           }
           tombstones.push(tombstone);
           reconciledExtraCount += 1;
+        }
+      }
+
+      // Hash the persisted projected columns after repairs/tombstones. Stored ContentHash is
+      // treated as integrity metadata only; it is never evidence of field parity by itself.
+      for (const table of PROJECTOR_TABLES) {
+        const rows = await manager.query(
+          selectTargetRows(table, false),
+          [input.target.legacyDatabaseId, input.target.legacyCompanyId, input.target.environment],
+        ) as RebuildTargetRow[];
+        for (const row of rows) {
+          if (!row.CentralAssetRef || !expected.has(row.CentralAssetRef)) continue;
+          const actualHash = contentHashFromDestinationRow(table, row);
+          actualEntries.push(`${row.CentralAssetRef}:${actualHash ?? 'INVALID'}`);
         }
       }
     });

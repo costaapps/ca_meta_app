@@ -3,12 +3,17 @@ import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { compareProjectionVersion, destinationKeyHash, projectionContentHash, validateProjectionRecord, validateProjectionTarget } from '../src/legacy-projection/legacy-projection.mapper.js';
 import { LegacyProjectionService } from '../src/legacy-projection/legacy-projection.service.js';
+import { createLegacyProjectionJobHandler, DurableLegacyProjectionJobScheduler } from '../src/legacy-projection/legacy-projection.jobs.js';
+import { LegacyProjectionError } from '../src/legacy-projection/legacy-projection.types.js';
 import type {
   LegacyProjectionCheckpoint, LegacyProjectionCheckpointStore, LegacyProjectionDestination,
   LegacyProjectionDestinationCatalog, LegacyProjectionRecord, LegacyProjectionRebuildResult,
   LegacyProjectionSnapshot, LegacyProjectionTargetKey,
 } from '../src/legacy-projection/legacy-projection.types.js';
 import type { OutboxEventEnvelope } from '../src/jobs/event-validation.js';
+import type { EnqueueJobInput, JobStore, ClaimedJob } from '../src/jobs/job-store.js';
+import type { VerifiedJobExecutionContext } from '../src/jobs/job-execution-authorization.js';
+import type { EntityManager } from 'typeorm';
 
 const tenantId = '90000000-0000-4000-8000-000000000088';
 const dbACompanyA: LegacyProjectionTargetKey = { legacyDatabaseId: 'synthetic-db', legacyCompanyId: 'company-a', environment: 'test' };
@@ -42,12 +47,17 @@ function snapshot(
 
 class MemoryCheckpointStore implements LegacyProjectionCheckpointStore {
   readonly rows = new Map<string, LegacyProjectionCheckpoint>();
+  failNextRecordWithConflict = false;
   private key(tenant: string, destination: string, ref: string): string { return `${tenant}\0${destination}\0${ref}`; }
   async read(tenant: string, destination: string, ref: string) { return this.rows.get(this.key(tenant, destination, ref)); }
   async listByDestination(tenant: string, destination: string) {
     return [...this.rows.values()].filter((row) => row.tenantId === tenant && row.destinationKeyHash === destination);
   }
   async record(checkpoint: LegacyProjectionCheckpoint) {
+    if (this.failNextRecordWithConflict) {
+      this.failNextRecordWithConflict = false;
+      throw new LegacyProjectionError('PROJECTION_VERSION_CONFLICT', 'Synthetic concurrent checkpoint conflict.');
+    }
     this.rows.set(this.key(checkpoint.tenantId, checkpoint.destinationKeyHash, checkpoint.centralRef), checkpoint);
   }
 }
@@ -132,6 +142,66 @@ test('projection is idempotent and reprocessing a current tombstone does not res
   const projected = destination.rows.get('synthetic-db\0company-a\0legacy-page-1');
   assert.equal(projected?.tombstone, true);
   assert.equal(projected?.status, 'REMOVED');
+});
+
+test('projection jobs share a stable scheduling scope for the same tenant aggregate', async () => {
+  const queued: EnqueueJobInput[] = [];
+  const jobs = {
+    enqueueWithin: async (_manager: EntityManager, input: EnqueueJobInput) => {
+      queued.push(input);
+      return { id: `job-${queued.length}`, duplicate: false };
+    },
+  } as unknown as JobStore;
+  const scheduler = new DurableLegacyProjectionJobScheduler(jobs);
+  const first = event('event-a', 1);
+  const second = event('event-b', 2);
+  const third = event('event-c', 1);
+  await scheduler.enqueueWithin({} as EntityManager, {
+    ...first, aggregateRef: 'connection-a', data: { ...first.data, assetRef: 'same-resource-ref' },
+  }, 'outbox-a');
+  await scheduler.enqueueWithin({} as EntityManager, {
+    ...second, aggregateRef: 'connection-b', data: { ...second.data, assetRef: 'same-resource-ref' },
+  }, 'outbox-b');
+  await scheduler.enqueueWithin({} as EntityManager, {
+    ...third, data: { ...third.data, assetRef: 'different-resource-ref' },
+  }, 'outbox-c');
+
+  assert.notEqual(queued[0]?.idempotencyKey, queued[1]?.idempotencyKey, 'different events retain distinct idempotency');
+  assert.equal(queued[0]?.resourceScopeRef, queued[1]?.resourceScopeRef, 'same asset jobs serialize across aggregate events');
+  assert.notEqual(queued[0]?.resourceScopeRef, queued[2]?.resourceScopeRef, 'unrelated resources stay independent');
+});
+
+test('a transient version conflict retries after reloading current state and preserves the newer tombstone', async () => {
+  const destination = new MemoryDestination();
+  const store = new MemoryCheckpointStore();
+  store.failNextRecordWithConflict = true;
+  const projection = new LegacyProjectionService(store, new MemoryCatalog([{ target: dbACompanyA, destination }]));
+  let current = record();
+  let sourceLoads = 0;
+  const source = {
+    loadCurrent: async (_tenantId: string, _eventId: string, _sourceVersion: number) => {
+      sourceLoads += 1;
+      return snapshot(event('outbox-current', 2), [{ target: dbACompanyA, records: [current] }]);
+    },
+    loadTenantCurrent: async () => ({ tenantId, targets: [] }),
+  };
+  const handler = createLegacyProjectionJobHandler(source, projection);
+  const job = {
+    tenantId,
+    type: 'PROJECTION_RECONCILE',
+    payload: { kind: 'PROJECTION_RECONCILE', projectionRef: 'outbox-current', sourceVersion: 2 },
+  } as unknown as ClaimedJob;
+  const signal = new AbortController().signal;
+  const authorization = {} as VerifiedJobExecutionContext;
+
+  const conflicted = await handler(job, signal, authorization);
+  assert.deepEqual(conflicted, { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DEPENDENCY_UNAVAILABLE' });
+  current = record({ sourceVersion: 2, status: 'REMOVED', tombstone: true });
+  const retried = await handler(job, signal, authorization);
+
+  assert.deepEqual(retried, { kind: 'SUCCEEDED' });
+  assert.equal(sourceLoads, 2, 'each retry reloads the central current snapshot');
+  assert.equal(destination.rows.get('synthetic-db\0company-a\0legacy-page-1')?.tombstone, true);
 });
 
 test('same IdDatabase companies and separate destinations fail independently and recover on redelivery', async () => {

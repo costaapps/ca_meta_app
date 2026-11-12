@@ -24,13 +24,19 @@ export class DurableLegacyProjectionJobScheduler implements LegacyProjectionJobS
   async enqueueWithin(manager: EntityManager, event: OutboxEventEnvelope, outboxEventId: string): Promise<void> {
     if (!projectable(event)) return;
     const digest = createHash('sha256').update(outboxEventId, 'utf8').digest('hex');
+    const resourceRef = typeof event.data['assetRef'] === 'string' ? event.data['assetRef'] : event.aggregateRef;
+    const resourceDigest = createHash('sha256')
+      .update(JSON.stringify([event.tenantRef, resourceRef]), 'utf8')
+      .digest('hex');
     await this.jobs.enqueueWithin(manager, {
       tenantId: event.tenantRef,
       type: 'PROJECTION_RECONCILE',
       idempotencyKey: `legacy-projection:${digest}`,
       correlationId: event.correlationId,
       causationId: event.causationId,
-      resourceScopeRef: `projection:${digest}`,
+      // The queue fences active jobs by tenant + resourceScopeRef. Keep distinct event
+      // idempotency keys, but serialize every event for the same asset/aggregate.
+      resourceScopeRef: `projection:${resourceDigest}`,
       payload: { kind: 'PROJECTION_RECONCILE', projectionRef: outboxEventId, sourceVersion: event.aggregateVersion },
     });
   }
@@ -54,13 +60,18 @@ export function createLegacyProjectionJobHandler(
     try {
       const result = await projection.project(snapshot);
       if (result.destinations.some((destination) => destination.state === 'PENDING')) {
-        return { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DESTINATION_UNAVAILABLE' };
+        const conflict = result.destinations.find((destination) => destination.safeErrorCode === 'PROJECTION_VERSION_CONFLICT');
+        return { kind: 'RETRYABLE_FAILURE', safeErrorCode: conflict ? 'DEPENDENCY_UNAVAILABLE' : 'DESTINATION_UNAVAILABLE' };
       }
       if (result.destinations.some((destination) => destination.state === 'FAILED')) {
         return { kind: 'PERMANENT_FAILURE', safeErrorCode: 'DESTINATION_NOT_READY' };
       }
       return { kind: 'SUCCEEDED' };
     } catch (error) {
+      if (error instanceof LegacyProjectionError && error.safeCode === 'PROJECTION_VERSION_CONFLICT') {
+        // Retry invokes loadCurrent again, so the calculation uses the latest committed state.
+        return { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DEPENDENCY_UNAVAILABLE' };
+      }
       return { kind: 'PERMANENT_FAILURE', safeErrorCode: error instanceof LegacyProjectionError ? error.safeCode : 'PROJECTION_INVALID' };
     }
   };

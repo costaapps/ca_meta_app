@@ -16,7 +16,12 @@ function supportedEvent(eventType: string): boolean {
 }
 
 function safeProjectionError(error: unknown): { readonly state: 'PENDING' | 'FAILED'; readonly code: string } {
-  if (error instanceof LegacyProjectionError) return { state: 'FAILED', code: error.safeCode };
+  if (error instanceof LegacyProjectionError) {
+    if (error.safeCode === 'PROJECTION_VERSION_CONFLICT') {
+      return { state: 'PENDING', code: error.safeCode };
+    }
+    return { state: 'FAILED', code: error.safeCode };
+  }
   return { state: 'PENDING', code: 'DESTINATION_UNAVAILABLE' };
 }
 

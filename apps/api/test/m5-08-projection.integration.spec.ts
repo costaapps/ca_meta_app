@@ -130,7 +130,8 @@ test('M5.08 MariaDB fault injection: duplicate/order, company isolation, indepen
   const destinationCatalog = new AllowlistedLegacyProjectionCatalog([
     { target: companyA, dataSource: targetA }, { target: companyB, dataSource: targetA }, { target: destinationB, dataSource: targetB },
   ]);
-  const projection = new LegacyProjectionService(new MysqlLegacyProjectionCheckpointStore(central), destinationCatalog);
+  const checkpointStore = new MysqlLegacyProjectionCheckpointStore(central);
+  const projection = new LegacyProjectionService(checkpointStore, destinationCatalog);
   let fixtureReady = false;
 
   try {
@@ -159,13 +160,32 @@ test('M5.08 MariaDB fault injection: duplicate/order, company isolation, indepen
     const eventToAppend = event('event-with-atomic-projection-job', 8);
     const appended = await outbox.append(eventToAppend);
     const duplicateAppend = await outbox.append(eventToAppend);
+    await outbox.append(event('event-same-aggregate-newer', 9));
     assert.equal(appended.duplicate, false);
     assert.equal(duplicateAppend.duplicate, true);
     const queued = await centralSource.query(
       `SELECT job_type FROM ca_meta_jobs WHERE tenant_id = ? AND correlation_id = ? ORDER BY job_type`,
       [tenantId, 'm5-08-integration'],
     ) as Array<{ job_type: string }>;
-    assert.deepEqual(queued.map((job) => job.job_type), ['OUTBOX_DELIVER', 'PROJECTION_RECONCILE']);
+    assert.deepEqual(queued.map((job) => job.job_type), [
+      'OUTBOX_DELIVER', 'OUTBOX_DELIVER', 'PROJECTION_RECONCILE', 'PROJECTION_RECONCILE',
+    ]);
+    const projectionScopes = await centralSource.query(
+      `SELECT resource_scope_ref FROM ca_meta_jobs WHERE tenant_id = ? AND correlation_id = ?
+       AND job_type = 'PROJECTION_RECONCILE' ORDER BY created_at, id`,
+      [tenantId, 'm5-08-integration'],
+    ) as Array<{ resource_scope_ref: string }>;
+    assert.equal(projectionScopes.length, 2);
+    assert.equal(projectionScopes[0]?.resource_scope_ref, projectionScopes[1]?.resource_scope_ref,
+      'same tenant aggregate projection jobs must use the same serialization scope');
+    const firstProjectionClaim = await jobStore.claimNext('m5-08-projection-order-a', 300_000, ['PROJECTION_RECONCILE']);
+    assert.ok(firstProjectionClaim);
+    assert.equal(await jobStore.claimNext('m5-08-projection-order-b', 300_000, ['PROJECTION_RECONCILE']), null,
+      'a second event for the same aggregate cannot run concurrently');
+    assert.equal(await jobStore.finish(firstProjectionClaim, { kind: 'SUCCEEDED' }), true);
+    const secondProjectionClaim = await jobStore.claimNext('m5-08-projection-order-b', 300_000, ['PROJECTION_RECONCILE']);
+    assert.ok(secondProjectionClaim);
+    assert.equal(await jobStore.finish(secondProjectionClaim, { kind: 'SUCCEEDED' }), true);
     const eventPayload = await centralSource.query(
       `SELECT payload_json FROM ca_meta_outbox_events WHERE tenant_id = ? AND event_id = ?`,
       [tenantId, eventToAppend.eventId],
@@ -240,7 +260,35 @@ test('M5.08 MariaDB fault injection: duplicate/order, company isolation, indepen
     assert.deepEqual([Number(ownedExtra?.deleted), ownedExtra?.status], [1, 'REMOVED']);
     assert.deepEqual([Number(unknownExtra?.deleted), unknownExtra?.status], [0, 'ACTIVE']);
 
+    await targetB.query(
+      `UPDATE MetaConnectedPages SET DisplayName = 'Corrupted fixture value'
+       WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
+      [destinationB.legacyDatabaseId, destinationB.legacyCompanyId, destinationB.environment, failingDestination.legacyAssetRef],
+    );
+    const checkpoint = await checkpointStore.read(tenantId, destinationKeyHash(destinationB), failingDestination.centralRef);
+    assert.ok(checkpoint);
     const destinationAdapter = new MysqlLegacyProjectionDestination(destinationB, targetB);
+    const repaired = await destinationAdapter.reconcile({
+      target: destinationB, tenantId, records: [failingDestination], knownOwnedCheckpoints: [checkpoint],
+      projectionSchemaVersion: 1, destinationKeyHash: destinationKeyHash(destinationB),
+    });
+    assert.equal(repaired.parity, 'MATCHED');
+    assert.equal(repaired.actualCount, 1);
+    assert.equal(repaired.actualHash, repaired.expectedHash);
+    await targetB.query(
+      `UPDATE MetaConnectedPages SET DisplayName = 'Corrupted again'
+       WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
+      [destinationB.legacyDatabaseId, destinationB.legacyCompanyId, destinationB.environment, failingDestination.legacyAssetRef],
+    );
+    await destinationAdapter.apply({ target: destinationB, tenantId, records: [failingDestination], projectionSchemaVersion: 1 });
+    const [repairedRow] = await targetB.query(
+      `SELECT DisplayName AS display_name FROM MetaConnectedPages
+       WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
+      [destinationB.legacyDatabaseId, destinationB.legacyCompanyId, destinationB.environment, failingDestination.legacyAssetRef],
+    ) as Array<{ display_name: string }>;
+    assert.equal(repairedRow?.display_name, failingDestination.displayName,
+      'apply and reconcile must repair field drift even when the old ContentHash still matches the source');
+
     const tombstone = record('central-page-c', 'destination-b-page', { sourceVersion: 4, status: 'REMOVED', tombstone: true });
     await destinationAdapter.apply({ target: destinationB, tenantId, records: [tombstone], projectionSchemaVersion: 1 });
     await destinationAdapter.apply({ target: destinationB, tenantId, records: [failingDestination], projectionSchemaVersion: 1 });
@@ -250,6 +298,21 @@ test('M5.08 MariaDB fault injection: duplicate/order, company isolation, indepen
       [destinationB.legacyDatabaseId, destinationB.legacyCompanyId, destinationB.environment, 'destination-b-page'],
     ) as Array<{ version: number | string; deleted: number | string; status: string }>;
     assert.deepEqual([Number(latest?.version), Number(latest?.deleted), latest?.status], [4, 1, 'REMOVED']);
+
+    const activeFirst = record('central-order-active', 'destination-order-page', { sourceVersion: 3 });
+    const tombstoneAfter = record('central-order-active', 'destination-order-page', {
+      sourceVersion: 4, status: 'REMOVED', tombstone: true,
+    });
+    await destinationAdapter.apply({ target: destinationB, tenantId, records: [activeFirst], projectionSchemaVersion: 1 });
+    await destinationAdapter.apply({ target: destinationB, tenantId, records: [tombstoneAfter], projectionSchemaVersion: 1 });
+    await destinationAdapter.apply({ target: destinationB, tenantId, records: [activeFirst], projectionSchemaVersion: 1 });
+    const [orderLatest] = await targetB.query(
+      `SELECT ProjectionVersion AS version, Status AS status, IsDeleted AS deleted FROM MetaConnectedPages
+       WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
+      [destinationB.legacyDatabaseId, destinationB.legacyCompanyId, destinationB.environment, activeFirst.legacyAssetRef],
+    ) as Array<{ version: number | string; status: string; deleted: number | string }>;
+    assert.deepEqual([Number(orderLatest?.version), orderLatest?.status, Number(orderLatest?.deleted)], [4, 'REMOVED', 1],
+      'active-then-revoked and revoked-then-stale-active application orders both retain the tombstone');
 
     const secretColumns = await targetA.query(
       `SELECT column_name FROM information_schema.columns
