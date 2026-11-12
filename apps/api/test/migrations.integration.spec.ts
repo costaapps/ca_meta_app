@@ -207,10 +207,14 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
       'the fresh schema pauses safely at v22 when the table-only trigger-definer grant is absent',
     );
     const stagedStatus = await readMigrationStatus(environment);
-    assert.equal(stagedStatus.migrations.length, MIGRATIONS.length);
-    assert.ok(stagedStatus.migrations.slice(0, -1).every((migration) => migration.state === 'APPLIED' && migration.checksumMatches));
-    assert.equal(stagedStatus.migrations.at(-1)?.id, ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id);
-    assert.equal(stagedStatus.migrations.at(-1)?.state, 'RUNNING');
+    const coexistenceLockIndex = MIGRATIONS.findIndex(
+      (migration) => migration.id === ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id,
+    );
+    assert.ok(coexistenceLockIndex >= 0, 'the Coexistence lock migration is registered');
+    assert.equal(stagedStatus.migrations.length, coexistenceLockIndex + 1, 'the failed deployment stops at the Coexistence lock migration');
+    assert.ok(stagedStatus.migrations.slice(0, coexistenceLockIndex).every((migration) => migration.state === 'APPLIED' && migration.checksumMatches));
+    assert.equal(stagedStatus.migrations[coexistenceLockIndex]?.id, ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id);
+    assert.equal(stagedStatus.migrations[coexistenceLockIndex]?.state, 'RUNNING');
     const stagedSteps = await queryRows<{ step_id: string; state: string }>(grantAdmin,
       `SELECT step_id, state FROM ${MIGRATION_STEP_LEDGER} WHERE migration_id = ?`,
       [ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id],
@@ -235,7 +239,7 @@ test('MariaDB migration ledger, implicit-commit recovery, backfill, role separat
     );
     await deployMigrations(environment);
     const recoveredStatus = await readMigrationStatus(environment);
-    assert.equal(recoveredStatus.migrations.length, 22);
+    assert.equal(recoveredStatus.migrations.length, MIGRATIONS.length);
     assert.ok(recoveredStatus.migrations.every((migration) => migration.state === 'APPLIED' && migration.checksumMatches));
     const recoveredTrigger = await queryRows<{ trigger_name: string }>(grantAdmin,
       'SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema = ? AND trigger_name = ?',

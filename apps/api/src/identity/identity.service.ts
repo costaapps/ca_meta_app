@@ -217,6 +217,7 @@ const ROLE_PERMISSIONS: Readonly<Record<TenantOperation, readonly MembershipRole
   REAUTHORIZE: ['owner', 'admin', 'operator'],
   DISCONNECT: ['owner', 'admin'],
   REPLAY_EVENT: ['owner', 'admin', 'operator'],
+  MANAGE_AUTOMATION_CONFIG: ['owner', 'admin', 'operator'],
   MANAGE_MEMBERS: ['owner', 'admin'],
   GRANT_ADMIN: ['owner'],
   READ_CREDENTIAL_METADATA: ['owner', 'admin'],

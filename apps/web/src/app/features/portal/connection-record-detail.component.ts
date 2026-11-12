@@ -82,6 +82,9 @@ export class ConnectionRecordDetailComponent implements OnInit, OnDestroy {
 
   canShowReauthorization(asset: ConnectionAsset): boolean { return asset.capabilities?.canReauthorize === true; }
   canShowDisconnect(asset: ConnectionAsset): boolean { return asset.capabilities?.canDisconnect === true; }
+  canShowAutomationConfig(asset: ConnectionAsset): boolean {
+    return asset.kind === 'PHONE_NUMBER' || asset.kind === 'PAGE' || asset.kind === 'INSTAGRAM_ACCOUNT';
+  }
 
   /** SessionContext has no safe company label in the current contract, so tenant writes stay disabled. */
   get writesAllowed(): boolean { return false; }

@@ -21,6 +21,7 @@ import { ASSET_OBSERVATIONS_MIGRATION, ASSET_OBSERVATION_TABLES } from '../src/d
 import { CONNECTION_LIFECYCLE_MIGRATION } from '../src/database/migrations/connection-lifecycle.js';
 import { INTERNAL_ASSET_OPERATIONS_MIGRATION } from '../src/database/migrations/internal-asset-operations.js';
 import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION, ONBOARDING_COEXISTENCE_LOCK_TABLES } from '../src/database/migrations/onboarding-coexistence-lock.js';
+import { AUTOMATION_CONFIG_MIGRATION, AUTOMATION_CONFIG_TABLES } from '../src/database/migrations/automation-config.js';
 import { assertMigrationGrantRecords, CoexistenceLockDeleteGrantRequiredError, safeMigrationError } from '../src/database/migrations/migration-runner.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
@@ -104,9 +105,9 @@ test('migration grants require the lock-trigger definer privilege only on its ex
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
   const schemaVersions = MIGRATIONS.map((migration) => migration.schemaVersion);
-  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
-  assert.equal(schemaVersions.at(-1), 22);
-  assert.equal(MIGRATIONS.length, 22);
+  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
+  assert.equal(schemaVersions.at(-1), 23);
+  assert.equal(MIGRATIONS.length, 23);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -152,6 +153,8 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.schemaVersion, 21);
   assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id, '202611120022-onboarding-coexistence-serialization');
   assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.schemaVersion, 22);
+  assert.equal(AUTOMATION_CONFIG_MIGRATION.id, '202611120023-asset-automation-config');
+  assert.equal(AUTOMATION_CONFIG_MIGRATION.schemaVersion, 23);
   const coexistenceLockTable = ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.find((step) => step.id === 'create-onboarding-coexistence-locks');
   assert.ok(coexistenceLockTable && 'sql' in coexistenceLockTable);
   assert.match(coexistenceLockTable.sql, /PRIMARY KEY \(tenant_id\)/);
@@ -161,6 +164,7 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => 'runBatch' in step && step.id === 'backfill-active-onboarding-coexistence-locks'));
   assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => step.id === 'release-coexistence-lock-on-terminal-onboarding-status'));
   assert.ok(ONBOARDING_COEXISTENCE_LOCK_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
+  assert.ok(AUTOMATION_CONFIG_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.deepEqual(ASSET_OBSERVATIONS_MIGRATION.steps.map((step) => step.id), [
     'create-meta-asset-observations', 'asset-observation-no-update', 'asset-observation-no-delete',
   ]);

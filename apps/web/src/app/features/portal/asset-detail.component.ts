@@ -1,16 +1,17 @@
 import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { AssetAutomationConfigComponent } from './asset-automation-config.component';
 
 @Component({
   selector: 'app-asset-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  imports: [CommonModule, RouterLink, AssetAutomationConfigComponent],
   template: `
     <section class="asset-page" aria-labelledby="asset-title">
       <a routerLink="/connections">← Voltar às conexões</a>
       <h1 id="asset-title">Detalhes do recurso</h1>
-      <p>Os detalhes serão exibidos após a verificação do ativo e da autorização pelo servidor.</p>
+      <app-asset-automation-config />
     </section>
   `,
   styles: [`

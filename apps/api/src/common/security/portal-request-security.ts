@@ -69,6 +69,7 @@ export function portalRequestSecurityMiddleware(
       }
       response.setHeader('Access-Control-Allow-Origin', origin);
       response.setHeader('Access-Control-Allow-Credentials', 'true');
+      response.setHeader('Access-Control-Expose-Headers', 'ETag');
       response.vary('Origin');
     }
 
@@ -84,7 +85,7 @@ export function portalRequestSecurityMiddleware(
       const requestedMethod = oneHeader(request.headers['access-control-request-method']);
       const requestedHeaders = oneHeader(request.headers['access-control-request-headers']);
       const allowedMethods = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
-      const allowedHeaders = new Set(['content-type', 'x-csrf-token', 'x-tenant-context', 'idempotency-key']);
+      const allowedHeaders = new Set(['content-type', 'x-csrf-token', 'x-tenant-context', 'idempotency-key', 'if-match']);
       const normalizedHeaders = requestedHeaders?.split(',').map((header) => header.trim().toLowerCase()).filter(Boolean) ?? [];
       if (origin === undefined || !requestedMethod || !allowedMethods.has(requestedMethod.toUpperCase()) ||
         normalizedHeaders.some((header) => !allowedHeaders.has(header))) {
@@ -92,7 +93,7 @@ export function portalRequestSecurityMiddleware(
         return;
       }
       response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      response.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, X-Tenant-Context, Idempotency-Key');
+      response.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, X-Tenant-Context, Idempotency-Key, If-Match');
       response.setHeader('Access-Control-Max-Age', '600');
       response.status(HttpStatus.NO_CONTENT).end();
       return;

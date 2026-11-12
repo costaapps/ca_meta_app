@@ -30,3 +30,11 @@
 - **Decisão:** enquanto essa lacuna existir, o portal mostra “Identidade da empresa não confirmada”, oculta o seletor empresarial e falha fechado para toda mutação tenant-scoped. Leituras server-scoped e emissão pública de magic-link continuam disponíveis. Não derivar nome de `tenantRef`/`cUUID`, não inventar endpoint de rótulo e não liberar chamadas legadas externas quando um rótulo seguro for adicionado depois.
 - **Consequência:** M5.01–M5.03 exercitam o fluxo de gravação apenas com capability confirmada sintética em testes. Em produção, ações permanecem indisponíveis até uma alteração revisada do contrato que forneça contexto de empresa confiável; identidade visível por si só nunca autoriza consumidores Msg4/PHP.
 
+## D-M5-06 — Configuração por canal em rota aditiva
+
+- **Critério da issue #59:** oferecer leitura e atualização PATCH da representação de mensagens/respostas por canal em `/api/v1/assets/{assetId}/automation-config`.
+- **Motivo:** essa rota e os schemas `AutomationConfig`/`AutomationConfigUpdate` já pertencem ao contrato v1 congelado e são usados por consumidores existentes. Substituí-los pela nova representação de M5.05 faz `check:breaking` falhar e remove os campos `enabled`/`replyText` legados.
+- **Decisão:** manter inalterados o GET/PUT e os schemas v1 na rota base. Publicar a representação M5.05 com `GET/PATCH /api/v1/assets/{assetId}/automation-config/channels` e schemas `AutomationChannelConfig`/`AutomationChannelConfigUpdate`.
+- **Consequência:** os consumidores M5.05 usam explicitamente a rota `/channels`; consumidores v1 continuam podendo usar seu contrato original. A issue diverge do caminho base pedido para manter compatibilidade binária de contrato.
+- **Gate:** aceitar a rota após revisão do diff de contrato e `check:breaking`; qualquer consolidação futura na rota base requer uma versão compatível, migração dos consumidores identificados e gate próprio de breaking-change.
+

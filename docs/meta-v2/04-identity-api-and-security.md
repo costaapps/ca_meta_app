@@ -66,7 +66,7 @@ Os paths são contrato inicial para ratificação em OpenAPI. Segurança de toda
 | Reautorizar | POST `/connections/:id/reauthorizations` | Cria onboarding novo, preserva grant anterior quando válido |
 | Desconectar | DELETE `/connections/:id` ou comando tipado | Escopo e impacto descritos; cleanup externo separado |
 | Templates | GET/POST `/whatsapp/accounts/:id/templates` | Conta/grant MANAGE_TEMPLATES, payload permitido |
-| Automação | PATCH `/assets/:id/automation-config` | Campos por canal, version/ETag e outbox |
+| Automação | GET/PATCH `/assets/:id/automation-config/channels` | Campos por canal, version/ETag e outbox; preserva GET/PUT e schemas v1 existentes na rota base |
 | Notificações | GET `/notifications`, POST `/notifications/:id/actions` | Tenant completo e operationId; leitura separada de efeito externo |
 | Operações | GET `/operations/:id` | Outcome incluindo UNKNOWN, sem token/resposta bruta |
 | Webhook | GET/POST `/webhooks/meta/:appConfigRef` | Challenge/assinatura/raw body/limites; referência pública não é segredo |

@@ -398,6 +398,9 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
   const good = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-csrf-token': csrf }));
   assert.equal(good.continued, true);
   assert.equal(good.response.headerValue('access-control-allow-origin'), 'https://portal.example');
+  const readableResponse = await invokeMiddleware(middleware, request({ origin: 'https://portal.example' }, 'GET'));
+  assert.equal(readableResponse.continued, true);
+  assert.match(String(readableResponse.response.headerValue('access-control-expose-headers')), /(?:^|,\s*)ETag(?:,|$)/i);
 
   const missingCsrf = await invokeMiddleware(middleware, request(baseHeaders, 'POST', '/api/v1/session/logout'));
   assert.equal((missingCsrf.response.bodyValue() as { code: string }).code, 'CSRF_INVALID');
@@ -407,11 +410,12 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
 
   const preflight = await invokeMiddleware(middleware, request({
     origin: 'https://portal.example',
-    'access-control-request-method': 'DELETE',
-    'access-control-request-headers': 'content-type,x-csrf-token',
+    'access-control-request-method': 'PATCH',
+    'access-control-request-headers': 'content-type,x-csrf-token,if-match',
   }, 'OPTIONS'));
   assert.equal(preflight.response.statusCodeValue(), 204);
   assert.match(String(preflight.response.headerValue('access-control-allow-headers')), /X-CSRF-Token/);
+  assert.match(String(preflight.response.headerValue('access-control-allow-headers')), /If-Match/);
   const legacyPreflight = await invokeMiddleware(middleware, request({
     origin: 'https://portal.example',
     'access-control-request-method': 'DELETE',

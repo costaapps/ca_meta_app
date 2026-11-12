@@ -1920,7 +1920,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
-                    assetId: 10000000-0000-4000-8000-000000000004
+                    assetId: asset_example_01
                     enabled: true
                     replyText: Thanks for contacting our team.
                     version: 7
@@ -1982,11 +1982,146 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
-                    assetId: 10000000-0000-4000-8000-000000000004
+                    assetId: asset_example_01
                     enabled: false
                     replyText: ""
                     version: 8
                     updatedAt: 2026-10-29T12:02:00Z
+                    requestId: req_example_31
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-retry-policy: On 412, read the current representation and make an explicit new update.
+  /api/v1/assets/{assetId}/automation-config/channels:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against
+          the server-derived tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: getAutomationChannelConfig
+      tags:
+        - Configuration
+      summary: Read automation/reply configuration
+      description: Tenant and asset authorization are checked for the requested
+        capability. ETag is returned for conditional updates.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Sanitized success example
+          headers:
+            ETag:
+              schema:
+                type: string
+                example: '"automation-v7"'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationChannelConfig"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    assetId: 10000000-0000-4000-8000-000000000004
+                    assetKind: WHATSAPP_PHONE_NUMBER
+                    inheritanceMode: ASSET_ONLY
+                    supportedFields:
+                      - privateWelcomeMessage
+                    privateWelcomeMessage: Olá! Como podemos ajudar?
+                    commentPublicReply: null
+                    commentPrivateReply: null
+                    capabilities:
+                      canEdit: true
+                      executable: false
+                    version: 7
+                    updatedAt: 2026-10-29T11:00:00Z
+                    projectionState: PENDING
+                    requestId: req_example_30
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+    patch:
+      operationId: patchAutomationChannelConfig
+      tags:
+        - Configuration
+      summary: Update channel-supported automation/reply fields conditionally
+      description: Requires exact Origin, CSRF, current tenant context and If-Match
+        from the latest representation. Unknown fields are rejected. This
+        changes local configuration; delivery of a reply is a separate external
+        effect.
+      security: *a10
+      parameters:
+        - *a25
+        - *a26
+        - *a27
+        - *a28
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutomationChannelConfigUpdate"
+            examples:
+              whatsapp:
+                summary: Sanitized WhatsApp phone update
+                value:
+                  version: 7
+                  privateWelcomeMessage: ""
+      responses:
+        "200":
+          description: Sanitized success example
+          headers:
+            ETag:
+              schema:
+                type: string
+                example: '"automation-v8"'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationChannelConfig"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    assetId: 10000000-0000-4000-8000-000000000004
+                    assetKind: WHATSAPP_PHONE_NUMBER
+                    inheritanceMode: ASSET_ONLY
+                    supportedFields:
+                      - privateWelcomeMessage
+                    privateWelcomeMessage: ""
+                    commentPublicReply: null
+                    commentPrivateReply: null
+                    capabilities:
+                      canEdit: true
+                      executable: false
+                    version: 8
+                    updatedAt: 2026-10-29T12:02:00Z
+                    projectionState: PENDING
                     requestId: req_example_31
         "400": *a11
         "401": *a12
@@ -4205,6 +4340,102 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+    AutomationChannelConfig:
+      type: object
+      additionalProperties: false
+      required:
+        - assetId
+        - assetKind
+        - inheritanceMode
+        - supportedFields
+        - privateWelcomeMessage
+        - commentPublicReply
+        - commentPrivateReply
+        - capabilities
+        - version
+        - updatedAt
+        - projectionState
+        - requestId
+      properties:
+        assetId:
+          type: string
+          format: uuid
+        assetKind:
+          $ref: "#/components/schemas/AutomationConfigAssetKind"
+        inheritanceMode:
+          type: string
+          const: ASSET_ONLY
+          description: Each resource owns independent values. No account-level default is
+            applied.
+        supportedFields:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AutomationConfigField"
+        privateWelcomeMessage:
+          type:
+            - string
+            - "null"
+          maxLength: 4096
+        commentPublicReply:
+          type:
+            - string
+            - "null"
+          maxLength: 4096
+        commentPrivateReply:
+          type:
+            - string
+            - "null"
+          maxLength: 4096
+        capabilities:
+          type: object
+          additionalProperties: false
+          required:
+            - canEdit
+            - executable
+          properties:
+            canEdit:
+              type: boolean
+            executable:
+              type: boolean
+              const: false
+              description: The API stores settings only; message execution is a separate
+                fail-closed capability.
+        version:
+          type: integer
+          minimum: 0
+        updatedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        projectionState:
+          $ref: "#/components/schemas/AutomationConfigProjectionState"
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    AutomationConfigAssetKind:
+      type: string
+      enum:
+        - WHATSAPP_PHONE_NUMBER
+        - FACEBOOK_PAGE
+        - INSTAGRAM_BUSINESS_ACCOUNT
+        - INSTAGRAM_CREATOR_ACCOUNT
+    AutomationConfigField:
+      type: string
+      enum:
+        - privateWelcomeMessage
+        - commentPublicReply
+        - commentPrivateReply
+    AutomationConfigProjectionState:
+      type: string
+      enum:
+        - UNKNOWN
+        - PENDING
+        - SYNCED
+        - STALE
+        - FAILED
     AutomationConfigUpdate:
       type: object
       additionalProperties: false
@@ -4217,6 +4448,31 @@ components:
         replyText:
           type: string
           maxLength: 4096
+    AutomationChannelConfigUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 2
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+          minimum: 0
+        privateWelcomeMessage:
+          type: string
+          maxLength: 4096
+          description: Empty text clears the local value for this asset.
+          pattern: ^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]*$
+        commentPublicReply:
+          type: string
+          maxLength: 4096
+          description: Empty text clears the local value for this asset.
+          pattern: ^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]*$
+        commentPrivateReply:
+          type: string
+          maxLength: 4096
+          description: Empty text clears the local value for this asset.
+          pattern: ^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]*$
     ReplyRequest:
       type: object
       additionalProperties: false

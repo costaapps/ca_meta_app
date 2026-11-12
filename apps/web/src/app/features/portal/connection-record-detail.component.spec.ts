@@ -109,6 +109,8 @@ describe('ConnectionRecordDetailComponent', () => {
     expect(Array.from(view.querySelectorAll('button')).every((button) => button.disabled)).toBe(true);
     expect(view.querySelector('details summary')?.textContent).toContain('Detalhes técnicos para suporte');
     expect(view.textContent).toContain('req-synthetic-connection-02');
+    expect(view.querySelector('.config-link')?.textContent).toContain('Configurar mensagens e respostas deste recurso');
+    expect(view.querySelector('.config-link')?.getAttribute('href')).toBe('/assets/00000000-0000-4000-8000-000000000012');
     fixture.destroy();
   });
 });
