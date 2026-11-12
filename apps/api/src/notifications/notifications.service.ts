@@ -57,10 +57,25 @@ const SAFE_KIND_SUMMARY: Readonly<Record<string, string>> = Object.freeze({
 
 function digest(value: string): Buffer { return createHash('sha256').update(value, 'utf8').digest(); }
 function hex(value: Buffer | string): string { return Buffer.isBuffer(value) ? value.toString('hex') : value.toLowerCase(); }
+function canonicalCursorDate(value: string): string | undefined {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{1,6})Z$/.exec(value);
+  if (!match) return undefined;
+  const timestamp = `${match[1]}.${match[2].padEnd(6, '0')}Z`;
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 19) !== timestamp.slice(0, 19)) return undefined;
+  return timestamp;
+}
 function cursorDate(value: string | Date): string {
-  const parsed = value instanceof Date ? value : new Date(value);
-  if (!Number.isFinite(parsed.getTime())) throw new Error('Stored notification timestamp is invalid.');
-  return parsed.toISOString();
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) throw new Error('Stored notification timestamp is invalid.');
+    return value.toISOString().replace(/\.(\d{3})Z$/, (_match, milliseconds: string) => `.${milliseconds}000Z`);
+  }
+  const timestamp = canonicalCursorDate(value);
+  if (!timestamp) throw new Error('Stored notification timestamp is invalid.');
+  return timestamp;
+}
+function cursorSqlDate(value: string): string {
+  return `${value.slice(0, 10)} ${value.slice(11, -1)}`;
 }
 function encodeCursor(value: Cursor): string { return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url'); }
 function decodeCursor(value: string | undefined): Cursor | undefined {
@@ -68,10 +83,10 @@ function decodeCursor(value: string | undefined): Cursor | undefined {
   if (value.length > 512 || !/^[A-Za-z0-9_-]+$/.test(value)) throw new NotificationInputError();
   try {
     const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Record<string, unknown>;
-    const date = new Date(String(decoded['createdAt']));
+    const createdAt = typeof decoded['createdAt'] === 'string' ? canonicalCursorDate(decoded['createdAt']) : undefined;
     const id = decoded['id'];
-    if (!Number.isFinite(date.getTime()) || typeof id !== 'string' || !CURSOR_ID.test(id)) throw new Error();
-    return { createdAt: date.toISOString(), id };
+    if (!createdAt || typeof id !== 'string' || !CURSOR_ID.test(id)) throw new Error();
+    return { createdAt, id };
   } catch { throw new NotificationInputError(); }
 }
 
@@ -97,13 +112,15 @@ export class NotificationsService {
     const cursor = decodeCursor(rawCursor);
     const pageSize = Number.isSafeInteger(limit) && limit >= 1 && limit <= 100 ? limit : 50;
     const database = await this.database.getDataSource();
+    const cursorDateValue = cursor ? cursorSqlDate(cursor.createdAt) : null;
     const rows = await database.query(
-      `SELECT id, kind, asset_id, message_ref, status, created_at
+      `SELECT id, kind, asset_id, message_ref, status,
+              DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS created_at
        FROM ca_meta_notifications
        WHERE tenant_id = ? AND status <> 'DISMISSED'
          AND (? IS NULL OR created_at < ? OR (created_at = ? AND id < ?))
        ORDER BY created_at DESC, id DESC LIMIT ?`,
-      [scope.tenantId, cursor?.createdAt ?? null, cursor?.createdAt ?? null, cursor?.createdAt ?? null, cursor?.id ?? null, pageSize + 1],
+      [scope.tenantId, cursorDateValue, cursorDateValue, cursorDateValue, cursor?.id ?? null, pageSize + 1],
     ) as NotificationRow[];
     const hasNext = rows.length > pageSize;
     const visible = rows.slice(0, pageSize);

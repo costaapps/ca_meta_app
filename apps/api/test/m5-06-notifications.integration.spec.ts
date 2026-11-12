@@ -98,17 +98,23 @@ test('notifications stay isolated by company tenant, paginate, and local actions
         VALUES (?,?,?,'MESSAGE_RECEIVED',NULL,?,?, 'UNREAD','Synthetic summary',DATE_SUB(UTC_TIMESTAMP(6), INTERVAL ? SECOND),UTC_TIMESTAMP(6))`,
       [id, tenantId, assetId, `private-target-${randomUUID()}`, createHash('sha256').update(randomUUID()).digest(), secondsAgo]);
     }
+    await source.query(`UPDATE ca_meta_notifications SET created_at = ? WHERE id = ? AND tenant_id = ?`,
+      ['2026-11-12 12:34:56.123456', notificationA, tenantA]);
+    await source.query(`UPDATE ca_meta_notifications SET created_at = ? WHERE id = ? AND tenant_id = ?`,
+      ['2026-11-12 12:34:56.123457', notificationA2, tenantA]);
 
     const firstPage = await service.list(sessionA, contextA, 1, undefined, 'req-m5-06-list-a');
     assert.equal(firstPage.items.length, 1);
-    assert.ok(firstPage.items[0]?.id === notificationA2 || firstPage.items[0]?.id === notificationA);
+    assert.equal(firstPage.items[0]?.id, notificationA2, 'DATETIME(6) order keeps the newer microsecond first');
+    assert.equal(firstPage.items[0]?.createdAt, '2026-11-12T12:34:56.123457Z', 'serialized timestamp keeps all six fractional digits');
     assert.notEqual(firstPage.items[0]?.id, notificationB);
     assert.equal(firstPage.items[0]?.safeSummary, 'A new WhatsApp message is available.');
     assert.equal(firstPage.items[0]?.actions.includes('SEND_MESSAGE'), false);
     assert.ok(firstPage.nextCursor);
     const secondPage = await service.list(sessionA, contextA, 1, firstPage.nextCursor, 'req-m5-06-list-next');
     assert.equal(secondPage.items.length, 1);
-    assert.notEqual(secondPage.items[0]?.id, firstPage.items[0]?.id);
+    assert.equal(secondPage.items[0]?.id, notificationA, 'next cursor resumes after the exact microsecond, without repeating the first row');
+    assert.equal(secondPage.items[0]?.createdAt, '2026-11-12T12:34:56.123456Z');
     const pageB = await service.list(sessionB, contextB, 100, undefined, 'req-m5-06-list-b');
     assert.deepEqual(pageB.items.map((item) => item.id), [notificationB]);
     await assert.rejects(service.act(sessionB, contextB, notificationA, `m5-06-forged-${randomUUID()}`,
