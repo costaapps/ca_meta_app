@@ -54,24 +54,24 @@ function operationList() {
     .map(([method, operation]) => ({ route, method, operation })));
 }
 
-function collectSchemaPropertyNames(schema, result = new Set(), seen = new Set()) {
+function collectSchemaPropertyPaths(schema, result = new Set(), seen = new Set(), owner = 'inline') {
   if (!schema || typeof schema !== 'object') return result;
   if (typeof schema.$ref === 'string') {
     if (seen.has(schema.$ref)) return result;
     seen.add(schema.$ref);
     const match = schema.$ref.match(/^#\/components\/schemas\/([^/]+)$/);
-    if (match) collectSchemaPropertyNames(contract.components.schemas[match[1]], result, seen);
+    if (match) collectSchemaPropertyPaths(contract.components.schemas[match[1]], result, seen, match[1]);
     return result;
   }
   if (schema.properties && typeof schema.properties === 'object') {
     for (const [name, child] of Object.entries(schema.properties)) {
-      result.add(name);
-      collectSchemaPropertyNames(child, result, seen);
+      result.add(`${owner}.${name}`);
+      collectSchemaPropertyPaths(child, result, seen, owner);
     }
   }
-  if (schema.items) collectSchemaPropertyNames(schema.items, result, seen);
+  if (schema.items) collectSchemaPropertyPaths(schema.items, result, seen, owner);
   for (const branch of [...(schema.oneOf ?? []), ...(schema.anyOf ?? []), ...(schema.allOf ?? [])]) {
-    collectSchemaPropertyNames(branch, result, seen);
+    collectSchemaPropertyPaths(branch, result, seen, owner);
   }
   return result;
 }
@@ -203,26 +203,38 @@ test('every request, success and reusable error example validates against its JS
   assert.ok(checked >= 60, `expected a broad request/success/error fixture set, checked ${checked}`);
 });
 
-test('public success DTOs and event envelopes contain no credential or raw message fields', async () => {
-  const forbiddenProperty = /^(?:accessToken|refreshToken|token|secret|clientSecret|appSecret|ciphertext|authorizationCode|sessionCookie|providerPayload|rawPayload|messageText|messageBody|bodyText)$/i;
+test('public success DTOs and event envelopes contain no credentials or raw messages outside sanitized template BODY', async () => {
+  const forbiddenProperty = /^(?:accessToken|refreshToken|token|secret|clientSecret|appSecret|ciphertext|authorizationCode|sessionCookie|providerPayload|rawPayload|messageText|messageBody)$/i;
+  const forbiddenEventProperty = /^(?:accessToken|refreshToken|token|secret|clientSecret|appSecret|ciphertext|authorizationCode|sessionCookie|providerPayload|rawPayload|messageText|messageBody|bodyText)$/i;
   const checkedProperties = new Set();
   for (const { route, method, operation } of operationList()) {
     for (const [status, responseRef] of Object.entries(operation.responses)) {
       const response = resolveResponse(responseRef);
       for (const content of Object.values(response.content ?? {})) {
         if (!content.schema) continue;
-        for (const name of collectSchemaPropertyNames(content.schema)) checkedProperties.add(name);
+        for (const name of collectSchemaPropertyPaths(content.schema)) checkedProperties.add(name);
       }
     }
   }
-  for (const name of checkedProperties) assert.doesNotMatch(name, forbiddenProperty, `unsafe response DTO field: ${name}`);
+  for (const fieldPath of checkedProperties) {
+    const name = fieldPath.slice(fieldPath.lastIndexOf('.') + 1);
+    assert.doesNotMatch(name, forbiddenProperty, `unsafe response DTO field: ${fieldPath}`);
+    if (name.toLowerCase() === 'bodytext') assert.equal(fieldPath, 'Template.bodyText', 'raw body fields are only allowed in the sanitized Template DTO');
+  }
+  const templateBody = contract.components.schemas.Template?.properties?.bodyText;
+  assert.ok(templateBody, 'Template exposes BODY text only through its sanitized response field');
+  assert.equal(contract.components.schemas.Template.required.includes('bodyText'), false, 'BODY text remains optional for v1 consumers');
+  assert.deepEqual(templateBody.type, ['string', 'null']);
+  assert.equal(templateBody.maxLength, 1024);
+  assert.match(templateBody.description, /Sanitized BODY text/);
+  assert.match(templateBody.description, /examples and other components are omitted/);
 
   for (const eventPath of eventPaths) {
     const schema = JSON.parse(await readFile(eventPath, 'utf8'));
     const visit = (node) => {
       if (!node || typeof node !== 'object') return;
       for (const [key, value] of Object.entries(node)) {
-        assert.doesNotMatch(key, forbiddenProperty, `unsafe event field: ${key}`);
+        assert.doesNotMatch(key, forbiddenEventProperty, `unsafe event field: ${key}`);
         visit(value);
       }
     };

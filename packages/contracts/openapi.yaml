@@ -2304,13 +2304,13 @@ paths:
         provider for review. The API and worker adapters are disabled by default
         until current capability evidence is reviewed.
       x-idempotency-scope: tenant + operation + Idempotency-Key and canonical request payload hash.
-      x-retry-policy: At most one provider submission, including the initial request.
-        The durable job is configured with one attempt and AMBIGUOUS effect
-        mode. If the outcome is ambiguous, status is UNKNOWN and a read-only
-        reconciliation checks the same internal account for a name/language
-        candidate. A candidate can predate the request and does not prove
-        causation; without confirmed provider correlation the outcome remains
-        UNKNOWN. No blind retry.
+      x-retry-policy: At most one automatic provider submission, including the initial
+        request; zero automatic retries without verified provider idempotency.
+        The durable job has one attempt and AMBIGUOUS effect mode. If the outcome
+        is ambiguous, status is UNKNOWN and a read-only reconciliation checks
+        the same internal account for a name/language candidate. A candidate can
+        predate the request and does not prove causation; without confirmed
+        provider correlation the outcome remains UNKNOWN. No blind retry.
   /api/v1/notifications:
     get:
       operationId: listNotifications
