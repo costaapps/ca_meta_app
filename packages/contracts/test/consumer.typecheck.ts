@@ -3,6 +3,8 @@ import type { components, paths } from '../src/index.js';
 type Expect<T extends true> = T;
 type PublicPath = Expect<'/health' extends keyof paths ? true : false>;
 type InternalRouteExcluded = Expect<'/internal/v1/assets/{assetId}/operations' extends keyof paths ? false : true>;
+type InternalV2RouteExcluded = Expect<'/internal/v2/assets/{assetId}/operations' extends keyof paths ? false : true>;
+type InternalV2StatusExcluded = Expect<'/internal/v2/operations/{operationId}' extends keyof paths ? false : true>;
 type ErrorCodes = components['schemas']['ErrorEnvelope']['code'];
 const internalError: ErrorCodes = 'INTERNAL_ERROR';
 const hostError: ErrorCodes = 'HOST_NOT_ALLOWED';

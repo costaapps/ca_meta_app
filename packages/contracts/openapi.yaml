@@ -825,6 +825,9 @@ paths:
                           - operation: SUBSCRIBE_WEBHOOKS
                             enabled: false
                             reasonCode: CONFIGURATION_MISSING
+                          - operation: PHONE_REGISTRATION_CONVENTIONAL
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
                       - flowVariant: WHATSAPP_COEXISTENCE
                         authVariant: WHATSAPP_BUSINESS_APP_ONBOARDING
                         enabled: false
@@ -3039,6 +3042,7 @@ components:
             - READ_STATUS
             - SUBSCRIBE_WEBHOOKS
             - SYNC_HISTORY
+            - PHONE_REGISTRATION_CONVENTIONAL
         enabled:
           type: boolean
         reasonCode:

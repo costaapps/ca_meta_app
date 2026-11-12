@@ -19,6 +19,7 @@ import { LEGACY_IMPORT_MIGRATION, LEGACY_IMPORT_TABLES } from '../src/database/m
 import { ONBOARDING_CODE_TABLES, ONBOARDING_SAGA_MIGRATION } from '../src/database/migrations/onboarding-saga.js';
 import { ASSET_OBSERVATIONS_MIGRATION, ASSET_OBSERVATION_TABLES } from '../src/database/migrations/asset-observations.js';
 import { CONNECTION_LIFECYCLE_MIGRATION } from '../src/database/migrations/connection-lifecycle.js';
+import { INTERNAL_ASSET_OPERATIONS_MIGRATION } from '../src/database/migrations/internal-asset-operations.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -60,9 +61,9 @@ test('migration configuration rejects runtime account reuse and privileged built
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
   const schemaVersions = MIGRATIONS.map((migration) => migration.schemaVersion);
-  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
-  assert.equal(schemaVersions.at(-1), 20);
-  assert.equal(MIGRATIONS.length, 20);
+  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+  assert.equal(schemaVersions.at(-1), 21);
+  assert.equal(MIGRATIONS.length, 21);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -104,6 +105,8 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(ASSET_OBSERVATIONS_MIGRATION.schemaVersion, 19);
   assert.equal(CONNECTION_LIFECYCLE_MIGRATION.id, '202611100020-meta-connection-lifecycle');
   assert.equal(CONNECTION_LIFECYCLE_MIGRATION.schemaVersion, 20);
+  assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.id, '202611110021-internal-asset-operations');
+  assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.schemaVersion, 21);
   assert.deepEqual(ASSET_OBSERVATIONS_MIGRATION.steps.map((step) => step.id), [
     'create-meta-asset-observations', 'asset-observation-no-update', 'asset-observation-no-delete',
   ]);

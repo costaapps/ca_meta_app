@@ -868,7 +868,7 @@ export interface components {
         readonly MetaBootstrapReason: "CONFIGURATION_MISSING" | "CONFIGURATION_DISABLED" | "VERSION_EVIDENCE_REQUIRED" | "PERMISSION_MAPPING_NOT_CONFIRMED" | "CAPABILITY_EVIDENCE_MISSING" | "ACCESS_LEVEL_NOT_CONFIRMED" | "APP_REVIEW_NOT_CONFIRMED" | "SANDBOX_NOT_CONFIRMED";
         readonly MetaCapabilityStatus: {
             /** @enum {string} */
-            readonly operation: "ASSET_DISCOVERY" | "SEND_MESSAGE" | "MANAGE_COMMENTS" | "MANAGE_TEMPLATES" | "READ_STATUS" | "SUBSCRIBE_WEBHOOKS" | "SYNC_HISTORY";
+            readonly operation: "ASSET_DISCOVERY" | "SEND_MESSAGE" | "MANAGE_COMMENTS" | "MANAGE_TEMPLATES" | "READ_STATUS" | "SUBSCRIBE_WEBHOOKS" | "SYNC_HISTORY" | "PHONE_REGISTRATION_CONVENTIONAL";
             readonly enabled: boolean;
             readonly reasonCode: components["schemas"]["MetaBootstrapReason"] | null;
         };

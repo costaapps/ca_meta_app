@@ -1,8 +1,10 @@
 # Nest API workspace
 
-The API is an independent NestJS 12 application. It has no Meta provider integration or provider
-credential handling. It contains the portal session, identity, and optional Suite4 ticket-entry
-boundaries. `/health` is process liveness; `/ready` checks only the essential MariaDB connection.
+The API is an independent NestJS 12 application. It contains the portal session, identity, and
+optional Suite4 ticket-entry boundaries. Its internal asset-operation routes have typed payloads,
+tenant-bound service authentication, credential resolution, an idempotency ledger, and audit records.
+No real provider operation adapter is installed, so Meta actions remain fail-closed. `/health` is
+process liveness; `/ready` checks only the essential MariaDB connection.
 Success returns { "status": "ok" }.
 Dependency failure returns HTTP 503 with the canonical OpenAPI Unavailable ErrorEnvelope.
 Business routes use /api/v1 and are denied by the global guard unless a route is explicitly
@@ -230,3 +232,27 @@ Expected result:
 The harness proves local connectivity and sanitized readiness behavior against the pinned MariaDB
 image only. It does not prove deployment topology, production credentials, migrations, provider
 health, or Meta access.
+
+## Internal service operations
+
+The machine routes are excluded from the `/api/v1` prefix and are exactly
+`POST /internal/v2/assets/{assetId}/operations` and
+`GET /internal/v2/operations/{operationId}`. They require an `Authorization: Bearer ...` proof that
+is at least 32 bytes and is mapped by server-only `API_INTERNAL_SERVICE_CREDENTIAL_HASHES_JSON`
+configuration to one service principal and one tenant. The configuration stores only the SHA-256
+digest and the principal/tenant UUIDs; the raw proof belongs only in the calling service's protected
+secret store. The current database grant must also be active and include `META_CONNECTION_EXECUTE`
+and `CREDENTIAL_USE`; removing a hash or revoking a scope denies the next request. There is no global
+token fallback and no browser/web token path.
+
+The proposed `/internal/v1` operation remains frozen in the canonical contract and is not an alias
+for the v2 typed-proof request or authentication behavior; see ADR-021.
+
+For rotation, provision a new high-entropy proof in the caller secret store, add its digest as a
+second entry for the same principal and tenant, roll the API configuration to every replica, switch
+the caller, then remove the old digest and roll the API again. To revoke, remove its digest and/or
+revoke the current service grant, then roll all API replicas. No production issuer, caller inventory,
+distribution process, or rotation rehearsal is confirmed. The default operation adapter and current
+credential-policy/audit adapters are fail-closed, so operations return the safe unavailable outcome
+until provider, Meta, and deployment gates are separately satisfied. See
+[`docs/meta-v2/specs/internal-service-operations.md`](../../docs/meta-v2/specs/internal-service-operations.md).

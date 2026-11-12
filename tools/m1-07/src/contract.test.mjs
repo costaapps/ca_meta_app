@@ -10,7 +10,9 @@ import YAML from 'yaml';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../../..');
 const contractPath = path.join(root, 'docs/meta-v2/contracts/openapi.yaml');
+const baselinePath = path.join(root, 'docs/meta-v2/contracts/openapi-v1.baseline.yaml');
 const contract = YAML.parse(await readFile(contractPath, 'utf8'));
+const baseline = YAML.parse(await readFile(baselinePath, 'utf8'));
 const eventPaths = [
   path.join(root, 'docs/meta-v2/contracts/events/inbox-event.schema.json'),
   path.join(root, 'docs/meta-v2/contracts/events/outbox-event.schema.json'),
@@ -79,19 +81,27 @@ test('OpenAPI has explicit root-host routes, deny-by-default security and no dup
   assert.equal(contract.servers[0].url, 'https://api.example.invalid');
   assert.deepEqual(contract.security, [{ portalSession: [] }]);
   assert.ok(contract.paths['/api/v1/auth/exchanges']);
-  assert.ok(contract.paths['/internal/v1/assets/{assetId}/operations']);
+  assert.ok(contract.paths['/internal/v1/assets/{assetId}/operations'], 'the frozen v1 proposal remains present');
+  assert.ok(contract.paths['/internal/v2/assets/{assetId}/operations']);
+  assert.deepEqual(contract.paths['/internal/v1/assets/{assetId}/operations'], baseline.paths['/internal/v1/assets/{assetId}/operations'],
+    'v1 operation is unchanged from the frozen contract');
+  assert.deepEqual(contract.components.schemas.InternalAssetOperationRequest, baseline.components.schemas.InternalAssetOperationRequest,
+    'v1 request schema is unchanged from the frozen contract');
+  assert.deepEqual(contract.components.securitySchemes.internalServiceAuth, baseline.components.securitySchemes.internalServiceAuth,
+    'v1 service authentication scheme is unchanged from the frozen contract');
   assert.ok(contract.paths['/health']);
   assert.ok(contract.paths['/ready']);
-  assert.deepEqual(contract.paths['/internal/v1/assets/{assetId}/operations'].post['x-internal-authorization'], {
-    requiredClaims: ['service_id', 'tenant_ref', 'asset_ref', 'operation'],
-    audience: 'msg4-meta-internal',
+  assert.deepEqual(contract.paths['/internal/v2/assets/{assetId}/operations'].post['x-internal-authorization'], {
+    requiredProof: 'Authorization: Bearer <opaque service credential>',
+    serverMapping: 'API_INTERNAL_SERVICE_CREDENTIAL_HASHES_JSON -> one principalId + tenantId',
     bindings: {
-      tenant_ref: 'tenant owning the asset identified by path.assetId',
-      asset_ref: 'path.assetId',
-      operation: 'requestBody.kind',
+      tenantId: 'server-mapped service credential and current service grant',
+      assetId: 'path.assetId plus current verified tenant-owned asset authorization',
+      operation: 'requestBody.operation',
     },
     enforceCurrentTenantGrant: true,
-    allowlist: ['SEND_REPLY', 'MARK_READ', 'REFRESH_STATUS'],
+    requiredServiceScopes: ['META_CONNECTION_EXECUTE', 'CREDENTIAL_USE'],
+    allowlist: ['SEND_MESSAGE', 'MANAGE_TEMPLATES', 'MANAGE_COMMENTS', 'READ_STATUS', 'SUBSCRIBE_WEBHOOKS'],
   });
 
   const operations = operationList();
@@ -104,7 +114,8 @@ test('OpenAPI has explicit root-host routes, deny-by-default security and no dup
   for (const { route, method, operation } of operations) {
     const pair = `${method} ${route}`;
     if (operation.tags.includes('Internal Operations')) {
-      assert.deepEqual(operation.security, [{ internalServiceAuth: [] }], `${pair} must require the internal service scope`);
+      const proofScheme = route.startsWith('/internal/v2/') ? 'internalServiceProofV2' : 'internalServiceAuth';
+      assert.deepEqual(operation.security, [{ [proofScheme]: [] }], `${pair} must require the contract's internal service scope`);
     } else if (publicPairs.has(pair)) {
       assert.ok(Array.isArray(operation.security), `${pair} must explicitly declare public/pre-auth security`);
       assert.ok(operation.security.length === 0 || operation.security.every((requirement) => 'preAuthCookie' in requirement), `${pair} may not inherit portal session auth or use an undeclared public bypass`);
@@ -300,6 +311,40 @@ test('compatibility matrix accounts for every sanitized baseline row exactly onc
       `${row.source_kind} ${row.source_method} ${row.source_path_or_symbol} must map by HTTP method`,
     );
   }
+  const internalHelper = matrix.find((row) => row.source_kind === 'php_include' && row.source_file === 'backend/meta_auth_helper.php');
+  assert.ok(internalHelper, 'baseline includes the versioned shared PHP helper');
+  assert.equal(internalHelper.v1_target, 'POST /internal/v2/assets/{assetId}/operations');
+  const sendHelper = matrix.find((row) => row.source_symbol === 'sendWhatsAppMessage');
+  assert.ok(sendHelper, 'baseline includes the versioned WhatsApp send helper');
+  assert.deepEqual(
+    [sendHelper.v1_operation, sendHelper.v1_target, sendHelper.compatibility_policy],
+    ['runInternalAssetOperationV2', 'POST /internal/v2/assets/{assetId}/operations (SEND_MESSAGE)', 'internal-typed-operation'],
+  );
+});
+
+test('internal template locale schemas match the accepted language/locale syntax', () => {
+  const request = contract.components.schemas.InternalAssetOperationV2Request;
+  const send = request.oneOf.find((branch) => branch.properties?.operation?.const === 'SEND_MESSAGE');
+  const createTemplate = request.oneOf.find((branch) => branch.properties?.operation?.const === 'MANAGE_TEMPLATES' && branch.properties?.action?.const === 'CREATE');
+  assert.ok(send && createTemplate);
+  const localePattern = '^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})?$';
+  assert.equal(send.properties.message.oneOf.find((branch) => branch.properties?.kind?.const === 'TEMPLATE').properties.language.pattern, localePattern);
+  assert.equal(createTemplate.properties.language.pattern, localePattern);
+});
+
+test('generated browser client excludes both internal contract versions and proof schemas', async () => {
+  const generated = await readFile(path.join(here, 'generated/openapi.d.ts'), 'utf8');
+  assert.doesNotMatch(generated, /\/internal\/v[12]\/|InternalAssetOperation|internalService(?:Auth|ProofV2)/);
+});
+
+test('Meta capability contract includes the conventional phone registration operation from the runtime manifest', () => {
+  const operationEnum = contract.components.schemas.MetaCapabilityStatus.properties.operation.enum;
+  assert.ok(operationEnum.includes('PHONE_REGISTRATION_CONVENTIONAL'));
+  const bootstrap = operationList().find(({ operation }) => operation.operationId === 'readMetaConfigurationBootstrap').operation;
+  const example = bootstrap.responses['200'].content['application/json'].examples.unconfigured.value;
+  const whatsapp = example.profiles.find((profile) => profile.flowVariant === 'WHATSAPP_EXCLUSIVE');
+  assert.ok(whatsapp.capabilities.some((entry) => entry.operation === 'PHONE_REGISTRATION_CONVENTIONAL'));
+  assert.equal(whatsapp.capabilities.find((entry) => entry.operation === 'PHONE_REGISTRATION_CONVENTIONAL').enabled, false);
 });
 
 test('contract has bounded pagination, ETag preconditions and 202 Location for accepted jobs', () => {
