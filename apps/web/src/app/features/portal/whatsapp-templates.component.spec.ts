@@ -111,7 +111,8 @@ describe('WhatsAppTemplatesComponent', () => {
     const state = await createFixture();
     const bodyText = 'Hello {{1}}, code {{2}} and again {{1}}';
     state.component.templates = [{ id: 'provider-template-1', name: 'order_update', language: 'en', status: 'APPROVED',
-      category: 'UTILITY', bodyText, updatedAt: '2026-11-10T12:00:00.000Z' }];
+      category: 'UTILITY', providerStatusLabel: 'APPROVED', providerCategoryLabel: 'UTILITY', bodyText,
+      updatedAt: '2026-11-10T12:00:00.000Z' }];
     expect(state.component.templates[0]?.bodyText).toBe(bodyText);
     expect(state.component.getBodyPlaceholders(state.component.templates[0]?.bodyText ?? null)).toEqual(['{{1}}', '{{2}}']);
     expect(state.component.getBodyPlaceholders(null)).toEqual([]);

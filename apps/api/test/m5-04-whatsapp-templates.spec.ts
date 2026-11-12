@@ -44,6 +44,8 @@ function scope(tenant: string = tenantId): AuthorizedTenantScope {
 
 function setup(options: { readonly currentTenant?: string; readonly allow?: boolean; readonly provider?: object | null;
   readonly createEnabled?: boolean;
+  readonly providerStatus?: unknown;
+  readonly providerCategory?: unknown;
   readonly accountFor?: (tenant: string, assetRef: string) => WhatsAppTemplatesAccount | undefined } = {}) {
   const enqueued = new Map<string, { readonly id: string; readonly input: EnqueueJobInput }>();
   const jobStatuses = new Map<string, string>();
@@ -104,8 +106,10 @@ function setup(options: { readonly currentTenant?: string; readonly allow?: bool
   const provider = options.provider === null ? null : options.provider ?? {
     async list(target: WhatsAppTemplatesAccount, input: { readonly cursor?: string; readonly limit: number }) {
       calls.push({ account: target, ...input });
-      return { items: [{ id: 'provider-template-1', name: 'order_update', language: 'en', status: 'APPROVED',
-        category: 'UTILITY', components: [{ type: 'BODY', text: 'Hello {{1}}, code {{2}} and again {{1}}',
+      return { items: [{ id: 'provider-template-1', name: 'order_update', language: 'en',
+        status: options.providerStatus === undefined ? 'APPROVED' : options.providerStatus,
+        category: options.providerCategory === undefined ? 'UTILITY' : options.providerCategory,
+        components: [{ type: 'BODY', text: 'Hello {{1}}, code {{2}} and again {{1}}',
           example: { body_text: [['PRIVATE PROVIDER EXAMPLE']] } }], updatedAt: '2026-11-10T12:00:00Z' }], nextCursor: null, requestId: 'discarded' };
     },
   };
@@ -169,12 +173,23 @@ test('M5.04 listing preserves observed labels and sanitized BODY text while omit
   assert.equal(page.requestId, 'req-list-01');
   assert.equal(page.items[0]?.status, 'APPROVED');
   assert.equal(page.items[0]?.category, 'UTILITY');
+  assert.equal(page.items[0]?.providerStatusLabel, 'APPROVED');
+  assert.equal(page.items[0]?.providerCategoryLabel, 'UTILITY');
   assert.equal(page.items[0]?.bodyText, 'Hello {{1}}, code {{2}} and again {{1}}');
   assert.equal('components' in (page.items[0] ?? {}), false);
   assert.equal(JSON.stringify(page.items).includes('PRIVATE PROVIDER EXAMPLE'), false);
   const session = await sessionFor();
   await assert.rejects(() => fixture.service.list(session, contextRef, assetId, { cursor: 'bad cursor', limit: 23 }, 'req-list-02'), TemplateInputError);
   assert.equal(fixture.calls.length, 1);
+});
+
+test('M5.04 keeps v1 enum compatibility and preserves bounded unrecognized provider labels', async () => {
+  const fixture = setup({ providerStatus: 'IN_REVIEW', providerCategory: 'PROMOTIONAL' });
+  const page = await fixture.service.list(await sessionFor(), contextRef, assetId, { limit: 50 }, 'req-list-unknown');
+  assert.equal(page.items[0]?.status, 'UNKNOWN');
+  assert.equal(page.items[0]?.category, 'UNKNOWN');
+  assert.equal(page.items[0]?.providerStatusLabel, 'IN_REVIEW');
+  assert.equal(page.items[0]?.providerCategoryLabel, 'PROMOTIONAL');
 });
 
 test('M5.04 prevents cross-tenant and non-granted asset list access', async () => {

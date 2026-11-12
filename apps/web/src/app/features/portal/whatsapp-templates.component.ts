@@ -224,7 +224,7 @@ export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {
   trackByAsset(_index: number, asset: TemplateAsset): string { return asset.id; }
   trackByTemplate(_index: number, item: TemplateRecord): string { return `${item.id}:${item.language}`; }
 
-  getBodyPlaceholders(bodyText: string | null): readonly string[] {
+  getBodyPlaceholders(bodyText: string | null | undefined): readonly string[] {
     return Object.freeze([...new Set(bodyText?.match(/\{\{[1-9][0-9]{0,2}\}\}/g) ?? [])]);
   }
 

@@ -14,6 +14,8 @@ import { TemplateInputError, parseTemplateCreateRequest, type TemplateCreateRequ
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CURSOR = /^[A-Za-z0-9._~+/%=-]{1,512}$/;
 const PROVIDER_ID = /^\d{1,32}$/;
+const TEMPLATE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'PAUSED', 'UNKNOWN'] as const;
+const TEMPLATE_CATEGORIES = ['AUTHENTICATION', 'MARKETING', 'UTILITY', 'UNKNOWN'] as const;
 
 export interface WhatsAppTemplatesAccount {
   readonly tenantId: string;
@@ -236,8 +238,12 @@ function sanitizeTemplatePage(value: unknown, requestId: string): components['sc
     const status = observedLabel(item.status);
     const category = observedLabel(item.category);
     const bodyText = observedBodyText(item);
-    // Keep provider labels as observations. They do not establish approval or local category semantics.
-    items.push(Object.freeze({ id: item.id, name: item.name, language: item.language, status, category, bodyText,
+    // Keep the v1 enums stable for older consumers; optional labels preserve provider observations.
+    const normalizedStatus = TEMPLATE_STATUSES.find((known) => known === status) ?? 'UNKNOWN';
+    const normalizedCategory = TEMPLATE_CATEGORIES.find((known) => known === category) ?? 'UNKNOWN';
+    items.push(Object.freeze({ id: item.id, name: item.name, language: item.language,
+      status: normalizedStatus, category: normalizedCategory, providerStatusLabel: status,
+      providerCategoryLabel: category, bodyText,
       updatedAt: new Date(item.updatedAt).toISOString() }));
   }
   return Object.freeze({ items: Object.freeze(items), nextCursor: value.nextCursor as string | null, requestId });

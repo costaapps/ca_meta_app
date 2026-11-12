@@ -1233,12 +1233,22 @@ export interface components {
             readonly id: string;
             readonly name: string;
             readonly language: string;
-            /** @description Bounded provider-observed label. It is returned without mapping to local status semantics and does not establish approval. */
-            readonly status: string;
-            /** @description Bounded provider-observed label. It is returned without mapping to local category semantics. */
-            readonly category: string;
+            /**
+             * @description Normalized status using the existing v1 enum; UNKNOWN covers other provider labels. This value does not establish approval.
+             * @enum {string}
+             */
+            readonly status: "PENDING" | "APPROVED" | "REJECTED" | "PAUSED" | "UNKNOWN";
+            /**
+             * @description Normalized category using the existing v1 enum; UNKNOWN covers other provider labels.
+             * @enum {string}
+             */
+            readonly category: "AUTHENTICATION" | "MARKETING" | "UTILITY" | "UNKNOWN";
+            /** @description Bounded, sanitized provider-reported status label, preserved for display without assigning approval semantics. */
+            readonly providerStatusLabel?: string;
+            /** @description Bounded, sanitized provider-reported category label, preserved without assigning local category semantics. */
+            readonly providerCategoryLabel?: string;
             /** @description Sanitized BODY text, including any literal placeholders. Provider examples and other components are omitted; null means no safe BODY text was available. */
-            readonly bodyText: string | null;
+            readonly bodyText?: string | null;
             /** Format: date-time */
             readonly updatedAt: string;
         };

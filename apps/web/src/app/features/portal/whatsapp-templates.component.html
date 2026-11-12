@@ -42,11 +42,11 @@
           <article class="template-card" *ngFor="let item of templates; trackBy: trackByTemplate">
             <div class="template-title-row">
               <h3>{{ item.name }}</h3>
-              <span class="status">Estado informado: {{ item.status }}</span>
+              <span class="status">Estado informado: {{ item.providerStatusLabel ?? item.status }}</span>
             </div>
             <dl>
               <div><dt>Idioma</dt><dd>{{ item.language }}</dd></div>
-              <div><dt>Categoria informada</dt><dd>{{ item.category }}</dd></div>
+              <div><dt>Categoria informada</dt><dd>{{ item.providerCategoryLabel ?? item.category }}</dd></div>
               <div><dt>Última atualização observada</dt><dd>{{ item.updatedAt }}</dd></div>
               <div class="template-body-field"><dt>Texto BODY</dt><dd class="template-body">{{ item.bodyText ?? 'Texto BODY não disponível.' }}</dd></div>
               <div class="template-body-field" *ngIf="getBodyPlaceholders(item.bodyText).length > 0">

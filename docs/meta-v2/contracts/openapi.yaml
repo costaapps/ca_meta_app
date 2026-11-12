@@ -2078,6 +2078,9 @@ paths:
                         language: en
                         status: UNKNOWN
                         category: UNKNOWN
+                        providerStatusLabel: EXTERNALLY_REVIEWED
+                        providerCategoryLabel: UTILITY
+                        bodyText: Your order is ready for pickup.
                         updatedAt: 2026-10-29T10:00:00Z
                     nextCursor: null
                     requestId: req_example_36
@@ -4262,7 +4265,6 @@ components:
         - language
         - status
         - category
-        - bodyText
         - updatedAt
       properties:
         id:
@@ -4279,14 +4281,31 @@ components:
           maxLength: 16
         status:
           type: string
-          minLength: 1
-          maxLength: 64
-          description: Bounded provider-observed label. It is returned without mapping to local status semantics and does not establish approval.
+          enum:
+            - PENDING
+            - APPROVED
+            - REJECTED
+            - PAUSED
+            - UNKNOWN
+          description: Normalized status using the existing v1 enum; UNKNOWN covers other provider labels. This value does not establish approval.
         category:
+          type: string
+          enum:
+            - AUTHENTICATION
+            - MARKETING
+            - UTILITY
+            - UNKNOWN
+          description: Normalized category using the existing v1 enum; UNKNOWN covers other provider labels.
+        providerStatusLabel:
           type: string
           minLength: 1
           maxLength: 64
-          description: Bounded provider-observed label. It is returned without mapping to local category semantics.
+          description: Bounded, sanitized provider-reported status label, preserved for display without assigning approval semantics.
+        providerCategoryLabel:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Bounded, sanitized provider-reported category label, preserved without assigning local category semantics.
         bodyText:
           type:
             - string
