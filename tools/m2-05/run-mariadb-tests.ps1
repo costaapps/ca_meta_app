@@ -112,7 +112,6 @@ $portalRecoveryKey = New-HexSecret
 $sql = @"
 CREATE USER 'ca_meta_migrator'@'%' IDENTIFIED BY '$migrationPassword';
 GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES, TRIGGER ON ca_meta_m205.* TO 'ca_meta_migrator'@'%';
-GRANT DELETE ON ca_meta_m205.ca_meta_onboarding_coexistence_locks TO 'ca_meta_migrator'@'%';
 CREATE USER 'ca_meta_api'@'%' IDENTIFIED BY '$apiPassword';
 GRANT SELECT, INSERT, UPDATE, DELETE ON ca_meta_m205.* TO 'ca_meta_api'@'%';
 "@
@@ -161,6 +160,7 @@ try {
   try {
     Invoke-Checked -FilePath 'docker' -ArgumentList @('compose', '-p', $composeProject, '-f', $composeFile, 'up', '-d', '--wait')
     Invoke-Checked -FilePath $npmCommand -ArgumentList @('exec', '--workspace=@ca-meta/api', '--', 'tsc', '-p', 'tsconfig.test.json')
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m2-05/prepare-current-schema.mjs')
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m2-08/prepare-test-reports.mjs')
     Write-Output 'M2.05 fixture: durable work and M3.05 onboarding.'
     Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
