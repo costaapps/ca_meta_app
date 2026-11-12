@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
@@ -41,6 +41,7 @@ export class ConnectionsHomeComponent implements OnInit, OnDestroy {
     private readonly connectionCatalog: ConnectionCatalogService,
     private readonly sessions: PortalSessionService,
     private readonly context: PortalContextStore,
+    private readonly cdr: ChangeDetectorRef,
   ) {}
 
   ngOnInit(): void {
@@ -120,6 +121,7 @@ export class ConnectionsHomeComponent implements OnInit, OnDestroy {
     this.isLoading = true;
     this.listError = '';
     this.listRequestId = null;
+    this.cdr.markForCheck();
     try {
       const cursor = this.cursorHistory[this.pageIndex];
       const page = await this.connectionCatalog.list(this.appliedFilters, cursor);
@@ -134,7 +136,10 @@ export class ConnectionsHomeComponent implements OnInit, OnDestroy {
       this.listError = 'Não foi possível carregar as conexões.';
       this.listRequestId = safeRequestId(error);
     } finally {
-      if (generation === this.listGeneration) this.isLoading = false;
+      if (generation === this.listGeneration) {
+        this.isLoading = false;
+        this.cdr.markForCheck();
+      }
     }
   }
 
@@ -143,6 +148,7 @@ export class ConnectionsHomeComponent implements OnInit, OnDestroy {
     this.isCatalogLoading = true;
     this.catalogError = '';
     this.catalogRequestId = null;
+    this.cdr.markForCheck();
     try {
       const response = await this.flowCatalog.load();
       if (generation !== this.catalogGeneration) return;
@@ -152,7 +158,10 @@ export class ConnectionsHomeComponent implements OnInit, OnDestroy {
       this.catalogError = 'Não foi possível consultar a disponibilidade dos fluxos.';
       this.catalogRequestId = safeRequestId(error);
     } finally {
-      if (generation === this.catalogGeneration) this.isCatalogLoading = false;
+      if (generation === this.catalogGeneration) {
+        this.isCatalogLoading = false;
+        this.cdr.markForCheck();
+      }
     }
   }
 
@@ -172,12 +181,14 @@ export class ConnectionsHomeComponent implements OnInit, OnDestroy {
     this.catalogError = '';
     this.isLoading = true;
     this.isCatalogLoading = true;
+    this.cdr.markForCheck();
     const session = await this.sessions.ensureCurrentSession(true);
     if (generation !== this.listGeneration) return;
     if (!session) {
       this.isLoading = false;
       this.isCatalogLoading = false;
       this.listError = 'A sessão não está disponível para este contexto. Entre novamente.';
+      this.cdr.markForCheck();
       return;
     }
     await Promise.all([this.loadConnections(), this.loadCatalog()]);
@@ -199,5 +210,6 @@ export class ConnectionsHomeComponent implements OnInit, OnDestroy {
     this.isCatalogLoading = false;
     this.listError = 'Sua sessão terminou. Entre novamente para ver as conexões desta empresa.';
     this.catalogError = '';
+    this.cdr.markForCheck();
   }
 }

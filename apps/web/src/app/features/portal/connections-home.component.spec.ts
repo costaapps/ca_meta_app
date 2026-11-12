@@ -1,6 +1,7 @@
 import { Subject } from 'rxjs';
 import { HttpErrorResponse } from '@angular/common/http';
 import { provideRouter } from '@angular/router';
+import { ChangeDetectorRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { ConnectionCatalogFilters, ConnectionListPage } from '../../core/portal/connection-catalog.service';
 import { ConnectionCatalogService, connectionStatusCopy } from '../../core/portal/connection-catalog.service';
@@ -28,7 +29,7 @@ function createComponent(list: (filters: ConnectionCatalogFilters, cursor?: stri
   const flowCatalog = { load: vi.fn().mockResolvedValue({}), cards: vi.fn().mockReturnValue([]) } as unknown as MetaFlowCatalogService;
   const sessions = { ensureCurrentSession } as unknown as PortalSessionService;
   const context = { contextChanged$: changes.asObservable(), sessionExpired$: sessionExpired.asObservable() } as unknown as PortalContextStore;
-  const component = new ConnectionsHomeComponent(flowCatalog, catalog, sessions, context);
+  const component = new ConnectionsHomeComponent(flowCatalog, catalog, sessions, context, { markForCheck: vi.fn() } as unknown as ChangeDetectorRef);
   return { component, list: catalog.list as unknown as ReturnType<typeof vi.fn>, changes };
 }
 

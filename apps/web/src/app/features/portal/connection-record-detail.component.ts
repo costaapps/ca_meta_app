@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import type { components } from '@ca-meta/contracts';
@@ -32,6 +32,7 @@ export class ConnectionRecordDetailComponent implements OnInit, OnDestroy {
     private readonly catalog: ConnectionCatalogService,
     private readonly sessions: PortalSessionService,
     private readonly context: PortalContextStore,
+    private readonly cdr: ChangeDetectorRef,
   ) {}
 
   ngOnInit(): void {
@@ -41,6 +42,7 @@ export class ConnectionRecordDetailComponent implements OnInit, OnDestroy {
       void this.load(id);
     });
     this.context.contextChanged$.pipe(takeUntil(this.destroy$)).subscribe(() => { void this.reloadAfterContextChange(); });
+    this.context.sessionExpired$.pipe(takeUntil(this.destroy$)).subscribe(() => { this.clearForExpiredSession(); });
   }
 
   ngOnDestroy(): void {
@@ -91,12 +93,14 @@ export class ConnectionRecordDetailComponent implements OnInit, OnDestroy {
       this.isLoading = false;
       this.errorMessage = 'Esta conexão não foi encontrada.';
       this.errorRequestId = null;
+      this.cdr.markForCheck();
       return;
     }
     this.connection = null;
     this.isLoading = true;
     this.errorMessage = '';
     this.errorRequestId = null;
+    this.cdr.markForCheck();
     try {
       const connection = await this.catalog.detail(id);
       if (generation !== this.detailGeneration) return;
@@ -106,7 +110,10 @@ export class ConnectionRecordDetailComponent implements OnInit, OnDestroy {
       this.errorMessage = 'Não foi possível carregar os detalhes desta conexão.';
       this.errorRequestId = safeRequestId(error);
     } finally {
-      if (generation === this.detailGeneration) this.isLoading = false;
+      if (generation === this.detailGeneration) {
+        this.isLoading = false;
+        this.cdr.markForCheck();
+      }
     }
   }
 
@@ -116,13 +123,25 @@ export class ConnectionRecordDetailComponent implements OnInit, OnDestroy {
     this.errorMessage = '';
     this.errorRequestId = null;
     this.isLoading = true;
+    this.cdr.markForCheck();
     const session = await this.sessions.ensureCurrentSession(true);
     if (generation !== this.detailGeneration) return;
     if (!session) {
       this.isLoading = false;
       this.errorMessage = 'A sessão não está disponível para este contexto. Entre novamente.';
+      this.cdr.markForCheck();
       return;
     }
     await this.load(this.currentConnectionId);
+  }
+
+  private clearForExpiredSession(): void {
+    this.detailGeneration += 1;
+    this.currentConnectionId = '';
+    this.connection = null;
+    this.errorMessage = 'Sua sessão terminou. Entre novamente para ver os detalhes desta conexão.';
+    this.errorRequestId = null;
+    this.isLoading = false;
+    this.cdr.markForCheck();
   }
 }

@@ -1,7 +1,8 @@
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { provideRouter } from '@angular/router';
+import { ChangeDetectorRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { EMPTY, NEVER } from 'rxjs';
+import { EMPTY, NEVER, Subject, of } from 'rxjs';
 import { ConnectionCatalogService, assetStatusCopy, authorizationStatusCopy, connectionStatusCopy, credentialHealthCopy } from '../../core/portal/connection-catalog.service';
 import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalSessionService } from '../../core/portal/portal-session.service';
@@ -9,9 +10,42 @@ import { coexistenceDetailFixture, fourWhatsAppNumbers, staleRevokedPageFixture 
 import { ConnectionRecordDetailComponent } from './connection-record-detail.component';
 
 describe('ConnectionRecordDetailComponent', () => {
+  it('clears visible detail and ignores a pending response after session expiration', async () => {
+    let resolveDetail!: (detail: typeof coexistenceDetailFixture) => void;
+    const pendingDetail = new Promise<typeof coexistenceDetailFixture>((resolve) => { resolveDetail = resolve; });
+    const sessionExpired = new Subject<void>();
+    const markForCheck = vi.fn();
+    const component = new ConnectionRecordDetailComponent(
+      { paramMap: of(convertToParamMap({ id: coexistenceDetailFixture.id })) } as unknown as ActivatedRoute,
+      { detail: vi.fn().mockReturnValue(pendingDetail) } as unknown as ConnectionCatalogService,
+      {} as PortalSessionService,
+      { contextChanged$: NEVER, sessionExpired$: sessionExpired.asObservable() } as unknown as PortalContextStore,
+      { markForCheck } as unknown as ChangeDetectorRef,
+    );
+
+    component.connection = coexistenceDetailFixture;
+    component.errorRequestId = 'req-prior-connection';
+    component.ngOnInit();
+    sessionExpired.next();
+
+    expect(component.connection).toBeNull();
+    expect(component.isLoading).toBe(false);
+    expect(component.errorMessage).toBe('Sua sessão terminou. Entre novamente para ver os detalhes desta conexão.');
+    expect(component.errorRequestId).toBeNull();
+    expect(markForCheck).toHaveBeenCalled();
+
+    resolveDetail(coexistenceDetailFixture);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(component.connection).toBeNull();
+    expect(component.errorMessage).toBe('Sua sessão terminou. Entre novamente para ver os detalhes desta conexão.');
+    component.ngOnDestroy();
+  });
+
   it('keeps four WhatsApp numbers distinct by safe masked labels and per-row ordinals', () => {
     const component = new ConnectionRecordDetailComponent(
       {} as ActivatedRoute, {} as ConnectionCatalogService, {} as PortalSessionService, {} as PortalContextStore,
+      { markForCheck: vi.fn() } as unknown as ChangeDetectorRef,
     );
     component.connection = coexistenceDetailFixture;
 
@@ -33,6 +67,7 @@ describe('ConnectionRecordDetailComponent', () => {
   it('shows admin actions only when the server capability grants them and keeps writes disabled without a safe company label', () => {
     const component = new ConnectionRecordDetailComponent(
       {} as ActivatedRoute, {} as ConnectionCatalogService, {} as PortalSessionService, {} as PortalContextStore,
+      { markForCheck: vi.fn() } as unknown as ChangeDetectorRef,
     );
     const adminAsset = staleRevokedPageFixture.assets[0]!;
     const viewerAsset = {
@@ -56,7 +91,7 @@ describe('ConnectionRecordDetailComponent', () => {
         { provide: ActivatedRoute, useValue: { paramMap: EMPTY } },
         { provide: ConnectionCatalogService, useValue: { detail: vi.fn() } },
         { provide: PortalSessionService, useValue: { current: null, ensureCurrentSession: vi.fn() } },
-        { provide: PortalContextStore, useValue: { contextChanged$: NEVER } },
+        { provide: PortalContextStore, useValue: { contextChanged$: NEVER, sessionExpired$: NEVER } },
       ],
     }).compileComponents();
     const fixture = TestBed.createComponent(ConnectionRecordDetailComponent);
