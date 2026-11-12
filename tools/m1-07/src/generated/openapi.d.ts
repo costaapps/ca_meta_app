@@ -2875,9 +2875,6 @@ export interface operations {
                 readonly cursor?: components["parameters"]["Cursor"];
                 /** @description Page size, default 50, maximum 100. */
                 readonly limit?: components["parameters"]["Limit"];
-                readonly channel?: components["parameters"]["AssetCatalogChannel"];
-                /** @description Exact opaque WhatsApp phone number filter. */
-                readonly number?: components["parameters"]["AssetCatalogNumber"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
