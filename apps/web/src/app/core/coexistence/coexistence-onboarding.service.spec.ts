@@ -5,12 +5,37 @@ import { of, Subject, type Observable } from 'rxjs';
 import type { HttpClient } from '@angular/common/http';
 import { CoexistenceOnboardingService, reauthorizationIdempotencyKey } from './coexistence-onboarding.service';
 import type { CoexistenceProviderAdapter } from './coexistence-provider-adapter';
+import { PortalTenantIdentityService, type TenantMutationCapability } from '../portal/portal-tenant-identity.service';
+import type { PortalSessionService } from '../portal/portal-session.service';
 
 const providerOrigin = 'https://provider.synthetic.invalid';
 const onboardingRef = 'onboarding-session-reference-123456';
 const stateRef = 'synthetic-provider-state-reference-1234567890';
 const tenantContextRef = 'synthetic-tenant-context-reference-123';
 const csrfToken = 'synthetic-csrf-cookie-value-1234567890';
+const syntheticConfirmedCapability: TenantMutationCapability = Object.freeze({
+  confirmed: true,
+  tenantDisplayName: 'Synthetic confirmed company',
+  source: 'server-session',
+});
+// Existing M4 flow tests exercise onboarding logic behind a typed capability. This synthetic fixture
+// is not evidence that the current API supplies a confirmed company label.
+const testTenantIdentity = {
+  current: syntheticConfirmedCapability,
+  forSession: () => syntheticConfirmedCapability,
+} as unknown as PortalTenantIdentityService;
+
+function portalSession(contextRef = tenantContextRef) {
+  return {
+    sessionRef: 'synthetic-session-reference-123',
+    principalRef: 'synthetic-principal-reference-123',
+    tenantRef: 'synthetic-tenant-reference-123',
+    roles: ['operator'],
+    tenantContextRef: contextRef,
+    contextVersion: 1,
+    requestId: 'synthetic-session-request-123',
+  };
+}
 
 const readyStatus = {
   id: onboardingRef,
@@ -100,6 +125,14 @@ interface ServiceHarness {
   setTenantContextRef(value: string): void;
 }
 
+interface IdentityGuardAttempt {
+  readonly onboardingRef: string;
+  readonly stateRef: string;
+  readonly tenantContextRef: string;
+  state: string;
+  message: string;
+}
+
 function pendingServerStatus(id: string): Record<string, unknown> {
   return {
     id,
@@ -129,7 +162,7 @@ function serviceHarness(options: {
   let preparedCount = 0;
   const messageSource = options.source ?? window;
   const get = vi.fn((url: string) => {
-    if (url.endsWith('/session')) return of({ tenantContextRef: activeTenantContextRef });
+    if (url.endsWith('/session')) return of(portalSession(activeTenantContextRef));
     if (url.endsWith('/integrations/flows')) return of(flowList);
     const path = url.split('/');
     const sessionsIndex = path.lastIndexOf('onboarding-sessions');
@@ -179,6 +212,7 @@ function serviceHarness(options: {
       return preparedCount === 1 ? messageSource : {} as MessageEventSource;
     }),
     document,
+    testTenantIdentity,
   );
   return {
     service,
@@ -235,7 +269,7 @@ describe('CoexistenceOnboardingService', () => {
     const service = new CoexistenceOnboardingService(http, '/api', [providerOrigin], {
       prepareForUserGesture: () => undefined,
       decodeMessage: () => undefined,
-    }, document);
+    }, document, testTenantIdentity);
 
     await service.refreshAvailability();
 
@@ -246,13 +280,68 @@ describe('CoexistenceOnboardingService', () => {
     service.dispose();
   });
 
+  it('retains server reads but blocks direct coexistence create, recovery, and code submission without confirmed identity', async () => {
+    const prepared = reviewedAdapter().prepareForUserGesture();
+    const prepareForUserGesture = vi.fn(() => prepared);
+    const adapter = { ...reviewedAdapter(), prepareForUserGesture };
+    const get = vi.fn((url: string) => of(url.endsWith('/session') ? portalSession() : flowList));
+    const post = vi.fn(() => of({}));
+    const sessions = { current: portalSession() } as unknown as PortalSessionService;
+    const identity = new PortalTenantIdentityService(sessions);
+    const service = new CoexistenceOnboardingService(
+      { get, post } as unknown as HttpClient,
+      '/api',
+      [providerOrigin],
+      adapter,
+      document,
+      identity,
+    );
+
+    await service.refreshAvailability();
+    expect(get).toHaveBeenCalledWith('/api/v1/session', { withCredentials: true });
+    expect(get).toHaveBeenCalledWith('/api/v1/integrations/flows', expect.anything());
+    expect(service.getSnapshot()).toMatchObject({
+      state: 'unavailable',
+      message: 'Identidade da empresa não confirmada',
+      canStart: false,
+    });
+
+    await service.start();
+    await service.recover(onboardingRef, { action: 'RESUME', stage: 'authorization' });
+    expect(prepareForUserGesture).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+
+    const restoreCookie = installSyntheticCsrfCookie();
+    const attempt: IdentityGuardAttempt = {
+      onboardingRef,
+      stateRef,
+      tenantContextRef,
+      state: 'awaiting_provider',
+      message: '',
+    };
+    const internal = service as unknown as {
+      submitCode(attempt: IdentityGuardAttempt, authorizationCode: string): Promise<void>;
+      stopListening(attempt: IdentityGuardAttempt): void;
+      confirmStatus(attempt: IdentityGuardAttempt, scheduleNext: boolean): Promise<void>;
+    };
+    internal.stopListening = vi.fn();
+    internal.confirmStatus = vi.fn(async () => undefined);
+    try {
+      await internal.submitCode(attempt, 'synthetic-authorization-code');
+      expect(post).not.toHaveBeenCalled();
+    } finally {
+      restoreCookie();
+      service.dispose();
+    }
+  });
+
   it('does not create a server session if the user-gesture provider context cannot be prepared', async () => {
     const adapter: CoexistenceProviderAdapter = {
       ...reviewedAdapter(),
       prepareForUserGesture: vi.fn(() => undefined),
     };
     const get = vi.fn((url: string) => of(url.endsWith('/session')
-      ? { tenantContextRef }
+      ? portalSession()
       : url.endsWith('/integrations/flows') ? flowList : pendingServerStatus(onboardingRef)));
     const post = vi.fn(() => of({}));
     const service = new CoexistenceOnboardingService(
@@ -261,6 +350,7 @@ describe('CoexistenceOnboardingService', () => {
       [providerOrigin],
       adapter,
       document,
+      testTenantIdentity,
     );
 
     await service.refreshAvailability();
@@ -299,7 +389,7 @@ describe('CoexistenceOnboardingService', () => {
     const get = vi.fn((url: string) => {
       preparationOrder.push('get');
       return of(url.endsWith('/session')
-        ? { tenantContextRef }
+        ? portalSession()
         : url.endsWith('/integrations/flows') ? flowList : serverStatus);
     });
     const post = vi.fn((url: string, body: unknown) => {
@@ -329,6 +419,7 @@ describe('CoexistenceOnboardingService', () => {
       [providerOrigin],
       adapter,
       document,
+      testTenantIdentity,
     );
 
     try {

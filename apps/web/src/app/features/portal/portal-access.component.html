@@ -1,0 +1,30 @@
+<main class="access-page">
+  <section class="access-card" aria-labelledby="access-title">
+    <a class="brand" routerLink="/access" aria-label="Msg4 Meta"><span class="brand-mark">M</span><span>Msg4 / Meta</span></a>
+    <p class="eyebrow">Portal de conexões</p>
+    <h1 id="access-title">Entre com segurança</h1>
+    <p class="intro">Use o link de acesso recebido por convite ou abra este portal pelo Suite4.</p>
+
+    <p *ngIf="isChecking" class="status" role="status">Verificando sua sessão…</p>
+    <ng-container *ngIf="!isChecking">
+      <p *ngIf="noticeMessage" class="notice" role="status">{{ noticeMessage }}</p>
+      <a *ngIf="hasUnacceptedAttempt" class="suite-link" routerLink="/connections">Abrir conexões</a>
+      <form (ngSubmit)="requestLink()" #entryForm="ngForm">
+        <label for="email">E-mail do convite</label>
+        <input id="email" name="email" type="email" [(ngModel)]="email" autocomplete="email" required maxlength="254" />
+        <button type="submit" [disabled]="entryForm.invalid || isRequesting">
+          {{ isRequesting ? 'Solicitando…' : 'Enviar link de acesso' }}
+        </button>
+      </form>
+      <p *ngIf="requestAccepted" class="success" role="status">
+        Se este endereço tiver um convite válido e o envio estiver disponível, você receberá um link de acesso.
+      </p>
+      <p *ngIf="errorMessage" class="error" role="alert">
+        {{ errorMessage }} <span *ngIf="errorRequestId">Referência: {{ errorRequestId }}</span>
+      </p>
+      <div class="separator"><span>ou</span></div>
+      <a class="suite-link" routerLink="/embed">Continuar pelo Suite4</a>
+    </ng-container>
+    <p class="privacy-note">O endereço e o contexto da empresa não concedem acesso por si só.</p>
+  </section>
+</main>
