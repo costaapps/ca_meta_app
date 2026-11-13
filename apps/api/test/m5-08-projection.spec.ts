@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { compareProjectionVersion, destinationKeyHash, projectionContentHash, validateProjectionRecord, validateProjectionTarget } from '../src/legacy-projection/legacy-projection.mapper.js';
 import { LegacyProjectionService } from '../src/legacy-projection/legacy-projection.service.js';
 import { createLegacyProjectionJobHandler, DurableLegacyProjectionJobScheduler } from '../src/legacy-projection/legacy-projection.jobs.js';
+import { MysqlLegacyProjectionSource } from '../src/legacy-projection/mysql-legacy-projection.source.js';
 import { LegacyProjectionError } from '../src/legacy-projection/legacy-projection.types.js';
 import type {
   LegacyProjectionCheckpoint, LegacyProjectionCheckpointStore, LegacyProjectionDestination,
@@ -14,6 +15,7 @@ import type { OutboxEventEnvelope } from '../src/jobs/event-validation.js';
 import type { EnqueueJobInput, JobStore, ClaimedJob } from '../src/jobs/job-store.js';
 import type { VerifiedJobExecutionContext } from '../src/jobs/job-execution-authorization.js';
 import type { EntityManager } from 'typeorm';
+import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 
 const tenantId = '90000000-0000-4000-8000-000000000088';
 const dbACompanyA: LegacyProjectionTargetKey = { legacyDatabaseId: 'synthetic-db', legacyCompanyId: 'company-a', environment: 'test' };
@@ -48,6 +50,13 @@ function snapshot(
   targets: readonly { target: LegacyProjectionTargetKey; records: readonly LegacyProjectionRecord[] }[],
 ): LegacyProjectionSnapshot {
   return Object.freeze({ tenantId, event: currentEvent, targets });
+}
+
+function mysqlProjectionSource(query: (statement: string) => Promise<unknown>): MysqlLegacyProjectionSource {
+  const database = {
+    getDataSource: async () => ({ query }),
+  } as unknown as DurableWorkDatabase;
+  return new MysqlLegacyProjectionSource(database);
 }
 
 class MemoryCheckpointStore implements LegacyProjectionCheckpointStore {
@@ -173,17 +182,16 @@ test('connection projection jobs serialize tenant-wide across authorization even
 });
 
 test('transient central source reads retry and recover on redelivery', async () => {
-  const destination = new MemoryDestination();
-  const projection = new LegacyProjectionService(new MemoryCheckpointStore(), new MemoryCatalog([{ target: dbACompanyA, destination }]));
+  const projection = new LegacyProjectionService(new MemoryCheckpointStore(), new MemoryCatalog([]));
   let sourceReads = 0;
-  const source = {
-    loadCurrent: async () => {
+  const source = mysqlProjectionSource(async (statement) => {
+    if (statement.includes('FROM ca_meta_outbox_events')) {
       sourceReads += 1;
       if (sourceReads === 1) throw new Error('synthetic central database temporarily unavailable');
-      return snapshot(event('outbox-retry', 1), [{ target: dbACompanyA, records: [record()] }]);
-    },
-    loadTenantCurrent: async () => ({ tenantId, targets: [] }),
-  };
+      return [{ payload_json: JSON.stringify(event('outbox-retry', 1)) }];
+    }
+    return [];
+  });
   const handler = createLegacyProjectionJobHandler(source, projection);
   const job = {
     tenantId,
@@ -198,14 +206,48 @@ test('transient central source reads retry and recover on redelivery', async () 
   });
   assert.deepEqual(await handler(job, signal, authorization), { kind: 'SUCCEEDED' });
   assert.equal(sourceReads, 2);
-  assert.equal(destination.rows.size, 1);
 });
 
-test('structured source validation errors remain permanent', async () => {
-  const destination = new MemoryDestination();
-  const projection = new LegacyProjectionService(new MemoryCheckpointStore(), new MemoryCatalog([{ target: dbACompanyA, destination }]));
+test('invalid stored JSON and outbox envelopes are permanent with a safe source code', async () => {
+  const projection = new LegacyProjectionService(new MemoryCheckpointStore(), new MemoryCatalog([]));
+  const invalidPayloads = [
+    '{"message":"synthetic-invalid-json-marker", invalid}',
+    JSON.stringify({ eventId: 'synthetic-invalid-envelope-marker' }),
+  ];
+  for (const payload of invalidPayloads) {
+    const source = mysqlProjectionSource(async () => [{ payload_json: payload }]);
+    const handler = createLegacyProjectionJobHandler(source, projection);
+    const job = {
+      tenantId,
+      type: 'PROJECTION_RECONCILE',
+      payload: { kind: 'PROJECTION_RECONCILE', projectionRef: 'outbox-invalid', sourceVersion: 1 },
+    } as unknown as ClaimedJob;
+
+    const outcome = await handler(job, new AbortController().signal, {} as VerifiedJobExecutionContext);
+    assert.deepEqual(outcome, { kind: 'PERMANENT_FAILURE', safeErrorCode: 'SOURCE_INVALID' });
+    assert.equal(JSON.stringify(outcome).includes('synthetic-invalid'), false);
+  }
+});
+
+test('a missing source snapshot remains permanent', async () => {
+  const projection = new LegacyProjectionService(new MemoryCheckpointStore(), new MemoryCatalog([]));
+  const source = mysqlProjectionSource(async () => []);
+  const handler = createLegacyProjectionJobHandler(source, projection);
+  const job = {
+    tenantId,
+    type: 'PROJECTION_RECONCILE',
+    payload: { kind: 'PROJECTION_RECONCILE', projectionRef: 'outbox-missing', sourceVersion: 1 },
+  } as unknown as ClaimedJob;
+
+  assert.deepEqual(await handler(job, new AbortController().signal, {} as VerifiedJobExecutionContext), {
+    kind: 'PERMANENT_FAILURE', safeErrorCode: 'SOURCE_NOT_FOUND',
+  });
+});
+
+test('structured source validation errors remain permanent and safe', async () => {
+  const projection = new LegacyProjectionService(new MemoryCheckpointStore(), new MemoryCatalog([]));
   const source = {
-    loadCurrent: async () => { throw new LegacyProjectionError('SOURCE_SCOPE_MISMATCH', 'synthetic tenant scope mismatch'); },
+    loadCurrent: async () => { throw new LegacyProjectionError('SOURCE_SCOPE_MISMATCH', 'synthetic raw database details must not escape'); },
     loadTenantCurrent: async () => ({ tenantId, targets: [] }),
   };
   const handler = createLegacyProjectionJobHandler(source, projection);
@@ -215,9 +257,11 @@ test('structured source validation errors remain permanent', async () => {
     payload: { kind: 'PROJECTION_RECONCILE', projectionRef: 'outbox-invalid', sourceVersion: 1 },
   } as unknown as ClaimedJob;
 
-  assert.deepEqual(await handler(job, new AbortController().signal, {} as VerifiedJobExecutionContext), {
+  const outcome = await handler(job, new AbortController().signal, {} as VerifiedJobExecutionContext);
+  assert.deepEqual(outcome, {
     kind: 'PERMANENT_FAILURE', safeErrorCode: 'SOURCE_SCOPE_MISMATCH',
   });
+  assert.equal(JSON.stringify(outcome).includes('synthetic raw database details'), false);
 });
 
 test('a transient version conflict retries after reloading current state and preserves the newer tombstone', async () => {

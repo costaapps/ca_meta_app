@@ -15,15 +15,21 @@ interface ConfigProjectionRow {
 }
 
 function eventFromJson(value: string | Buffer | unknown): OutboxEventEnvelope {
-  const parsed = Buffer.isBuffer(value) ? JSON.parse(value.toString('utf8')) as unknown :
-    typeof value === 'string' ? JSON.parse(value) as unknown : value;
-  return parseOutboxEvent(parsed);
+  try {
+    const parsed = Buffer.isBuffer(value) ? JSON.parse(value.toString('utf8')) as unknown :
+      typeof value === 'string' ? JSON.parse(value) as unknown : value;
+    return parseOutboxEvent(parsed);
+  } catch {
+    // A malformed persisted event cannot recover by retrying the same outbox row.
+    // Keep parser/validator details out of job outcomes and operator-facing codes.
+    throw new LegacyProjectionError('SOURCE_INVALID', 'Central outbox event is invalid.');
+  }
 }
 
 function eventReference(event: OutboxEventEnvelope, key: string): string {
   const value = event.data[key];
   if (typeof value !== 'string' || value.length === 0 || value.length > 128) {
-    throw new LegacyProjectionError('INVALID_EVENT_REFERENCE', 'Outbox event reference is invalid.');
+    throw new LegacyProjectionError('SOURCE_INVALID', 'Central outbox event reference is invalid.');
   }
   return value;
 }
