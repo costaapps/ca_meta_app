@@ -59,7 +59,12 @@ export function createLegacyProjectionJobHandler(
     try {
       snapshot = await source.loadCurrent(job.tenantId, job.payload.projectionRef, job.payload.sourceVersion);
     } catch (error) {
-      return { kind: 'PERMANENT_FAILURE', safeErrorCode: error instanceof LegacyProjectionError ? error.safeCode : 'SOURCE_INVALID' };
+      if (error instanceof LegacyProjectionError) {
+        return { kind: 'PERMANENT_FAILURE', safeErrorCode: error.safeCode };
+      }
+      // A driver/network error from the central source may recover; let the durable
+      // job policy retry it, while exposing only a stable safe code to operators.
+      return { kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DEPENDENCY_UNAVAILABLE' };
     }
     if (!snapshot) return { kind: 'PERMANENT_FAILURE', safeErrorCode: 'SOURCE_NOT_FOUND' };
     try {
