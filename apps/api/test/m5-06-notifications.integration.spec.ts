@@ -75,9 +75,9 @@ test('notifications stay isolated by company tenant, paginate, and local actions
   const actionKey = `m5-06-idempotency-${randomUUID()}`;
 
   try {
-    for (const [tenantId, appId, assetId, legacyCompanyId] of [
-      [tenantA, appA, assetA, `company-a-${randomUUID()}`],
-      [tenantB, appB, assetB, `company-b-${randomUUID()}`],
+    for (const [tenantId, appId, assetId, legacyCompanyId, phoneNumberRef] of [
+      [tenantA, appA, assetA, `company-a-${randomUUID()}`, '15550000001'],
+      [tenantB, appB, assetB, `company-b-${randomUUID()}`, '15550000002'],
     ] as const) {
       await source.query(`INSERT INTO ca_meta_tenants (id,status,version,created_at,updated_at) VALUES (?,'ACTIVE',1,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, [tenantId]);
       await source.query(`INSERT INTO ca_meta_tenant_legacy_maps (id,tenant_id,legacy_database_id,legacy_company_id,environment,created_at)
@@ -88,7 +88,7 @@ test('notifications stay isolated by company tenant, paginate, and local actions
       await source.query(`INSERT INTO ca_meta_assets
         (id,tenant_id,app_configuration_id,provider,environment,asset_kind,external_id,display_name,external_name,version,created_at,updated_at)
         VALUES (?, ?, ?, 'META', 'test', 'WHATSAPP_PHONE_NUMBER', ?, 'Synthetic phone', 'Synthetic phone', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
-      [assetId, tenantId, appId, `synthetic-waba-${tenantId}`]);
+      [assetId, tenantId, appId, phoneNumberRef]);
     }
     for (const [tenantId, assetId, id, secondsAgo] of [
       [tenantA, assetA, notificationA, 2], [tenantA, assetA, notificationA2, 1], [tenantB, assetB, notificationB, 0],
@@ -111,6 +111,12 @@ test('notifications stay isolated by company tenant, paginate, and local actions
     assert.equal(firstPage.items[0]?.safeSummary, 'A new WhatsApp message is available.');
     assert.equal(firstPage.items[0]?.actions.includes('SEND_MESSAGE'), false);
     assert.ok(firstPage.nextCursor);
+    const numberFiltered = await service.list(sessionA, contextA, 100, undefined, 'req-m5-06-list-number', {
+      channel: 'WHATSAPP', number: '15550000001',
+    });
+    assert.deepEqual(numberFiltered.items.map((item) => item.id), [notificationA2, notificationA]);
+    const channelFiltered = await service.list(sessionA, contextA, 100, undefined, 'req-m5-06-list-channel', { channel: 'FACEBOOK' });
+    assert.deepEqual(channelFiltered.items, [], 'channel filter keeps unrelated assets out of the result');
     const secondPage = await service.list(sessionA, contextA, 1, firstPage.nextCursor, 'req-m5-06-list-next');
     assert.equal(secondPage.items.length, 1);
     assert.equal(secondPage.items[0]?.id, notificationA, 'next cursor resumes after the exact microsecond, without repeating the first row');
@@ -156,9 +162,14 @@ test('notifications stay isolated by company tenant, paginate, and local actions
     if (secondAttempt.status === 'rejected') throw new Error(`Concurrent external action failed: ${secondAttempt.reason.name}: ${secondAttempt.reason.message}`);
     const firstAccepted = firstAttempt.value;
     const secondAccepted = secondAttempt.value;
-    assert.ok('operationId' in firstAccepted && 'operationId' in secondAccepted);
-    if (!('operationId' in firstAccepted) || !('operationId' in secondAccepted)) throw new Error('External action was not accepted.');
+    assert.ok('jobId' in firstAccepted && 'jobId' in secondAccepted);
+    if (!('jobId' in firstAccepted) || !('jobId' in secondAccepted) ||
+        typeof firstAccepted.operationId !== 'string' || typeof secondAccepted.operationId !== 'string') {
+      throw new Error('External action was not accepted.');
+    }
     assert.equal(firstAccepted.operationId, secondAccepted.operationId, 'concurrent idempotent external requests share one operation');
+    assert.equal(firstAccepted.jobId, firstAccepted.operationId, 'operation id remains available through the existing job contract');
+    assert.equal(firstAccepted.location, `/api/v1/jobs/${firstAccepted.jobId}`);
     const operationId = firstAccepted.operationId;
     const jobRows = await source.query(`SELECT id FROM ca_meta_jobs WHERE tenant_id = ? AND job_type = 'NOTIFICATION_ACTION'`, [tenantB]) as Array<{ id: string }>;
     assert.deepEqual(jobRows.map((row) => row.id), [operationId], 'one durable notification action job is created');
@@ -178,8 +189,8 @@ test('notifications stay isolated by company tenant, paginate, and local actions
     assert.equal(await service.operation(sessionA, contextA, operationId, 'req-m5-06-operation-foreign'), undefined,
       'an operation identifier cannot cross tenant scope');
     const replay = await queueService.act(sessionB, contextB, notificationB, externalKey, externalAction, 'req-m5-06-external-replay');
-    assert.ok('operationId' in replay);
-    if ('operationId' in replay) assert.equal(replay.status, 'UNKNOWN');
+    assert.ok('jobId' in replay && 'operationId' in replay);
+    if ('jobId' in replay) assert.equal(replay.status, 'PENDING', 'accepted replay preserves the v1 response; the job resource carries current status');
     await assert.rejects(queueService.act(sessionB, contextB, notificationB, `m5-06-new-key-${randomUUID()}`,
       externalAction, 'req-m5-06-external-no-blind-retry'), NotificationActionUnresolvedError);
     const afterUnknown = await source.query(`SELECT status FROM ca_meta_notifications WHERE id = ? AND tenant_id = ?`, [notificationB, tenantB]) as Array<{ status: string }>;

@@ -738,7 +738,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Apply a notification action
-         * @description The action is checked against current membership, asset grant and role. MARK_READ/DISMISS are local; REPLY is an external message effect and enters the bounded async job/reconciliation path. This endpoint never reports a provider send as complete on HTTP acceptance.
+         * @description The server derives the tenant from the verified session and current membership, then resolves the notification and asset in that tenant. MARK_READ/DISMISS are local state changes and return 200 only after persistence. When an eligible external adapter is available, SEND_TEMPLATE/REPLY_COMMENT return a durable operation; HTTP acceptance is not provider success. The current runtime has no confirmed credential or action adapter and returns 503 for those external actions. SEND_MESSAGE is unavailable until current eligibility and supported message context are confirmed. Browser input cannot select an asset/provider ID or tenant.
          */
         readonly post: operations["actOnNotification"];
         readonly delete?: never;
@@ -1340,7 +1340,7 @@ export interface components {
         readonly Notification: {
             readonly id: string;
             /** @enum {string} */
-            readonly kind: "MESSAGE_RECEIVED" | "ASSET_STATUS_CHANGED" | "ACTION_REQUIRED";
+            readonly kind: "MESSAGE_RECEIVED" | "COMMENT_RECEIVED" | "ASSET_STATUS_CHANGED" | "ACTION_REQUIRED";
             readonly assetRef: string;
             readonly messageRef: string | null;
             /** @enum {string} */
@@ -1348,7 +1348,7 @@ export interface components {
             readonly safeSummary: string;
             /** Format: date-time */
             readonly createdAt: string;
-            readonly actions: readonly ("MARK_READ" | "DISMISS" | "REPLY" | "REFRESH")[];
+            readonly actions: readonly ("MARK_READ" | "DISMISS" | "REPLY" | "REFRESH" | "SEND_TEMPLATE" | "REPLY_COMMENT" | "SEND_MESSAGE")[];
         };
         readonly NotificationListPage: {
             readonly items: readonly components["schemas"]["Notification"][];
@@ -1362,6 +1362,28 @@ export interface components {
             /** @constant */
             readonly action: "REPLY";
             readonly replyText: string;
+        } | {
+            /** @constant */
+            readonly action: "SEND_TEMPLATE";
+            readonly templateName: string;
+            readonly language: string;
+            readonly parameters: readonly string[];
+        } | {
+            /** @constant */
+            readonly action: "REPLY_COMMENT";
+            readonly replyText: string;
+        } | {
+            /** @constant */
+            readonly action: "SEND_MESSAGE";
+            readonly messageText: string;
+        };
+        readonly NotificationActionResult: {
+            readonly notificationId: string;
+            /** @enum {string} */
+            readonly action: "MARK_READ" | "DISMISS";
+            /** @enum {string} */
+            readonly status: "READ" | "DISMISSED";
+            readonly requestId: string;
         };
         readonly NotificationActionAccepted: {
             readonly notificationId: string;
@@ -1370,6 +1392,8 @@ export interface components {
             readonly status: "PENDING";
             readonly location: string;
             readonly requestId: string;
+            /** @description Same identifier as jobId; use GET /api/v1/operations/{operationId} for action status. */
+            readonly operationId?: string;
         };
         readonly WebhookChallengeResponse: {
             readonly challenge: string;
@@ -3214,10 +3238,19 @@ export interface operations {
             };
         };
         readonly responses: {
-            /** @description Sanitized success example */
+            /** @description Local READ/DISMISS state persisted successfully */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NotificationActionResult"];
+                };
+            };
+            /** @description Durable external action accepted for processing */
             readonly 202: {
                 headers: {
-                    /** @description Relative URI of the tenant-scoped accepted job; poll it for the outcome. */
+                    /** @description Existing tenant-scoped job resource; operationId also identifies GET /api/v1/operations/{operationId}. */
                     readonly Location?: string;
                     readonly [name: string]: unknown;
                 };

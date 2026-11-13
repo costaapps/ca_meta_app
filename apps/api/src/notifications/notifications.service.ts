@@ -45,6 +45,10 @@ interface ActionReceiptRow {
 }
 
 interface Cursor { createdAt: string; id: string }
+interface NotificationListFilters {
+  readonly channel?: 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP';
+  readonly number?: string;
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CURSOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -106,21 +110,35 @@ export class NotificationsService {
   ) {}
 
   async list(session: VerifiedPortalSession, contextRef: string, limit: number, rawCursor: string | undefined,
-    requestId: string): Promise<NotificationPage> {
+    requestId: string, filters: NotificationListFilters = {}): Promise<NotificationPage> {
     const scope = await this.portalScope(session, contextRef);
     await this.authorization.authorize(scope, 'RESOURCE_READ', scope.tenantId);
     const cursor = decodeCursor(rawCursor);
     const pageSize = Number.isSafeInteger(limit) && limit >= 1 && limit <= 100 ? limit : 50;
     const database = await this.database.getDataSource();
     const cursorDateValue = cursor ? cursorSqlDate(cursor.createdAt) : null;
+    const clauses = ['n.tenant_id = ?', "n.status <> 'DISMISSED'"];
+    const values: Array<string | number | null> = [scope.tenantId];
+    if (filters.channel === 'FACEBOOK') clauses.push("a.asset_kind = 'FACEBOOK_PAGE'");
+    if (filters.channel === 'INSTAGRAM') clauses.push("a.asset_kind IN ('INSTAGRAM_BUSINESS_ACCOUNT', 'INSTAGRAM_CREATOR_ACCOUNT')");
+    if (filters.channel === 'WHATSAPP') clauses.push("a.asset_kind IN ('WHATSAPP_PHONE_NUMBER', 'WHATSAPP_BUSINESS_ACCOUNT')");
+    if (filters.number !== undefined) {
+      clauses.push("a.asset_kind = 'WHATSAPP_PHONE_NUMBER' AND a.external_id = ?");
+      values.push(filters.number);
+    }
+    if (cursor) {
+      clauses.push('(n.created_at < ? OR (n.created_at = ? AND n.id < ?))');
+      values.push(cursorDateValue, cursorDateValue, cursor.id);
+    }
+    values.push(pageSize + 1);
     const rows = await database.query(
-      `SELECT id, kind, asset_id, message_ref, status,
-              DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS created_at
-       FROM ca_meta_notifications
-       WHERE tenant_id = ? AND status <> 'DISMISSED'
-         AND (? IS NULL OR created_at < ? OR (created_at = ? AND id < ?))
-       ORDER BY created_at DESC, id DESC LIMIT ?`,
-      [scope.tenantId, cursorDateValue, cursorDateValue, cursorDateValue, cursor?.id ?? null, pageSize + 1],
+      `SELECT n.id, n.kind, n.asset_id, n.message_ref, n.status,
+              DATE_FORMAT(n.created_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS created_at
+       FROM ca_meta_notifications n
+       INNER JOIN ca_meta_assets a ON a.tenant_id = n.tenant_id AND a.id = n.asset_id
+       WHERE ${clauses.join(' AND ')}
+       ORDER BY n.created_at DESC, n.id DESC LIMIT ?`,
+      values,
     ) as NotificationRow[];
     const hasNext = rows.length > pageSize;
     const visible = rows.slice(0, pageSize);
@@ -144,21 +162,22 @@ export class NotificationsService {
   async act(session: VerifiedPortalSession, contextRef: string, notificationId: string, idempotencyKey: string,
     action: NotificationAction, requestId: string): Promise<ActionResult | ActionAccepted> {
     const scope = await this.portalScope(session, contextRef);
+    const normalizedAction = action.action === 'REPLY' ? { action: 'REPLY_COMMENT' as const, replyText: action.replyText } : action;
     const notificationRef = requiredId(notificationId);
     if (!/^[A-Za-z0-9._~-]{16,128}$/.test(idempotencyKey)) throw new NotificationInputError();
     const database = await this.database.getDataSource();
     const keyHash = digest(`${scope.tenantId}\0${idempotencyKey}`);
-    const requestHash = digest(canonicalJson(action));
+    const requestHash = digest(canonicalJson(normalizedAction));
 
-    if (action.action === 'SEND_MESSAGE') {
+    if (normalizedAction.action === 'SEND_MESSAGE') {
       await this.authorization.authorize(scope, 'CONNECT', scope.tenantId);
       throw new NotificationExternalActionUnavailableError();
     }
-    if (action.action === 'SEND_TEMPLATE' || action.action === 'REPLY_COMMENT') {
+    if (normalizedAction.action === 'SEND_TEMPLATE' || normalizedAction.action === 'REPLY_COMMENT') {
       await this.authorization.authorize(scope, 'CONNECT', scope.tenantId);
       if (!this.jobs || !this.externalActionsEnabled) throw new NotificationExternalActionUnavailableError();
       return await this.queueExternalAction({ scope, notificationId: notificationRef,
-        keyHash, requestHash, action, requestId });
+        keyHash, requestHash, action: normalizedAction, requestId });
     }
     await this.authorization.authorize(scope, 'RESOURCE_READ', scope.tenantId);
 
@@ -174,7 +193,7 @@ export class NotificationsService {
         `INSERT IGNORE INTO ca_meta_notification_action_receipts
           (id, tenant_id, notification_id, action, idempotency_key_hash, request_hash, operation_id, status, safe_error_code, actor_ref_hash, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, NULL, 'PENDING', NULL, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`,
-        [randomUUID(), scope.tenantId, notificationRef, action.action, keyHash, requestHash, digest(scope.principalId)],
+        [randomUUID(), scope.tenantId, notificationRef, normalizedAction.action, keyHash, requestHash, digest(scope.principalId)],
       );
       const receiptRows = await manager.query(
         `SELECT id, notification_id, action, request_hash, operation_id, status
@@ -182,17 +201,17 @@ export class NotificationsService {
         [scope.tenantId, keyHash],
       ) as ActionReceiptRow[];
       const receipt = receiptRows[0];
-      if (!receipt || receipt.notification_id !== notificationRef || receipt.action !== action.action || hex(receipt.request_hash) !== requestHash.toString('hex')) {
+      if (!receipt || receipt.notification_id !== notificationRef || receipt.action !== normalizedAction.action || hex(receipt.request_hash) !== requestHash.toString('hex')) {
         throw new NotificationIdempotencyConflictError();
       }
       if (receipt.status === 'SUCCEEDED') {
         const latest = await manager.query(
           `SELECT status FROM ca_meta_notifications WHERE id = ? AND tenant_id = ?`, [notificationRef, scope.tenantId],
         ) as Array<{ status: 'READ' | 'DISMISSED' | 'UNREAD' }>;
-        return Object.freeze({ notificationId: notificationRef, action: action.action,
+        return Object.freeze({ notificationId: notificationRef, action: normalizedAction.action,
           status: latest[0]?.status === 'DISMISSED' ? 'DISMISSED' : 'READ', requestId });
       }
-      const target = action.action === 'MARK_READ' ? (current.status === 'DISMISSED' ? 'DISMISSED' : 'READ') : 'DISMISSED';
+      const target = normalizedAction.action === 'MARK_READ' ? (current.status === 'DISMISSED' ? 'DISMISSED' : 'READ') : 'DISMISSED';
       await manager.query(
         `UPDATE ca_meta_notifications SET status = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ? AND tenant_id = ?`,
         [target, notificationRef, scope.tenantId],
@@ -201,7 +220,7 @@ export class NotificationsService {
         `UPDATE ca_meta_notification_action_receipts SET status = 'SUCCEEDED', updated_at = UTC_TIMESTAMP(6) WHERE id = ? AND tenant_id = ?`,
         [receipt.id, scope.tenantId],
       );
-      return Object.freeze({ notificationId: notificationRef, action: action.action, status: target, requestId });
+      return Object.freeze({ notificationId: notificationRef, action: normalizedAction.action, status: target, requestId });
     });
   }
 
@@ -276,13 +295,11 @@ export class NotificationsService {
           `UPDATE ca_meta_notification_action_receipts SET operation_id = ?, updated_at = UTC_TIMESTAMP(6)
            WHERE id = ? AND tenant_id = ?`, [queued.id, receipt.id, input.scope.tenantId],
         );
-        return Object.freeze({ notificationId: input.notificationId, operationId: queued.id, status: 'PENDING',
-          location: `/api/v1/operations/${queued.id}`, requestId: input.requestId });
+        return Object.freeze({ notificationId: input.notificationId, jobId: queued.id, operationId: queued.id, status: 'PENDING',
+          location: `/api/v1/jobs/${queued.id}`, requestId: input.requestId });
       }
-      const status = receipt.status === 'RUNNING' || receipt.status === 'SUCCEEDED' || receipt.status === 'FAILED' || receipt.status === 'UNKNOWN'
-        ? receipt.status : 'PENDING';
-      return Object.freeze({ notificationId: input.notificationId, operationId: receipt.operation_id, status,
-        location: `/api/v1/operations/${receipt.operation_id}`, requestId: input.requestId });
+      return Object.freeze({ notificationId: input.notificationId, jobId: receipt.operation_id, operationId: receipt.operation_id, status: 'PENDING',
+        location: `/api/v1/jobs/${receipt.operation_id}`, requestId: input.requestId });
     });
   }
 

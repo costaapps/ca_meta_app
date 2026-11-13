@@ -2460,6 +2460,8 @@ paths:
         - $ref: "#/components/parameters/TenantContext"
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/AssetCatalogChannel"
+        - $ref: "#/components/parameters/AssetCatalogNumber"
       responses:
         "200":
           description: Sanitized success example
@@ -2556,10 +2558,11 @@ paths:
           description: Durable external action accepted for processing
           headers:
             Location:
-              description: Relative URI of the operation status resource.
+              description: Existing tenant-scoped job resource; operationId also identifies
+                GET /api/v1/operations/{operationId}.
               schema:
                 type: string
-                pattern: ^/api/v1/operations/[A-Za-z0-9_-]+$
+                pattern: ^/api/v1/jobs/[A-Za-z0-9_-]+$
           content:
             application/json:
               schema:
@@ -2569,9 +2572,10 @@ paths:
                   summary: Sanitized accepted operation
                   value:
                     notificationId: 20000000-0000-4000-8000-000000000001
+                    jobId: 20000000-0000-4000-8000-000000000002
                     operationId: 20000000-0000-4000-8000-000000000002
                     status: PENDING
-                    location: /api/v1/operations/20000000-0000-4000-8000-000000000002
+                    location: /api/v1/jobs/20000000-0000-4000-8000-000000000002
                     requestId: req_example_39
         "400": *a11
         "401": *a12
@@ -4797,6 +4801,8 @@ components:
             enum:
               - MARK_READ
               - DISMISS
+              - REPLY
+              - REFRESH
               - SEND_TEMPLATE
               - REPLY_COMMENT
               - SEND_MESSAGE
@@ -4834,6 +4840,20 @@ components:
               enum:
                 - MARK_READ
                 - DISMISS
+        - type: object
+          additionalProperties: false
+          required:
+            - action
+            - replyText
+          properties:
+            action:
+              type: string
+              const: REPLY
+            replyText:
+              type: string
+              minLength: 1
+              maxLength: 4096
+              writeOnly: true
         - type: object
           additionalProperties: false
           required:
@@ -4921,7 +4941,7 @@ components:
       additionalProperties: false
       required:
         - notificationId
-        - operationId
+        - jobId
         - status
         - location
         - requestId
@@ -4930,25 +4950,26 @@ components:
           type: string
           minLength: 1
           maxLength: 128
-        operationId:
+        jobId:
           type: string
           minLength: 1
           maxLength: 128
         status:
           type: string
-          enum:
-            - PENDING
-            - RUNNING
-            - SUCCEEDED
-            - FAILED
-            - UNKNOWN
+          const: PENDING
         location:
           type: string
-          pattern: ^/api/v1/operations/[A-Za-z0-9_-]+$
+          pattern: ^/api/v1/jobs/[A-Za-z0-9_-]+$
         requestId:
           type: string
           minLength: 1
           maxLength: 128
+        operationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Same identifier as jobId; use GET /api/v1/operations/{operationId}
+            for action status.
     WebhookChallengeResponse:
       type: object
       additionalProperties: false

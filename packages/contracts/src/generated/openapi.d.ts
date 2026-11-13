@@ -1348,7 +1348,7 @@ export interface components {
             readonly safeSummary: string;
             /** Format: date-time */
             readonly createdAt: string;
-            readonly actions: readonly ("MARK_READ" | "DISMISS" | "SEND_TEMPLATE" | "REPLY_COMMENT" | "SEND_MESSAGE")[];
+            readonly actions: readonly ("MARK_READ" | "DISMISS" | "REPLY" | "REFRESH" | "SEND_TEMPLATE" | "REPLY_COMMENT" | "SEND_MESSAGE")[];
         };
         readonly NotificationListPage: {
             readonly items: readonly components["schemas"]["Notification"][];
@@ -1358,6 +1358,10 @@ export interface components {
         readonly NotificationActionRequest: {
             /** @enum {string} */
             readonly action: "MARK_READ" | "DISMISS";
+        } | {
+            /** @constant */
+            readonly action: "REPLY";
+            readonly replyText: string;
         } | {
             /** @constant */
             readonly action: "SEND_TEMPLATE";
@@ -1383,11 +1387,13 @@ export interface components {
         };
         readonly NotificationActionAccepted: {
             readonly notificationId: string;
-            readonly operationId: string;
-            /** @enum {string} */
-            readonly status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "UNKNOWN";
+            readonly jobId: string;
+            /** @constant */
+            readonly status: "PENDING";
             readonly location: string;
             readonly requestId: string;
+            /** @description Same identifier as jobId; use GET /api/v1/operations/{operationId} for action status. */
+            readonly operationId?: string;
         };
         readonly WebhookChallengeResponse: {
             readonly challenge: string;
@@ -3163,6 +3169,9 @@ export interface operations {
                 readonly cursor?: components["parameters"]["Cursor"];
                 /** @description Page size, default 50, maximum 100. */
                 readonly limit?: components["parameters"]["Limit"];
+                readonly channel?: components["parameters"]["AssetCatalogChannel"];
+                /** @description Exact opaque WhatsApp phone number filter. */
+                readonly number?: components["parameters"]["AssetCatalogNumber"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -3241,7 +3250,7 @@ export interface operations {
             /** @description Durable external action accepted for processing */
             readonly 202: {
                 headers: {
-                    /** @description Relative URI of the operation status resource. */
+                    /** @description Existing tenant-scoped job resource; operationId also identifies GET /api/v1/operations/{operationId}. */
                     readonly Location?: string;
                     readonly [name: string]: unknown;
                 };

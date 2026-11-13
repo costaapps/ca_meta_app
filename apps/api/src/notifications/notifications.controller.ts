@@ -45,6 +45,20 @@ function parseLimit(value: unknown): number {
   return limit;
 }
 
+type NotificationChannel = 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP';
+
+function parseChannel(value: unknown): NotificationChannel | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'FACEBOOK' || value === 'INSTAGRAM' || value === 'WHATSAPP') return value;
+  throw new BadRequestException();
+}
+
+function parseNumber(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value.length > 33 || !/^\+?[0-9]{1,32}$/.test(value)) throw new BadRequestException();
+  return value;
+}
+
 function object(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new BadRequestException();
   return value as Record<string, unknown>;
@@ -71,7 +85,7 @@ function parseAction(value: unknown): components['schemas']['NotificationActionR
         body['parameters'].length > 100 || !body['parameters'].every((item) => safeText(item, 1024))) throw new BadRequestException();
     return { action: 'SEND_TEMPLATE', templateName: body['templateName'], language: body['language'], parameters: body['parameters'] };
   }
-  if (body['action'] === 'REPLY_COMMENT') {
+  if (body['action'] === 'REPLY' || body['action'] === 'REPLY_COMMENT') {
     if (!exactKeys(body, ['action', 'replyText']) || !safeText(body['replyText'], 4096)) throw new BadRequestException();
     return { action: 'REPLY_COMMENT', replyText: body['replyText'] };
   }
@@ -97,7 +111,10 @@ export class NotificationsController {
     try {
       if (query['cursor'] !== undefined && typeof query['cursor'] !== 'string') throw new BadRequestException();
       return await this.notifications.list(request.portalSession, tenantContextRef(request, headerContext), parseLimit(query['limit']),
-        query['cursor'] as string | undefined, requestId(request));
+        query['cursor'] as string | undefined, requestId(request), {
+          channel: parseChannel(query['channel']),
+          number: parseNumber(query['number']),
+        });
     } catch (error) {
       if (error instanceof NotificationInputError) throw new BadRequestException();
       throw error;
@@ -118,7 +135,7 @@ export class NotificationsController {
     try {
       const result = await this.notifications.act(request.portalSession, tenantContextRef(request, headerContext), notificationId,
         idempotencyKey ?? '', parseAction(request.body), requestId(request));
-      if ('operationId' in result) {
+      if ('jobId' in result) {
         response.status(HttpStatus.ACCEPTED);
         response.setHeader('Location', result.location);
       }
