@@ -9,6 +9,8 @@ import { OnboardingSessionStore, type StoredOnboardingReference, type StoredPend
 import { ONBOARDING_TENANT_IDENTITY, ONBOARDING_TENANT_IDENTITY_WARNING, type OnboardingTenantIdentityReader } from './onboarding-tenant-identity';
 import { parseOnboardingFlowCatalog, type OnboardingFlowProfile, type OnboardingFlowVariant } from './onboarding-flow-catalog';
 
+const FLOW_CATALOG_APP_OFFSETS = [0, 6, 12] as const;
+
 export type OnboardingServerStatusName = 'CREATED' | 'AWAITING_PROVIDER' | 'CODE_RECEIVED' | 'EXCHANGING' |
   'ASSETS_VERIFIED' | 'PROVISIONING' | 'READY' | 'PARTIAL' | 'CANCELLED' | 'EXPIRED' | 'FAILED';
 export type OnboardingReadiness = 'READY' | 'PARTIAL' | 'UNKNOWN';
@@ -286,13 +288,13 @@ export class PortalOnboardingService {
     this.update({ catalogState: 'loading' });
     try {
       const context = await this.readRequestContext(false);
-      const [bootstrap, flowList]: [unknown, unknown] = await Promise.all([
+      const [bootstrap, firstFlowPage]: [unknown, unknown] = await Promise.all([
         firstValueFrom(this.http.get<unknown>(`${this.baseUrl}/meta/bootstrap`, { withCredentials: true })),
-        firstValueFrom(this.http.get<unknown>(`${this.baseUrl}/integrations/flows`, {
-          withCredentials: true,
-          headers: new HttpHeaders({ 'X-Tenant-Context': context.tenantContextRef }),
-        })),
+        this.readFlowCatalogPage(context, 0),
       ]);
+      if (sequence !== this.catalogLoadSequence) return;
+      if (this.currentTenantContextRef !== context.tenantContextRef) throw new Error('catalog-tenant-context-changed');
+      const flowList = await this.readCompleteFlowCatalog(context, firstFlowPage);
       if (sequence !== this.catalogLoadSequence) return;
       if (this.currentTenantContextRef !== context.tenantContextRef) throw new Error('catalog-tenant-context-changed');
       const profiles = parseOnboardingFlowCatalog(bootstrap, flowList);
@@ -304,6 +306,36 @@ export class PortalOnboardingService {
       this.catalogTenantContextRef = undefined;
       this.update({ catalogState: 'error', profiles: Object.freeze([]), notice: 'Não foi possível carregar as opções de conexão.' });
     }
+  }
+
+  private readFlowCatalogPage(context: PortalRequestContext, appOffset: 0 | 6 | 12): Promise<unknown> {
+    return firstValueFrom(this.http.get<unknown>(`${this.baseUrl}/integrations/flows`, {
+      withCredentials: true,
+      headers: new HttpHeaders({ 'X-Tenant-Context': context.tenantContextRef }),
+      ...(appOffset === 0 ? {} : { params: { appOffset } }),
+    }));
+  }
+
+  private async readCompleteFlowCatalog(context: PortalRequestContext, firstPage: unknown): Promise<unknown> {
+    const items: unknown[] = [];
+    let page: unknown = firstPage;
+    for (const [index, appOffset] of FLOW_CATALOG_APP_OFFSETS.entries()) {
+      if (index > 0) {
+        if (this.currentTenantContextRef !== context.tenantContextRef) throw new Error('catalog-tenant-context-changed');
+        page = await this.readFlowCatalogPage(context, appOffset);
+      }
+      if (!isRecord(page) || Object.keys(page).some((key) => !['items', 'truncated', 'requestId'].includes(key)) ||
+          !Array.isArray(page['items']) || page['items'].length > (appOffset === 12 ? 20 : 30) ||
+          page['items'].length > 32 || page['items'].length % 5 !== 0 ||
+          typeof page['truncated'] !== 'boolean' || typeof page['requestId'] !== 'string' ||
+          page['requestId'].length < 1 || page['requestId'].length > 128) return undefined;
+      items.push(...page['items']);
+      if (items.length > 80) return undefined;
+      if (page['truncated'] === false) {
+        return Object.freeze({ items: Object.freeze(items), truncated: false, requestId: page['requestId'] });
+      }
+    }
+    return undefined;
   }
 
   async restoreSessions(): Promise<void> {

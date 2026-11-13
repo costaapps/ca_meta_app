@@ -33,21 +33,30 @@ try {
     '--include=src/app/core/onboarding/onboarding-tenant-identity.spec.ts',
     '--include=src/app/core/onboarding/portal-onboarding.service.spec.ts',
     '--include=src/app/features/portal/onboarding/portal-onboarding.component.spec.ts',
+    '--include=src/app/features/portal/connection-detail.component.spec.ts',
     '--include=src/app/app.routes.spec.ts',
   ];
-  if (!run(args)) process.exitCode = 1;
-  else {
+  const commandPassed = run(args);
+  try {
     const report = await readFile(outputFile, 'utf8');
     const suites = [...report.matchAll(/<testsuite\b([^>]*)>/g)];
     const total = (attribute) => suites.reduce((sum, suite) => sum + Number(suite[1].match(new RegExp(`\\b${attribute}="(\\d+)"`))?.[1] ?? 0), 0);
     const tests = total('tests');
     const failures = total('failures') + total('errors');
-    if (tests === 0 || failures !== 0) {
+    if (!commandPassed || tests === 0 || failures !== 0) {
       process.stderr.write(`M5.03 Angular JUnit result: ${tests} test(s), ${failures} failure(s).\n`);
+      const details = [...report.matchAll(/<(?:failure|error)\b[^>]*>([\s\S]*?)<\/(?:failure|error)>/g)]
+        .map((match) => match[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim())
+        .filter(Boolean).join('\n').slice(0, 2400);
+      if (details) process.stderr.write(`${details}\n`);
       process.exitCode = 1;
     } else {
       process.stdout.write(`M5.03 Angular specs: ${tests} test(s), ${failures} failure(s).\n`);
     }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown file error';
+    process.stderr.write(`M5.03 Angular JUnit report unavailable: ${message}.\n`);
+    process.exitCode = 1;
   }
 } finally {
   const resolvedOutput = resolve(temporaryOutput);

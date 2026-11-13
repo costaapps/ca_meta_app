@@ -24,6 +24,7 @@ import {
   AssetCatalogService,
   AssetNotFoundError,
 } from './asset-catalog.service.js';
+import type { FlowCatalogAppOffset } from './meta-assets.types.js';
 import { AssetRefreshRateLimitError, AssetRefreshUnavailableError } from './asset-refresh.service.js';
 
 const CHANNELS = new Set(['FACEBOOK', 'INSTAGRAM', 'WHATSAPP']);
@@ -40,6 +41,13 @@ function tenantContextRef(request: PortalRequest, headerContext?: string): strin
 }
 
 function requestId(request: PortalRequest): string { return request.requestId ?? 'unknown'; }
+
+function parseFlowCatalogAppOffset(value: unknown): FlowCatalogAppOffset {
+  if (value === undefined || value === '0') return 0;
+  if (value === '6') return 6;
+  if (value === '12') return 12;
+  throw new BadRequestException();
+}
 
 function parseAssetQuery(query: Record<string, unknown>) {
   const rawLimit = query.limit;
@@ -127,10 +135,12 @@ export class AssetCatalogController {
   @PublicRoute()
   @UseGuards(PortalSessionGuard)
   listFlows(
+    @Query('appOffset') appOffset: unknown,
     @Req() request: PortalRequest,
     @Headers('x-tenant-context') headerContext?: string,
   ): Promise<components['schemas']['FlowList']> {
-    return this.catalog.listFlows(request.portalSession, tenantContextRef(request, headerContext), requestId(request));
+    return this.catalog.listFlows(request.portalSession, tenantContextRef(request, headerContext), requestId(request),
+      parseFlowCatalogAppOffset(appOffset));
   }
 
   @Get('assets')

@@ -26,7 +26,21 @@ describe('PortalOnboardingComponent', () => {
       requestId: 'req-flows-1234567890',
       items: [
         'FACEBOOK_LOGIN', 'INSTAGRAM_VIA_FACEBOOK_LOGIN', 'INSTAGRAM_LOGIN', 'WHATSAPP_CLOUD_API', 'WHATSAPP_COEXISTENCE',
-      ].map((variant) => ({ variant, enabled: true, requestedCapabilities: ['READ_STATUS'] })),
+      ].map((variant) => ({
+        variant,
+        flowVariant: variant === 'FACEBOOK_LOGIN' ? 'FACEBOOK' :
+          variant.startsWith('INSTAGRAM_') ? 'INSTAGRAM' :
+            variant === 'WHATSAPP_CLOUD_API' ? 'WHATSAPP_EXCLUSIVE' : 'WHATSAPP_COEXISTENCE',
+        journeys: variant.startsWith('INSTAGRAM_')
+          ? ['INSTAGRAM_VIA_FACEBOOK_LOGIN', 'INSTAGRAM_LOGIN'] : [variant],
+        appConfigurationRef: '33333333-3333-4333-8333-333333333333',
+        environment: 'test',
+        enabled: true,
+        availability: 'AVAILABLE',
+        prerequisites: { metaAppConfigured: true, serverAdapterRegistered: true, tenantFeatureFlag: 'ENABLED' },
+        requestedCapabilities: ['READ_STATUS'],
+      })),
+      truncated: false,
     })!;
     const snapshot: PortalOnboardingSnapshot = Object.freeze({
       catalogState: 'loaded',

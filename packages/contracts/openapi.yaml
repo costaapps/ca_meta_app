@@ -620,10 +620,28 @@ paths:
         the journey identifier; optional `flowVariant` groups journeys into the
         four Meta flow families. A journey is enabled only when its tenant
         feature flag and a registered server adapter are confirmed; either
-        unknown or unavailable prerequisite keeps it disabled.
+        unknown or unavailable prerequisite keeps it disabled. Each page
+        contains up to six app configurations (30 journeys), except offset 12,
+        which contains up to four configurations (20 journeys), for a maximum
+        source of 16 configurations. `truncated=true` means another page exists
+        or the source exceeds 16 configurations. Clients must request offsets 0,
+        6 and 12 in order until `truncated=false`; if the third page remains
+        truncated, the full catalog is unavailable and must not be used to
+        choose an authorization flow.
       security: *a10
-      parameters: &a22
+      parameters:
         - $ref: "#/components/parameters/TenantContext"
+        - name: appOffset
+          in: query
+          required: false
+          description: App-configuration offset. Omit for the first page; subsequent pages
+            use 6 or 12.
+          schema:
+            type: integer
+            enum:
+              - 0
+              - 6
+              - 12
       responses:
         "200":
           description: Sanitized success example
@@ -870,7 +888,7 @@ paths:
         unexpired, nonterminal WHATSAPP_COEXISTENCE session; a same-key retry
         replays the existing session.
       security: *a10
-      parameters: &a23
+      parameters: &a22
         - &a25
           $ref: "#/components/parameters/Origin"
         - &a26
@@ -958,7 +976,8 @@ paths:
         until a verified server adapter is configured. UNKNOWN/STALE evidence
         stays visible and blocks READY when required.
       security: *a10
-      parameters: *a22
+      parameters: &a23
+        - $ref: "#/components/parameters/TenantContext"
       responses:
         "200":
           description: Sanitized success example
@@ -1018,7 +1037,7 @@ paths:
         mutation or submitting the one-use code. The worker rechecks
         authorization immediately before each external call.
       security: *a10
-      parameters: *a23
+      parameters: *a22
       requestBody:
         required: true
         content:
@@ -1086,7 +1105,7 @@ paths:
         use GET /api/v1/meta/{variant}/callback; do not send that callback code
         through portal authentication exchange.
       security: *a10
-      parameters: *a23
+      parameters: *a22
       requestBody:
         required: true
         description: Request uses a closed, size-bounded schema.
@@ -1235,7 +1254,7 @@ paths:
         adapters remain UNKNOWN. Credential bytes, provider URLs and IDs,
         payloads, messages and contact details are excluded.
       security: *a10
-      parameters: *a22
+      parameters: *a23
       responses:
         "200":
           description: Safe current-tenant operational summary
@@ -1430,7 +1449,7 @@ paths:
         server-derived tenant. A foreign tenant resource is indistinguishable
         from an unavailable resource.
       security: *a10
-      parameters: *a22
+      parameters: *a23
       responses:
         "200":
           description: Sanitized success example
@@ -1515,7 +1534,7 @@ paths:
         route conflicts and the caller must select one asset on the asset-scoped
         route.
       security: *a10
-      parameters: *a23
+      parameters: *a22
       responses:
         "202":
           description: Sanitized success example
@@ -1582,7 +1601,7 @@ paths:
         untouched unless a later reviewed operation proves they can be changed
         safely.
       security: *a10
-      parameters: *a23
+      parameters: *a22
       responses:
         "202":
           description: Local disconnect recorded; provider cleanup is not confirmed.
@@ -1629,7 +1648,7 @@ paths:
         usable while verified and eligible under current policy; rotation is
         explicit.
       security: *a10
-      parameters: *a23
+      parameters: *a22
       responses:
         "202":
           description: Reauthorization work accepted; its prior grant remains active.
@@ -1915,7 +1934,7 @@ paths:
       description: Returns normalized metadata only. Provider response bodies, tokens
         and raw webhook data are excluded.
       security: *a10
-      parameters: *a22
+      parameters: *a23
       responses:
         "200":
           description: Sanitized success example
@@ -1977,7 +1996,7 @@ paths:
         HTTP request. Caller receives a job reference, not a claim that status
         is fresh.
       security: *a10
-      parameters: *a23
+      parameters: *a22
       responses:
         "202":
           description: Sanitized success example
@@ -2029,7 +2048,7 @@ paths:
       description: Tenant and asset authorization are checked for the requested
         capability. ETag is returned for conditional updates.
       security: *a10
-      parameters: *a22
+      parameters: *a23
       responses:
         "200":
           description: Sanitized success example
@@ -2146,7 +2165,7 @@ paths:
       description: Tenant and asset authorization are checked for the requested
         capability. ETag is returned for conditional updates.
       security: *a10
-      parameters: *a22
+      parameters: *a23
       responses:
         "200":
           description: Sanitized success example
@@ -2283,7 +2302,7 @@ paths:
         Recipient/message references are resolved server-side. External delivery
         is not exactly-once; provider idempotency support is Not confirmed.
       security: *a10
-      parameters: *a23
+      parameters: *a22
       requestBody:
         required: true
         description: Request uses a closed, size-bounded schema.
@@ -2357,7 +2376,7 @@ paths:
         evidence. Job responses never include raw provider error bodies or
         credentials.
       security: *a10
-      parameters: *a22
+      parameters: *a23
       responses:
         "200":
           description: Sanitized success example
@@ -2413,7 +2432,7 @@ paths:
       description: Returns SUCCEEDED/FAILED/UNKNOWN and redacted status metadata only.
         UNKNOWN is not success and does not authorize blind retry.
       security: *a10
-      parameters: *a22
+      parameters: *a23
       responses:
         "200":
           description: Sanitized success example
@@ -2517,7 +2536,7 @@ paths:
         confirmed. Body and category constraints are local request-contract
         limits, not a claim about the current Meta validation rules.
       security: *a10
-      parameters: *a23
+      parameters: *a22
       requestBody:
         required: true
         description: Request uses a closed, size-bounded schema.
@@ -2654,7 +2673,7 @@ paths:
         message context are confirmed. Browser input cannot select an
         asset/provider ID or tenant.
       security: *a10
-      parameters: *a23
+      parameters: *a22
       requestBody:
         required: true
         description: Request uses a closed, size-bounded schema.

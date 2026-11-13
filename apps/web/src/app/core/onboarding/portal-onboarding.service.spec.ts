@@ -1,5 +1,5 @@
 import { HttpErrorResponse, type HttpClient, type HttpHeaders } from '@angular/common/http';
-import { of, throwError } from 'rxjs';
+import { from, of, throwError } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
 import { parseOnboardingFlowCatalog, type OnboardingFlowProfile } from './onboarding-flow-catalog';
 import { OnboardingSessionStore } from './onboarding-session-store';
@@ -99,11 +99,33 @@ function flowList(): unknown {
       flowVariant: variant === 'FACEBOOK_LOGIN' ? 'FACEBOOK' :
         variant.startsWith('INSTAGRAM_') ? 'INSTAGRAM' :
           variant === 'WHATSAPP_CLOUD_API' ? 'WHATSAPP_EXCLUSIVE' : 'WHATSAPP_COEXISTENCE',
+      journeys: variant.startsWith('INSTAGRAM_')
+        ? ['INSTAGRAM_VIA_FACEBOOK_LOGIN', 'INSTAGRAM_LOGIN'] : [variant],
+      appConfigurationRef: '33333333-3333-4333-8333-333333333333',
+      environment: 'test',
       enabled: true,
       availability: 'AVAILABLE',
+      prerequisites: { metaAppConfigured: true, serverAdapterRegistered: true, tenantFeatureFlag: 'ENABLED' },
       requestedCapabilities: ['READ_STATUS'],
     })),
   };
+}
+
+function flowsForConfigurations(refs: readonly string[]): unknown {
+  const base = flowList() as { items: Array<Record<string, unknown>>; requestId: string; truncated: boolean };
+  return {
+    ...base,
+    items: refs.flatMap((appConfigurationRef) => base.items.map((item) => ({ ...item, appConfigurationRef }))),
+  };
+}
+
+function paginatedFlowLists(refs: readonly string[], lastPageTruncated = false): Array<Record<string, unknown>> {
+  const all = flowsForConfigurations(refs) as { items: Array<Record<string, unknown>>; requestId: string };
+  return [
+    { ...all, requestId: 'req-flow-page-01', items: all.items.slice(0, 30), truncated: true },
+    { ...all, requestId: 'req-flow-page-02', items: all.items.slice(30, 60), truncated: true },
+    { ...all, requestId: 'req-flow-page-03', items: all.items.slice(60, 80), truncated: lastPageTruncated },
+  ];
 }
 
 function serverStatus(
@@ -171,7 +193,11 @@ function createHarness(options?: {
     isAllowed: (url) => url.origin === 'https://provider.synthetic.invalid' && url.searchParams.getAll('state').length === 1,
   };
   const http = {
-    get: vi.fn((url: string, _options?: { readonly withCredentials?: boolean; readonly headers?: HttpHeaders }) => {
+    get: vi.fn((url: string, _options?: {
+      readonly withCredentials?: boolean;
+      readonly headers?: HttpHeaders;
+      readonly params?: Readonly<Record<string, string | number | boolean>>;
+    }) => {
       if (url.endsWith('/meta/bootstrap')) return of(catalog());
       if (url.endsWith('/integrations/flows')) return of(flowList());
       if (url.endsWith('/session')) return of({ tenantContextRef });
@@ -257,6 +283,186 @@ describe('PortalOnboardingService', () => {
     const unavailable = flowList() as { items: Array<Record<string, unknown>> };
     unavailable.items.find((item) => item['variant'] === 'WHATSAPP_COEXISTENCE')!['availability'] = 'ADAPTER_UNAVAILABLE';
     expect(parseOnboardingFlowCatalog(catalog(), unavailable)?.find((profile) => profile.flowVariant === 'WHATSAPP_COEXISTENCE')?.enabled).toBe(false);
+  });
+
+  it('coalesces complete equivalent catalogs from distinct server app configurations', () => {
+    const parsed = parseOnboardingFlowCatalog(catalog(), flowsForConfigurations([
+      '33333333-3333-4333-8333-333333333333',
+      '66666666-6666-4666-8666-666666666666',
+    ]));
+
+    expect(parsed?.map((profile) => profile.flowVariant)).toEqual([
+      'FACEBOOK_LOGIN',
+      'INSTAGRAM_VIA_FACEBOOK_LOGIN',
+      'INSTAGRAM_LOGIN',
+      'WHATSAPP_CLOUD_API',
+      'WHATSAPP_COEXISTENCE',
+    ]);
+
+    const maximumSupported = parseOnboardingFlowCatalog(catalog(), flowsForConfigurations(Array.from({ length: 16 }, (_, index) =>
+      `77777777-7777-4777-8777-${String(index + 1).padStart(12, '0')}`)));
+    expect(maximumSupported).toHaveLength(5);
+  });
+
+  it('loads app configuration pages sequentially and aggregates all 16 before parsing', async () => {
+    const refs = Array.from({ length: 16 }, (_, index) =>
+      `77777777-7777-4777-8777-${String(index + 1).padStart(12, '0')}`);
+    const pages = paginatedFlowLists(refs);
+    const { service, http } = createHarness();
+    const originalGet = http.get.getMockImplementation();
+    http.get.mockImplementation((url, options) => {
+      if (!url.endsWith('/integrations/flows')) return originalGet!(url, options);
+      const offset = options?.params?.['appOffset'] ?? 0;
+      return of(pages[offset === 0 ? 0 : offset === 6 ? 1 : 2]);
+    });
+
+    await service.loadCatalog();
+
+    const flowReads = http.get.mock.calls.filter(([url]) => url.endsWith('/integrations/flows'));
+    expect(flowReads.map(([, options]) => options?.params?.['appOffset'] ?? 0)).toEqual([0, 6, 12]);
+    expect(service.getSnapshot().catalogState).toBe('loaded');
+    expect(service.getSnapshot().profiles).toHaveLength(5);
+  });
+
+  it('validates behavior across pages before coalescing app configurations', async () => {
+    const refs = Array.from({ length: 16 }, (_, index) =>
+      `12121212-1212-4212-8212-${String(index + 1).padStart(12, '0')}`);
+    const pages = paginatedFlowLists(refs);
+    const thirdPage = pages[2] as { items: Array<Record<string, unknown>> };
+    pages[2] = {
+      ...thirdPage,
+      items: thirdPage.items.map((item) => ({ ...item, requestedCapabilities: ['SEND_MESSAGE'] })),
+    };
+    const { service, http } = createHarness();
+    const originalGet = http.get.getMockImplementation();
+    http.get.mockImplementation((url, options) => {
+      if (!url.endsWith('/integrations/flows')) return originalGet!(url, options);
+      const offset = options?.params?.['appOffset'] ?? 0;
+      return of(pages[offset === 0 ? 0 : offset === 6 ? 1 : 2]);
+    });
+
+    await service.loadCatalog();
+
+    const flowReads = http.get.mock.calls.filter(([url]) => url.endsWith('/integrations/flows'));
+    expect(flowReads.map(([, options]) => options?.params?.['appOffset'] ?? 0)).toEqual([0, 6, 12]);
+    expect(service.getSnapshot().catalogState).toBe('error');
+    expect(service.getSnapshot().profiles).toEqual([]);
+  });
+
+  it('fails closed when the third page remains truncated', async () => {
+    const refs = Array.from({ length: 16 }, (_, index) =>
+      `88888888-8888-4888-8888-${String(index + 1).padStart(12, '0')}`);
+    const pages = paginatedFlowLists(refs, true);
+    const { service, http } = createHarness();
+    const originalGet = http.get.getMockImplementation();
+    http.get.mockImplementation((url, options) => {
+      if (!url.endsWith('/integrations/flows')) return originalGet!(url, options);
+      const offset = options?.params?.['appOffset'] ?? 0;
+      return of(pages[offset === 0 ? 0 : offset === 6 ? 1 : 2]);
+    });
+
+    await service.loadCatalog();
+
+    const flowReads = http.get.mock.calls.filter(([url]) => url.endsWith('/integrations/flows'));
+    expect(flowReads).toHaveLength(3);
+    expect(service.getSnapshot().catalogState).toBe('error');
+    expect(service.getSnapshot().profiles).toEqual([]);
+  });
+
+  it('does not commit a paginated catalog after the tenant context changes mid-read', async () => {
+    const refs = Array.from({ length: 16 }, (_, index) =>
+      `99999999-9999-4999-8999-${String(index + 1).padStart(12, '0')}`);
+    const oldPages = paginatedFlowLists(refs);
+    const changedTenant = 'synthetic-tenant-context-reference-456';
+    let releaseLastPage!: (page: Record<string, unknown>) => void;
+    const lastPagePending = new Promise<Record<string, unknown>>((resolve) => { releaseLastPage = resolve; });
+    let notifyLastPageStarted!: () => void;
+    const lastPageStarted = new Promise<void>((resolve) => { notifyLastPageStarted = resolve; });
+    const replacementPage = flowList() as { items: Array<Record<string, unknown>>; requestId: string; truncated: boolean };
+    replacementPage.items = replacementPage.items.map((item) => ({ ...item, requestedCapabilities: ['SEND_MESSAGE'] }));
+    let sessionCalls = 0;
+    const { service, http } = createHarness();
+    const originalGet = http.get.getMockImplementation();
+    http.get.mockImplementation((url, options) => {
+      if (url.endsWith('/session')) {
+        sessionCalls += 1;
+        return of({ tenantContextRef: sessionCalls === 1 ? tenantContextRef : changedTenant });
+      }
+      if (url.endsWith('/integrations/flows')) {
+        if (sessionCalls === 1) {
+          const offset = options?.params?.['appOffset'] ?? 0;
+          if (offset === 12) {
+            notifyLastPageStarted();
+            return from(lastPagePending);
+          }
+          return of(oldPages[offset === 0 ? 0 : 1]);
+        }
+        return of(replacementPage);
+      }
+      return originalGet!(url, options);
+    });
+
+    const staleLoad = service.loadCatalog();
+    await lastPageStarted;
+    await service.loadCatalog();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(service.getSnapshot().catalogState).toBe('loaded');
+    expect(service.getSnapshot().profiles[0]?.requestedCapabilities).toEqual(['SEND_MESSAGE']);
+
+    releaseLastPage(oldPages[2]!);
+    await staleLoad;
+    expect(service.getSnapshot().profiles[0]?.requestedCapabilities).toEqual(['SEND_MESSAGE']);
+  });
+
+  it('accepts the single unconfigured server group with a null app reference', () => {
+    const unconfigured = flowList() as { items: Array<Record<string, unknown>>; truncated: boolean };
+    unconfigured.items = unconfigured.items.map((item) => ({
+      ...item,
+      appConfigurationRef: null,
+      enabled: false,
+      availability: 'CONFIGURATION_MISSING',
+      prerequisites: { metaAppConfigured: false, serverAdapterRegistered: false, tenantFeatureFlag: 'UNKNOWN' },
+      requestedCapabilities: [],
+    }));
+
+    const parsed = parseOnboardingFlowCatalog(catalog(), unconfigured);
+    expect(parsed).toHaveLength(5);
+    expect(parsed?.every((profile) => !profile.enabled && profile.availability === 'CONFIGURATION_MISSING')).toBe(true);
+  });
+
+  it('fails closed for divergent configuration behavior, partial groups, invalid refs, or truncation', () => {
+    const refs = [
+      '33333333-3333-4333-8333-333333333333',
+      '66666666-6666-4666-8666-666666666666',
+    ];
+    const divergentValues: ReadonlyArray<readonly [string, unknown]> = [
+      ['enabled', false],
+      ['availability', 'UNKNOWN'],
+      ['prerequisites', { metaAppConfigured: true, serverAdapterRegistered: false, tenantFeatureFlag: 'ENABLED' }],
+      ['requestedCapabilities', ['SEND_MESSAGE']],
+      ['environment', 'production'],
+    ];
+    for (const [field, conflictingValue] of divergentValues) {
+      const divergent = flowsForConfigurations(refs) as { items: Array<Record<string, unknown>>; truncated: boolean };
+      divergent.items[5] = { ...divergent.items[5], [field]: conflictingValue };
+      expect(parseOnboardingFlowCatalog(catalog(), divergent), field).toBeUndefined();
+    }
+
+    const partial = flowsForConfigurations(refs) as { items: Array<Record<string, unknown>>; truncated: boolean };
+    partial.items.pop();
+    expect(parseOnboardingFlowCatalog(catalog(), partial)).toBeUndefined();
+
+    const invalidRef = flowList() as { items: Array<Record<string, unknown>>; truncated: boolean };
+    invalidRef.items[0] = { ...invalidRef.items[0], appConfigurationRef: 'client-selected' };
+    expect(parseOnboardingFlowCatalog(catalog(), invalidRef)).toBeUndefined();
+
+    expect(parseOnboardingFlowCatalog(catalog(), flowsForConfigurations([refs[0]!, refs[0]!]))).toBeUndefined();
+
+    const truncated = flowsForConfigurations(Array.from({ length: 7 }, (_, index) =>
+      `88888888-8888-4888-8888-${String(index + 1).padStart(12, '0')}`)) as { items: Array<Record<string, unknown>>; truncated: boolean };
+    truncated.items = truncated.items.slice(0, 32);
+    truncated.truncated = true;
+    expect(parseOnboardingFlowCatalog(catalog(), truncated)).toBeUndefined();
   });
 
   it('fails closed if the Coexistence profile exposes conventional phone registration', () => {
