@@ -5,6 +5,7 @@ import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalSessionService } from '../../core/portal/portal-session.service';
 import { safeRequestId } from '../../core/portal/safe-api-error';
 import { NotificationsService, PortalNotification } from '../../core/portal/notifications.service';
+import { PortalTenantIdentityService, TENANT_IDENTITY_UNCONFIRMED_MESSAGE } from '../../core/portal/portal-tenant-identity.service';
 
 @Component({
   selector: 'app-notifications',
@@ -20,6 +21,7 @@ export class NotificationsComponent implements OnInit, OnDestroy {
   error = '';
   message = '';
   requestId: string | null = null;
+  readonly writesUnavailableCopy = TENANT_IDENTITY_UNCONFIRMED_MESSAGE + '. Ações de alteração indisponíveis até que a empresa possa ser identificada com segurança.';
   private readonly destroy$ = new Subject<void>();
   private generation = 0;
   private readonly acting = new Set<string>();
@@ -28,6 +30,7 @@ export class NotificationsComponent implements OnInit, OnDestroy {
     private readonly service: NotificationsService,
     private readonly sessions: PortalSessionService,
     private readonly context: PortalContextStore,
+    private readonly tenantIdentity: PortalTenantIdentityService,
   ) {}
 
   ngOnInit(): void {
@@ -62,7 +65,7 @@ export class NotificationsComponent implements OnInit, OnDestroy {
   }
 
   async apply(item: PortalNotification, action: 'MARK_READ' | 'DISMISS'): Promise<void> {
-    if (this.acting.has(item.id) || !item.actions.includes(action)) return;
+    if (!this.writesAllowed || this.acting.has(item.id) || !item.actions.includes(action)) return;
     this.acting.add(item.id);
     this.error = '';
     this.message = '';
@@ -82,6 +85,8 @@ export class NotificationsComponent implements OnInit, OnDestroy {
       this.acting.delete(item.id);
     }
   }
+
+  get writesAllowed(): boolean { return this.tenantIdentity.current.confirmed; }
 
   isActing(notificationId: string): boolean { return this.acting.has(notificationId); }
   async nextPage(): Promise<void> { if (this.nextCursor) await this.load(this.nextCursor); }

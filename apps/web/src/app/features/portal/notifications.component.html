@@ -8,6 +8,7 @@
     <button type="button" class="refresh-button" (click)="load()" [disabled]="isLoading">Atualizar</button>
   </header>
 
+  <p *ngIf="!writesAllowed" id="tenant-identity-unconfirmed" class="notice identity-warning" role="status">{{ writesUnavailableCopy }}</p>
   <p *ngIf="message" class="notice success" role="status">{{ message }}</p>
   <p *ngIf="error" class="notice error" role="alert">{{ error }}</p>
   <p *ngIf="requestId" class="request-id">Referência: {{ requestId }}</p>
@@ -23,9 +24,9 @@
       </div>
       <div class="notification-actions">
         <button *ngIf="item.actions.includes('MARK_READ')" type="button" (click)="apply(item, 'MARK_READ')"
-          [disabled]="isActing(item.id)">Marcar como lida</button>
+          [disabled]="!writesAllowed || isActing(item.id)" [attr.aria-describedby]="writesAllowed ? null : 'tenant-identity-unconfirmed'">Marcar como lida</button>
         <button *ngIf="item.actions.includes('DISMISS')" type="button" class="secondary" (click)="apply(item, 'DISMISS')"
-          [disabled]="isActing(item.id)">Dispensar</button>
+          [disabled]="!writesAllowed || isActing(item.id)" [attr.aria-describedby]="writesAllowed ? null : 'tenant-identity-unconfirmed'">Dispensar</button>
       </div>
     </li>
   </ul>

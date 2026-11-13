@@ -4,9 +4,26 @@ import type { components } from '@ca-meta/contracts';
 import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalSessionService } from '../../core/portal/portal-session.service';
 import { NotificationsService } from '../../core/portal/notifications.service';
+import { PortalTenantIdentityService, type TenantMutationCapability } from '../../core/portal/portal-tenant-identity.service';
 import { NotificationsComponent } from './notifications.component';
 
 type Notification = components['schemas']['Notification'];
+
+const unconfirmedIdentity: TenantMutationCapability = Object.freeze({
+  confirmed: false,
+  reason: 'TENANT_IDENTITY_UNCONFIRMED',
+  message: 'Identidade da empresa não confirmada',
+});
+
+const confirmedIdentity: TenantMutationCapability = Object.freeze({
+  confirmed: true,
+  tenantDisplayName: 'Empresa sintética',
+  source: 'server-session',
+});
+
+function tenantIdentity(capability: TenantMutationCapability): PortalTenantIdentityService {
+  return { get current() { return capability; } } as PortalTenantIdentityService;
+}
 
 const notice: Notification = {
   id: '00000000-0000-4000-8000-000000000061',
@@ -33,6 +50,7 @@ describe('NotificationsComponent', () => {
         { provide: NotificationsService, useValue: service },
         { provide: PortalSessionService, useValue: { ensureCurrentSession: vi.fn().mockResolvedValue(true) } },
         { provide: PortalContextStore, useValue: { contextChanged$, sessionExpired$ } },
+        { provide: PortalTenantIdentityService, useValue: tenantIdentity(confirmedIdentity) },
       ],
     }).compileComponents();
 
@@ -62,6 +80,40 @@ describe('NotificationsComponent', () => {
     fixture.destroy();
   });
 
+  it('disables notification writes and guards programmatic actions without confirmed identity', async () => {
+    const service = {
+      list: vi.fn().mockResolvedValue({ items: [notice], nextCursor: null, requestId: 'req-notifications-unconfirmed' }),
+      act: vi.fn(),
+    };
+    await TestBed.configureTestingModule({
+      imports: [NotificationsComponent],
+      providers: [
+        { provide: NotificationsService, useValue: service },
+        { provide: PortalSessionService, useValue: { ensureCurrentSession: vi.fn().mockResolvedValue(true) } },
+        { provide: PortalContextStore, useValue: { contextChanged$: new Subject<void>(), sessionExpired$: new Subject<void>() } },
+        { provide: PortalTenantIdentityService, useValue: tenantIdentity(unconfirmedIdentity) },
+      ],
+    }).compileComponents();
+
+    const fixture = TestBed.createComponent(NotificationsComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.componentRef.changeDetectorRef.detectChanges();
+    const view = fixture.nativeElement as HTMLElement;
+    expect(view.textContent).toContain('Identidade da empresa não confirmada');
+    expect(view.textContent).toContain('Ações de alteração indisponíveis');
+    const actionButtons = Array.from(view.querySelectorAll<HTMLButtonElement>('.notification-actions button'));
+    expect(actionButtons.length).toBe(2);
+    expect(actionButtons.every((button) => button.disabled)).toBe(true);
+    expect(actionButtons.every((button) => button.getAttribute('aria-describedby') === 'tenant-identity-unconfirmed')).toBe(true);
+
+    await fixture.componentInstance.apply(notice, 'MARK_READ');
+    await fixture.componentInstance.apply(notice, 'DISMISS');
+    expect(service.act).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.error).toBe('');
+    fixture.destroy();
+  });
+
   it('clears the displayed tenant context before loading after a session context change', async () => {
     const contextChanged$ = new Subject<void>();
     const sessions = { ensureCurrentSession: vi.fn().mockResolvedValue(true) };
@@ -76,6 +128,7 @@ describe('NotificationsComponent', () => {
         { provide: NotificationsService, useValue: service },
         { provide: PortalSessionService, useValue: sessions },
         { provide: PortalContextStore, useValue: { contextChanged$, sessionExpired$: new Subject<void>() } },
+        { provide: PortalTenantIdentityService, useValue: tenantIdentity(unconfirmedIdentity) },
       ],
     }).compileComponents();
     const fixture = TestBed.createComponent(NotificationsComponent);
@@ -105,6 +158,7 @@ describe('NotificationsComponent', () => {
         { provide: NotificationsService, useValue: service },
         { provide: PortalSessionService, useValue: { ensureCurrentSession: vi.fn().mockResolvedValue(true) } },
         { provide: PortalContextStore, useValue: { contextChanged$, sessionExpired$: new Subject<void>() } },
+        { provide: PortalTenantIdentityService, useValue: tenantIdentity(unconfirmedIdentity) },
       ],
     }).compileComponents();
 
