@@ -16,6 +16,7 @@ import type { MetaAppConfigRegistry } from '../src/meta-config/meta-app-config.r
 import type { MetaGraphCallResult } from '../src/meta-graph/meta-graph.types.js';
 import type { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { NotificationsService } from '../src/notifications/notifications.service.js';
+import { NotificationsController } from '../src/notifications/notifications.controller.js';
 import {
   MetaGraphNotificationActionAdapter,
   notificationActionFinalizer,
@@ -31,6 +32,31 @@ const assetId = '90000000-0000-4000-8000-000000000064';
 const appConfigurationId = '90000000-0000-4000-8000-000000000065';
 const targetId = 'provider-target-private-synthetic-001';
 const providerAssetId = 'provider-asset-private-synthetic-001';
+
+test('notification controller preserves legacy REPLY parsing and accepted job response', async () => {
+  const calls: unknown[][] = [];
+  const jobId = randomUUID();
+  const accepted = { notificationId, jobId, operationId: jobId, status: 'PENDING' as const,
+    location: `/api/v1/jobs/${jobId}`, requestId: 'req-m5-06-controller' };
+  const service = { async act(...args: unknown[]) { calls.push(args); return accepted; } } as unknown as NotificationsService;
+  const controller = new NotificationsController(service);
+  const statuses: number[] = [];
+  const headers: Array<[string, string]> = [];
+  const response = {
+    status(value: number) { statuses.push(value); return this; },
+    setHeader(name: string, value: string) { headers.push([name, value]); return this; },
+  } as never;
+  const request = { portalSession: {}, requestId: 'req-m5-06-controller',
+    body: { action: 'REPLY', replyText: 'Synthetic legacy reply.' } } as never;
+  const result = await controller.act(notificationId, 'm5-06-controller-tenant-context', 'm5-06-idempotency-key-001',
+    request, response);
+
+  assert.deepEqual(result, accepted);
+  assert.deepEqual(statuses, [202]);
+  assert.deepEqual(headers, [['Location', accepted.location]]);
+  const action = calls[0]?.[4] as { action?: string; replyText?: string } | undefined;
+  assert.deepEqual(action, { action: 'REPLY_COMMENT', replyText: 'Synthetic legacy reply.' });
+});
 
 class SyntheticCredentialVerifier extends ServiceCredentialVerifier {
   mint() { return this.issueVerifiedServiceCredential(principalId, tenantId); }

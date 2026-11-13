@@ -713,7 +713,7 @@ export interface paths {
         };
         /**
          * List tenant-scoped operational notifications
-         * @description Returns safe metadata, references and freshness; no message body or raw provider payload is included. Cursor and limit are bounded.
+         * @description Returns safe metadata, references and freshness; no message body or raw provider payload is included. Cursor and limit are bounded. Repeat the same channel and number filters on every page request when continuing with a cursor.
          */
         readonly get: operations["listNotifications"];
         readonly put?: never;

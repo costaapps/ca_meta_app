@@ -111,10 +111,14 @@ test('notifications stay isolated by company tenant, paginate, and local actions
     assert.equal(firstPage.items[0]?.safeSummary, 'A new WhatsApp message is available.');
     assert.equal(firstPage.items[0]?.actions.includes('SEND_MESSAGE'), false);
     assert.ok(firstPage.nextCursor);
-    const numberFiltered = await service.list(sessionA, contextA, 100, undefined, 'req-m5-06-list-number', {
+    const firstNumberFiltered = await service.list(sessionA, contextA, 1, undefined, 'req-m5-06-list-number', {
       channel: 'WHATSAPP', number: '15550000001',
     });
-    assert.deepEqual(numberFiltered.items.map((item) => item.id), [notificationA2, notificationA]);
+    assert.deepEqual(firstNumberFiltered.items.map((item) => item.id), [notificationA2]);
+    assert.ok(firstNumberFiltered.nextCursor);
+    const secondNumberFiltered = await service.list(sessionA, contextA, 1, firstNumberFiltered.nextCursor,
+      'req-m5-06-list-number-next', { channel: 'WHATSAPP', number: '15550000001' });
+    assert.deepEqual(secondNumberFiltered.items.map((item) => item.id), [notificationA]);
     const channelFiltered = await service.list(sessionA, contextA, 100, undefined, 'req-m5-06-list-channel', { channel: 'FACEBOOK' });
     assert.deepEqual(channelFiltered.items, [], 'channel filter keeps unrelated assets out of the result');
     const secondPage = await service.list(sessionA, contextA, 1, firstPage.nextCursor, 'req-m5-06-list-next');
