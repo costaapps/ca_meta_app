@@ -1,4 +1,4 @@
-import { ActivatedRoute, convertToParamMap } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, type ParamMap } from '@angular/router';
 import { provideRouter } from '@angular/router';
 import { ChangeDetectorRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
@@ -8,6 +8,25 @@ import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalSessionService } from '../../core/portal/portal-session.service';
 import { coexistenceDetailFixture, fourWhatsAppNumbers, staleRevokedPageFixture } from './fixtures/connection-catalog.fixtures';
 import { ConnectionRecordDetailComponent } from './connection-record-detail.component';
+
+async function settle(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function createRoutedDetailComponent(detail: ConnectionCatalogService['detail']) {
+  const routeParams = new Subject<ParamMap>();
+  const component = new ConnectionRecordDetailComponent(
+    { paramMap: routeParams.asObservable() } as unknown as ActivatedRoute,
+    { detail } as unknown as ConnectionCatalogService,
+    { current: null, ensureCurrentSession: vi.fn() } as unknown as PortalSessionService,
+    { contextChanged$: NEVER } as unknown as PortalContextStore,
+    { markForCheck: vi.fn() } as unknown as ChangeDetectorRef,
+  );
+  component.ngOnInit();
+  return { component, routeParams };
+}
 
 describe('ConnectionRecordDetailComponent', () => {
   it('clears visible detail and ignores a pending response after session expiration', async () => {
@@ -81,6 +100,32 @@ describe('ConnectionRecordDetailComponent', () => {
     expect(component.canShowDisconnect(viewerAsset)).toBe(false);
     expect(component.writesAllowed).toBe(false);
     expect(component.writesUnavailableCopy).toContain('Identidade da empresa não confirmada');
+  });
+
+  it('loads the detail for the emitted route ID and clears loading', async () => {
+    const detail = vi.fn<ConnectionCatalogService['detail']>().mockResolvedValue(coexistenceDetailFixture);
+    const { component, routeParams } = createRoutedDetailComponent(detail);
+
+    routeParams.next(convertToParamMap({ id: coexistenceDetailFixture.id }));
+    await settle();
+
+    expect(detail).toHaveBeenCalledWith(coexistenceDetailFixture.id);
+    expect(component.connection).toBe(coexistenceDetailFixture);
+    expect(component.isLoading).toBe(false);
+    component.ngOnDestroy();
+  });
+
+  it('clears loading and shows an error when the detail request rejects', async () => {
+    const detail = vi.fn<ConnectionCatalogService['detail']>().mockRejectedValue(new Error('synthetic detail failure'));
+    const { component, routeParams } = createRoutedDetailComponent(detail);
+
+    routeParams.next(convertToParamMap({ id: coexistenceDetailFixture.id }));
+    await settle();
+
+    expect(detail).toHaveBeenCalledWith(coexistenceDetailFixture.id);
+    expect(component.isLoading).toBe(false);
+    expect(component.errorMessage).toBe('Não foi possível carregar os detalhes desta conexão.');
+    component.ngOnDestroy();
   });
 
   it('renders readable status text, secondary support details, and disabled role-scoped actions', async () => {
