@@ -4599,6 +4599,8 @@ components:
           type: boolean
         canDisconnect:
           type: boolean
+        canRefresh:
+          type: boolean
     AssetListPage:
       type: object
       additionalProperties: false

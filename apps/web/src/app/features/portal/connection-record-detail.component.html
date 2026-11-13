@@ -3,9 +3,9 @@
   <p class="eyebrow">Detalhes da conexão</p>
   <h1 id="connection-detail-title">{{ connection ? flowLabel(connection) : 'Conexão' }}</h1>
 
-  <aside class="identity-warning" role="status" aria-label="Identidade da empresa não confirmada">
+  <aside *ngIf="!writesAllowed" class="identity-warning" role="status" aria-label="Identidade da empresa não confirmada">
     <strong>Identidade da empresa não confirmada</strong>
-    <p>{{ writesUnavailableCopy }} Nenhuma atualização ou tarefa de acompanhamento foi iniciada.</p>
+    <p>{{ writesUnavailableCopy }}</p>
   </aside>
 
   <p *ngIf="isLoading" class="state" role="status">Carregando detalhes da conexão…</p>
@@ -82,10 +82,20 @@
 
           <a *ngIf="canShowAutomationConfig(asset)" class="config-link" [routerLink]="['/assets', asset.id]">Configurar mensagens e respostas deste recurso</a>
 
-          <div *ngIf="canShowReauthorization(asset) || canShowDisconnect(asset)" class="asset-actions" aria-label="Ações indisponíveis">
-            <button *ngIf="canShowReauthorization(asset)" type="button" [disabled]="!writesAllowed" [attr.aria-describedby]="'writes-disabled-' + index">Solicitar reautorização</button>
-            <button *ngIf="canShowDisconnect(asset)" type="button" [disabled]="!writesAllowed" [attr.aria-describedby]="'writes-disabled-' + index">Desconectar este recurso</button>
-            <p [id]="'writes-disabled-' + index">{{ writesUnavailableCopy }} Nenhuma alteração foi iniciada.</p>
+          <div class="asset-actions refresh-actions" aria-label="Atualização de status">
+            <button type="button" [disabled]="!canStartRefresh(asset)" [attr.aria-describedby]="canStartRefresh(asset) ? null : 'refresh-help-' + index" (click)="startRefresh(asset)">Atualizar status</button>
+            <p *ngIf="!canStartRefresh(asset)" [id]="'refresh-help-' + index">{{ refreshDisabledCopy(asset) }}</p>
+            <div *ngIf="refreshState(asset) as refresh" class="refresh-result" role="status" aria-live="polite">
+              <p>{{ refresh.message }}</p>
+              <p *ngIf="refresh.requestId" class="refresh-request">Referência da solicitação: <code>{{ refresh.requestId }}</code></p>
+              <button *ngIf="refresh.canCheck" type="button" [disabled]="refresh.busy" (click)="checkRefreshJob(asset)">Verificar status agora</button>
+            </div>
+          </div>
+
+          <div *ngIf="canShowReauthorization(asset) || canShowDisconnect(asset)" class="asset-actions" aria-label="Outras ações indisponíveis">
+            <button *ngIf="canShowReauthorization(asset)" type="button" disabled>Solicitar reautorização</button>
+            <button *ngIf="canShowDisconnect(asset)" type="button" disabled>Desconectar este recurso</button>
+            <p>Esta ação ainda não está disponível nesta tela.</p>
           </div>
         </article>
       </div>

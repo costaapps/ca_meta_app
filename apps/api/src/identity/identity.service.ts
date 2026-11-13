@@ -214,6 +214,7 @@ const ROLE_PERMISSIONS: Readonly<Record<TenantOperation, readonly MembershipRole
   TENANT_READ: ['owner', 'admin', 'operator', 'viewer'],
   RESOURCE_READ: ['owner', 'admin', 'operator', 'viewer'],
   CONNECT: ['owner', 'admin', 'operator'],
+  REFRESH_ASSET: ['owner', 'admin', 'operator'],
   REAUTHORIZE: ['owner', 'admin', 'operator'],
   DISCONNECT: ['owner', 'admin'],
   REPLAY_EVENT: ['owner', 'admin', 'operator'],

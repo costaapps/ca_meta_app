@@ -3,9 +3,11 @@ import { provideRouter } from '@angular/router';
 import { ChangeDetectorRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { EMPTY, NEVER, Subject, of } from 'rxjs';
+import type { components } from '@ca-meta/contracts';
 import { ConnectionCatalogService, assetStatusCopy, authorizationStatusCopy, connectionStatusCopy, credentialHealthCopy } from '../../core/portal/connection-catalog.service';
 import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalSessionService } from '../../core/portal/portal-session.service';
+import { PortalTenantIdentityService } from '../../core/portal/portal-tenant-identity.service';
 import { coexistenceDetailFixture, fourWhatsAppNumbers, staleRevokedPageFixture } from './fixtures/connection-catalog.fixtures';
 import { ConnectionRecordDetailComponent } from './connection-record-detail.component';
 
@@ -15,6 +17,16 @@ async function settle(): Promise<void> {
   await Promise.resolve();
 }
 
+function tenantIdentity(confirmed = false): PortalTenantIdentityService {
+  return {
+    get current() {
+      return confirmed
+        ? { confirmed: true, tenantDisplayName: 'Empresa sintética', source: 'server-session' }
+        : { confirmed: false, reason: 'TENANT_IDENTITY_UNCONFIRMED', message: 'Identidade da empresa não confirmada' };
+    },
+  } as PortalTenantIdentityService;
+}
+
 function createRoutedDetailComponent(detail: ConnectionCatalogService['detail']) {
   const routeParams = new Subject<ParamMap>();
   const component = new ConnectionRecordDetailComponent(
@@ -22,6 +34,7 @@ function createRoutedDetailComponent(detail: ConnectionCatalogService['detail'])
     { detail } as unknown as ConnectionCatalogService,
     { current: null, ensureCurrentSession: vi.fn() } as unknown as PortalSessionService,
     { contextChanged$: NEVER, sessionExpired$: NEVER } as unknown as PortalContextStore,
+    tenantIdentity(),
     { markForCheck: vi.fn() } as unknown as ChangeDetectorRef,
   );
   component.ngOnInit();
@@ -39,6 +52,7 @@ describe('ConnectionRecordDetailComponent', () => {
       { detail: vi.fn().mockReturnValue(pendingDetail) } as unknown as ConnectionCatalogService,
       {} as PortalSessionService,
       { contextChanged$: NEVER, sessionExpired$: sessionExpired.asObservable() } as unknown as PortalContextStore,
+      tenantIdentity(),
       { markForCheck } as unknown as ChangeDetectorRef,
     );
 
@@ -64,6 +78,7 @@ describe('ConnectionRecordDetailComponent', () => {
   it('keeps four WhatsApp numbers distinct by safe masked labels and per-row ordinals', () => {
     const component = new ConnectionRecordDetailComponent(
       {} as ActivatedRoute, {} as ConnectionCatalogService, {} as PortalSessionService, {} as PortalContextStore,
+      tenantIdentity(),
       { markForCheck: vi.fn() } as unknown as ChangeDetectorRef,
     );
     component.connection = coexistenceDetailFixture;
@@ -83,9 +98,10 @@ describe('ConnectionRecordDetailComponent', () => {
     expect(credentialHealthCopy('ACTION_REQUIRED')).toContain('ação');
   });
 
-  it('shows admin actions only when the server capability grants them and keeps writes disabled without a safe company label', () => {
+  it('shows admin actions only when the server capability grants them and keeps writes disabled without confirmed identity', () => {
     const component = new ConnectionRecordDetailComponent(
       {} as ActivatedRoute, {} as ConnectionCatalogService, {} as PortalSessionService, {} as PortalContextStore,
+      tenantIdentity(),
       { markForCheck: vi.fn() } as unknown as ChangeDetectorRef,
     );
     const adminAsset = staleRevokedPageFixture.assets[0]!;
@@ -100,6 +116,118 @@ describe('ConnectionRecordDetailComponent', () => {
     expect(component.canShowDisconnect(viewerAsset)).toBe(false);
     expect(component.writesAllowed).toBe(false);
     expect(component.writesUnavailableCopy).toContain('Identidade da empresa não confirmada');
+  });
+
+  it('starts only with confirmed identity and server capability, follows the opaque returned job ID, and prevents duplicate requests', async () => {
+    vi.useFakeTimers();
+    try {
+      const routeParams = new Subject<ParamMap>();
+      const originalAsset = staleRevokedPageFixture.assets[0]!;
+      const asset = { ...originalAsset, capabilities: { ...originalAsset.capabilities!, canRefresh: true } };
+      const detail = vi.fn().mockResolvedValue({ ...staleRevokedPageFixture, assets: [asset] });
+      const refresh = vi.fn()
+        .mockResolvedValueOnce({ jobId: 'opaque_job_01', status: 'PENDING', location: '/api/v1/jobs/not-the-job-id', requestId: 'req_refresh_01' })
+        .mockResolvedValueOnce({ jobId: 'opaque_job_02', status: 'PENDING', location: '/api/v1/jobs/ignored', requestId: 'req_refresh_02' });
+      const status = (id: string, jobStatus: 'RUNNING' | 'SUCCEEDED'): components['schemas']['JobStatus'] => ({
+        id, status: jobStatus, operation: 'REFRESH_ASSET',
+        createdAt: '2026-11-10T10:00:00Z', updatedAt: '2026-11-10T10:00:01Z',
+        nextAction: jobStatus === 'SUCCEEDED' ? 'NONE' : 'WAIT', requestId: 'req_job_01',
+      });
+      const job = vi.fn()
+        .mockResolvedValueOnce(status('opaque_job_01', 'RUNNING'))
+        .mockResolvedValueOnce(status('opaque_job_01', 'SUCCEEDED'))
+        .mockResolvedValue(status('opaque_job_02', 'RUNNING'));
+      const component = new ConnectionRecordDetailComponent(
+        { paramMap: routeParams.asObservable() } as unknown as ActivatedRoute,
+        { detail, refresh, job } as unknown as ConnectionCatalogService,
+        { current: {}, ensureCurrentSession: vi.fn() } as unknown as PortalSessionService,
+        { contextChanged$: NEVER, sessionExpired$: NEVER } as unknown as PortalContextStore,
+        tenantIdentity(true),
+        { markForCheck: vi.fn() } as unknown as ChangeDetectorRef,
+      );
+      component.ngOnInit();
+      routeParams.next(convertToParamMap({ id: staleRevokedPageFixture.id }));
+      await settle();
+
+      const loadedAsset = component.connection!.assets[0]!;
+      const start = component.startRefresh(loadedAsset);
+      await settle();
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledWith(originalAsset.id);
+      expect(job).toHaveBeenCalledTimes(1);
+      expect(job).toHaveBeenCalledWith('opaque_job_01');
+      expect(component.canStartRefresh(loadedAsset)).toBe(false);
+      await component.startRefresh(loadedAsset);
+      expect(refresh).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await start;
+      await settle();
+      expect(job).toHaveBeenCalledTimes(2);
+      expect(detail).toHaveBeenCalledTimes(2);
+      expect(component.refreshState(loadedAsset)?.message).toBe('A atualização foi concluída.');
+      expect(component.refreshState(loadedAsset)?.requestId).toBe('req_job_01');
+      expect(component.refreshState(loadedAsset)?.busy).toBe(false);
+
+      const secondStart = component.startRefresh(loadedAsset);
+      await settle();
+      await vi.advanceTimersByTimeAsync(4_000);
+      await secondStart;
+      expect(job).toHaveBeenCalledTimes(7);
+      expect(job.mock.calls.slice(2).every(([jobId]) => jobId === 'opaque_job_02')).toBe(true);
+      expect(component.refreshState(loadedAsset)?.message).toContain('acompanhamento automático foi pausado');
+      expect(component.refreshState(loadedAsset)?.canCheck).toBe(true);
+      await component.checkRefreshJob(loadedAsset);
+      expect(job).toHaveBeenCalledTimes(8);
+      expect(component.refreshState(loadedAsset)?.canCheck).toBe(true);
+      component.ngOnDestroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops polling after tenant context changes while the current job read is pending', async () => {
+    vi.useFakeTimers();
+    try {
+      const routeParams = new Subject<ParamMap>();
+      const contextChanged = new Subject<void>();
+      let resolveJob!: (job: components['schemas']['JobStatus']) => void;
+      const pendingJob = new Promise<components['schemas']['JobStatus']>((resolve) => { resolveJob = resolve; });
+      const originalAsset = staleRevokedPageFixture.assets[0]!;
+      const asset = { ...originalAsset, capabilities: { ...originalAsset.capabilities!, canRefresh: true } };
+      const catalog = {
+        detail: vi.fn().mockResolvedValue({ ...staleRevokedPageFixture, assets: [asset] }),
+        refresh: vi.fn().mockResolvedValue({ jobId: 'opaque_job_02', status: 'PENDING', location: '/api/v1/jobs/ignored', requestId: 'req_refresh_02' }),
+        job: vi.fn().mockReturnValue(pendingJob),
+      };
+      const component = new ConnectionRecordDetailComponent(
+        { paramMap: routeParams.asObservable() } as unknown as ActivatedRoute,
+        catalog as unknown as ConnectionCatalogService,
+        { current: {}, ensureCurrentSession: vi.fn().mockResolvedValue({}) } as unknown as PortalSessionService,
+        { contextChanged$: contextChanged.asObservable(), sessionExpired$: NEVER } as unknown as PortalContextStore,
+        tenantIdentity(true),
+        { markForCheck: vi.fn() } as unknown as ChangeDetectorRef,
+      );
+      component.ngOnInit();
+      routeParams.next(convertToParamMap({ id: staleRevokedPageFixture.id }));
+      await settle();
+      const start = component.startRefresh(component.connection!.assets[0]!);
+      await settle();
+      expect(catalog.job).toHaveBeenCalledTimes(1);
+
+      contextChanged.next();
+      resolveJob({
+        id: 'opaque_job_02', status: 'RUNNING', operation: 'REFRESH_ASSET', createdAt: '2026-11-10T10:00:00Z',
+        updatedAt: '2026-11-10T10:00:01Z', nextAction: 'WAIT', requestId: 'req_job_02',
+      });
+      await start;
+      await settle();
+      expect(catalog.job).toHaveBeenCalledTimes(1);
+      expect(component.refreshStates.size).toBe(0);
+      component.ngOnDestroy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('loads the detail for the emitted route ID and clears loading', async () => {
@@ -137,6 +265,7 @@ describe('ConnectionRecordDetailComponent', () => {
         { provide: ConnectionCatalogService, useValue: { detail: vi.fn() } },
         { provide: PortalSessionService, useValue: { current: null, ensureCurrentSession: vi.fn() } },
         { provide: PortalContextStore, useValue: { contextChanged$: NEVER, sessionExpired$: NEVER } },
+        { provide: PortalTenantIdentityService, useValue: { current: { confirmed: false, reason: 'TENANT_IDENTITY_UNCONFIRMED', message: 'Identidade da empresa não confirmada' } } },
       ],
     }).compileComponents();
     const fixture = TestBed.createComponent(ConnectionRecordDetailComponent);
@@ -150,7 +279,7 @@ describe('ConnectionRecordDetailComponent', () => {
     expect(view.textContent).toContain('Webhook e configuração de eventos');
     expect(view.textContent).toContain('Sincronização empresarial');
     expect(view.querySelector('.status-cue')?.textContent).toContain('Status desatualizado');
-    expect(view.querySelectorAll('button').length).toBe(2);
+    expect(view.querySelectorAll('button').length).toBe(3);
     expect(Array.from(view.querySelectorAll('button')).every((button) => button.disabled)).toBe(true);
     expect(view.querySelector('details summary')?.textContent).toContain('Detalhes técnicos para suporte');
     expect(view.textContent).toContain('req-synthetic-connection-02');

@@ -28,6 +28,7 @@ export type TenantOperation =
   | 'TENANT_READ'
   | 'RESOURCE_READ'
   | 'CONNECT'
+  | 'REFRESH_ASSET'
   | 'REAUTHORIZE'
   | 'DISCONNECT'
   | 'REPLAY_EVENT'
