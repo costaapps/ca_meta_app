@@ -13,6 +13,7 @@ import { MysqlLegacyProjectionCheckpointStore } from '../src/legacy-projection/m
 import { MysqlLegacyProjectionDestination } from '../src/legacy-projection/mysql-legacy-projection.destination.js';
 import { LegacyProjectionService } from '../src/legacy-projection/legacy-projection.service.js';
 import { DurableLegacyProjectionJobScheduler } from '../src/legacy-projection/legacy-projection.jobs.js';
+import { LegacyProjectionError } from '../src/legacy-projection/legacy-projection.types.js';
 import type { LegacyProjectionRecord, LegacyProjectionTargetKey } from '../src/legacy-projection/legacy-projection.types.js';
 import type { OutboxEventEnvelope } from '../src/jobs/event-validation.js';
 
@@ -318,7 +319,11 @@ test('M5.08 MariaDB fault injection: duplicate/order, company isolation, indepen
 
     const tombstone = record('central-page-c', 'destination-b-page', { sourceVersion: 4, status: 'REMOVED', tombstone: true });
     await destinationAdapter.apply({ target: destinationB, tenantId, records: [tombstone], projectionSchemaVersion: 1 });
-    await destinationAdapter.apply({ target: destinationB, tenantId, records: [failingDestination], projectionSchemaVersion: 1 });
+    await assert.rejects(
+      destinationAdapter.apply({ target: destinationB, tenantId, records: [failingDestination], projectionSchemaVersion: 1 }),
+      (error: unknown) => error instanceof LegacyProjectionError && error.safeCode === 'PROJECTION_VERSION_CONFLICT',
+      'a stale active write conflicts instead of silently succeeding over a newer tombstone',
+    );
     const [latest] = await targetB.query(
       `SELECT ProjectionVersion AS version, IsDeleted AS deleted, Status AS status
        FROM MetaConnectedPages WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
