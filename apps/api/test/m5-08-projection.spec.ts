@@ -172,6 +172,54 @@ test('connection projection jobs serialize tenant-wide across authorization even
     'the same authorization reference in another tenant has a separate scope');
 });
 
+test('transient central source reads retry and recover on redelivery', async () => {
+  const destination = new MemoryDestination();
+  const projection = new LegacyProjectionService(new MemoryCheckpointStore(), new MemoryCatalog([{ target: dbACompanyA, destination }]));
+  let sourceReads = 0;
+  const source = {
+    loadCurrent: async () => {
+      sourceReads += 1;
+      if (sourceReads === 1) throw new Error('synthetic central database temporarily unavailable');
+      return snapshot(event('outbox-retry', 1), [{ target: dbACompanyA, records: [record()] }]);
+    },
+    loadTenantCurrent: async () => ({ tenantId, targets: [] }),
+  };
+  const handler = createLegacyProjectionJobHandler(source, projection);
+  const job = {
+    tenantId,
+    type: 'PROJECTION_RECONCILE',
+    payload: { kind: 'PROJECTION_RECONCILE', projectionRef: 'outbox-retry', sourceVersion: 1 },
+  } as unknown as ClaimedJob;
+  const signal = new AbortController().signal;
+  const authorization = {} as VerifiedJobExecutionContext;
+
+  assert.deepEqual(await handler(job, signal, authorization), {
+    kind: 'RETRYABLE_FAILURE', safeErrorCode: 'DEPENDENCY_UNAVAILABLE',
+  });
+  assert.deepEqual(await handler(job, signal, authorization), { kind: 'SUCCEEDED' });
+  assert.equal(sourceReads, 2);
+  assert.equal(destination.rows.size, 1);
+});
+
+test('structured source validation errors remain permanent', async () => {
+  const destination = new MemoryDestination();
+  const projection = new LegacyProjectionService(new MemoryCheckpointStore(), new MemoryCatalog([{ target: dbACompanyA, destination }]));
+  const source = {
+    loadCurrent: async () => { throw new LegacyProjectionError('SOURCE_SCOPE_MISMATCH', 'synthetic tenant scope mismatch'); },
+    loadTenantCurrent: async () => ({ tenantId, targets: [] }),
+  };
+  const handler = createLegacyProjectionJobHandler(source, projection);
+  const job = {
+    tenantId,
+    type: 'PROJECTION_RECONCILE',
+    payload: { kind: 'PROJECTION_RECONCILE', projectionRef: 'outbox-invalid', sourceVersion: 1 },
+  } as unknown as ClaimedJob;
+
+  assert.deepEqual(await handler(job, new AbortController().signal, {} as VerifiedJobExecutionContext), {
+    kind: 'PERMANENT_FAILURE', safeErrorCode: 'SOURCE_SCOPE_MISMATCH',
+  });
+});
+
 test('a transient version conflict retries after reloading current state and preserves the newer tombstone', async () => {
   const destination = new MemoryDestination();
   const store = new MemoryCheckpointStore();
