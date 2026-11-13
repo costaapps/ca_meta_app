@@ -39,6 +39,7 @@ export type TenantOperation =
 
 export type ServiceScope =
   | 'TENANT_RESOURCE_READ'
+  | 'LEGACY_METADATA_PROJECT'
   | 'META_CONNECTION_EXECUTE'
   | 'CREDENTIAL_USE'
   | 'NOTIFICATION_PROJECTION_WRITE'

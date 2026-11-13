@@ -19,6 +19,7 @@
     "test:m5-04": "node ../../tools/m5-04/run-focused-api-test.mjs",
     "test:m5-05": "node ../../tools/m5-05/run-focused-api-test.mjs",
     "test:m5-06": "node ../../tools/m5-06/run-focused-api-test.mjs",
+    "test:m5-08": "node ../../tools/m5-08/run-focused-api-test.mjs",
     "test:m4-01": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/test/m4-01-meta-app-config.spec.js",
     "test:m3-09": "node ../../tools/m3-09/run-focused-test.mjs",
     "test:m3-08": "node ../../tools/m3-08/run-focused-test.mjs",
