@@ -179,6 +179,7 @@ function resourceScope(input: EnqueueJobInput, payload: JobPayload): string {
     case 'CREDENTIAL_INSPECTION': return payload.credentialId;
     case 'ASSET_REFRESH': return payload.assetId;
     case 'TEMPLATE_CREATE': return payload.assetId;
+    case 'NOTIFICATION_ACTION': return payload.notificationId;
   }
 }
 

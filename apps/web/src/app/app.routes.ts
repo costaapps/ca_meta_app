@@ -22,8 +22,7 @@ export const routes: Routes = [
       },
       {
         path: 'notifications',
-        loadComponent: () => import('./features/portal/portal-section.component').then((m) => m.PortalSectionComponent),
-        data: { title: 'Notificações', description: 'As notificações serão exibidas após a confirmação do contexto e da empresa pelo servidor.' },
+        loadComponent: () => import('./features/portal/notifications.component').then((m) => m.NotificationsComponent),
       },
       { path: 'setup/coexistence', loadComponent: () => import('./features/coexistence/coexistence-setup.component').then((m) => m.CoexistenceSetupComponent) },
       // Legacy entry points never carry authentication authority; the session guard still applies.

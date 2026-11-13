@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.test.json",
+  "include": ["src/**/*.ts", "test/m5-06-notifications.integration.spec.ts", "test/m5-06-notification-action.spec.ts"],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}

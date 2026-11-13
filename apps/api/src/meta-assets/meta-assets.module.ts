@@ -45,6 +45,8 @@ import {
   MysqlWhatsAppTemplatesAccountDirectory, WhatsAppTemplatesService,
 } from '../whatsapp-templates/whatsapp-templates.service.js';
 import type { WhatsAppTemplatesProvider } from '../whatsapp-templates/whatsapp-templates.service.js';
+import { NotificationsController } from '../notifications/notifications.controller.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 
 @Module({})
 export class MetaAssetsModule {
@@ -52,7 +54,7 @@ export class MetaAssetsModule {
     return {
       module: MetaAssetsModule,
       imports: [identityModule, JobsModule.register(environment), PrivacyModule.register(environment)],
-      controllers: [AssetCatalogController, WhatsAppTemplatesController, AutomationConfigController],
+      controllers: [AssetCatalogController, WhatsAppTemplatesController, AutomationConfigController, NotificationsController],
       providers: [
         {
           provide: PortalSessionGuard,
@@ -112,6 +114,13 @@ export class MetaAssetsModule {
             contexts: TenantContextService, authorization: TenantAuthorizationService) =>
             new AutomationConfigService(repository, assets, contexts, authorization, environment.nodeEnv),
           inject: [AUTOMATION_CONFIG_REPOSITORY, META_ASSETS_REPOSITORY, TenantContextService, TenantAuthorizationService],
+        },
+        {
+          provide: NotificationsService,
+          useFactory: (database: DurableWorkDatabase, contexts: TenantContextService,
+            authorization: TenantAuthorizationService, serviceAuthorization: ServiceTenantAuthorizationService, jobs: DurableJobStore) =>
+            new NotificationsService(database, contexts, authorization, serviceAuthorization, jobs, false),
+          inject: [DURABLE_WORK_DATABASE, TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService, DURABLE_JOB_STORE],
         },
         { provide: CREDENTIAL_KEY_PROVIDER, useFactory: () => new ConfiguredCredentialKeyProvider(environment.credentialKeyRing) },
         { provide: CREDENTIAL_VAULT_AUTHORIZATION, useClass: FailClosedCredentialVaultAuthorization },
