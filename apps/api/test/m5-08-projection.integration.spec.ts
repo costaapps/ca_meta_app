@@ -268,6 +268,27 @@ test('M5.08 MariaDB fault injection: duplicate/order, company isolation, indepen
     const checkpoint = await checkpointStore.read(tenantId, destinationKeyHash(destinationB), failingDestination.centralRef);
     assert.ok(checkpoint);
     const destinationAdapter = new MysqlLegacyProjectionDestination(destinationB, targetB);
+    const repaired = await destinationAdapter.reconcile({
+      target: destinationB, tenantId, records: [failingDestination], knownOwnedCheckpoints: [checkpoint],
+      projectionSchemaVersion: 1, destinationKeyHash: destinationKeyHash(destinationB),
+    });
+    assert.equal(repaired.parity, 'MATCHED');
+    assert.equal(repaired.actualCount, 1);
+    assert.equal(repaired.actualHash, repaired.expectedHash);
+    await targetB.query(
+      `UPDATE MetaConnectedPages SET DisplayName = 'Corrupted again'
+       WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
+      [destinationB.legacyDatabaseId, destinationB.legacyCompanyId, destinationB.environment, failingDestination.legacyAssetRef],
+    );
+    await destinationAdapter.apply({ target: destinationB, tenantId, records: [failingDestination], projectionSchemaVersion: 1 });
+    const [repairedRow] = await targetB.query(
+      `SELECT DisplayName AS display_name FROM MetaConnectedPages
+       WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
+      [destinationB.legacyDatabaseId, destinationB.legacyCompanyId, destinationB.environment, failingDestination.legacyAssetRef],
+    ) as Array<{ display_name: string }>;
+    assert.equal(repairedRow?.display_name, failingDestination.displayName,
+      'apply and reconcile must repair field drift even when the old ContentHash still matches the source');
+
     const higherVersionActive = record('central-version-conflict', 'destination-version-conflict', { sourceVersion: 10 });
     await destinationAdapter.apply({ target: destinationB, tenantId, records: [higherVersionActive], projectionSchemaVersion: 1 });
     await checkpointStore.record({
@@ -294,27 +315,6 @@ test('M5.08 MariaDB fault injection: duplicate/order, company isolation, indepen
     ) as Array<{ version: number | string; status: string; deleted: number | string }>;
     assert.deepEqual([Number(protectedDestination?.version), protectedDestination?.status, Number(protectedDestination?.deleted)],
       [10, 'ACTIVE', 0]);
-
-    const repaired = await destinationAdapter.reconcile({
-      target: destinationB, tenantId, records: [failingDestination], knownOwnedCheckpoints: [checkpoint],
-      projectionSchemaVersion: 1, destinationKeyHash: destinationKeyHash(destinationB),
-    });
-    assert.equal(repaired.parity, 'MATCHED');
-    assert.equal(repaired.actualCount, 1);
-    assert.equal(repaired.actualHash, repaired.expectedHash);
-    await targetB.query(
-      `UPDATE MetaConnectedPages SET DisplayName = 'Corrupted again'
-       WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
-      [destinationB.legacyDatabaseId, destinationB.legacyCompanyId, destinationB.environment, failingDestination.legacyAssetRef],
-    );
-    await destinationAdapter.apply({ target: destinationB, tenantId, records: [failingDestination], projectionSchemaVersion: 1 });
-    const [repairedRow] = await targetB.query(
-      `SELECT DisplayName AS display_name FROM MetaConnectedPages
-       WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
-      [destinationB.legacyDatabaseId, destinationB.legacyCompanyId, destinationB.environment, failingDestination.legacyAssetRef],
-    ) as Array<{ display_name: string }>;
-    assert.equal(repairedRow?.display_name, failingDestination.displayName,
-      'apply and reconcile must repair field drift even when the old ContentHash still matches the source');
 
     const tombstone = record('central-page-c', 'destination-b-page', { sourceVersion: 4, status: 'REMOVED', tombstone: true });
     await destinationAdapter.apply({ target: destinationB, tenantId, records: [tombstone], projectionSchemaVersion: 1 });
@@ -512,10 +512,12 @@ test('MariaDB source adapter fences tenants, companies, grants and unmapped pare
     const projectionJobs = await centralSource.query(
       `SELECT resource_scope_ref, payload_json FROM ca_meta_jobs
        WHERE tenant_id = ? AND job_type = 'PROJECTION_RECONCILE'`, [sourceTenantA],
-    ) as Array<{ resource_scope_ref: string; payload_json: string | Buffer }>;
+    ) as Array<{ resource_scope_ref: string; payload_json: unknown }>;
     const jobFor = (outboxId: string) => projectionJobs.find((row) => {
-      const value = Buffer.isBuffer(row.payload_json) ? row.payload_json.toString('utf8') : row.payload_json;
-      return (JSON.parse(value) as { projectionRef?: string }).projectionRef === outboxId;
+      const value = Buffer.isBuffer(row.payload_json) ? JSON.parse(row.payload_json.toString('utf8')) as unknown :
+        typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) as unknown : row.payload_json;
+      return typeof value === 'object' && value !== null &&
+        (value as { projectionRef?: unknown }).projectionRef === outboxId;
     });
     const authorizationAJob = jobFor(outboxA.id);
     const sharedAuthorizationJob = jobFor(outboxShared.id);
