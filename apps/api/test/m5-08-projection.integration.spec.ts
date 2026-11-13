@@ -337,7 +337,11 @@ test('M5.08 MariaDB fault injection: duplicate/order, company isolation, indepen
     });
     await destinationAdapter.apply({ target: destinationB, tenantId, records: [activeFirst], projectionSchemaVersion: 1 });
     await destinationAdapter.apply({ target: destinationB, tenantId, records: [tombstoneAfter], projectionSchemaVersion: 1 });
-    await destinationAdapter.apply({ target: destinationB, tenantId, records: [activeFirst], projectionSchemaVersion: 1 });
+    await assert.rejects(
+      destinationAdapter.apply({ target: destinationB, tenantId, records: [activeFirst], projectionSchemaVersion: 1 }),
+      (error: unknown) => error instanceof LegacyProjectionError && error.safeCode === 'PROJECTION_VERSION_CONFLICT',
+      'an old active revision conflicts instead of silently succeeding over a newer tombstone',
+    );
     const [orderLatest] = await targetB.query(
       `SELECT ProjectionVersion AS version, Status AS status, IsDeleted AS deleted FROM MetaConnectedPages
        WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
