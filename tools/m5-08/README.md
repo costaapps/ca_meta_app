@@ -1,5 +1,7 @@
 # M5.08 synthetic legacy projection
 
+The recomposed milestone candidate is based on `44ef7a4610bbaa1c3053ec0d73f66716edbc2a49`. Its central checkpoint migration is v25, following the M5.06 v24 migration; the focused harness deploys the complete contiguous registry through v25.
+
 This slice projects a fresh, tenant-scoped central metadata snapshot to preconstructed destination connections. A destination is selected only by the server-owned `(legacyDatabaseId, legacyCompanyId, environment)` allowlist. Event bodies carry the existing outbox envelope and opaque references; they never choose a database, company, DSN, token or credential. The adapter writes only asset metadata, a central asset reference, projection version/hash and tombstone marker. It does not select or copy automation message text, provider payloads or credentials.
 
 The destination table names and column layout in the integration fixture are **provisional synthetic DDL**, not evidence of the enterprise schemas or deployed consumers. Real mappings, destination catalog provisioning, source data parity and PHP/deployed equivalence remain **Not confirmed**. The normal `JobsModule` composition now gives `OutboxService` a durable projection scheduler, so event, delivery job and `PROJECTION_RECONCILE` intent commit together. The projection worker handler and allowlisted destination runtime remain absent: this change persists intent but does not execute destination writes, and no production destination is configured by this package.
@@ -14,7 +16,7 @@ Run the mapper/service tests without a database:
 npm run test:m5-08 --workspace=@ca-meta/api
 ```
 
-Run the one focused MariaDB integration with the dedicated schemas `ca_meta_m5_08`, `ca_meta_m5_08_dest_a`, and `ca_meta_m5_08_dest_b`:
+Run the one focused MariaDB integration with the fixed fresh schemas `ca_meta_m5_08_v25`, `ca_meta_m5_08_v25_dest_a`, and `ca_meta_m5_08_v25_dest_b`. The test refuses any different database name; it does not accept arbitrary schema names from environment variables:
 
 ```powershell
 $env:M5_08_ENV_FILE = "$env:LOCALAPPDATA\Temp\ca-meta-m5-env-20261111\package-users.env"

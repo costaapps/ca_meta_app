@@ -44,8 +44,8 @@ const checkpointStep: DdlStep = {
 };
 
 const definition = {
-  id: '202611110022-legacy-projection-checkpoints',
-  schemaVersion: 22,
+  id: '202611120025-legacy-projection-checkpoints',
+  schemaVersion: 25,
   minimumSupportedApiVersion: 1,
   steps: [checkpointStep],
 } as const;

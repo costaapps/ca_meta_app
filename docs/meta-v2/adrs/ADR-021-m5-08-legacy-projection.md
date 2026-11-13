@@ -21,7 +21,7 @@ Issue #63 requires durable replication of central metadata through the existing 
 
 The local harness demonstrates atomic queue intent in the caller transaction, same-resource job serialization, retry with a fresh source read after a version conflict, per-company separation when database ID is shared, independent destination failure/retry, tenant-fenced source loading, allowlisted active grants versus revoked grants, missing parent mapping failure, both active/revocation application orders, repair of field corruption with the old hash preserved, and full rebuild ownership/count/hash reporting. It does not prove production table compatibility, a deployed legacy consumer, actual mappings/credentials, source event completeness, deployed PHP equivalence, production backlog behavior, or a live worker installation. These external gates remain **Not confirmed**.
 
-The central checkpoint migration is numbered v22 only on the isolated candidate M5.05 base. The combined milestone order must be reindexed after M5.06 and other M5 packages are integrated; the intended final slot is v25 after #62 v21, #60 v22, #59 v23 and #61 v24. Do not apply this provisional version number to an already merged migration ledger.
+The central checkpoint migration is schema v25 after M5.06 v24 on milestone base `44ef7a4610bbaa1c3053ec0d73f66716edbc2a49`; preceding versions are #62 v21, #60 v22, #59 v23 and #61 v24. The registry and migration-unit fixture must keep this sequence contiguous. This migration creates only the central checkpoint table and does not alter enterprise destination schemas.
 
 ## Review findings and code-snapshot evidence
 

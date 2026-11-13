@@ -23,6 +23,7 @@ import { INTERNAL_ASSET_OPERATIONS_MIGRATION } from '../src/database/migrations/
 import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION, ONBOARDING_COEXISTENCE_LOCK_TABLES } from '../src/database/migrations/onboarding-coexistence-lock.js';
 import { AUTOMATION_CONFIG_MIGRATION, AUTOMATION_CONFIG_TABLES } from '../src/database/migrations/automation-config.js';
 import { NOTIFICATIONS_MIGRATION } from '../src/database/migrations/notifications.js';
+import { LEGACY_PROJECTION_MIGRATION } from '../src/database/migrations/legacy-projection.js';
 import { assertMigrationGrantRecords, CoexistenceLockDeleteGrantRequiredError, safeMigrationError } from '../src/database/migrations/migration-runner.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
@@ -106,9 +107,11 @@ test('migration grants require the lock-trigger definer privilege only on its ex
 
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
   const schemaVersions = MIGRATIONS.map((migration) => migration.schemaVersion);
-  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]);
-  assert.equal(schemaVersions.at(-1), 24);
-  assert.equal(MIGRATIONS.length, 24);
+  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+  assert.equal(schemaVersions.at(-1), 25);
+  assert.equal(MIGRATIONS.length, 25);
+  assert.equal(LEGACY_PROJECTION_MIGRATION.schemaVersion, 25);
+  assert.equal(MIGRATIONS.at(-1)?.id, LEGACY_PROJECTION_MIGRATION.id);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);

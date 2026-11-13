@@ -117,9 +117,9 @@ test('M5.08 MariaDB fault injection: duplicate/order, company isolation, indepen
   const centralName = required('M5_08_CENTRAL_DATABASE_NAME');
   const aName = required('M5_08_DEST_A_DATABASE_NAME');
   const bName = required('M5_08_DEST_B_DATABASE_NAME');
-  assert.equal(centralName, 'ca_meta_m5_08', 'Central integration database must be the dedicated synthetic schema.');
-  assert.equal(aName, 'ca_meta_m5_08_dest_a', 'Destination A must be the dedicated synthetic schema.');
-  assert.equal(bName, 'ca_meta_m5_08_dest_b', 'Destination B must be the dedicated synthetic schema.');
+  assert.equal(centralName, 'ca_meta_m5_08_v25', 'Central integration database must be the fresh v25 synthetic schema.');
+  assert.equal(aName, 'ca_meta_m5_08_v25_dest_a', 'Destination A must be the fresh v25 synthetic schema.');
+  assert.equal(bName, 'ca_meta_m5_08_v25_dest_b', 'Destination B must be the fresh v25 synthetic schema.');
 
   const central = new DurableWorkDatabase({ database: {
     host: centralConfig.host, port: centralConfig.port, name: centralConfig.database,
