@@ -7,7 +7,7 @@ import { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { DurableJobStore } from '../src/jobs/job-store.js';
 import { OutboxService } from '../src/outbox/outbox-service.js';
 import { MysqlLegacyProjectionSource } from '../src/legacy-projection/mysql-legacy-projection.source.js';
-import { destinationKeyHash } from '../src/legacy-projection/legacy-projection.mapper.js';
+import { destinationKeyHash, projectionContentHash } from '../src/legacy-projection/legacy-projection.mapper.js';
 import { AllowlistedLegacyProjectionCatalog } from '../src/legacy-projection/legacy-projection.catalog.js';
 import { MysqlLegacyProjectionCheckpointStore } from '../src/legacy-projection/mysql-legacy-projection-checkpoints.js';
 import { MysqlLegacyProjectionDestination } from '../src/legacy-projection/mysql-legacy-projection.destination.js';
@@ -268,6 +268,33 @@ test('M5.08 MariaDB fault injection: duplicate/order, company isolation, indepen
     const checkpoint = await checkpointStore.read(tenantId, destinationKeyHash(destinationB), failingDestination.centralRef);
     assert.ok(checkpoint);
     const destinationAdapter = new MysqlLegacyProjectionDestination(destinationB, targetB);
+    const higherVersionActive = record('central-version-conflict', 'destination-version-conflict', { sourceVersion: 10 });
+    await destinationAdapter.apply({ target: destinationB, tenantId, records: [higherVersionActive], projectionSchemaVersion: 1 });
+    await checkpointStore.record({
+      tenantId, destinationKeyHash: destinationKeyHash(destinationB), centralRef: higherVersionActive.centralRef,
+      sourceVersion: 3, projectionSchemaVersion: 1, contentHash: projectionContentHash(higherVersionActive),
+      tombstone: false, state: 'SYNCED', safeErrorCode: null,
+    });
+    const lowerVersionTombstone = record('central-version-conflict', 'destination-version-conflict', {
+      sourceVersion: 1, status: 'REMOVED', tombstone: true,
+    });
+    const conflictingProjection = await projection.project(projectionSnapshot(event('lower-version-tombstone', 1), [
+      { target: destinationB, records: [lowerVersionTombstone] },
+    ]));
+    assert.deepEqual([conflictingProjection.destinations[0]?.state, conflictingProjection.destinations[0]?.safeErrorCode],
+      ['PENDING', 'PROJECTION_VERSION_CONFLICT'],
+      'a lower-version current tombstone cannot be marked synced over a different higher-version destination row');
+    const conflictCheckpoint = await checkpointStore.read(tenantId, destinationKeyHash(destinationB), higherVersionActive.centralRef);
+    assert.deepEqual([conflictCheckpoint?.sourceVersion, conflictCheckpoint?.state, conflictCheckpoint?.safeErrorCode],
+      [4, 'PENDING', 'PROJECTION_VERSION_CONFLICT']);
+    const [protectedDestination] = await targetB.query(
+      `SELECT ProjectionVersion AS version, Status AS status, IsDeleted AS deleted FROM MetaConnectedPages
+       WHERE IdDatabase = ? AND IdCompany = ? AND Environment = ? AND IdAsset = ?`,
+      [destinationB.legacyDatabaseId, destinationB.legacyCompanyId, destinationB.environment, higherVersionActive.legacyAssetRef],
+    ) as Array<{ version: number | string; status: string; deleted: number | string }>;
+    assert.deepEqual([Number(protectedDestination?.version), protectedDestination?.status, Number(protectedDestination?.deleted)],
+      [10, 'ACTIVE', 0]);
+
     const repaired = await destinationAdapter.reconcile({
       target: destinationB, tenantId, records: [failingDestination], knownOwnedCheckpoints: [checkpoint],
       projectionSchemaVersion: 1, destinationKeyHash: destinationKeyHash(destinationB),
@@ -361,6 +388,7 @@ test('MariaDB source adapter fences tenants, companies, grants and unmapped pare
   const appA = randomUUID();
   const appB = randomUUID();
   const authorizationA = randomUUID();
+  const authorizationShared = randomUUID();
   const authorizationB = randomUUID();
   const authorizationParentless = randomUUID();
   const assetA = randomUUID();
@@ -415,8 +443,10 @@ test('MariaDB source adapter fences tenants, companies, grants and unmapped pare
        (id, tenant_id, app_configuration_id, provider, environment, provider_authorization_id, authorization_state, version, observed_at, created_at, updated_at)
        VALUES (?, ?, ?, 'META', 'test', NULL, 'ACTIVE', 1, ?, ?, ?),
               (?, ?, ?, 'META', 'test', NULL, 'ACTIVE', 1, ?, ?, ?),
+              (?, ?, ?, 'META', 'test', NULL, 'ACTIVE', 1, ?, ?, ?),
               (?, ?, ?, 'META', 'test', NULL, 'ACTIVE', 1, ?, ?, ?)`,
       [authorizationA, sourceTenantA, appA, timestamp, timestamp, timestamp,
+        authorizationShared, sourceTenantA, appA, timestamp, timestamp, timestamp,
         authorizationB, sourceTenantB, appB, timestamp, timestamp, timestamp,
         authorizationParentless, sourceTenantA, appA, timestamp, timestamp, timestamp],
     );
@@ -440,10 +470,12 @@ test('MariaDB source adapter fences tenants, companies, grants and unmapped pare
         verification_state, verification_source, verification_ref_hash, verified_at, subscription_state, projection_state,
         version, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'META', 'test', NULL, 'ACTIVE', 'VERIFIED', 'META_API', ?, ?, 'UNKNOWN', 'UNKNOWN', 1, ?, ?),
+              (?, ?, ?, ?, 'META', 'test', NULL, 'ACTIVE', 'VERIFIED', 'META_API', ?, ?, 'UNKNOWN', 'UNKNOWN', 1, ?, ?),
               (?, ?, ?, ?, 'META', 'test', NULL, 'REVOKED', 'VERIFIED', 'META_API', ?, ?, 'UNKNOWN', 'UNKNOWN', 1, ?, ?),
               (?, ?, ?, ?, 'META', 'test', NULL, 'ACTIVE', 'VERIFIED', 'META_API', ?, ?, 'UNKNOWN', 'UNKNOWN', 1, ?, ?),
               (?, ?, ?, ?, 'META', 'test', NULL, 'ACTIVE', 'VERIFIED', 'META_API', ?, ?, 'UNKNOWN', 'UNKNOWN', 1, ?, ?)`,
       [sourceTenantA, authorizationA, assetA, appA, 'a'.repeat(64), timestamp, timestamp, timestamp,
+        sourceTenantA, authorizationShared, assetA, appA, 'e'.repeat(64), timestamp, timestamp, timestamp,
         sourceTenantA, authorizationA, assetARevoked, appA, 'b'.repeat(64), timestamp, timestamp, timestamp,
         sourceTenantB, authorizationB, assetB, appB, 'c'.repeat(64), timestamp, timestamp, timestamp,
         sourceTenantA, authorizationParentless, phoneWithoutMappedParent, appA, 'd'.repeat(64), timestamp, timestamp, timestamp],
@@ -473,19 +505,40 @@ test('MariaDB source adapter fences tenants, companies, grants and unmapped pare
     );
 
     const outboxA = await outbox.append(event(`source-a-${randomUUID()}`, 1, sourceTenantA, authorizationA));
+    const outboxShared = await outbox.append(event(`source-shared-${randomUUID()}`, 1, sourceTenantA, authorizationShared));
     const outboxB = await outbox.append(event(`source-b-${randomUUID()}`, 1, sourceTenantB, authorizationB));
     const parentlessEvent = await outbox.append(event(`source-parent-${randomUUID()}`, 1, sourceTenantA, authorizationParentless));
+
+    const projectionJobs = await centralSource.query(
+      `SELECT resource_scope_ref, payload_json FROM ca_meta_jobs
+       WHERE tenant_id = ? AND job_type = 'PROJECTION_RECONCILE'`, [sourceTenantA],
+    ) as Array<{ resource_scope_ref: string; payload_json: string | Buffer }>;
+    const jobFor = (outboxId: string) => projectionJobs.find((row) => {
+      const value = Buffer.isBuffer(row.payload_json) ? row.payload_json.toString('utf8') : row.payload_json;
+      return (JSON.parse(value) as { projectionRef?: string }).projectionRef === outboxId;
+    });
+    const authorizationAJob = jobFor(outboxA.id);
+    const sharedAuthorizationJob = jobFor(outboxShared.id);
+    assert.ok(authorizationAJob && sharedAuthorizationJob);
+    assert.equal(authorizationAJob.resource_scope_ref, sharedAuthorizationJob.resource_scope_ref,
+      'two valid connection.changed events for authorizations linked to one asset share the tenant-wide queue scope');
 
     assert.equal(await source.loadCurrent(sourceTenantA, outboxB.id, 1), undefined,
       'A cannot load B outbox records by changing the event reference.');
     const snapshotA = await source.loadCurrent(sourceTenantA, outboxA.id, 1);
     assert.ok(snapshotA);
+    const snapshotShared = await source.loadCurrent(sourceTenantA, outboxShared.id, 1);
+    assert.ok(snapshotShared);
     assert.deepEqual(snapshotA.targets.map((target) => [target.target.legacyDatabaseId, target.target.legacyCompanyId]),
       [[sharedDatabaseId, sourceTargetA.legacyCompanyId]]);
     const activeA = snapshotA.targets[0]?.records.find((record) => record.centralRef === assetA);
+    const sharedAuthorizationAsset = snapshotShared.targets[0]?.records.find((record) => record.centralRef === assetA);
     const revokedA = snapshotA.targets[0]?.records.find((record) => record.centralRef === assetARevoked);
     assert.deepEqual(activeA?.capabilities, ['PAGES_READ_ENGAGEMENT']);
     assert.equal(activeA?.status, 'ACTIVE');
+    assert.equal(sharedAuthorizationAsset?.status, 'ACTIVE');
+    assert.equal(sharedAuthorizationAsset?.centralRef, activeA?.centralRef,
+      'both authorization events load the same shared central asset');
     assert.deepEqual(revokedA?.capabilities, []);
     assert.equal(revokedA?.status, 'REMOVED');
     assert.equal(snapshotA.targets[0]?.records.some((record) => record.centralRef === assetB), false);
@@ -517,13 +570,49 @@ test('MariaDB source adapter fences tenants, companies, grants and unmapped pare
       ]);
       const projection = new LegacyProjectionService(new MysqlLegacyProjectionCheckpointStore(central), catalog);
       assert.equal((await projection.project(snapshotA)).destinations[0]?.state, 'SYNCED');
+      await centralSource.query(
+        `UPDATE ca_meta_authorizations
+         SET authorization_state = 'REVOKED', version = version + 1, updated_at = UTC_TIMESTAMP(6)
+         WHERE tenant_id = ? AND id = ?`, [sourceTenantA, authorizationShared],
+      );
+      await centralSource.query(
+        `UPDATE ca_meta_asset_authorizations
+         SET state = 'REVOKED', version = version + 1, updated_at = UTC_TIMESTAMP(6)
+         WHERE tenant_id = ? AND authorization_id = ? AND asset_id = ?`, [sourceTenantA, authorizationShared, assetA],
+      );
+      const partialRevocation = await source.loadCurrent(sourceTenantA, outboxShared.id, 1);
+      assert.equal(partialRevocation?.targets[0]?.records.find((record) => record.centralRef === assetA)?.status, 'ACTIVE',
+        'revoking one authorization preserves an asset covered by its other active authorization');
+      assert.equal((await projection.project(partialRevocation!)).destinations[0]?.state, 'SYNCED');
+
+      await centralSource.query(
+        `UPDATE ca_meta_authorizations
+         SET authorization_state = 'REVOKED', version = version + 1, updated_at = UTC_TIMESTAMP(6)
+         WHERE tenant_id = ? AND id = ?`, [sourceTenantA, authorizationA],
+      );
+      await centralSource.query(
+        `UPDATE ca_meta_asset_authorizations
+         SET state = 'REVOKED', version = version + 1, updated_at = UTC_TIMESTAMP(6)
+         WHERE tenant_id = ? AND authorization_id = ? AND asset_id = ?`, [sourceTenantA, authorizationA, assetA],
+      );
+      const fullyRevoked = await source.loadCurrent(sourceTenantA, outboxA.id, 1);
+      assert.equal(fullyRevoked?.targets[0]?.records.find((record) => record.centralRef === assetA)?.status, 'REMOVED',
+        'revoking the last authorization produces a current tombstone from the original outbox event');
+      assert.equal((await projection.project(fullyRevoked!)).destinations[0]?.state, 'SYNCED');
+      const reloadedOldEvent = await source.loadCurrent(sourceTenantA, outboxShared.id, 1);
+      assert.equal(reloadedOldEvent?.targets[0]?.records.find((record) => record.centralRef === assetA)?.status, 'REMOVED',
+        'an old event for the other authorization reloads the current tombstone after revocation');
+      assert.equal((await projection.project(reloadedOldEvent!)).destinations[0]?.state, 'SYNCED');
       const targetRows = await targetA.query(
-        `SELECT IdCompany AS company, CentralAssetRef AS central_ref, CapabilitiesJson AS capabilities
+        `SELECT IdCompany AS company, CentralAssetRef AS central_ref, CapabilitiesJson AS capabilities,
+                Status AS status, IsDeleted AS deleted
          FROM MetaConnectedPages WHERE IdDatabase = ? AND Environment = ? AND IdCompany IN (?, ?)`,
         [sharedDatabaseId, 'test', sourceTargetA.legacyCompanyId, sourceTargetB.legacyCompanyId],
-      ) as Array<{ company: string; central_ref: string; capabilities: string | object }>;
+      ) as Array<{ company: string; central_ref: string; capabilities: string | object; status: string; deleted: number | string }>;
       assert.equal(targetRows.some((row) => row.central_ref === assetB), false);
       assert.ok(targetRows.every((row) => row.company === sourceTargetA.legacyCompanyId));
+      assert.deepEqual([targetRows.find((row) => row.central_ref === assetA)?.status,
+        Number(targetRows.find((row) => row.central_ref === assetA)?.deleted)], ['REMOVED', 1]);
     } finally {
       await targetA.query('DELETE FROM MetaConnectedPages WHERE IdDatabase = ? AND IdCompany IN (?, ?) AND Environment = ?',
         [sharedDatabaseId, sourceTargetA.legacyCompanyId, sourceTargetB.legacyCompanyId, 'test']).catch(() => undefined);

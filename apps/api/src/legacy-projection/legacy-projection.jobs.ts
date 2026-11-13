@@ -24,7 +24,12 @@ export class DurableLegacyProjectionJobScheduler implements LegacyProjectionJobS
   async enqueueWithin(manager: EntityManager, event: OutboxEventEnvelope, outboxEventId: string): Promise<void> {
     if (!projectable(event)) return;
     const digest = createHash('sha256').update(outboxEventId, 'utf8').digest('hex');
-    const resourceRef = typeof event.data['assetRef'] === 'string' ? event.data['assetRef'] : event.aggregateRef;
+    // CONNECTION_CHANGED identifies an authorization, while one asset can belong to
+    // multiple authorizations. Serialize the tenant's connection snapshots together
+    // so two authorization events cannot project competing views concurrently.
+    const resourceRef = event.eventType === 'connection.changed'
+      ? 'tenant-connection-snapshot'
+      : typeof event.data['assetRef'] === 'string' ? event.data['assetRef'] : event.aggregateRef;
     const resourceDigest = createHash('sha256')
       .update(JSON.stringify([event.tenantRef, resourceRef]), 'utf8')
       .digest('hex');
@@ -35,7 +40,7 @@ export class DurableLegacyProjectionJobScheduler implements LegacyProjectionJobS
       correlationId: event.correlationId,
       causationId: event.causationId,
       // The queue fences active jobs by tenant + resourceScopeRef. Keep distinct event
-      // idempotency keys, but serialize every event for the same asset/aggregate.
+      // idempotency keys while serializing shared connection snapshots tenant-wide.
       resourceScopeRef: `projection:${resourceDigest}`,
       payload: { kind: 'PROJECTION_RECONCILE', projectionRef: outboxEventId, sourceVersion: event.aggregateVersion },
     });

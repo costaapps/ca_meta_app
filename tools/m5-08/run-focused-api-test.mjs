@@ -49,6 +49,18 @@ if (integrationEnabled) {
   for (const name of packageKeys) {
     if (!process.env[name]?.trim()) throw new Error(`MariaDB integration requires ${name}; set M5_08_ENV_FILE to the isolated test credential file.`);
   }
+  const fixedIntegrationSettings = new Map([
+    ['M5_08_TEST_DB_HOST', '127.0.0.1'],
+    ['M5_08_TEST_DB_PORT', '13307'],
+    ['M5_08_CENTRAL_DATABASE_NAME', 'ca_meta_m5_08_v25'],
+    ['M5_08_DEST_A_DATABASE_NAME', 'ca_meta_m5_08_v25_dest_a'],
+    ['M5_08_DEST_B_DATABASE_NAME', 'ca_meta_m5_08_v25_dest_b'],
+  ]);
+  for (const [name, expected] of fixedIntegrationSettings) {
+    if (process.env[name] !== expected) {
+      throw new Error(`MariaDB integration refuses to migrate because ${name} does not match the fixed disposable M5.08 v25 target.`);
+    }
+  }
   process.env.MIGRATION_DATABASE_HOST = process.env.M5_08_TEST_DB_HOST;
   process.env.MIGRATION_DATABASE_PORT = process.env.M5_08_TEST_DB_PORT;
   process.env.MIGRATION_DATABASE_NAME = process.env.M5_08_CENTRAL_DATABASE_NAME;

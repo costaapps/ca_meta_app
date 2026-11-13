@@ -5,7 +5,6 @@ import { OutboxService } from '../outbox/outbox-service.js';
 import { DurableWorkDatabase } from './durable-work-database.js';
 import { DurableJobStore } from './job-store.js';
 import { FailClosedReplayAuthorizationPort, ReplayDryRunService } from './replay-dry-run.js';
-import { DurableLegacyProjectionJobScheduler } from '../legacy-projection/legacy-projection.jobs.js';
 
 export const DURABLE_WORK_DATABASE = Symbol('DURABLE_WORK_DATABASE');
 export const DURABLE_JOB_STORE = Symbol('DURABLE_JOB_STORE');
@@ -31,7 +30,7 @@ export class JobsModule {
         {
           provide: OutboxService,
           useFactory: (database: DurableWorkDatabase, jobs: DurableJobStore) =>
-            new OutboxService(database, jobs, new DurableLegacyProjectionJobScheduler(jobs)),
+            new OutboxService(database, jobs),
           inject: [DURABLE_WORK_DATABASE, DURABLE_JOB_STORE],
         },
         {

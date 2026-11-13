@@ -20,12 +20,17 @@ const dbACompanyA: LegacyProjectionTargetKey = { legacyDatabaseId: 'synthetic-db
 const dbACompanyB: LegacyProjectionTargetKey = { legacyDatabaseId: 'synthetic-db', legacyCompanyId: 'company-b', environment: 'test' };
 const dbBCompanyC: LegacyProjectionTargetKey = { legacyDatabaseId: 'synthetic-db-b', legacyCompanyId: 'company-c', environment: 'test' };
 
-function event(eventId: string, aggregateVersion: number): OutboxEventEnvelope {
+function event(
+  eventId: string,
+  aggregateVersion: number,
+  connectionRef = 'connection-ref',
+  eventTenantId = tenantId,
+): OutboxEventEnvelope {
   return Object.freeze({
-    eventId, tenantRef: tenantId, schemaVersion: 1, eventType: 'connection.changed', aggregateRef: 'connection-ref',
+    eventId, tenantRef: eventTenantId, schemaVersion: 1, eventType: 'connection.changed', aggregateRef: connectionRef,
     aggregateVersion, actor: { kind: 'SYSTEM' as const, ref: 'projection-test' }, correlationId: 'corr-m5-08', causationId: null,
     createdAt: '2026-11-11T00:00:00.000Z', enqueuedAt: '2026-11-11T00:00:00.000Z',
-    data: { kind: 'CONNECTION_CHANGED', connectionRef: 'connection-ref', status: 'ACTIVE', observedAt: '2026-11-11T00:00:00.000Z' },
+    data: { kind: 'CONNECTION_CHANGED', connectionRef, status: 'ACTIVE', observedAt: '2026-11-11T00:00:00.000Z' },
   });
 }
 
@@ -144,7 +149,7 @@ test('projection is idempotent and reprocessing a current tombstone does not res
   assert.equal(projected?.status, 'REMOVED');
 });
 
-test('projection jobs share a stable scheduling scope for the same tenant aggregate', async () => {
+test('connection projection jobs serialize tenant-wide across authorization events', async () => {
   const queued: EnqueueJobInput[] = [];
   const jobs = {
     enqueueWithin: async (_manager: EntityManager, input: EnqueueJobInput) => {
@@ -153,22 +158,18 @@ test('projection jobs share a stable scheduling scope for the same tenant aggreg
     },
   } as unknown as JobStore;
   const scheduler = new DurableLegacyProjectionJobScheduler(jobs);
-  const first = event('event-a', 1);
-  const second = event('event-b', 2);
-  const third = event('event-c', 1);
-  await scheduler.enqueueWithin({} as EntityManager, {
-    ...first, aggregateRef: 'connection-a', data: { ...first.data, assetRef: 'same-resource-ref' },
-  }, 'outbox-a');
-  await scheduler.enqueueWithin({} as EntityManager, {
-    ...second, aggregateRef: 'connection-b', data: { ...second.data, assetRef: 'same-resource-ref' },
-  }, 'outbox-b');
-  await scheduler.enqueueWithin({} as EntityManager, {
-    ...third, data: { ...third.data, assetRef: 'different-resource-ref' },
-  }, 'outbox-c');
+  const authorizationA = event('event-a', 1, 'authorization-a');
+  const authorizationB = event('event-b', 1, 'authorization-b');
+  const otherTenant = event('event-c', 1, 'authorization-a', '90000000-0000-4000-8000-000000000099');
+  await scheduler.enqueueWithin({} as EntityManager, authorizationA, 'outbox-a');
+  await scheduler.enqueueWithin({} as EntityManager, authorizationB, 'outbox-b');
+  await scheduler.enqueueWithin({} as EntityManager, otherTenant, 'outbox-c');
 
   assert.notEqual(queued[0]?.idempotencyKey, queued[1]?.idempotencyKey, 'different events retain distinct idempotency');
-  assert.equal(queued[0]?.resourceScopeRef, queued[1]?.resourceScopeRef, 'same asset jobs serialize across aggregate events');
-  assert.notEqual(queued[0]?.resourceScopeRef, queued[2]?.resourceScopeRef, 'unrelated resources stay independent');
+  assert.equal(queued[0]?.resourceScopeRef, queued[1]?.resourceScopeRef,
+    'valid CONNECTION_CHANGED events for different authorizations serialize tenant-wide');
+  assert.notEqual(queued[0]?.resourceScopeRef, queued[2]?.resourceScopeRef,
+    'the same authorization reference in another tenant has a separate scope');
 });
 
 test('a transient version conflict retries after reloading current state and preserves the newer tombstone', async () => {

@@ -170,7 +170,12 @@ export class MysqlLegacyProjectionDestination implements LegacyProjectionDestina
         const hash = projectionContentHash(record);
         if (existing) {
           const version = Number(existing.ProjectionVersion);
-          if (record.sourceVersion < version) continue;
+          if (record.sourceVersion < version) {
+            const actualHash = contentHashFromDestinationRow(table, existing);
+            if (actualHash === hash && existing.ContentHash === hash) continue;
+            throw new LegacyProjectionError('PROJECTION_VERSION_CONFLICT',
+              'A newer destination revision contains different projection content.');
+          }
           if (record.sourceVersion === version) {
             const actualHash = contentHashFromDestinationRow(table, existing);
             if (actualHash === hash && existing.ContentHash === hash) continue;
