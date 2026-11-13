@@ -17,6 +17,140 @@ const writerColumns = [
   'unresolved_external_effects', 'drift_reconciled_snapshot_hash', 'version', 'created_at', 'updated_at',
 ] as const;
 
+interface ForeignKeyShape {
+  readonly name: string;
+  readonly columns: readonly string[];
+  readonly table: string;
+  readonly referencedColumns: readonly string[];
+  readonly updateRule: 'RESTRICT';
+  readonly deleteRule: 'RESTRICT';
+}
+
+interface CheckShape {
+  readonly name: string;
+  readonly clause: string;
+}
+
+const batchForeignKeys: readonly ForeignKeyShape[] = [
+  { name: 'fk_ca_meta_migration_manifest_import_batch', columns: ['batch_id'], table: 'ca_meta_legacy_import_batches',
+    referencedColumns: ['batch_id'], updateRule: 'RESTRICT', deleteRule: 'RESTRICT' },
+];
+const batchChecks: readonly CheckShape[] = [
+  { name: 'ck_ca_meta_migration_manifest_counts', clause: 'candidate_rows + quarantined_rows = planned_rows' },
+  { name: 'ck_ca_meta_migration_manifest_state', clause: "state IN ('PLANNED', 'APPLYING', 'PAUSED', 'COMPLETED', 'FAILED')" },
+];
+const writerForeignKeys: readonly ForeignKeyShape[] = [
+  { name: 'fk_ca_meta_migration_cohort_tenant', columns: ['tenant_id'], table: 'ca_meta_tenants',
+    referencedColumns: ['id'], updateRule: 'RESTRICT', deleteRule: 'RESTRICT' },
+];
+const writerChecks: readonly CheckShape[] = [
+  { name: 'ck_ca_meta_migration_cohort_channel', clause: "channel_family IN ('WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE', 'FACEBOOK', 'INSTAGRAM')" },
+  { name: 'ck_ca_meta_migration_cohort_consumer', clause: "consumer_kind IN ('PORTAL', 'LEGACY_PHP', 'INTERNAL_WORKER', 'WEBHOOK_INGRESS', 'OTHER_INTERNAL')" },
+  { name: 'ck_ca_meta_migration_cohort_function', clause: "function_name IN ('CONFIGURATION', 'CREDENTIAL_REFERENCE', 'LEGACY_PROJECTION', 'OPERATION_RELAY', 'WEBHOOK_DISPATCH')" },
+  { name: 'ck_ca_meta_migration_cohort_writer', clause: "writer_owner IN ('LEGACY', 'CENTRAL', 'PROJECTOR', 'RELAY', 'NEW')" },
+  { name: 'ck_ca_meta_migration_cohort_phase', clause: "phase IN ('PREPARED', 'SHADOW_READ', 'CUTOVER', 'PAUSED', 'ROLLED_BACK')" },
+];
+
+function normalizeCheckClause(value: string | Buffer): string {
+  const text = Buffer.isBuffer(value) ? value.toString('utf8') : value;
+  let normalized = '';
+  let inString = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (inString) {
+      normalized += character;
+      if (character === '\\' && index + 1 < text.length) normalized += text[++index]!;
+      else if (character === "'" && text[index + 1] === "'") normalized += text[++index]!;
+      else if (character === "'") inString = false;
+      continue;
+    }
+    if (character === "'") {
+      inString = true;
+      normalized += character;
+    } else if (character !== '`' && !/\s/u.test(character)) normalized += character.toLowerCase();
+  }
+
+  while (normalized.startsWith('(') && normalized.endsWith(')')) {
+    let depth = 0;
+    let quoted = false;
+    let wrapsWholeClause = true;
+    for (let index = 0; index < normalized.length; index += 1) {
+      const character = normalized[index]!;
+      if (quoted) {
+        if (character === '\\' && index + 1 < normalized.length) index += 1;
+        else if (character === "'" && normalized[index + 1] === "'") index += 1;
+        else if (character === "'") quoted = false;
+        continue;
+      }
+      if (character === "'") quoted = true;
+      else if (character === '(') depth += 1;
+      else if (character === ')') {
+        depth -= 1;
+        if (depth === 0 && index < normalized.length - 1) {
+          wrapsWholeClause = false;
+          break;
+        }
+      }
+    }
+    if (!wrapsWholeClause || depth !== 0) break;
+    normalized = normalized.slice(1, -1);
+  }
+  return normalized;
+}
+
+async function verifyForeignKeys(
+  queryRunner: QueryRunner,
+  table: string,
+  expected: readonly ForeignKeyShape[],
+): Promise<void> {
+  const rows = await queryRunner.query(
+    `SELECT DATABASE() AS current_schema, k.constraint_name AS name, k.column_name AS column_name,
+            k.referenced_table_schema AS referenced_schema, k.referenced_table_name AS referenced_table,
+            k.referenced_column_name AS referenced_column, r.update_rule AS update_rule, r.delete_rule AS delete_rule
+     FROM information_schema.key_column_usage k
+     JOIN information_schema.referential_constraints r
+       ON r.constraint_schema = k.constraint_schema AND r.table_name = k.table_name AND r.constraint_name = k.constraint_name
+     WHERE k.table_schema = DATABASE() AND k.table_name = ? AND k.referenced_table_name IS NOT NULL
+     ORDER BY k.constraint_name, k.ordinal_position`,
+    [table],
+  ) as Array<{ current_schema: string; name: string; column_name: string; referenced_schema: string; referenced_table: string;
+    referenced_column: string; update_rule: string; delete_rule: string }>;
+  const actual = new Map<string, { columns: string[]; schema: string; currentSchema: string; table: string; referencedColumns: string[];
+    updateRule: string; deleteRule: string }>();
+  for (const row of rows) {
+    const foreignKey = actual.get(row.name) ?? {
+      columns: [], schema: row.referenced_schema, currentSchema: row.current_schema, table: row.referenced_table, referencedColumns: [],
+      updateRule: row.update_rule, deleteRule: row.delete_rule,
+    };
+    foreignKey.columns.push(row.column_name);
+    foreignKey.referencedColumns.push(row.referenced_column);
+    actual.set(row.name, foreignKey);
+  }
+  if (rows.some((row) => row.referenced_schema !== row.current_schema) || actual.size !== expected.length || expected.some((foreignKey) => {
+    const found = actual.get(foreignKey.name);
+    return !found || found.schema !== found.currentSchema || found.table !== foreignKey.table ||
+      found.columns.join('\0') !== foreignKey.columns.join('\0') ||
+      found.referencedColumns.join('\0') !== foreignKey.referencedColumns.join('\0') ||
+      found.updateRule.toUpperCase() !== foreignKey.updateRule || found.deleteRule.toUpperCase() !== foreignKey.deleteRule;
+  })) throw new Error(`Migration found an incompatible foreign key on ${table}.`);
+}
+
+async function verifyChecks(queryRunner: QueryRunner, table: string, expected: readonly CheckShape[]): Promise<void> {
+  const rows = await queryRunner.query(
+    `SELECT tc.constraint_name AS name, cc.check_clause AS clause
+     FROM information_schema.table_constraints tc
+     LEFT JOIN information_schema.check_constraints cc
+       ON cc.constraint_schema = tc.constraint_schema AND cc.constraint_name = tc.constraint_name
+     WHERE tc.table_schema = DATABASE() AND tc.table_name = ? AND tc.constraint_type = 'CHECK'`,
+    [table],
+  ) as Array<{ name: string; clause: string | Buffer | null }>;
+  const expectedByName = new Map(expected.map((check) => [check.name, normalizeCheckClause(check.clause)]));
+  if (rows.length !== expected.length || rows.some((row) => row.clause === null ||
+      expectedByName.get(row.name) !== normalizeCheckClause(row.clause))) {
+    throw new Error(`Migration found incompatible CHECK constraints on ${table}.`);
+  }
+}
+
 async function verifyIndexes(
   queryRunner: QueryRunner,
   table: string,
@@ -75,12 +209,13 @@ const batches: DdlStep = {
     CONSTRAINT ck_ca_meta_migration_manifest_counts CHECK (candidate_rows + quarantined_rows = planned_rows),
     CONSTRAINT ck_ca_meta_migration_manifest_state CHECK (state IN ('PLANNED', 'APPLYING', 'PAUSED', 'COMPLETED', 'FAILED'))
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
-  definitionVersion: 'v1',
+  definitionVersion: 'v2',
   definition: JSON.stringify({ table: 'ca_meta_migration_batch_manifests', columns: batchColumns,
     indexes: ['PRIMARY(batch_id)', 'UNIQUE(source_snapshot_hash,projection_version)', 'state,updated_at'],
-    foreignKeys: ['batch_id -> ca_meta_legacy_import_batches(batch_id)'],
+    foreignKeys: batchForeignKeys, checks: batchChecks,
     safeFields: ['source snapshot hash', 'source version', 'projection version', 'catalog alias', 'aggregate counts', 'checkpoint'],
-    verifier: [assertExpectedColumns.toString(), verifyIndexes.toString(), tableExists.toString()] }),
+    verifier: [assertExpectedColumns.toString(), verifyIndexes.toString(), verifyForeignKeys.toString(),
+      verifyChecks.toString(), normalizeCheckClause.toString(), tableExists.toString()] }),
   retryWhenAbsent: true,
   verify: async ({ queryRunner }) => {
     if (!(await tableExists(queryRunner, 'ca_meta_migration_batch_manifests'))) return false;
@@ -90,6 +225,8 @@ const batches: DdlStep = {
       ['uq_ca_meta_migration_batch_snapshot', { columns: ['source_snapshot_hash', 'projection_version'], unique: true }],
       ['ix_ca_meta_migration_batch_state', { columns: ['state', 'updated_at'], unique: false }],
     ]));
+    await verifyForeignKeys(queryRunner, 'ca_meta_migration_batch_manifests', batchForeignKeys);
+    await verifyChecks(queryRunner, 'ca_meta_migration_batch_manifests', batchChecks);
     return true;
   },
 };
@@ -125,13 +262,13 @@ const cohortWriters: DdlStep = {
     CONSTRAINT ck_ca_meta_migration_cohort_writer CHECK (writer_owner IN ('LEGACY', 'CENTRAL', 'PROJECTOR', 'RELAY', 'NEW')),
     CONSTRAINT ck_ca_meta_migration_cohort_phase CHECK (phase IN ('PREPARED', 'SHADOW_READ', 'CUTOVER', 'PAUSED', 'ROLLED_BACK'))
   ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_bin`,
-  definitionVersion: 'v1',
+  definitionVersion: 'v2',
   definition: JSON.stringify({ table: 'ca_meta_migration_cohort_writers', columns: writerColumns,
     indexes: ['PRIMARY(tenant_id,channel_family,consumer_kind,function_name)',
       'UNIQUE(cohort_id,function_name)', 'cohort_id'],
-    foreignKeys: ['tenant_id -> ca_meta_tenants(id)'],
-    checks: ['channel family allowlist', 'consumer kind allowlist', 'function allowlist', 'writer owner allowlist', 'phase allowlist'],
-    verifier: [assertExpectedColumns.toString(), verifyIndexes.toString(), tableExists.toString()] }),
+    foreignKeys: writerForeignKeys, checks: writerChecks,
+    verifier: [assertExpectedColumns.toString(), verifyIndexes.toString(), verifyForeignKeys.toString(),
+      verifyChecks.toString(), normalizeCheckClause.toString(), tableExists.toString()] }),
   retryWhenAbsent: true,
   verify: async ({ queryRunner }) => {
     if (!(await tableExists(queryRunner, 'ca_meta_migration_cohort_writers'))) return false;
@@ -141,6 +278,8 @@ const cohortWriters: DdlStep = {
       ['uq_ca_meta_migration_cohort_function', { columns: ['cohort_id', 'function_name'], unique: true }],
       ['ix_ca_meta_migration_cohort_id', { columns: ['cohort_id'], unique: false }],
     ]));
+    await verifyForeignKeys(queryRunner, 'ca_meta_migration_cohort_writers', writerForeignKeys);
+    await verifyChecks(queryRunner, 'ca_meta_migration_cohort_writers', writerChecks);
     return true;
   },
 };
