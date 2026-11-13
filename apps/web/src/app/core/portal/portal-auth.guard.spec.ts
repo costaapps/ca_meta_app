@@ -15,6 +15,17 @@ describe('safeReturnUrl', () => {
     expect(safeReturnUrl('/connections/asset.123')).toBe('/connections');
   });
 
+  it('preserves the exact status route while rejecting nested paths and unsafe query parameters', () => {
+    expect(safeReturnUrl('/status')).toBe('/status');
+    expect(safeReturnUrl('/status/extra')).toBe('/connections');
+    expect(safeReturnUrl('/status?cUUID=tenant-secret&state=synthetic-state')).toBe('/status');
+  });
+
+  it('preserves a connection detail route with one opaque identifier segment', () => {
+    expect(safeReturnUrl('/connections/connection_123')).toBe('/connections/connection_123');
+    expect(safeReturnUrl('/connections/connection/extra')).toBe('/connections');
+  });
+
   it('does not carry cUUID, ticket or callback success claims into a post-entry redirect', () => {
     expect(safeReturnUrl('/setup?cUUID=tenant-secret&auth_success=true&ticket=synthetic')).toBe('/connections');
     expect(safeReturnUrl('/connections?cUUID=old-tenant&ticket=synthetic')).toBe('/connections');

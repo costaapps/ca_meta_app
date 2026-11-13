@@ -3,7 +3,7 @@ export function safeReturnUrl(value: string): string {
   const [path, query = ''] = value.split('?', 2);
   if (path === '/access' || path === '/embed' || path === '/oauth/return' || path === '/setup' ||
       path.startsWith('/setup/') || path === '/channels') return '/connections';
-  const safePaths = path === '/connections' || path === '/templates' || path === '/notifications' ||
+  const safePaths = path === '/connections' || path === '/templates' || path === '/notifications' || path === '/status' ||
     /^\/connections\/new\/[a-z-]+$/.test(path) || /^\/connections\/[A-Za-z0-9_-]{1,128}$/.test(path) ||
     /^\/assets\/[A-Za-z0-9_-]{1,128}$/.test(path);
   if (!safePaths) return '/connections';

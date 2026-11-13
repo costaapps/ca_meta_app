@@ -1222,6 +1222,132 @@ paths:
       x-retry-policy: State is single-use. A duplicate callback is rejected or safely
         resumes the same recorded operation; ambiguous exchange becomes UNKNOWN
         and is reconciled before retry.
+  /api/v1/operations/diagnostics:
+    get:
+      operationId: getOperationsDiagnostics
+      tags:
+        - Operations
+      summary: Read safe diagnostics for the current tenant
+      description: The tenant is derived from the authenticated portal session and
+        current server-validated context. The request accepts no tenant ID. The
+        read model contains status, counts, safe reason codes, timestamps,
+        request correlation and contract/read-model versions only. Missing
+        adapters remain UNKNOWN. Credential bytes, provider URLs and IDs,
+        payloads, messages and contact details are excluded.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Safe current-tenant operational summary
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationsDiagnostics"
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "409": *a15
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/support/diagnostics/export:
+    get:
+      operationId: exportSupportDiagnostics
+      tags:
+        - Operations
+      summary: Export audited support diagnostics for the current tenant
+      description: The current tenant comes only from the authenticated session and
+        server-validated context. A trusted SUPPORT grant (maximum lifetime 15
+        minutes) and fixed reason code are required and audited before the data
+        is read. This route accepts no tenant ID. The export uses the same
+        closed redaction and status-only allowlist as the portal read model.
+      security: *a10
+      parameters:
+        - $ref: "#/components/parameters/TenantContext"
+        - name: reasonCode
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/OperationsReasonCode"
+      responses:
+        "200":
+          description: Sanitized export; support access is audited before the read
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationsDiagnostics"
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/operations/actions:
+    post:
+      operationId: requestOperationsAction
+      tags:
+        - Operations
+      summary: Request a tenant-scoped operational action
+      description: Every action requires a fixed reason code, current portal context
+        and idempotency key. The request has no tenant field. User actions use
+        current membership roles and existing typed handlers; tenant writes
+        remain unavailable while the session has no trusted company identity.
+        Support actions require a trusted SUPPORT grant with a maximum 15-minute
+        lifetime. Unsupported adapters return a typed unavailable outcome.
+        Replay is accepted only for a support-authorized dead letter whose
+        stored effect mode and deterministic replay key permit it; UNKNOWN or
+        ambiguous outcomes are never directly resent.
+      security: *a10
+      parameters:
+        - $ref: "#/components/parameters/TenantContext"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperationsActionRequest"
+            examples:
+              revalidate:
+                summary: Request a status refresh for one tenant-owned resource
+                value:
+                  action: REVALIDATE
+                  resourceRef: 10000000-0000-4000-8000-000000000004
+                  reasonCode: CUSTOMER_REQUEST
+      responses:
+        "200":
+          description: Typed action outcome; unavailable and ambiguous actions are never
+            reported as accepted
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationsActionResult"
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "429": *a19
+        "503": *a20
+        default: *a21
   /api/v1/connections:
     get:
       operationId: listConnections
@@ -3507,6 +3633,397 @@ components:
             - APPLIED
             - DUPLICATE
             - UNMAPPED
+    OperationsReasonCode:
+      type: string
+      enum:
+        - INCIDENT
+        - CUSTOMER_REQUEST
+        - SECURITY_REVIEW
+    OperationsActionRequest:
+      oneOf:
+        - $ref: "#/components/schemas/OperationsRevalidateRequest"
+        - $ref: "#/components/schemas/OperationsResumeStageRequest"
+        - $ref: "#/components/schemas/OperationsReconcileSubscriptionRequest"
+        - $ref: "#/components/schemas/OperationsRequestReauthRequest"
+        - $ref: "#/components/schemas/OperationsReplayJobRequest"
+    OperationsRevalidateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+        - resourceRef
+        - reasonCode
+      properties:
+        action:
+          type: string
+          const: REVALIDATE
+        resourceRef:
+          type: string
+          format: uuid
+        reasonCode:
+          $ref: "#/components/schemas/OperationsReasonCode"
+    OperationsResumeStageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+        - resourceRef
+        - stage
+        - reasonCode
+      properties:
+        action:
+          type: string
+          const: RESUME_STAGE
+        resourceRef:
+          type: string
+          format: uuid
+        stage:
+          type: string
+          enum:
+            - authorization
+            - asset-verification
+            - subscription
+            - projection
+        reasonCode:
+          $ref: "#/components/schemas/OperationsReasonCode"
+    OperationsReconcileSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+        - resourceRef
+        - reasonCode
+      properties:
+        action:
+          type: string
+          const: RECONCILE_SUBSCRIPTION
+        resourceRef:
+          type: string
+          format: uuid
+        reasonCode:
+          $ref: "#/components/schemas/OperationsReasonCode"
+    OperationsRequestReauthRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+        - resourceRef
+        - reasonCode
+      properties:
+        action:
+          type: string
+          const: REQUEST_REAUTH
+        resourceRef:
+          type: string
+          format: uuid
+        reasonCode:
+          $ref: "#/components/schemas/OperationsReasonCode"
+    OperationsReplayJobRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+        - resourceRef
+        - reasonCode
+      properties:
+        action:
+          type: string
+          const: REPLAY_JOB
+        resourceRef:
+          type: string
+          format: uuid
+        reasonCode:
+          $ref: "#/components/schemas/OperationsReasonCode"
+    OperationsActionResult:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+        - outcome
+        - reasonCode
+        - requestId
+        - operationRef
+      properties:
+        action:
+          type: string
+          enum:
+            - REVALIDATE
+            - RESUME_STAGE
+            - RECONCILE_SUBSCRIPTION
+            - REQUEST_REAUTH
+            - REPLAY_JOB
+        outcome:
+          type: string
+          enum:
+            - ACCEPTED
+            - DUPLICATE
+            - UNAVAILABLE
+            - REJECTED
+        reasonCode:
+          type: string
+          enum:
+            - AUDIT_UNAVAILABLE
+            - REFRESH_QUEUED
+            - REFRESH_ADAPTER_UNAVAILABLE
+            - TENANT_IDENTITY_NOT_CONFIRMED
+            - STAGE_RESUME_QUEUED
+            - ONBOARDING_ADAPTER_UNAVAILABLE
+            - REAUTHORIZATION_REQUESTED
+            - REAUTHORIZATION_NOT_CONFIGURED
+            - SUPPORT_ROLE_NOT_CONFIRMED
+            - SUBSCRIPTION_ADAPTER_NOT_CONFIRMED
+            - DEAD_LETTER_NOT_FOUND
+            - AUTHORIZATION_DENIED
+            - AUTHORIZATION_UNAVAILABLE
+            - AUTHORIZATION_EXPIRED
+            - GRANT_INVALID
+            - SCOPE_MISMATCH
+            - AMBIGUOUS_EFFECT_NOT_REPLAYABLE
+            - REPLAY_ENQUEUED
+            - REPLAY_DUPLICATE
+            - DRY_RUN_AUTHORIZED
+        requestId:
+          type: string
+          format: uuid
+        operationRef:
+          type:
+            - string
+            - "null"
+          maxLength: 128
+    OperationsDiagnosticSection:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - reasonCode
+        - observedAt
+      properties:
+        state:
+          type: string
+          enum:
+            - HEALTHY
+            - ACTION_REQUIRED
+            - PENDING
+            - FAILED
+            - UNKNOWN
+        reasonCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: ^[A-Z0-9_]+$
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+    OperationsOnboardingSection:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - reasonCode
+        - observedAt
+        - nextAction
+      properties:
+        state:
+          type: string
+          enum:
+            - HEALTHY
+            - ACTION_REQUIRED
+            - PENDING
+            - FAILED
+            - UNKNOWN
+        reasonCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: ^[A-Z0-9_]+$
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        nextAction:
+          type:
+            - string
+            - "null"
+          maxLength: 32
+    OperationsGrantsSection:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - reasonCode
+        - observedAt
+        - grantedCount
+        - revokedCount
+      properties:
+        state:
+          type: string
+          enum:
+            - HEALTHY
+            - ACTION_REQUIRED
+            - PENDING
+            - FAILED
+            - UNKNOWN
+        reasonCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: ^[A-Z0-9_]+$
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        grantedCount:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        revokedCount:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+    OperationsJobsSection:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - reasonCode
+        - observedAt
+        - counts
+      properties:
+        state:
+          type: string
+          enum:
+            - HEALTHY
+            - ACTION_REQUIRED
+            - PENDING
+            - FAILED
+            - UNKNOWN
+        reasonCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: ^[A-Z0-9_]+$
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        counts:
+          type: object
+          maxProperties: 16
+          additionalProperties:
+            type: integer
+            minimum: 0
+    OperationsProjectionSection:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - reasonCode
+        - observedAt
+        - pendingCount
+        - failedCount
+        - lagSeconds
+      properties:
+        state:
+          type: string
+          enum:
+            - HEALTHY
+            - ACTION_REQUIRED
+            - PENDING
+            - FAILED
+            - UNKNOWN
+        reasonCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: ^[A-Z0-9_]+$
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        pendingCount:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        failedCount:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        lagSeconds:
+          type: "null"
+    OperationsDiagnostics:
+      type: object
+      additionalProperties: false
+      required:
+        - requestId
+        - generatedAt
+        - versions
+        - onboarding
+        - credentialHealth
+        - grants
+        - subscription
+        - webhook
+        - jobs
+        - projection
+        - nextAction
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        generatedAt:
+          type: string
+          format: date-time
+        versions:
+          type: object
+          additionalProperties: false
+          required:
+            - contract
+            - readModel
+          properties:
+            contract:
+              type: string
+              const: 1.0.0-proposed
+            readModel:
+              type: integer
+              const: 1
+        onboarding:
+          $ref: "#/components/schemas/OperationsOnboardingSection"
+        credentialHealth:
+          $ref: "#/components/schemas/OperationsDiagnosticSection"
+        grants:
+          $ref: "#/components/schemas/OperationsGrantsSection"
+        subscription:
+          $ref: "#/components/schemas/OperationsDiagnosticSection"
+        webhook:
+          $ref: "#/components/schemas/OperationsDiagnosticSection"
+        jobs:
+          $ref: "#/components/schemas/OperationsJobsSection"
+        projection:
+          $ref: "#/components/schemas/OperationsProjectionSection"
+        nextAction:
+          type: string
+          enum:
+            - REQUEST_REAUTHORIZATION
+            - WAIT_FOR_PROCESSING
+            - CONTACT_SUPPORT
+            - REVIEW_SYNC
+            - CHECK_CONNECTION
+            - NO_ACTION
+            - UNKNOWN
     JobAccepted:
       type: object
       additionalProperties: false

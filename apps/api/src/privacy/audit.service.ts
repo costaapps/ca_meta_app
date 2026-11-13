@@ -21,6 +21,7 @@ export interface AuditEventInput {
 
 const REF = /^[A-Za-z0-9:_-]{1,128}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_SUPPORT_GRANT_TTL_MS = 15 * 60 * 1000;
 
 export function privacyRefHash(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -55,17 +56,18 @@ export interface SupportAccessGrant {
   readonly actorRef: string;
   readonly targetRef: string;
   readonly reasonCode: 'INCIDENT' | 'CUSTOMER_REQUEST' | 'SECURITY_REVIEW';
+  readonly role: 'SUPPORT';
   readonly expiresAt: string;
 }
 
 export interface SupportAccessAuthorizationPort {
-  authorize(input: Omit<SupportAccessGrant, 'expiresAt'>): Promise<SupportAccessGrant | null>;
+  authorize(input: Omit<SupportAccessGrant, 'expiresAt' | 'role'>): Promise<SupportAccessGrant | null>;
 }
 
 export type SupportReasonCode = SupportAccessGrant['reasonCode'];
 
 export class FailClosedSupportAccessAuthorization implements SupportAccessAuthorizationPort {
-  async authorize(_input: Omit<SupportAccessGrant, 'expiresAt'>): Promise<null> { return null; }
+  async authorize(_input: Omit<SupportAccessGrant, 'expiresAt' | 'role'>): Promise<null> { return null; }
 }
 
 /** Internal support diagnostics require a short-lived grant and are audited before data is read. */
@@ -75,11 +77,13 @@ export class SupportDiagnosticService {
     private readonly authorization: SupportAccessAuthorizationPort = new FailClosedSupportAccessAuthorization(),
   ) {}
 
-  async read<T>(input: Omit<SupportAccessGrant, 'expiresAt'>, correlationId: string, read: () => Promise<T>): Promise<unknown> {
+  async read<T>(input: Omit<SupportAccessGrant, 'expiresAt' | 'role'>, correlationId: string, read: () => Promise<T>): Promise<unknown> {
     const grant = await this.authorization.authorize(input);
-    if (!grant || grant.tenantId !== input.tenantId || grant.actorRef !== input.actorRef ||
+    const expiresAt = grant ? Date.parse(grant.expiresAt) : NaN;
+    const now = Date.now();
+    if (!grant || grant.role !== 'SUPPORT' || grant.tenantId !== input.tenantId || grant.actorRef !== input.actorRef ||
       grant.targetRef !== input.targetRef || grant.reasonCode !== input.reasonCode ||
-      !Number.isFinite(Date.parse(grant.expiresAt)) || Date.parse(grant.expiresAt) <= Date.now()) {
+      !Number.isFinite(expiresAt) || expiresAt <= now || expiresAt - now > MAX_SUPPORT_GRANT_TTL_MS) {
       throw new Error('Support diagnostic access denied.');
     }
     await this.audit.record({

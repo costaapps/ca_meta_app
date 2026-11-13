@@ -15,6 +15,7 @@ export const PORTAL_NAVIGATION = Object.freeze([
   Object.freeze({ path: '/onboarding', label: 'Autorizações', exact: true }),
   Object.freeze({ path: '/templates', label: 'Modelos', exact: false }),
   Object.freeze({ path: '/notifications', label: 'Notificações', exact: false }),
+  Object.freeze({ path: '/status', label: 'Status', exact: true }),
 ]);
 
 @Component({

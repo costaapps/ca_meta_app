@@ -13,6 +13,7 @@
     "test:m5-04": "node ../../tools/m5-04/run-focused-web-tests.mjs",
     "test:m5-05": "node ../../tools/m5-05/run-focused-web-tests.mjs",
     "test:m5-06": "node ../../tools/m5-06/run-focused-web-tests.mjs",
+    "test:m5-10": "node ../../tools/m5-10/run-focused-web-tests.mjs",
     "typecheck": "ngc -p tsconfig.app.json --noEmit",
     "lint": "node ../../tools/m2/check-web-boundary.mjs"
   },
