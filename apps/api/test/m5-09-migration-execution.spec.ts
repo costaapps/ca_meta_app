@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { resolve } from 'node:path';
 import type { LegacyImportApplyPort, LegacyImportApplyResult } from '../src/legacy-import/legacy-import.ports.js';
 import { executeLegacyImportPlan } from '../src/legacy-import/legacy-import.runner.js';
 import { createLegacyImportReferenceHasher, planLegacyImport } from '../src/legacy-import/legacy-import.planner.js';
@@ -82,8 +83,8 @@ test('M5.09 dry-run manifest contains provenance and aggregate counts only', () 
 });
 
 test('M5.09 checked-in fixture is synthetic, bounded, and emits explicit quarantine reasons', () => {
-  const fixturePath = process.env.M5_09_FIXTURE_PATH;
-  assert.ok(fixturePath, 'focused harness must select the checked-in synthetic fixture');
+  const fixturePath = process.env.M5_09_FIXTURE_PATH
+    ?? resolve(__dirname, '../../../../tools/m5-09/fixtures/synthetic-migration-inventory.json');
   const fixture: unknown = JSON.parse(readFileSync(fixturePath, 'utf8'));
   const source = planLegacyImport(fixture, context);
   assert.equal(source.report.totalRows, 2);
