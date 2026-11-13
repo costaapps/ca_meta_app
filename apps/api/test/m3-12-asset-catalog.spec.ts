@@ -115,19 +115,21 @@ function setup(options: { roles?: readonly MembershipRole[]; adapter?: object; a
       return { tenantId: session.tenantId, roles, principalId: session.principalId } as AuthorizedTenantScope;
     },
   } as unknown as TenantContextService;
+  const authorizedOperations: string[] = [];
   const authorization = {
     async authorize(_scope: AuthorizedTenantScope, operation: string) {
+      authorizedOperations.push(operation);
       if (roles.includes('viewer') && operation !== 'RESOURCE_READ') throw new IdentityDeniedError();
     },
   } as unknown as TenantAuthorizationService;
   const coordinator = new AssetRefreshCoordinator({} as DurableWorkDatabase, {} as DurableJobStore,
     options.adapter as never);
   const service = new AssetCatalogService(repository, contexts, authorization, 'test', coordinator, new Set());
-  return { service, readQueries, connectionQueries, get refreshLookups() { return refreshLookups; } };
+  return { service, readQueries, connectionQueries, authorizedOperations, get refreshLookups() { return refreshLookups; } };
 }
 
 test('catalog rejects forged sessions and viewer access stays read-only', async () => {
-  const { service } = setup({ roles: ['viewer'] });
+  const { service, authorizedOperations } = setup({ roles: ['viewer'] });
   await assert.rejects(service.listFlows({} as VerifiedPortalSession, contextRef, 'request-synthetic'), IdentityDeniedError);
   const session = await sessionFor();
   const flows = await service.listFlows(session, contextRef, 'request-synthetic');
@@ -148,6 +150,7 @@ test('catalog rejects forged sessions and viewer access stays read-only', async 
   assert.ok(configuredFlows.items.every((item) => item.appConfigurationRef === appConfigurationId));
   assert.ok(configuredFlows.items.every((item) => item.availability === 'ADAPTER_UNAVAILABLE'));
   await assert.rejects(service.refreshAsset(session, contextRef, assetId, 'request-synthetic'), IdentityDeniedError);
+  assert.equal(authorizedOperations.at(-1), 'REFRESH_ASSET');
 });
 
 test('asset cursor is strictly parsed and every catalog read carries the server-resolved tenant', async () => {
@@ -184,6 +187,20 @@ test('refresh fails closed without a configured adapter and does not open a queu
   assert.equal(state.refreshLookups, 1, 'resource existence is checked within the tenant before returning unavailable');
 });
 
+test('refresh capability requires an operator role and registered adapter', async () => {
+  const operator = setup({ adapter: {}, assets: [asset()] });
+  const operatorPage = await operator.service.listAssets(await sessionFor(), contextRef, { limit: 10 }, 'request-synthetic');
+  assert.equal(operatorPage.items[0]?.capabilities?.canRefresh, true);
+
+  const viewer = setup({ roles: ['viewer'], adapter: {}, assets: [asset()] });
+  const viewerPage = await viewer.service.listAssets(await sessionFor(), contextRef, { limit: 10 }, 'request-synthetic');
+  assert.equal(viewerPage.items[0]?.capabilities?.canRefresh, false);
+
+  const unavailable = setup({ assets: [asset()] });
+  const unavailablePage = await unavailable.service.listAssets(await sessionFor(), contextRef, { limit: 10 }, 'request-synthetic');
+  assert.equal(unavailablePage.items[0]?.capabilities?.canRefresh, false);
+});
+
 test('asset response is an explicit allowlist and does not serialize provider or secret fields', async () => {
   const unsafe = { ...asset({ displayLabel: 'Support ••••4567' }), externalId: 'raw-provider-object', accessToken: 'synthetic-secret-never-return', providerPayload: { id: 'raw-provider-object' } } as AssetCatalogReadModel;
   const { service } = setup({ assets: [unsafe] });
@@ -197,7 +214,7 @@ test('asset response is an explicit allowlist and does not serialize provider or
   assert.equal(result.items[0]?.verificationSource, 'META_API');
   assert.equal(result.items[0]?.diagnostics?.onboardingStatus, 'UNKNOWN');
   assert.deepEqual(result.items[0]?.capabilities, {
-    canSend: false, canManageTemplates: false, canSubscribe: false, canReauthorize: false, canDisconnect: false,
+    canSend: false, canManageTemplates: false, canSubscribe: false, canReauthorize: false, canDisconnect: false, canRefresh: false,
   });
 });
 
@@ -491,7 +508,7 @@ test('connection detail preserves stale evidence and keeps viewer capabilities r
   assert.equal(result.assets[0]?.lastVerifiedAt, '2026-10-30T11:00:00.000Z');
   assert.equal(result.assets[0]?.verificationSource, 'META_API');
   assert.deepEqual(result.assets[0]?.capabilities, {
-    canSend: false, canManageTemplates: false, canSubscribe: false, canReauthorize: false, canDisconnect: false,
+    canSend: false, canManageTemplates: false, canSubscribe: false, canReauthorize: false, canDisconnect: false, canRefresh: false,
   });
 });
 

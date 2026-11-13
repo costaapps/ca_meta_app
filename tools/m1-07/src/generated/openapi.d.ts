@@ -1366,6 +1366,7 @@ export interface components {
             readonly canSubscribe: boolean;
             readonly canReauthorize: boolean;
             readonly canDisconnect: boolean;
+            readonly canRefresh?: boolean;
         };
         readonly AssetListPage: {
             readonly items: readonly components["schemas"]["AssetListItem"][];

@@ -85,7 +85,8 @@ function canOperate(roles: readonly MembershipRole[]): boolean {
   return roles.some((role) => role === 'owner' || role === 'admin' || role === 'operator');
 }
 
-function capabilitySnapshot(item: AssetCatalogReadModel, roles: readonly MembershipRole[]): components['schemas']['AssetCapabilities'] {
+function capabilitySnapshot(item: AssetCatalogReadModel, roles: readonly MembershipRole[],
+  refreshAvailable: boolean): components['schemas']['AssetCapabilities'] {
   // Mappings remain advisory; unsupported variant/operation pairs stay false until confirmed.
   const now = Date.now();
   const observation = item.statusObservation ?? null;
@@ -116,10 +117,12 @@ function capabilitySnapshot(item: AssetCatalogReadModel, roles: readonly Members
     canSubscribe: false,
     canReauthorize: operator && item.reauthorizationRequired,
     canDisconnect: roles.some((role) => role === 'owner' || role === 'admin') && active,
+    canRefresh: operator && refreshAvailable,
   });
 }
 
-function toAssetListItem(item: AssetCatalogReadModel, roles: readonly MembershipRole[]): components['schemas']['AssetListItem'] {
+function toAssetListItem(item: AssetCatalogReadModel, roles: readonly MembershipRole[],
+  refreshAvailable: boolean): components['schemas']['AssetListItem'] {
   return Object.freeze({
     id: item.assetRef,
     kind: publicAssetKind(item.kind),
@@ -131,7 +134,7 @@ function toAssetListItem(item: AssetCatalogReadModel, roles: readonly Membership
     verificationSource: item.verificationSource,
     stale: item.stale,
     diagnostics: item.diagnostics,
-    capabilities: capabilitySnapshot(item, roles),
+    capabilities: capabilitySnapshot(item, roles, refreshAvailable),
     ...(item.statusObservation ? { statusObservation: toPublicAssetStatusObservation(item.statusObservation,
       item.authorizationStatus, new Date().toISOString()) } : {}),
   });
@@ -152,7 +155,8 @@ function toConnection(item: ConnectionCatalogReadModel): components['schemas']['
   });
 }
 
-function toConnectionAsset(item: AssetCatalogReadModel, roles: readonly MembershipRole[]): components['schemas']['ConnectionAsset'] {
+function toConnectionAsset(item: AssetCatalogReadModel, roles: readonly MembershipRole[],
+  refreshAvailable: boolean): components['schemas']['ConnectionAsset'] {
   return Object.freeze({
     id: item.assetRef,
     kind: publicAssetKind(item.kind),
@@ -164,7 +168,7 @@ function toConnectionAsset(item: AssetCatalogReadModel, roles: readonly Membersh
     verificationSource: item.verificationSource,
     stale: item.stale,
     diagnostics: item.diagnostics,
-    capabilities: capabilitySnapshot(item, roles),
+    capabilities: capabilitySnapshot(item, roles, refreshAvailable),
     ...(item.statusObservation ? { statusObservation: toPublicAssetStatusObservation(item.statusObservation,
       item.authorizationStatus, new Date().toISOString()) } : {}),
   });
@@ -247,7 +251,7 @@ export class AssetCatalogService {
     };
     const page = await this.repository.listAssetCatalog(repoQuery);
     return Object.freeze({
-      items: Object.freeze(page.items.map((item) => toAssetListItem(item, scope.roles))),
+      items: Object.freeze(page.items.map((item) => toAssetListItem(item, scope.roles, this.refreshCoordinator.available))),
       nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
       requestId,
     });
@@ -260,7 +264,7 @@ export class AssetCatalogService {
     if (!isUuid(assetRef)) return undefined;
     const item = await this.repository.findAssetCatalog({ tenantId: scope.tenantId, environment: this.environment, assetRef });
     if (!item) return undefined;
-    return Object.freeze({ ...toAssetListItem(item, scope.roles), requestId });
+    return Object.freeze({ ...toAssetListItem(item, scope.roles, this.refreshCoordinator.available), requestId });
   }
 
   async listConnections(session: VerifiedPortalSession, tenantContextRef: string, query: ConnectionCatalogQuery,
@@ -287,13 +291,14 @@ export class AssetCatalogService {
     const item = await this.repository.findConnectionCatalog({ tenantId: scope.tenantId,
       environment: this.environment, connectionRef });
     if (!item) return undefined;
-    return Object.freeze({ ...toConnection(item), assets: Object.freeze((item.assets ?? []).map((asset) => toConnectionAsset(asset, scope.roles))), requestId });
+    return Object.freeze({ ...toConnection(item), assets: Object.freeze((item.assets ?? []).map((asset) =>
+      toConnectionAsset(asset, scope.roles, this.refreshCoordinator.available))), requestId });
   }
 
   async refreshAsset(session: VerifiedPortalSession, tenantContextRef: string, assetRef: string,
     _requestId: string): Promise<components['schemas']['JobAccepted']> {
     const scope = await this.readScope(session, tenantContextRef);
-    await this.authorization.authorize(scope, 'REAUTHORIZE', scope.tenantId);
+    await this.authorization.authorize(scope, 'REFRESH_ASSET', scope.tenantId);
     if (!isUuid(assetRef)) throw new AssetNotFoundError();
     const item = await this.repository.findAssetCatalog({ tenantId: scope.tenantId, environment: this.environment, assetRef });
     if (!item) throw new AssetNotFoundError();
