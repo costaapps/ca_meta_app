@@ -16,7 +16,11 @@ const outputRoot = join(apiRoot, '.test-runs');
 const temporaryOutput = join(outputRoot, `m5-08-${process.pid}-${Date.now()}`);
 const safePrefix = `${resolve(outputRoot)}${sep}`;
 const integrationEnabled = process.env.M5_08_PROJECTION_INTEGRATION === '1';
+const testNamePattern = process.env.M5_08_TEST_NAME_PATTERN;
 const environmentFile = process.env.M5_08_ENV_FILE;
+if (testNamePattern !== undefined && testNamePattern !== 'MariaDB') {
+  throw new Error('M5_08_TEST_NAME_PATTERN supports only the focused MariaDB integration cases.');
+}
 const packageKeys = new Set([
   'M5_08_TEST_DB_HOST', 'M5_08_TEST_DB_PORT',
   'M5_08_CENTRAL_DATABASE_NAME', 'M5_08_CENTRAL_API_DATABASE_USER', 'M5_08_CENTRAL_API_DATABASE_PASSWORD',
@@ -102,6 +106,7 @@ try {
     }
     if (process.exitCode !== 1 && !run([
       '--test', '--test-concurrency=1',
+      ...(testNamePattern ? ['--test-name-pattern', testNamePattern] : []),
       join(temporaryOutput, 'test', 'm5-08-projection.spec.js'),
       join(temporaryOutput, 'test', 'm5-08-projection.integration.spec.js'),
     ])) {
