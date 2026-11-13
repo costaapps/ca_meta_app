@@ -26,12 +26,32 @@ export class OperationsDiagnosticsComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     void this.refresh();
-    this.context.contextChanged$.pipe(takeUntil(this.destroy$)).subscribe(() => { void this.refresh(); });
+    this.context.contextChanged$.pipe(takeUntil(this.destroy$)).subscribe(() => { this.reloadForContextChange(); });
+    this.context.sessionExpired$.pipe(takeUntil(this.destroy$)).subscribe(() => { this.clearForExpiredSession(); });
   }
 
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
+  }
+
+  private reloadForContextChange(): void {
+    this.readGeneration += 1;
+    this.diagnostics = null;
+    this.loading = true;
+    this.isRefreshing = false;
+    this.errorMessage = '';
+    this.errorRequestId = null;
+    void this.refresh();
+  }
+
+  private clearForExpiredSession(): void {
+    this.readGeneration += 1;
+    this.diagnostics = null;
+    this.loading = false;
+    this.isRefreshing = false;
+    this.errorMessage = 'Sua sessão terminou. Entre novamente para consultar o status.';
+    this.errorRequestId = null;
   }
 
   async refresh(): Promise<void> {
