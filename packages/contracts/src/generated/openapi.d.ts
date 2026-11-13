@@ -190,7 +190,7 @@ export interface paths {
         };
         /**
          * List configured flow choices
-         * @description Returns the five existing authorization journeys for each app configuration in the current tenant and environment. `variant` remains the journey identifier; optional `flowVariant` groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled. Up to 16 app configurations (80 journeys) are returned; clients must not use a catalog marked `truncated` to choose an authorization flow.
+         * @description Returns the five existing authorization journeys for each app configuration in the current tenant and environment. `variant` remains the journey identifier; optional `flowVariant` groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled. Each page contains up to six app configurations (30 journeys), except offset 12, which contains up to four configurations (20 journeys), for a maximum source of 16 configurations. `truncated=true` means another page exists or the source exceeds 16 configurations. Clients must request offsets 0, 6 and 12 in order until `truncated=false`; if the third page remains truncated, the full catalog is unavailable and must not be used to choose an authorization flow.
          */
         readonly get: operations["listIntegrationFlows"];
         readonly put?: never;
@@ -2116,7 +2116,10 @@ export interface operations {
     };
     readonly listIntegrationFlows: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                /** @description App-configuration offset. Omit for the first page; subsequent pages use 6 or 12. */
+                readonly appOffset?: 0 | 6 | 12;
+            };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
                 readonly "X-Tenant-Context": components["parameters"]["TenantContext"];

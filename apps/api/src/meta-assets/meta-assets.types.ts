@@ -234,6 +234,8 @@ export interface FlowCatalogAppContext {
   readonly environment: MetaEnvironment;
 }
 
+export type FlowCatalogAppOffset = 0 | 6 | 12;
+
 export interface FlowCatalogApps {
   readonly items: readonly FlowCatalogAppContext[];
   readonly truncated: boolean;

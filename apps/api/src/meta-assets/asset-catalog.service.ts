@@ -5,7 +5,7 @@ import { TenantAuthorizationService, TenantContextService } from '../identity/id
 import type { MembershipRole } from '../identity/identity.types.js';
 import type {
   AssetCapabilityEvidence, AssetCatalogChannel, AssetCatalogPageQuery, AssetCatalogReadModel, ConnectionCatalogPageQuery,
-  ConnectionCatalogReadModel, FlowCatalogVariant, MetaEnvironment,
+  ConnectionCatalogReadModel, FlowCatalogAppOffset, FlowCatalogVariant, MetaEnvironment,
 } from './meta-assets.types.js';
 import type { MetaAssetsRepository } from './mysql-meta-assets.repository.js';
 import { AssetRefreshCoordinator, AssetRefreshUnavailableError } from './asset-refresh.service.js';
@@ -205,11 +205,16 @@ export class AssetCatalogService {
     private readonly registeredFlowVariants: ReadonlySet<FlowCatalogVariant>,
   ) {}
 
-  async listFlows(session: VerifiedPortalSession, tenantContextRef: string, requestId: string): Promise<components['schemas']['FlowList']> {
+  async listFlows(session: VerifiedPortalSession, tenantContextRef: string, requestId: string,
+    appOffset: FlowCatalogAppOffset = 0): Promise<components['schemas']['FlowList']> {
     const scope = await this.readScope(session, tenantContextRef);
     await this.authorization.authorize(scope, 'RESOURCE_READ', scope.tenantId);
-    const apps = await this.repository.listFlowCatalogApps({ tenantId: scope.tenantId, environment: this.environment });
-    const contexts = apps.items.length > 0 ? apps.items : [{ appConfigurationRef: null, environment: this.environment }];
+    const apps = await this.repository.listFlowCatalogApps({
+      tenantId: scope.tenantId, environment: this.environment, appOffset,
+    });
+    const contexts = apps.items.length > 0 ? apps.items : appOffset === 0
+      ? [{ appConfigurationRef: null, environment: this.environment }]
+      : [];
     const allItems = contexts.flatMap((app) => FLOW_CATALOG.flatMap((flowVariant) => PUBLIC_JOURNEYS[flowVariant].map((variant) => {
       const appConfigured = app.appConfigurationRef !== null;
       const adapterRegistered = this.registeredFlowVariants.has(flowVariant);
@@ -231,7 +236,7 @@ export class AssetCatalogService {
         requestedCapabilities: Object.freeze([]),
       });
     })));
-    const items = allItems.slice(0, 80);
+    const items = allItems.slice(0, 32);
     return Object.freeze({ items: Object.freeze(items), truncated: apps.truncated || allItems.length > items.length, requestId });
   }
 

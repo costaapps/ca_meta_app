@@ -8,6 +8,8 @@ The portal needs a bounded view of configured flow choices, tenant connections a
 
 The catalog groups the five existing authorization journeys into four Meta flow families: Facebook, Instagram, WhatsApp exclusive and WhatsApp Coexistence. The legacy `variant` field continues to identify a journey; the optional `flowVariant` field identifies its family, and `journeys` lists all journeys in that family. Missing app configuration, adapter or confirmed tenant feature flag leaves a flow disabled with a safe availability reason. The current runtime has no registered flow or refresh adapter, so `enabled` remains false and actual provider eligibility is **Not confirmed**.
 
+`GET /integrations/flows` keeps the frozen v1 `FlowList.items.maxItems:32` bound. The optional `appOffset` query accepts only 0, 6 and 12; the first two pages return up to six configurations (30 journeys), and the last page returns up to four (20 journeys). `truncated` means another page exists or the tenant/environment contains more than the supported 16 configurations. The portal follows pages sequentially, aggregates and validates a complete result, and fails closed if page 12 remains truncated. The app-configuration reference remains server-issued and is not sent to onboarding creation. See [ADR-023](../adrs/ADR-023-m5-03-flow-catalog-pagination.md).
+
 ## Invariantes e autorização
 
 - `PortalSessionGuard`, verified portal session, current tenant context and `TenantAuthorizationService` authorize every catalog read. `tenantId` comes from the server-resolved scope; `cUUID`, a supplied UUID, app ID or browser flag never grants access.
@@ -39,6 +41,7 @@ Reads use bounded SQL queries and one batched grant/evidence query for each asse
 | AC-06 | No app configuration, provider binding or confirmed onboarding relation | Flows and diagnostics are read | Availability is explicit and unsupported onboarding/provider facts remain disabled or `UNKNOWN` | `apps/api/test/m3-12-asset-catalog.spec.ts`; synthetic OpenAPI examples |
 | AC-07 | Token health or expiry evidence is stale, expired, incomplete, or on a WABA parent | Capabilities are calculated | `canSend` is false unless current valid token/data-access evidence supports a phone-number target | `apps/api/test/m3-12-asset-catalog.spec.ts` |
 | AC-08 | M3.09 has a pending/acknowledged or resolved reauthorization impact | The catalog reads an asset | Only open, tenant/environment/app/authorization/asset-scoped intents make `canReauthorize` available | `apps/api/test/m3-12-asset-catalog.spec.ts`; bounded SQL query |
+| AC-09 | Tenant/environment has 1–16 configured Meta apps | Client requests flow pages with `appOffset` 0/6/12 | Each response stays within 32 items; complete equivalent groups can be aggregated, but overflow or a third truncated page is not usable | `apps/api/test/m3-12-asset-catalog.spec.ts`; `apps/web/src/app/core/onboarding/portal-onboarding.service.spec.ts`; M1.07 breaking check |
 
 ## Implementação em fatias
 
@@ -54,7 +57,7 @@ No schema migration or provider effect is introduced by this catalog slice. Read
 
 ## Validação e evidência
 
-Focused command for coordinator CI: `npm run test:m3-12 --workspace=@ca-meta/api`. The canonical OpenAPI client outputs were regenerated once with `npm run generate --workspace=@ca-meta/contracts` and `npm run generate --prefix tools/m1-07`. Tests, build, lint, typecheck and generated-output check commands were not run per the coordinator's time-saving instruction. Synthetic fixture assertions are not provider, tenant-production, App Review or permission evidence. Environment and accepted candidate SHA are recorded in the package handoff/PR, not embedded before commit.
+For the M5.03 multi-configuration catalog change, focused checks passed on the worktree based on `cff7411e1cb4b7cfa27d7176f87a7e2059601691`, with Node 24.22.2/npm 11.19.1: `npm run test:m5-02 --workspace=@ca-meta/api` (15/15), `npm run test:m5-03 --workspace=@ca-meta/web` (40/40), `npm run check:generated --workspace=@ca-meta/contracts` (12 deterministic artifacts), `npm run check:breaking --workspace=@ca-meta/contracts` (zero breaking changes), and `npm run check:generated --prefix tools/m1-07` (client and 53 compatibility rows current). The canonical client outputs were regenerated with `npm run generate --workspace=@ca-meta/contracts` and `npm run generate --prefix tools/m1-07`. Broader suites, build, lint and typecheck were not run for this change. Synthetic fixture assertions are not provider, tenant-production, App Review or permission evidence.
 
 ## Alterações de escopo
 

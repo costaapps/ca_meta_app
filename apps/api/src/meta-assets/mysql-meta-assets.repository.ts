@@ -24,6 +24,7 @@ import {
   type ConnectionCatalogPage,
   type ConnectionCatalogPageQuery,
   type ConnectionCatalogReadModel,
+  type FlowCatalogAppOffset,
   type FlowCatalogApps,
   type EvidenceSource,
   type TokenHealthState,
@@ -53,7 +54,8 @@ export interface MetaAssetsRepository {
   findAssetCatalog(input: { readonly tenantId: string; readonly environment: MetaEnvironment; readonly assetRef: string }): Promise<AssetCatalogReadModel | undefined>;
   listConnectionCatalog(input: ConnectionCatalogPageQuery): Promise<ConnectionCatalogPage>;
   findConnectionCatalog(input: { readonly tenantId: string; readonly environment: MetaEnvironment; readonly connectionRef: string }): Promise<ConnectionCatalogReadModel | undefined>;
-  listFlowCatalogApps(input: { readonly tenantId: string; readonly environment: MetaEnvironment }): Promise<FlowCatalogApps>;
+  listFlowCatalogApps(input: { readonly tenantId: string; readonly environment: MetaEnvironment;
+    readonly appOffset: FlowCatalogAppOffset }): Promise<FlowCatalogApps>;
 }
 
 interface AuthorizationRow {
@@ -776,17 +778,21 @@ export class MysqlMetaAssetsRepository implements MetaAssetsRepository {
     return Object.freeze({ items: Object.freeze(items), nextCursor: hasMore && pageRows.length > 0 ? pageRows[pageRows.length - 1]!.id : null });
   }
 
-  async listFlowCatalogApps(input: { readonly tenantId: string; readonly environment: MetaEnvironment }): Promise<FlowCatalogApps> {
-    if (!isUuid(input.tenantId)) throw new MetaAssetsConflictError('Flow catalog context is invalid.');
+  async listFlowCatalogApps(input: { readonly tenantId: string; readonly environment: MetaEnvironment;
+    readonly appOffset: FlowCatalogAppOffset }): Promise<FlowCatalogApps> {
+    if (!isUuid(input.tenantId) || ![0, 6, 12].includes(input.appOffset)) {
+      throw new MetaAssetsConflictError('Flow catalog context is invalid.');
+    }
+    const pageSize = input.appOffset === 12 ? 4 : 6;
     const dataSource = await this.database.getDataSource();
     const rows = await dataSource.query(
       `SELECT id FROM ca_meta_app_configurations
        WHERE tenant_id = ? AND provider = 'META' AND environment = ?
-       ORDER BY id LIMIT 17`,
-      [input.tenantId, input.environment],
+       ORDER BY id LIMIT ? OFFSET ?`,
+      [input.tenantId, input.environment, pageSize + 1, input.appOffset],
     ) as Array<{ id: string }>;
-    const truncated = rows.length > 16;
-    const items = rows.slice(0, 16).map((row) => Object.freeze({
+    const truncated = rows.length > pageSize;
+    const items = rows.slice(0, pageSize).map((row) => Object.freeze({
       appConfigurationRef: row.id, environment: input.environment,
     }));
     return Object.freeze({ items: Object.freeze(items), truncated });

@@ -109,7 +109,15 @@ function setup(options: { roles?: readonly MembershipRole[]; adapter?: object; a
       return { items: [], nextCursor: null };
     },
     async findConnectionCatalog() { return options.connection; },
-    async listFlowCatalogApps() { return { items: options.flowApps ?? [], truncated: options.flowAppsTruncated ?? false }; },
+    async listFlowCatalogApps({ appOffset }: { appOffset: 0 | 6 | 12 }) {
+      const all = options.flowApps ?? [];
+      const pageSize = appOffset === 12 ? 4 : 6;
+      const items = all.slice(appOffset, appOffset + pageSize);
+      return {
+        items,
+        truncated: (options.flowAppsTruncated ?? false) || appOffset + items.length < all.length,
+      };
+    },
   } as unknown as MetaAssetsRepository;
   const contexts = {
     async resolveCurrent(session: VerifiedPortalSession) {
@@ -154,19 +162,58 @@ test('catalog rejects forged sessions and viewer access stays read-only', async 
     appConfigurationRef: `77777777-7777-4777-8777-${String(index + 1).padStart(12, '0')}`,
     environment: 'test' as const,
   }));
-  const multiConfigFlows = await setup({ flowApps: appConfigurations }).service.listFlows(session, contextRef, 'request-synthetic');
-  assert.equal(multiConfigFlows.items.length, 80);
-  assert.equal(multiConfigFlows.truncated, false);
-  assert.equal(new Set(multiConfigFlows.items.map((item) => item.appConfigurationRef)).size, 16);
+  const multiConfigService = setup({ flowApps: appConfigurations }).service;
+  const firstPage = await multiConfigService.listFlows(session, contextRef, 'request-synthetic');
+  const secondPage = await multiConfigService.listFlows(session, contextRef, 'request-synthetic', 6);
+  const thirdPage = await multiConfigService.listFlows(session, contextRef, 'request-synthetic', 12);
+  assert.deepEqual([firstPage.items.length, secondPage.items.length, thirdPage.items.length], [30, 30, 20]);
+  assert.deepEqual([firstPage.truncated, secondPage.truncated, thirdPage.truncated], [true, true, false]);
+  const allFlows = [...firstPage.items, ...secondPage.items, ...thirdPage.items];
+  assert.equal(allFlows.length, 80);
+  assert.equal(new Set(allFlows.map((item) => item.appConfigurationRef)).size, 16);
   for (const app of appConfigurations) {
-    assert.equal(multiConfigFlows.items.filter((item) => item.appConfigurationRef === app.appConfigurationRef).length, 5);
+    assert.equal(allFlows.filter((item) => item.appConfigurationRef === app.appConfigurationRef).length, 5);
   }
-  const truncatedFlows = await setup({ flowApps: appConfigurations, flowAppsTruncated: true })
-    .service.listFlows(session, contextRef, 'request-synthetic');
-  assert.equal(truncatedFlows.items.length, 80);
-  assert.equal(truncatedFlows.truncated, true);
+  const overflowService = setup({ flowApps: appConfigurations, flowAppsTruncated: true }).service;
+  const overflowLastPage = await overflowService.listFlows(session, contextRef, 'request-synthetic', 12);
+  assert.equal(overflowLastPage.items.length, 20);
+  assert.equal(overflowLastPage.truncated, true);
   await assert.rejects(service.refreshAsset(session, contextRef, assetId, 'request-synthetic'), IdentityDeniedError);
   assert.equal(authorizedOperations.at(-1), 'REFRESH_ASSET');
+});
+
+test('flow app repository bounds pages at 16 configurations and marks a sentinel row', async () => {
+  const statements: Array<{ sql: string; params: readonly unknown[] }> = [];
+  const row = (index: number) => ({ id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}` });
+  const queryResults = [
+    Array.from({ length: 7 }, (_, index) => row(index)),
+    Array.from({ length: 7 }, (_, index) => row(index + 6)),
+    Array.from({ length: 4 }, (_, index) => row(index + 12)),
+    Array.from({ length: 5 }, (_, index) => row(index + 12)),
+  ];
+  const database = {
+    async getDataSource() {
+      return {
+        async query(sql: string, params: readonly unknown[] = []) {
+          statements.push({ sql, params });
+          return queryResults[statements.length - 1];
+        },
+      };
+    },
+  } as unknown as DurableWorkDatabase;
+  const repository = new MysqlMetaAssetsRepository(database, {} as never, {} as never);
+  const base = { tenantId, environment: 'test' as const };
+  const first = await repository.listFlowCatalogApps({ ...base, appOffset: 0 });
+  const second = await repository.listFlowCatalogApps({ ...base, appOffset: 6 });
+  const last = await repository.listFlowCatalogApps({ ...base, appOffset: 12 });
+  const overflow = await repository.listFlowCatalogApps({ ...base, appOffset: 12 });
+
+  assert.deepEqual([first.items.length, second.items.length, last.items.length, overflow.items.length], [6, 6, 4, 4]);
+  assert.deepEqual([first.truncated, second.truncated, last.truncated, overflow.truncated], [true, true, false, true]);
+  assert.ok(statements.every(({ sql }) => /ORDER BY id LIMIT \? OFFSET \?/.test(sql)));
+  assert.deepEqual(statements.map(({ params }) => params), [
+    [tenantId, 'test', 7, 0], [tenantId, 'test', 7, 6], [tenantId, 'test', 5, 12], [tenantId, 'test', 5, 12],
+  ]);
 });
 
 test('asset cursor is strictly parsed and every catalog read carries the server-resolved tenant', async () => {

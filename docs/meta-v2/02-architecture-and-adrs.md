@@ -59,6 +59,7 @@ As primeiras cinco ADRs atendem ao pacote M1.04. Decisões sobre identidade Suit
 | ADR | Decisão | Evidência/gate |
 |---|---|---|
 | [ADR-021 · M5.07 internal service operations](adrs/ADR-021-m5-07-internal-service-operations.md) | Hash-mapped service proof, tenant-bound grants, typed operations and idempotent status; preserves the frozen `/internal/v1` proposal and versions the new bridge under `/internal/v2`. | `openapi-v1.baseline.yaml` remains unchanged; breaking diff, contract checks, and M5.07 package harness must pass. Issue #62's route-version adjustment requires owner acceptance. |
+| [ADR-023 · M5.03 flow-catalog pagination](adrs/ADR-023-m5-03-flow-catalog-pagination.md) | Keep v1 `FlowList.items.maxItems:32`; page app configurations at offsets 0/6/12 and fail closed above 16. | Frozen M1.07 baseline unchanged; optional query additive; generated-client and breaking checks plus focused M5.02/M5.03 gates required. |
 
 ## Organização alvo
 
