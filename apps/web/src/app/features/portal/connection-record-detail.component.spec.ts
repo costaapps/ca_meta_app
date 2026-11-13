@@ -21,7 +21,7 @@ function createRoutedDetailComponent(detail: ConnectionCatalogService['detail'])
     { paramMap: routeParams.asObservable() } as unknown as ActivatedRoute,
     { detail } as unknown as ConnectionCatalogService,
     { current: null, ensureCurrentSession: vi.fn() } as unknown as PortalSessionService,
-    { contextChanged$: NEVER } as unknown as PortalContextStore,
+    { contextChanged$: NEVER, sessionExpired$: NEVER } as unknown as PortalContextStore,
     { markForCheck: vi.fn() } as unknown as ChangeDetectorRef,
   );
   component.ngOnInit();
