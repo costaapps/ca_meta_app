@@ -231,7 +231,7 @@ export class AssetCatalogService {
         requestedCapabilities: Object.freeze([]),
       });
     })));
-    const items = allItems.slice(0, 32);
+    const items = allItems.slice(0, 80);
     return Object.freeze({ items: Object.freeze(items), truncated: apps.truncated || allItems.length > items.length, requestId });
   }
 

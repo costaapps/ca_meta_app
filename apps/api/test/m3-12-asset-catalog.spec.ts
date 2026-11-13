@@ -92,6 +92,7 @@ function asset(overrides: Partial<AssetCatalogReadModel> = {}): AssetCatalogRead
 
 function setup(options: { roles?: readonly MembershipRole[]; adapter?: object; assets?: readonly AssetCatalogReadModel[];
   flowApps?: readonly { appConfigurationRef: string; environment: 'test' }[];
+  flowAppsTruncated?: boolean;
   connection?: ConnectionCatalogReadModel } = {}) {
   const roles = options.roles ?? ['operator'];
   const readQueries: AssetCatalogPageQuery[] = [];
@@ -108,7 +109,7 @@ function setup(options: { roles?: readonly MembershipRole[]; adapter?: object; a
       return { items: [], nextCursor: null };
     },
     async findConnectionCatalog() { return options.connection; },
-    async listFlowCatalogApps() { return { items: options.flowApps ?? [], truncated: false }; },
+    async listFlowCatalogApps() { return { items: options.flowApps ?? [], truncated: options.flowAppsTruncated ?? false }; },
   } as unknown as MetaAssetsRepository;
   const contexts = {
     async resolveCurrent(session: VerifiedPortalSession) {
@@ -149,6 +150,21 @@ test('catalog rejects forged sessions and viewer access stays read-only', async 
   assert.equal(configuredFlows.items.length, 5);
   assert.ok(configuredFlows.items.every((item) => item.appConfigurationRef === appConfigurationId));
   assert.ok(configuredFlows.items.every((item) => item.availability === 'ADAPTER_UNAVAILABLE'));
+  const appConfigurations = Array.from({ length: 16 }, (_, index) => ({
+    appConfigurationRef: `77777777-7777-4777-8777-${String(index + 1).padStart(12, '0')}`,
+    environment: 'test' as const,
+  }));
+  const multiConfigFlows = await setup({ flowApps: appConfigurations }).service.listFlows(session, contextRef, 'request-synthetic');
+  assert.equal(multiConfigFlows.items.length, 80);
+  assert.equal(multiConfigFlows.truncated, false);
+  assert.equal(new Set(multiConfigFlows.items.map((item) => item.appConfigurationRef)).size, 16);
+  for (const app of appConfigurations) {
+    assert.equal(multiConfigFlows.items.filter((item) => item.appConfigurationRef === app.appConfigurationRef).length, 5);
+  }
+  const truncatedFlows = await setup({ flowApps: appConfigurations, flowAppsTruncated: true })
+    .service.listFlows(session, contextRef, 'request-synthetic');
+  assert.equal(truncatedFlows.items.length, 80);
+  assert.equal(truncatedFlows.truncated, true);
   await assert.rejects(service.refreshAsset(session, contextRef, assetId, 'request-synthetic'), IdentityDeniedError);
   assert.equal(authorizedOperations.at(-1), 'REFRESH_ASSET');
 });

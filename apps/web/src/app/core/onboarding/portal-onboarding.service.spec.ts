@@ -99,10 +99,23 @@ function flowList(): unknown {
       flowVariant: variant === 'FACEBOOK_LOGIN' ? 'FACEBOOK' :
         variant.startsWith('INSTAGRAM_') ? 'INSTAGRAM' :
           variant === 'WHATSAPP_CLOUD_API' ? 'WHATSAPP_EXCLUSIVE' : 'WHATSAPP_COEXISTENCE',
+      journeys: variant.startsWith('INSTAGRAM_')
+        ? ['INSTAGRAM_VIA_FACEBOOK_LOGIN', 'INSTAGRAM_LOGIN'] : [variant],
+      appConfigurationRef: '33333333-3333-4333-8333-333333333333',
+      environment: 'test',
       enabled: true,
       availability: 'AVAILABLE',
+      prerequisites: { metaAppConfigured: true, serverAdapterRegistered: true, tenantFeatureFlag: 'ENABLED' },
       requestedCapabilities: ['READ_STATUS'],
     })),
+  };
+}
+
+function flowsForConfigurations(refs: readonly string[]): unknown {
+  const base = flowList() as { items: Array<Record<string, unknown>>; requestId: string; truncated: boolean };
+  return {
+    ...base,
+    items: refs.flatMap((appConfigurationRef) => base.items.map((item) => ({ ...item, appConfigurationRef }))),
   };
 }
 
@@ -257,6 +270,76 @@ describe('PortalOnboardingService', () => {
     const unavailable = flowList() as { items: Array<Record<string, unknown>> };
     unavailable.items.find((item) => item['variant'] === 'WHATSAPP_COEXISTENCE')!['availability'] = 'ADAPTER_UNAVAILABLE';
     expect(parseOnboardingFlowCatalog(catalog(), unavailable)?.find((profile) => profile.flowVariant === 'WHATSAPP_COEXISTENCE')?.enabled).toBe(false);
+  });
+
+  it('coalesces complete equivalent catalogs from distinct server app configurations', () => {
+    const parsed = parseOnboardingFlowCatalog(catalog(), flowsForConfigurations([
+      '33333333-3333-4333-8333-333333333333',
+      '66666666-6666-4666-8666-666666666666',
+    ]));
+
+    expect(parsed?.map((profile) => profile.flowVariant)).toEqual([
+      'FACEBOOK_LOGIN',
+      'INSTAGRAM_VIA_FACEBOOK_LOGIN',
+      'INSTAGRAM_LOGIN',
+      'WHATSAPP_CLOUD_API',
+      'WHATSAPP_COEXISTENCE',
+    ]);
+
+    const maximumSupported = parseOnboardingFlowCatalog(catalog(), flowsForConfigurations(Array.from({ length: 16 }, (_, index) =>
+      `77777777-7777-4777-8777-${String(index + 1).padStart(12, '0')}`)));
+    expect(maximumSupported).toHaveLength(5);
+  });
+
+  it('accepts the single unconfigured server group with a null app reference', () => {
+    const unconfigured = flowList() as { items: Array<Record<string, unknown>>; truncated: boolean };
+    unconfigured.items = unconfigured.items.map((item) => ({
+      ...item,
+      appConfigurationRef: null,
+      enabled: false,
+      availability: 'CONFIGURATION_MISSING',
+      prerequisites: { metaAppConfigured: false, serverAdapterRegistered: false, tenantFeatureFlag: 'UNKNOWN' },
+      requestedCapabilities: [],
+    }));
+
+    const parsed = parseOnboardingFlowCatalog(catalog(), unconfigured);
+    expect(parsed).toHaveLength(5);
+    expect(parsed?.every((profile) => !profile.enabled && profile.availability === 'CONFIGURATION_MISSING')).toBe(true);
+  });
+
+  it('fails closed for divergent configuration behavior, partial groups, invalid refs, or truncation', () => {
+    const refs = [
+      '33333333-3333-4333-8333-333333333333',
+      '66666666-6666-4666-8666-666666666666',
+    ];
+    const divergentValues: ReadonlyArray<readonly [string, unknown]> = [
+      ['enabled', false],
+      ['availability', 'UNKNOWN'],
+      ['prerequisites', { metaAppConfigured: true, serverAdapterRegistered: false, tenantFeatureFlag: 'ENABLED' }],
+      ['requestedCapabilities', ['SEND_MESSAGE']],
+      ['environment', 'production'],
+    ];
+    for (const [field, conflictingValue] of divergentValues) {
+      const divergent = flowsForConfigurations(refs) as { items: Array<Record<string, unknown>>; truncated: boolean };
+      divergent.items[5] = { ...divergent.items[5], [field]: conflictingValue };
+      expect(parseOnboardingFlowCatalog(catalog(), divergent), field).toBeUndefined();
+    }
+
+    const partial = flowsForConfigurations(refs) as { items: Array<Record<string, unknown>>; truncated: boolean };
+    partial.items.pop();
+    expect(parseOnboardingFlowCatalog(catalog(), partial)).toBeUndefined();
+
+    const invalidRef = flowList() as { items: Array<Record<string, unknown>>; truncated: boolean };
+    invalidRef.items[0] = { ...invalidRef.items[0], appConfigurationRef: 'client-selected' };
+    expect(parseOnboardingFlowCatalog(catalog(), invalidRef)).toBeUndefined();
+
+    expect(parseOnboardingFlowCatalog(catalog(), flowsForConfigurations([refs[0]!, refs[0]!]))).toBeUndefined();
+
+    const truncated = flowsForConfigurations(Array.from({ length: 7 }, (_, index) =>
+      `88888888-8888-4888-8888-${String(index + 1).padStart(12, '0')}`)) as { items: Array<Record<string, unknown>>; truncated: boolean };
+    truncated.items = truncated.items.slice(0, 32);
+    truncated.truncated = true;
+    expect(parseOnboardingFlowCatalog(catalog(), truncated)).toBeUndefined();
   });
 
   it('fails closed if the Coexistence profile exposes conventional phone registration', () => {

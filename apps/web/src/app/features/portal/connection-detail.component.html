@@ -25,10 +25,10 @@
       <p>{{ catalog.reasonFor(profile) }}</p>
       <p class="verification-note">A configuração não confirma uma autorização Meta nem a conexão de recursos. O servidor verifica esses estados antes de concluir qualquer conexão.</p>
       <button type="button" [disabled]="!canContinue" aria-describedby="onboarding-pending"
-        title="A conexão assistida será disponibilizada no próximo passo do portal">
+        title="O início da autorização depende da ativação do provedor">
         Iniciar conexão
       </button>
-      <p id="onboarding-pending" class="pending-note">A conexão assistida ainda não está disponível. Esta configuração não inicia a autorização; o próximo passo será disponibilizado em M5.03.</p>
+      <p id="onboarding-pending" class="pending-note">Esta configuração não inicia a autorização. Consulte sessões existentes ou acompanhe a disponibilidade em <a routerLink="/onboarding">Autorizações</a>; o início de novas autorizações depende da ativação do provedor.</p>
     </article>
     <ng-template #noProfile>
       <article class="availability-card">

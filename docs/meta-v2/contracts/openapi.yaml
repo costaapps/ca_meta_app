@@ -576,7 +576,8 @@ paths:
         current tenant and environment. `variant` remains the journey identifier; optional `flowVariant`
         groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature
         flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite
-        keeps it disabled.
+        keeps it disabled. Up to 16 app configurations (80 journeys) are returned; clients must not use a
+        catalog marked `truncated` to choose an authorization flow.
       security: *a10
       parameters: &a22
         - $ref: "#/components/parameters/TenantContext"
@@ -3539,7 +3540,7 @@ components:
       properties:
         items:
           type: array
-          maxItems: 32
+          maxItems: 80
           items:
             $ref: "#/components/schemas/FlowDefinition"
         truncated:

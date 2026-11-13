@@ -190,7 +190,7 @@ export interface paths {
         };
         /**
          * List configured flow choices
-         * @description Returns the five existing authorization journeys for each app configuration in the current tenant and environment. `variant` remains the journey identifier; optional `flowVariant` groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled.
+         * @description Returns the five existing authorization journeys for each app configuration in the current tenant and environment. `variant` remains the journey identifier; optional `flowVariant` groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled. Up to 16 app configurations (80 journeys) are returned; clients must not use a catalog marked `truncated` to choose an authorization flow.
          */
         readonly get: operations["listIntegrationFlows"];
         readonly put?: never;
