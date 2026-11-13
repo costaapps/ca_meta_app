@@ -2594,9 +2594,10 @@ paths:
         notification state.
       x-idempotency-scope: tenant + notification action + Idempotency-Key and
         canonical request payload hash.
-      x-retry-policy: External actions use one durable attempt. A null/error/timeout
-        or ambiguous result becomes UNKNOWN and is never blindly retried. A
-        failed action does not mark the notification read or dismissed.
+      x-retry-policy: External actions use at most one automatic attempt, which is the
+        initial dispatch, with no automatic retry. A null/error/timeout or
+        ambiguous result becomes UNKNOWN and is never blindly retried. A failed
+        action does not mark the notification read or dismissed.
   /api/v1/webhooks/meta/{appConfigRef}:
     parameters:
       - name: appConfigRef

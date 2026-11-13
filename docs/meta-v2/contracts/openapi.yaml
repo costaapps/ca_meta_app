@@ -2432,9 +2432,9 @@ paths:
         is enabled; the current runtime has none. SEND_MESSAGE remains unavailable. MARK_READ and
         DISMISS only update local notification state.
       x-idempotency-scope: tenant + notification action + Idempotency-Key and canonical request payload hash.
-      x-retry-policy: External actions use one durable attempt. A null/error/timeout or ambiguous result
-        becomes UNKNOWN and is never blindly retried. A failed action does not mark the notification
-        read or dismissed.
+      x-retry-policy: External actions use at most one automatic attempt, which is the initial dispatch,
+        with no automatic retry. A null/error/timeout or ambiguous result becomes UNKNOWN and is never
+        blindly retried. A failed action does not mark the notification read or dismissed.
   /internal/v1/assets/{assetId}/operations:
     parameters:
       - name: assetId
