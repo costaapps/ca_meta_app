@@ -93,7 +93,51 @@ async function runDisposableMariaDb(buildCli) {
       MIGRATION_MIN_SUPPORTED_API_VERSION: '1',
     };
     if (!run([buildCli, 'deploy'], { env: migrationEnvironment })) {
-      throw new Error('Disposable M5.09 MariaDB migration deploy failed.');
+      const [migrationRows] = await admin.query(
+        `SELECT migration_id, schema_version, state FROM ${sqlIdentifier(schema)}.${sqlIdentifier('ca_meta_schema_migrations')} ORDER BY schema_version`,
+      );
+      assert.equal(migrationRows.length, 22, 'only the expected v22 grant preflight may pause the fresh migration run');
+      assert.deepEqual(migrationRows.map((row) => Number(row.schema_version)), Array.from({ length: 22 }, (_, index) => index + 1));
+      assert.ok(migrationRows.slice(0, 21).every((row) => row.state === 'APPLIED'),
+        'all migrations before the Coexistence lock must be applied before granting a scoped privilege');
+      assert.deepEqual({
+        id: migrationRows[21]?.migration_id,
+        version: Number(migrationRows[21]?.schema_version),
+        state: migrationRows[21]?.state,
+      }, {
+        id: '202611120022-onboarding-coexistence-serialization',
+        version: 22,
+        state: 'RUNNING',
+      });
+
+      const [lockSteps] = await admin.query(
+        `SELECT step_id, state FROM ${sqlIdentifier(schema)}.${sqlIdentifier('ca_meta_migration_steps')}
+         WHERE migration_id = '202611120022-onboarding-coexistence-serialization' ORDER BY step_id`,
+      );
+      const lockStepState = new Map(lockSteps.map((row) => [row.step_id, row.state]));
+      assert.equal(lockSteps.length, 4, 'the expected v22 migration step ledger is present');
+      assert.equal(lockStepState.get('create-onboarding-coexistence-locks'), 'APPLIED');
+      assert.equal(lockStepState.get('backfill-active-onboarding-coexistence-locks'), 'APPLIED');
+      assert.equal(lockStepState.get('validate-single-active-coexistence-session-per-tenant'), 'APPLIED');
+      assert.equal(lockStepState.get('release-coexistence-lock-on-terminal-onboarding-status'), 'STARTED');
+
+      const [lockTables] = await admin.query(
+        'SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_name = ?',
+        [schema, 'ca_meta_onboarding_coexistence_locks'],
+      );
+      assert.equal(lockTables.length, 1, 'v22 creates its exact lock table before requesting the table-only grant');
+      const [releaseTriggers] = await admin.query(
+        'SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema = ? AND trigger_name = ?',
+        [schema, 'tr_ca_meta_onboarding_coexistence_lock_release'],
+      );
+      assert.equal(releaseTriggers.length, 0, 'the v22 release trigger is absent while its grant is missing');
+
+      await admin.query(
+        `GRANT DELETE ON ${sqlIdentifier(schema)}.${sqlIdentifier('ca_meta_onboarding_coexistence_locks')} TO ${sqlAccount(migrationUser)}`,
+      );
+      if (!run([buildCli, 'deploy'], { env: migrationEnvironment })) {
+        throw new Error('Disposable M5.09 MariaDB migration deploy failed after the exact v22 table grant.');
+      }
     }
 
     const integrationEnvironment = {
