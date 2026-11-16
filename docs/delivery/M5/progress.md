@@ -5,7 +5,7 @@
 - Base verificada: `develop@c3e9baa75ea793d74292e62038e0d8d11bb61295`, igual a `origin/develop` em 2026-11-11.
 - PR consolidado M4 #151 está `closed/merged` no GitHub; merge commit `c3e9baa75ea793d74292e62038e0d8d11bb61295`.
 - Branch de integração `desktop/milestone-m5` foi criada e publicada a partir dessa base. Não existe PR consolidado M5 ainda.
-- Head atual da milestone após follow-ups M5.02/#56, M5.03/#60 e M5.08/#63: eed259732fbcd6fb4d8739794ce2502a0f035d7a.
+- Head atual da milestone incluindo evidência final documental: `8f9feeff0e72dccf315ad9c5618cd062b42ad5a2`; M5.08/#63 foi integrado no squash `eed259732fbcd6fb4d8739794ce2502a0f035d7a`.
 - Identidade Git local: `Eduardo Matuella <eduardo.matuella@costaapps.com.br>`. GitHub connector autenticado como `eduardomatuella-costaapps`, permissão `admin`; `gh` CLI ausente.
 - Node/npm global inicialmente eram v22.17.0/10.9.2. Ambiente M5 preparado com Node v24.22.2/npm 11.19.1 isolados no cache; `npm ci --ignore-scripts` executado uma vez no checkout base (674 pacotes, 47 advisories reportados; sem auto-fix). Worktrees de implementação reutilizam as dependências sem repetir instalação.
 - Docker Desktop 28.3.0/Compose 2.38.1 foi iniciado. MariaDB 11.8.8 sintético e descartável está saudável em `127.0.0.1:13307`, container `ca-meta-m5-db-20261111`, volume `ca_meta_m5_data_20261111`. Node 24.22.2/npm 11.19.1 e dependências compartilhadas estão disponíveis nas novas worktrees. Nenhuma validação de produção/Meta real foi executada.
