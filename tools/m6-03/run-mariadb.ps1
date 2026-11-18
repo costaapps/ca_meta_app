@@ -51,6 +51,7 @@ $managedEnvironment = @(
 )
 $previousEnvironment = @{}
 foreach ($name in $managedEnvironment) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name) }
+$previousPath = $env:Path
 $composeStarted = $false
 
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
@@ -130,4 +131,5 @@ try {
     if ($null -eq $previousEnvironment[$name]) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
     else { [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process') }
   }
+  $env:Path = $previousPath
 }

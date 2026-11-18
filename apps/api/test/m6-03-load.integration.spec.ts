@@ -12,7 +12,7 @@ import { MAX_ACTIVE_JOBS_PER_TENANT, MAX_WAITING_JOBS_PER_TENANT } from '../src/
 import type { InboxEventEnvelope, JobType } from '../src/jobs/event-validation.js';
 
 const enabled = process.env.M6_03_TEST === '1';
-const scenario = JSON.parse(readFileSync(resolve(process.cwd(), 'tools/m6-03/scenarios.json'), 'utf8')) as {
+const scenario = JSON.parse(readFileSync(resolve(__dirname, '../../../../tools/m6-03/scenarios.json'), 'utf8')) as {
   readonly seed: string;
   readonly tenants: readonly { readonly name: string; readonly historicalProjectionJobs: number; readonly webhookEvents: number; readonly concurrentOnboards: number }[];
   readonly workers: number;
