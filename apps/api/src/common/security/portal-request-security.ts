@@ -44,7 +44,15 @@ function matchesHash(value: string, digest: string): boolean {
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const PORTAL_ENTRY_EXCHANGE_PATH = '/api/v1/auth/exchanges';
+const PORTAL_PREAUTH_PATH = '/api/v1/auth/preauth';
+const MAGIC_LINK_REQUEST_PATH = '/api/v1/auth/magic-links';
 const MAGIC_LINK_CONSUME_PATH = '/api/v1/auth/magic-links/consume';
+const INTERNAL_SERVICE_OPERATION_POST_PATH =
+  /^\/internal\/v2\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/operations$/i;
+
+function isInternalServiceOperationPost(method: string, path: string): boolean {
+  return method === 'POST' && INTERNAL_SERVICE_OPERATION_POST_PATH.test(path);
+}
 
 /** Exact-origin CORS plus same-origin Fetch Metadata and synchronizer-token checks on authenticated writes. */
 export function portalRequestSecurityMiddleware(
@@ -61,6 +69,7 @@ export function portalRequestSecurityMiddleware(
       }
       response.setHeader('Access-Control-Allow-Origin', origin);
       response.setHeader('Access-Control-Allow-Credentials', 'true');
+      response.setHeader('Access-Control-Expose-Headers', 'ETag');
       response.vary('Origin');
     }
 
@@ -76,7 +85,7 @@ export function portalRequestSecurityMiddleware(
       const requestedMethod = oneHeader(request.headers['access-control-request-method']);
       const requestedHeaders = oneHeader(request.headers['access-control-request-headers']);
       const allowedMethods = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
-      const allowedHeaders = new Set(['content-type', 'x-csrf-token', 'x-tenant-context', 'idempotency-key']);
+      const allowedHeaders = new Set(['content-type', 'x-csrf-token', 'x-tenant-context', 'idempotency-key', 'if-match']);
       const normalizedHeaders = requestedHeaders?.split(',').map((header) => header.trim().toLowerCase()).filter(Boolean) ?? [];
       if (origin === undefined || !requestedMethod || !allowedMethods.has(requestedMethod.toUpperCase()) ||
         normalizedHeaders.some((header) => !allowedHeaders.has(header))) {
@@ -84,13 +93,20 @@ export function portalRequestSecurityMiddleware(
         return;
       }
       response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      response.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, X-Tenant-Context, Idempotency-Key');
+      response.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-CSRF-Token, X-Tenant-Context, Idempotency-Key, If-Match');
       response.setHeader('Access-Control-Max-Age', '600');
       response.status(HttpStatus.NO_CONTENT).end();
       return;
     }
 
     if (MUTATING_METHODS.has(request.method)) {
+      // Only the service operation POST bypasses browser Origin/CSRF checks; its controller
+      // requires a tenant-bound proof before resolving an asset or operation. Status is GET
+      // and follows normal safe-method handling; no other mutating method is exempt.
+      if (origin === undefined && isInternalServiceOperationPost(request.method, request.path)) {
+        next();
+        return;
+      }
       const requestHostOrigin = `${request.protocol}://${request.get('host') ?? ''}`;
       const fetchSite = oneHeader(request.headers['sec-fetch-site']);
       if (!origin || !isExactOrigin(origin, environment.allowedOrigins) || origin !== requestHostOrigin || fetchSite !== 'same-origin') {
@@ -101,6 +117,23 @@ export function portalRequestSecurityMiddleware(
       // A deliberate one-use link POST is pre-authenticated by its token and exact Origin.
       // An existing portal cookie must not make a native HTML confirmation form require a CSRF header.
       if (request.method === 'POST' && request.path === MAGIC_LINK_CONSUME_PATH) {
+        next();
+        return;
+      }
+
+      // Magic-link initiation is a public, rate-limited entry point. Keep the
+      // Origin/Fetch Metadata checks above, but do not let a stale portal
+      // session cookie prevent a user from requesting a fresh link. Its route
+      // handler continues to enforce identity and delivery quotas.
+      if (request.method === 'POST' && request.path === MAGIC_LINK_REQUEST_PATH) {
+        next();
+        return;
+      }
+
+      // Pre-auth creates a browser-bound challenge, not a portal session. Its
+      // controller retains the challenge cookie binding and abuse limits; a
+      // stale or active prior portal cookie must not require prior-session CSRF.
+      if (request.method === 'POST' && request.path === PORTAL_PREAUTH_PATH) {
         next();
         return;
       }

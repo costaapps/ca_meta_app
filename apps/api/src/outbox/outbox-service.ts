@@ -3,6 +3,7 @@ import type { EntityManager } from 'typeorm';
 import { canonicalJson, isUuid, parseOutboxEvent, type OutboxEventEnvelope } from '../jobs/event-validation.js';
 import type { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import type { ClaimedJob, JobFinalization, JobStore } from '../jobs/job-store.js';
+import type { LegacyProjectionJobScheduler } from '../legacy-projection/legacy-projection.jobs.js';
 
 export interface AppendOutboxResult {
   readonly id: string;
@@ -27,7 +28,11 @@ function resourceScope(event: OutboxEventEnvelope): string {
 
 /** Append with the caller's EntityManager so the caller's state update and delivery intent commit together. */
 export class OutboxService {
-  constructor(private readonly database: DurableWorkDatabase, private readonly jobs: JobStore) {}
+  constructor(
+    private readonly database: DurableWorkDatabase,
+    private readonly jobs: JobStore,
+    private readonly projectionJobs?: LegacyProjectionJobScheduler,
+  ) {}
 
   async append(eventValue: unknown): Promise<AppendOutboxResult> {
     const dataSource = await this.database.getDataSource();
@@ -74,6 +79,7 @@ export class OutboxService {
       resourceScopeRef: resourceScope(event),
       payload: { kind: 'OUTBOX_DELIVER', outboxEventRef: id },
     });
+    await this.projectionJobs?.enqueueWithin(manager, event, id);
     return { id, jobId: job.id, duplicate: false };
   }
 

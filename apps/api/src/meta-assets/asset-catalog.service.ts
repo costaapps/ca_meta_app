@@ -5,7 +5,7 @@ import { TenantAuthorizationService, TenantContextService } from '../identity/id
 import type { MembershipRole } from '../identity/identity.types.js';
 import type {
   AssetCapabilityEvidence, AssetCatalogChannel, AssetCatalogPageQuery, AssetCatalogReadModel, ConnectionCatalogPageQuery,
-  ConnectionCatalogReadModel, FlowCatalogVariant, MetaEnvironment,
+  ConnectionCatalogReadModel, FlowCatalogAppOffset, FlowCatalogVariant, MetaEnvironment,
 } from './meta-assets.types.js';
 import type { MetaAssetsRepository } from './mysql-meta-assets.repository.js';
 import { AssetRefreshCoordinator, AssetRefreshUnavailableError } from './asset-refresh.service.js';
@@ -22,7 +22,8 @@ export interface AssetCatalogQuery {
 }
 
 export interface ConnectionCatalogQuery extends Omit<AssetCatalogQuery, 'status'> {
-  readonly status?: ConnectionCatalogReadModel['status'];
+  readonly flowVariant?: ConnectionCatalogReadModel['flowVariant'];
+  readonly status?: ConnectionCatalogPageQuery['status'];
 }
 
 const FLOW_CATALOG: readonly FlowCatalogVariant[] = [
@@ -84,7 +85,8 @@ function canOperate(roles: readonly MembershipRole[]): boolean {
   return roles.some((role) => role === 'owner' || role === 'admin' || role === 'operator');
 }
 
-function capabilitySnapshot(item: AssetCatalogReadModel, roles: readonly MembershipRole[]): components['schemas']['AssetCapabilities'] {
+function capabilitySnapshot(item: AssetCatalogReadModel, roles: readonly MembershipRole[],
+  refreshAvailable: boolean): components['schemas']['AssetCapabilities'] {
   // Mappings remain advisory; unsupported variant/operation pairs stay false until confirmed.
   const now = Date.now();
   const observation = item.statusObservation ?? null;
@@ -115,13 +117,16 @@ function capabilitySnapshot(item: AssetCatalogReadModel, roles: readonly Members
     canSubscribe: false,
     canReauthorize: operator && item.reauthorizationRequired,
     canDisconnect: roles.some((role) => role === 'owner' || role === 'admin') && active,
+    canRefresh: operator && refreshAvailable,
   });
 }
 
-function toAssetListItem(item: AssetCatalogReadModel, roles: readonly MembershipRole[]): components['schemas']['AssetListItem'] {
+function toAssetListItem(item: AssetCatalogReadModel, roles: readonly MembershipRole[],
+  refreshAvailable: boolean): components['schemas']['AssetListItem'] {
   return Object.freeze({
     id: item.assetRef,
     kind: publicAssetKind(item.kind),
+    displayLabel: item.displayLabel,
     status: item.status,
     authorizationStatus: item.authorizationStatus,
     observedAt: item.observedAt,
@@ -129,7 +134,7 @@ function toAssetListItem(item: AssetCatalogReadModel, roles: readonly Membership
     verificationSource: item.verificationSource,
     stale: item.stale,
     diagnostics: item.diagnostics,
-    capabilities: capabilitySnapshot(item, roles),
+    capabilities: capabilitySnapshot(item, roles, refreshAvailable),
     ...(item.statusObservation ? { statusObservation: toPublicAssetStatusObservation(item.statusObservation,
       item.authorizationStatus, new Date().toISOString()) } : {}),
   });
@@ -150,10 +155,12 @@ function toConnection(item: ConnectionCatalogReadModel): components['schemas']['
   });
 }
 
-function toConnectionAsset(item: AssetCatalogReadModel, roles: readonly MembershipRole[]): components['schemas']['ConnectionAsset'] {
+function toConnectionAsset(item: AssetCatalogReadModel, roles: readonly MembershipRole[],
+  refreshAvailable: boolean): components['schemas']['ConnectionAsset'] {
   return Object.freeze({
     id: item.assetRef,
     kind: publicAssetKind(item.kind),
+    displayLabel: item.displayLabel,
     status: item.status,
     authorizationStatus: item.authorizationStatus,
     observedAt: item.observedAt,
@@ -161,7 +168,7 @@ function toConnectionAsset(item: AssetCatalogReadModel, roles: readonly Membersh
     verificationSource: item.verificationSource,
     stale: item.stale,
     diagnostics: item.diagnostics,
-    capabilities: capabilitySnapshot(item, roles),
+    capabilities: capabilitySnapshot(item, roles, refreshAvailable),
     ...(item.statusObservation ? { statusObservation: toPublicAssetStatusObservation(item.statusObservation,
       item.authorizationStatus, new Date().toISOString()) } : {}),
   });
@@ -198,11 +205,16 @@ export class AssetCatalogService {
     private readonly registeredFlowVariants: ReadonlySet<FlowCatalogVariant>,
   ) {}
 
-  async listFlows(session: VerifiedPortalSession, tenantContextRef: string, requestId: string): Promise<components['schemas']['FlowList']> {
+  async listFlows(session: VerifiedPortalSession, tenantContextRef: string, requestId: string,
+    appOffset: FlowCatalogAppOffset = 0): Promise<components['schemas']['FlowList']> {
     const scope = await this.readScope(session, tenantContextRef);
     await this.authorization.authorize(scope, 'RESOURCE_READ', scope.tenantId);
-    const apps = await this.repository.listFlowCatalogApps({ tenantId: scope.tenantId, environment: this.environment });
-    const contexts = apps.items.length > 0 ? apps.items : [{ appConfigurationRef: null, environment: this.environment }];
+    const apps = await this.repository.listFlowCatalogApps({
+      tenantId: scope.tenantId, environment: this.environment, appOffset,
+    });
+    const contexts = apps.items.length > 0 ? apps.items : appOffset === 0
+      ? [{ appConfigurationRef: null, environment: this.environment }]
+      : [];
     const allItems = contexts.flatMap((app) => FLOW_CATALOG.flatMap((flowVariant) => PUBLIC_JOURNEYS[flowVariant].map((variant) => {
       const appConfigured = app.appConfigurationRef !== null;
       const adapterRegistered = this.registeredFlowVariants.has(flowVariant);
@@ -244,7 +256,7 @@ export class AssetCatalogService {
     };
     const page = await this.repository.listAssetCatalog(repoQuery);
     return Object.freeze({
-      items: Object.freeze(page.items.map((item) => toAssetListItem(item, scope.roles))),
+      items: Object.freeze(page.items.map((item) => toAssetListItem(item, scope.roles, this.refreshCoordinator.available))),
       nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
       requestId,
     });
@@ -257,7 +269,7 @@ export class AssetCatalogService {
     if (!isUuid(assetRef)) return undefined;
     const item = await this.repository.findAssetCatalog({ tenantId: scope.tenantId, environment: this.environment, assetRef });
     if (!item) return undefined;
-    return Object.freeze({ ...toAssetListItem(item, scope.roles), requestId });
+    return Object.freeze({ ...toAssetListItem(item, scope.roles, this.refreshCoordinator.available), requestId });
   }
 
   async listConnections(session: VerifiedPortalSession, tenantContextRef: string, query: ConnectionCatalogQuery,
@@ -268,6 +280,7 @@ export class AssetCatalogService {
     const repoQuery: ConnectionCatalogPageQuery = {
       tenantId: scope.tenantId, environment: this.environment, limit: query.limit,
       ...(cursor ? { cursor } : {}), ...(query.channel ? { channel: query.channel } : {}),
+      ...(query.flowVariant ? { flowVariant: query.flowVariant } : {}),
       ...(query.number ? { number: query.number } : {}), ...(query.status ? { status: query.status } : {}),
     };
     const page = await this.repository.listConnectionCatalog(repoQuery);
@@ -283,13 +296,14 @@ export class AssetCatalogService {
     const item = await this.repository.findConnectionCatalog({ tenantId: scope.tenantId,
       environment: this.environment, connectionRef });
     if (!item) return undefined;
-    return Object.freeze({ ...toConnection(item), assets: Object.freeze((item.assets ?? []).map((asset) => toConnectionAsset(asset, scope.roles))), requestId });
+    return Object.freeze({ ...toConnection(item), assets: Object.freeze((item.assets ?? []).map((asset) =>
+      toConnectionAsset(asset, scope.roles, this.refreshCoordinator.available))), requestId });
   }
 
   async refreshAsset(session: VerifiedPortalSession, tenantContextRef: string, assetRef: string,
     _requestId: string): Promise<components['schemas']['JobAccepted']> {
     const scope = await this.readScope(session, tenantContextRef);
-    await this.authorization.authorize(scope, 'REAUTHORIZE', scope.tenantId);
+    await this.authorization.authorize(scope, 'REFRESH_ASSET', scope.tenantId);
     if (!isUuid(assetRef)) throw new AssetNotFoundError();
     const item = await this.repository.findAssetCatalog({ tenantId: scope.tenantId, environment: this.environment, assetRef });
     if (!item) throw new AssetNotFoundError();

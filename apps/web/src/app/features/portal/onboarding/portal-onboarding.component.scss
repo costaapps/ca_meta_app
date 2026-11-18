@@ -1,0 +1,37 @@
+.onboarding-page { width: min(960px, 100%); margin: 0 auto; padding: clamp(1rem, 3vw, 2rem); color: #1c2b36; }
+.page-header { margin-bottom: 1.25rem; }
+.page-header h1 { margin: .2rem 0 .45rem; font-size: clamp(1.7rem, 4vw, 2.4rem); }
+.eyebrow { margin: 0; color: #52616c; font-size: .82rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.tenant-name { color: #52616c; }
+.identity-warning, .external-gate, .notice, .error-panel { padding: .85rem 1rem; border-radius: .45rem; }
+.identity-warning, .error-panel { border: 1px solid #d98f8f; background: #fff4f4; color: #722; }
+.external-gate, .notice { border: 1px solid #e6c56c; background: #fff9e8; color: #574400; }
+.flow-list, .attempts-section { display: grid; gap: 1rem; margin-top: 1.5rem; }
+.flow-card, .attempt-card { padding: clamp(1rem, 2.5vw, 1.5rem); border: 1px solid #d9e0e7; border-radius: .65rem; background: #fff; box-shadow: 0 2px 9px rgb(26 42 54 / 5%); }
+.flow-card h2, .attempts-section h2 { margin-top: 0; }
+.flow-card-heading p, .profile-reason, .attempt-message { color: #52616c; line-height: 1.5; }
+.profile-choice { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-top: 1rem; margin-top: 1rem; border-top: 1px solid #edf0f3; }
+.profile-choice h3 { margin: 0; font-size: 1rem; }
+.profile-reason { margin: .35rem 0 .65rem; }
+.capability-list, .step-list { display: grid; gap: .4rem; padding-left: 1.2rem; color: #52616c; }
+.capability-list li, .step-list li { display: flex; justify-content: space-between; gap: 1rem; }
+.capability-state { color: #7a4b00; }
+.capability-state.is-enabled { color: #276749; }
+.primary-button, .secondary-button { min-height: 42px; padding: .55rem .9rem; border: 1px solid #005ecb; border-radius: .4rem; font: inherit; font-weight: 650; cursor: pointer; }
+.primary-button { flex: 0 0 auto; background: #0067d8; color: #fff; }
+.secondary-button { background: #fff; color: #0055b8; }
+.primary-button:disabled, .secondary-button:disabled { border-color: #b6c0ca; background: #eef1f4; color: #6b7782; cursor: not-allowed; }
+.primary-button:focus-visible, .secondary-button:focus-visible, summary:focus-visible { outline: 3px solid #80b9ff; outline-offset: 2px; }
+.attempt-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.attempt-heading h3 { margin: 0; }
+.status-label { margin: .3rem 0 0; font-weight: 700; }
+.job-status { color: #52616c; font-size: .9rem; }
+.attempt-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
+.support-details { margin-top: 1rem; color: #52616c; }
+.support-details code { overflow-wrap: anywhere; }
+.loading { padding: 1rem 0; }
+@media (max-width: 640px) {
+  .profile-choice, .attempt-heading { flex-direction: column; }
+  .primary-button { width: 100%; }
+  .capability-list li, .step-list li { align-items: flex-start; }
+}

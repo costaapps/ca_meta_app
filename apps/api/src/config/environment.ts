@@ -2,7 +2,7 @@ import { isIP } from 'node:net';
 import { createPublicKey, randomBytes } from 'node:crypto';
 import type { TicketExchangeConfiguration } from '../auth-exchange/ticket-contract.js';
 import type { ConfiguredTicketPublicKey } from '../auth-exchange/configured-ticket-key-set.js';
-import type { WorkerServiceCredentialHash } from '../identity/identity.trust.js';
+import type { InternalServiceCredentialHash, WorkerServiceCredentialHash } from '../identity/identity.trust.js';
 import {
   parseMetaAppConfigurations,
   parseTrustedMetaProviderAppIds,
@@ -71,6 +71,8 @@ export interface ApiEnvironment {
     /** Hash-only worker credentials mapped to SERVICE principals; raw proof comes from runtime secret storage. */
     readonly workerServiceCredentials?: readonly WorkerServiceCredentialHash[];
   };
+  /** Optional opaque Msg4/other-service proofs, each bound to one server-owned tenant. */
+  readonly internalServiceCredentials?: readonly InternalServiceCredentialHash[];
 }
 
 export class EnvironmentValidationError extends Error {
@@ -364,6 +366,36 @@ function workerServiceCredentialHashesField(
   }
 }
 
+function internalServiceCredentialHashesField(
+  source: NodeJS.ProcessEnv,
+  invalid: string[],
+): readonly InternalServiceCredentialHash[] | undefined {
+  const field = 'API_INTERNAL_SERVICE_CREDENTIAL_HASHES_JSON';
+  const value = source[field];
+  if (value === undefined || value.trim() === '') return undefined;
+  try {
+    if (Buffer.byteLength(value, 'utf8') > 32 * 1024) throw new Error();
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 100) throw new Error();
+    const entries = parsed.map((entry: unknown): InternalServiceCredentialHash => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new Error();
+      const principalId = Reflect.get(entry, 'principalId');
+      const tenantId = Reflect.get(entry, 'tenantId');
+      const credentialSha256 = Reflect.get(entry, 'credentialSha256');
+      if (Object.keys(entry).some((name) => !['principalId', 'tenantId', 'credentialSha256'].includes(name)) ||
+          typeof principalId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(principalId) ||
+          typeof tenantId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tenantId) ||
+          typeof credentialSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(credentialSha256)) throw new Error();
+      return Object.freeze({ principalId: principalId.toLowerCase(), tenantId: tenantId.toLowerCase(), credentialSha256 });
+    });
+    if (new Set(entries.map(({ credentialSha256 }) => credentialSha256)).size !== entries.length) throw new Error();
+    return Object.freeze(entries);
+  } catch {
+    invalid.push(field);
+    return undefined;
+  }
+}
+
 function credentialKeyRingField(source: NodeJS.ProcessEnv, invalid: string[]): CredentialKeyRingConfiguration | undefined {
   const field = 'API_CREDENTIAL_KEYRING_JSON';
   const value = source[field];
@@ -534,6 +566,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   const onboardingStateSigningKey = optionalBase64urlKey(source.API_ONBOARDING_STATE_KEY, 'API_ONBOARDING_STATE_KEY', invalid);
   const platformIdentityAdmins = platformIdentityAdminsField(source, invalid);
   const workerServiceCredentials = workerServiceCredentialHashesField(source, invalid);
+  const internalServiceCredentials = internalServiceCredentialHashesField(source, invalid);
   const credentialKeyRing = credentialKeyRingField(source, invalid);
   const trustedMetaProviderAppIds = parseTrustedMetaProviderAppIds(
     source.API_META_TRUSTED_APP_IDS_JSON,
@@ -581,6 +614,7 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
       platformIdentityAdmins,
       ...(workerServiceCredentials ? { workerServiceCredentials } : {}),
     },
+    ...(internalServiceCredentials ? { internalServiceCredentials } : {}),
   };
 }
 

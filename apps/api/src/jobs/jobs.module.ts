@@ -29,7 +29,8 @@ export class JobsModule {
         },
         {
           provide: OutboxService,
-          useFactory: (database: DurableWorkDatabase, jobs: DurableJobStore) => new OutboxService(database, jobs),
+          useFactory: (database: DurableWorkDatabase, jobs: DurableJobStore) =>
+            new OutboxService(database, jobs),
           inject: [DURABLE_WORK_DATABASE, DURABLE_JOB_STORE],
         },
         {

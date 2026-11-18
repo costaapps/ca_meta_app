@@ -63,6 +63,14 @@ export interface WorkerServiceCredentialHash {
   readonly credentialSha256: string;
 }
 
+/** One high-entropy machine credential pinned to one tenant and service principal. */
+export interface InternalServiceCredentialHash {
+  readonly principalId: string;
+  readonly tenantId: string;
+  /** Lowercase SHA-256 of the delivered proof; the proof itself is never configured. */
+  readonly credentialSha256: string;
+}
+
 export interface VerifiedPersistedJobContext {
   readonly [verifiedPersistedJobContextBrand]: true;
   readonly jobId: string;

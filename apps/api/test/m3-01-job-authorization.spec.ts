@@ -58,6 +58,7 @@ function authorizationFor(options: {
   readonly assetRelationship?: 'ACTIVE_VERIFIED' | 'MISSING' | 'REVOKED' | 'UNVERIFIED';
   readonly assetAuthorizationState?: 'ACTIVE' | 'PARTIAL' | 'REVOKED' | 'DISCONNECTED';
   readonly onboardingMembership?: 'ACTIVE_CONNECT' | 'REVOKED' | 'VIEWER';
+  readonly projectionResourceExists?: boolean;
   readonly scopes?: ServiceTenantGrant['scopes'];
 } = {}) {
   const job = jobFor(options.type ?? 'ASSET_REFRESH');
@@ -106,6 +107,14 @@ function authorizationFor(options: {
               sql.includes('onboarding.expires_at > UTC_TIMESTAMP(6)');
             return options.onboardingMembership === 'ACTIVE_CONNECT' && hasMembershipFence
               ? [{ steps_json: JSON.stringify([{ id: 'step-synthetic' }]) }] : [];
+          }
+          if (sql.includes('FROM ca_meta_outbox_events')) {
+            if (job.type !== 'PROJECTION_RECONCILE' || job.payload.kind !== 'PROJECTION_RECONCILE' ||
+                options.projectionResourceExists !== true) return [];
+            const payload = job.payload;
+            const matches = !!parameters && parameters[0] === payload.projectionRef &&
+              parameters[1] === job.tenantId && parameters[2] === payload.sourceVersion;
+            return matches ? [{ id: payload.projectionRef }] : [];
           }
           return [];
         },
@@ -214,4 +223,16 @@ test('reference-only projection and history jobs are denied until a tenant-owned
     const job = jobFor(type);
     assert.equal(await authorization.authorize(job), undefined);
   }
+});
+
+test('projection reconciliation requires an explicit projection write scope, not tenant read', async () => {
+  const readOnly = authorizationFor({
+    type: 'PROJECTION_RECONCILE', projectionResourceExists: true, scopes: ['TENANT_RESOURCE_READ'],
+  });
+  assert.equal(await readOnly.authorization.authorize(readOnly.job), undefined);
+
+  const projectionWriter = authorizationFor({
+    type: 'PROJECTION_RECONCILE', projectionResourceExists: true, scopes: ['LEGACY_METADATA_PROJECT'],
+  });
+  assert.ok(await projectionWriter.authorization.authorize(projectionWriter.job));
 });

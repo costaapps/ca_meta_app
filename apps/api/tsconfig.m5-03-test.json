@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-test",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/**/*.ts", "test/migration-unit.spec.ts", "test/m5-03-coexistence-lock.integration.spec.ts", "test/m5-03-coexistence-conflict.spec.ts"],
+  "exclude": ["node_modules", "dist", "dist-test"]
+}

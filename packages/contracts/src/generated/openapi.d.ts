@@ -190,7 +190,7 @@ export interface paths {
         };
         /**
          * List configured flow choices
-         * @description Returns the five existing authorization journeys for each app configuration in the current tenant and environment. `variant` remains the journey identifier; optional `flowVariant` groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled.
+         * @description Returns the five existing authorization journeys for each app configuration in the current tenant and environment. `variant` remains the journey identifier; optional `flowVariant` groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite keeps it disabled. Each page contains up to six app configurations (30 journeys), except offset 12, which contains up to four configurations (20 journeys), for a maximum source of 16 configurations. `truncated=true` means another page exists or the source exceeds 16 configurations. Clients must request offsets 0, 6 and 12 in order until `truncated=false`; if the third page remains truncated, the full catalog is unavailable and must not be used to choose an authorization flow.
          */
         readonly get: operations["listIntegrationFlows"];
         readonly put?: never;
@@ -232,7 +232,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Create an onboarding session and provider launch request
-         * @description Tenant/principal/config are resolved from the current server session. Body cannot select a tenant, CompanyUUID, app or secret. The server generates provider state and its correlation to this onboarding; launch URL is server-generated from allowlisted configuration. Persisted state is represented by a digest and is valid for ten minutes for one use. Requests fail closed with a safe 503 when the required server-side signing key or trusted provider-launch configuration is unavailable. The signing key is runtime-configurable; its presence in any deployment is Not confirmed. A 201 or provider redirect means only that a flow was created, never that a connection is READY.
+         * @description Tenant/principal/config are resolved from the current server session. Body cannot select a tenant, CompanyUUID, app or secret. The server generates provider state and its correlation to this onboarding; launch URL is server-generated from allowlisted configuration. Persisted state is represented by a digest and is valid for ten minutes for one use. Requests fail closed with a safe 503 when the required server-side signing key or trusted provider-launch configuration is unavailable. The signing key is runtime-configurable; its presence in any deployment is Not confirmed. A 201 or provider redirect means only that a flow was created, never that a connection is READY. A distinct idempotency key receives 409 COEXISTENCE_SESSION_ACTIVE while this tenant has another unexpired, nonterminal WHATSAPP_COEXISTENCE session; a same-key retry replays the existing session.
          */
         readonly post: operations["createOnboardingSession"];
         readonly delete?: never;
@@ -333,6 +333,66 @@ export interface paths {
         readonly get: operations["receiveProviderCallback"];
         readonly put?: never;
         readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/operations/diagnostics": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Read safe diagnostics for the current tenant
+         * @description The tenant is derived from the authenticated portal session and current server-validated context. The request accepts no tenant ID. The read model contains status, counts, safe reason codes, timestamps, request correlation and contract/read-model versions only. Missing adapters remain UNKNOWN. Credential bytes, provider URLs and IDs, payloads, messages and contact details are excluded.
+         */
+        readonly get: operations["getOperationsDiagnostics"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/support/diagnostics/export": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Export audited support diagnostics for the current tenant
+         * @description The current tenant comes only from the authenticated session and server-validated context. A trusted SUPPORT grant (maximum lifetime 15 minutes) and fixed reason code are required and audited before the data is read. This route accepts no tenant ID. The export uses the same closed redaction and status-only allowlist as the portal read model.
+         */
+        readonly get: operations["exportSupportDiagnostics"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/operations/actions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Request a tenant-scoped operational action
+         * @description Every action requires a fixed reason code, current portal context and idempotency key. The request has no tenant field. User actions use current membership roles and existing typed handlers; tenant writes remain unavailable while the session has no trusted company identity. Support actions require a trusted SUPPORT grant with a maximum 15-minute lifetime. Unsupported adapters return a typed unavailable outcome. Replay is accepted only for a support-authorized dead letter whose stored effect mode and deterministic replay key permit it; UNKNOWN or ambiguous outcomes are never directly resent.
+         */
+        readonly post: operations["requestOperationsAction"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -581,6 +641,33 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/assets/{assetId}/automation-config/channels": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                readonly assetId: string;
+            };
+            readonly cookie?: never;
+        };
+        /**
+         * Read automation/reply configuration
+         * @description Tenant and asset authorization are checked for the requested capability. ETag is returned for conditional updates.
+         */
+        readonly get: operations["getAutomationChannelConfig"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        /**
+         * Update channel-supported automation/reply fields conditionally
+         * @description Requires exact Origin, CSRF, current tenant context and If-Match from the latest representation. Unknown fields are rejected. This changes local configuration; delivery of a reply is a separate external effect.
+         */
+        readonly patch: operations["patchAutomationChannelConfig"];
+        readonly trace?: never;
+    };
     readonly "/api/v1/assets/{assetId}/replies": {
         readonly parameters: {
             readonly query?: never;
@@ -655,20 +742,20 @@ export interface paths {
             readonly query?: never;
             readonly header?: never;
             readonly path: {
-                /** @description Opaque account asset ID; the server verifies tenant and MANAGE_TEMPLATES capability. */
+                /** @description Internal WABA asset UUID selected from this tenant's verified WhatsApp EXCLUSIVE assets. The server resolves the provider account identifier and MANAGE_TEMPLATES credential; browser-supplied provider IDs, cUUID, company_uuid and tokens are not accepted. */
                 readonly assetId: string;
             };
             readonly cookie?: never;
         };
         /**
          * List templates for an authorized WhatsApp account
-         * @description Returns a tenant/account-scoped template projection from the selected eligible grant. Provider eligibility and actual grant semantics are Not confirmed; no global credential is selected.
+         * @description Returns a tenant/account-scoped template projection after current membership, WABA ownership, WhatsApp EXCLUSIVE flow, verified asset and candidate MANAGE_TEMPLATES grant checks. The provider adapter is disabled by default until current eligibility and capability evidence is reviewed. Unrecognized provider states are normalized to UNKNOWN; exact provider fields and status enumeration are Not confirmed. No root/global credential is selected.
          */
         readonly get: operations["listTemplates"];
         readonly put?: never;
         /**
          * Request creation of a template
-         * @description Validates an allowlisted payload and selected account grant before dispatch. Provider template review/approval is asynchronous and is not inferred from request acceptance.
+         * @description Validates an allowlisted payload and selected account grant before dispatch. Provider template review/approval is asynchronous and is not inferred from request acceptance. The real dispatch adapter remains disabled until current provider capability and tenant eligibility are confirmed. Body and category constraints are local request-contract limits, not a claim about the current Meta validation rules.
          */
         readonly post: operations["createTemplate"];
         readonly delete?: never;
@@ -686,7 +773,7 @@ export interface paths {
         };
         /**
          * List tenant-scoped operational notifications
-         * @description Returns safe metadata, references and freshness; no message body or raw provider payload is included. Cursor and limit are bounded.
+         * @description Returns safe metadata, references and freshness; no message body or raw provider payload is included. Cursor and limit are bounded. Repeat the same channel and number filters on every page request when continuing with a cursor.
          */
         readonly get: operations["listNotifications"];
         readonly put?: never;
@@ -711,7 +798,7 @@ export interface paths {
         readonly put?: never;
         /**
          * Apply a notification action
-         * @description The action is checked against current membership, asset grant and role. MARK_READ/DISMISS are local; REPLY is an external message effect and enters the bounded async job/reconciliation path. This endpoint never reports a provider send as complete on HTTP acceptance.
+         * @description The server derives the tenant from the verified session and current membership, then resolves the notification and asset in that tenant. MARK_READ/DISMISS are local state changes and return 200 only after persistence. When an eligible external adapter is available, SEND_TEMPLATE/REPLY_COMMENT return a durable operation; HTTP acceptance is not provider success. The current runtime has no confirmed credential or action adapter and returns 503 for those external actions. SEND_MESSAGE is unavailable until current eligibility and supported message context are confirmed. Browser input cannot select an asset/provider ID or tenant.
          */
         readonly post: operations["actOnNotification"];
         readonly delete?: never;
@@ -795,7 +882,7 @@ export interface components {
         readonly ErrorAction: "SIGN_IN" | "FIX_REQUEST" | "CONTACT_ADMIN" | "REFRESH" | "RESTART_ONBOARDING" | "REAUTHORIZE" | "WAIT" | "CHECK_STATUS" | "RECONCILE" | "USE_NEW_REQUEST_KEY" | "REDUCE_REQUEST" | "RELOAD_PORTAL";
         readonly ErrorEnvelope: {
             /** @enum {string} */
-            readonly code: "AUTH_REQUIRED" | "MEMBERSHIP_REVOKED" | "ACCESS_DENIED" | "RESOURCE_NOT_AVAILABLE" | "STATE_INVALID" | "ONBOARDING_EXPIRED" | "FLOW_UNAVAILABLE" | "FLOW_NOT_ELIGIBLE" | "ASSET_GRANT_MISSING" | "ASSET_CONFLICT" | "META_PERMISSION_REQUIRED" | "META_REAUTH_REQUIRED" | "META_RATE_LIMITED" | "SUBSCRIPTION_PENDING" | "OUTCOME_UNKNOWN" | "VERSION_CONFLICT" | "IDEMPOTENCY_KEY_REUSED" | "CONTEXT_CHANGED" | "ORIGIN_NOT_ALLOWED" | "HOST_NOT_ALLOWED" | "CSRF_INVALID" | "VALIDATION_FAILED" | "PAYLOAD_TOO_LARGE" | "RATE_LIMITED" | "DEPENDENCY_UNAVAILABLE" | "META_UNAVAILABLE" | "PROVIDER_REJECTED" | "INTERNAL_ERROR";
+            readonly code: "AUTH_REQUIRED" | "MEMBERSHIP_REVOKED" | "ACCESS_DENIED" | "RESOURCE_NOT_AVAILABLE" | "STATE_INVALID" | "ONBOARDING_EXPIRED" | "FLOW_UNAVAILABLE" | "FLOW_NOT_ELIGIBLE" | "ASSET_GRANT_MISSING" | "ASSET_CONFLICT" | "META_PERMISSION_REQUIRED" | "META_REAUTH_REQUIRED" | "META_RATE_LIMITED" | "SUBSCRIPTION_PENDING" | "OUTCOME_UNKNOWN" | "VERSION_CONFLICT" | "IDEMPOTENCY_KEY_REUSED" | "COEXISTENCE_SESSION_ACTIVE" | "CONTEXT_CHANGED" | "ORIGIN_NOT_ALLOWED" | "HOST_NOT_ALLOWED" | "CSRF_INVALID" | "VALIDATION_FAILED" | "PAYLOAD_TOO_LARGE" | "RATE_LIMITED" | "DEPENDENCY_UNAVAILABLE" | "META_UNAVAILABLE" | "PROVIDER_REJECTED" | "INTERNAL_ERROR";
             /** @description Fixed, allowlisted localization template selected by error code. Never interpolate raw provider detail, request values, secrets, or diagnostic text. */
             readonly safeMessage: string;
             /** @description Server-generated correlation identifier. Direct-client X-Request-Id values are ignored; this identifier is not authorization evidence. */
@@ -868,7 +955,7 @@ export interface components {
         readonly MetaBootstrapReason: "CONFIGURATION_MISSING" | "CONFIGURATION_DISABLED" | "VERSION_EVIDENCE_REQUIRED" | "PERMISSION_MAPPING_NOT_CONFIRMED" | "CAPABILITY_EVIDENCE_MISSING" | "ACCESS_LEVEL_NOT_CONFIRMED" | "APP_REVIEW_NOT_CONFIRMED" | "SANDBOX_NOT_CONFIRMED";
         readonly MetaCapabilityStatus: {
             /** @enum {string} */
-            readonly operation: "ASSET_DISCOVERY" | "SEND_MESSAGE" | "MANAGE_COMMENTS" | "MANAGE_TEMPLATES" | "READ_STATUS" | "SUBSCRIBE_WEBHOOKS" | "SYNC_HISTORY";
+            readonly operation: "ASSET_DISCOVERY" | "SEND_MESSAGE" | "MANAGE_COMMENTS" | "MANAGE_TEMPLATES" | "READ_STATUS" | "SUBSCRIBE_WEBHOOKS" | "SYNC_HISTORY" | "PHONE_REGISTRATION_CONVENTIONAL";
             readonly enabled: boolean;
             readonly reasonCode: components["schemas"]["MetaBootstrapReason"] | null;
         };
@@ -952,6 +1039,122 @@ export interface components {
             /** @enum {string} */
             readonly result: "APPLIED" | "DUPLICATE" | "UNMAPPED";
         };
+        /** @enum {string} */
+        readonly OperationsReasonCode: "INCIDENT" | "CUSTOMER_REQUEST" | "SECURITY_REVIEW";
+        readonly OperationsActionRequest: components["schemas"]["OperationsRevalidateRequest"] | components["schemas"]["OperationsResumeStageRequest"] | components["schemas"]["OperationsReconcileSubscriptionRequest"] | components["schemas"]["OperationsRequestReauthRequest"] | components["schemas"]["OperationsReplayJobRequest"];
+        readonly OperationsRevalidateRequest: {
+            /** @constant */
+            readonly action: "REVALIDATE";
+            /** Format: uuid */
+            readonly resourceRef: string;
+            readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+        };
+        readonly OperationsResumeStageRequest: {
+            /** @constant */
+            readonly action: "RESUME_STAGE";
+            /** Format: uuid */
+            readonly resourceRef: string;
+            /** @enum {string} */
+            readonly stage: "authorization" | "asset-verification" | "subscription" | "projection";
+            readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+        };
+        readonly OperationsReconcileSubscriptionRequest: {
+            /** @constant */
+            readonly action: "RECONCILE_SUBSCRIPTION";
+            /** Format: uuid */
+            readonly resourceRef: string;
+            readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+        };
+        readonly OperationsRequestReauthRequest: {
+            /** @constant */
+            readonly action: "REQUEST_REAUTH";
+            /** Format: uuid */
+            readonly resourceRef: string;
+            readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+        };
+        readonly OperationsReplayJobRequest: {
+            /** @constant */
+            readonly action: "REPLAY_JOB";
+            /** Format: uuid */
+            readonly resourceRef: string;
+            readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+        };
+        readonly OperationsActionResult: {
+            /** @enum {string} */
+            readonly action: "REVALIDATE" | "RESUME_STAGE" | "RECONCILE_SUBSCRIPTION" | "REQUEST_REAUTH" | "REPLAY_JOB";
+            /** @enum {string} */
+            readonly outcome: "ACCEPTED" | "DUPLICATE" | "UNAVAILABLE" | "REJECTED";
+            /** @enum {string} */
+            readonly reasonCode: "AUDIT_UNAVAILABLE" | "REFRESH_QUEUED" | "REFRESH_ADAPTER_UNAVAILABLE" | "TENANT_IDENTITY_NOT_CONFIRMED" | "STAGE_RESUME_QUEUED" | "ONBOARDING_ADAPTER_UNAVAILABLE" | "REAUTHORIZATION_REQUESTED" | "REAUTHORIZATION_NOT_CONFIGURED" | "SUPPORT_ROLE_NOT_CONFIRMED" | "SUBSCRIPTION_ADAPTER_NOT_CONFIRMED" | "DEAD_LETTER_NOT_FOUND" | "AUTHORIZATION_DENIED" | "AUTHORIZATION_UNAVAILABLE" | "AUTHORIZATION_EXPIRED" | "GRANT_INVALID" | "SCOPE_MISMATCH" | "AMBIGUOUS_EFFECT_NOT_REPLAYABLE" | "REPLAY_ENQUEUED" | "REPLAY_DUPLICATE" | "DRY_RUN_AUTHORIZED";
+            /** Format: uuid */
+            readonly requestId: string;
+            readonly operationRef: string | null;
+        };
+        readonly OperationsDiagnosticSection: {
+            /** @enum {string} */
+            readonly state: "HEALTHY" | "ACTION_REQUIRED" | "PENDING" | "FAILED" | "UNKNOWN";
+            readonly reasonCode: string | null;
+            /** Format: date-time */
+            readonly observedAt: string | null;
+        };
+        readonly OperationsOnboardingSection: {
+            /** @enum {string} */
+            readonly state: "HEALTHY" | "ACTION_REQUIRED" | "PENDING" | "FAILED" | "UNKNOWN";
+            readonly reasonCode: string | null;
+            /** Format: date-time */
+            readonly observedAt: string | null;
+            readonly nextAction: string | null;
+        };
+        readonly OperationsGrantsSection: {
+            /** @enum {string} */
+            readonly state: "HEALTHY" | "ACTION_REQUIRED" | "PENDING" | "FAILED" | "UNKNOWN";
+            readonly reasonCode: string | null;
+            /** Format: date-time */
+            readonly observedAt: string | null;
+            readonly grantedCount: number | null;
+            readonly revokedCount: number | null;
+        };
+        readonly OperationsJobsSection: {
+            /** @enum {string} */
+            readonly state: "HEALTHY" | "ACTION_REQUIRED" | "PENDING" | "FAILED" | "UNKNOWN";
+            readonly reasonCode: string | null;
+            /** Format: date-time */
+            readonly observedAt: string | null;
+            readonly counts: {
+                readonly [key: string]: number;
+            };
+        };
+        readonly OperationsProjectionSection: {
+            /** @enum {string} */
+            readonly state: "HEALTHY" | "ACTION_REQUIRED" | "PENDING" | "FAILED" | "UNKNOWN";
+            readonly reasonCode: string | null;
+            /** Format: date-time */
+            readonly observedAt: string | null;
+            readonly pendingCount: number | null;
+            readonly failedCount: number | null;
+            readonly lagSeconds: null;
+        };
+        readonly OperationsDiagnostics: {
+            /** Format: uuid */
+            readonly requestId: string;
+            /** Format: date-time */
+            readonly generatedAt: string;
+            readonly versions: {
+                /** @constant */
+                readonly contract: "1.0.0-proposed";
+                /** @constant */
+                readonly readModel: 1;
+            };
+            readonly onboarding: components["schemas"]["OperationsOnboardingSection"];
+            readonly credentialHealth: components["schemas"]["OperationsDiagnosticSection"];
+            readonly grants: components["schemas"]["OperationsGrantsSection"];
+            readonly subscription: components["schemas"]["OperationsDiagnosticSection"];
+            readonly webhook: components["schemas"]["OperationsDiagnosticSection"];
+            readonly jobs: components["schemas"]["OperationsJobsSection"];
+            readonly projection: components["schemas"]["OperationsProjectionSection"];
+            /** @enum {string} */
+            readonly nextAction: "REQUEST_REAUTHORIZATION" | "WAIT_FOR_PROCESSING" | "CONTACT_SUPPORT" | "REVIEW_SYNC" | "CHECK_CONNECTION" | "NO_ACTION" | "UNKNOWN";
+        };
         readonly JobAccepted: {
             readonly jobId: string;
             /** @constant */
@@ -1023,6 +1226,8 @@ export interface components {
         };
         readonly ConnectionAsset: {
             readonly id: string;
+            /** @description Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback. */
+            readonly displayLabel?: string | null;
             /** @enum {string} */
             readonly kind: "PAGE" | "INSTAGRAM_ACCOUNT" | "WHATSAPP_BUSINESS_ACCOUNT" | "PHONE_NUMBER";
             /** @enum {string} */
@@ -1066,6 +1271,8 @@ export interface components {
         };
         readonly Asset: {
             readonly id: string;
+            /** @description Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback. */
+            readonly displayLabel?: string | null;
             /** @enum {string} */
             readonly kind: "PAGE" | "INSTAGRAM_ACCOUNT" | "WHATSAPP_BUSINESS_ACCOUNT" | "PHONE_NUMBER";
             /** @enum {string} */
@@ -1086,6 +1293,8 @@ export interface components {
         };
         readonly AssetListItem: {
             readonly id: string;
+            /** @description Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback. */
+            readonly displayLabel?: string | null;
             /** @enum {string} */
             readonly kind: "PAGE" | "INSTAGRAM_ACCOUNT" | "WHATSAPP_BUSINESS_ACCOUNT" | "PHONE_NUMBER";
             /** @enum {string} */
@@ -1157,6 +1366,7 @@ export interface components {
             readonly canSubscribe: boolean;
             readonly canReauthorize: boolean;
             readonly canDisconnect: boolean;
+            readonly canRefresh?: boolean;
         };
         readonly AssetListPage: {
             readonly items: readonly components["schemas"]["AssetListItem"][];
@@ -1189,9 +1399,51 @@ export interface components {
             readonly updatedAt: string;
             readonly requestId: string;
         };
+        readonly AutomationChannelConfig: {
+            /** Format: uuid */
+            readonly assetId: string;
+            readonly assetKind: components["schemas"]["AutomationConfigAssetKind"];
+            /**
+             * @description Each resource owns independent values. No account-level default is applied.
+             * @constant
+             */
+            readonly inheritanceMode: "ASSET_ONLY";
+            readonly supportedFields: readonly components["schemas"]["AutomationConfigField"][];
+            readonly privateWelcomeMessage: string | null;
+            readonly commentPublicReply: string | null;
+            readonly commentPrivateReply: string | null;
+            readonly capabilities: {
+                readonly canEdit: boolean;
+                /**
+                 * @description The API stores settings only; message execution is a separate fail-closed capability.
+                 * @constant
+                 */
+                readonly executable: false;
+            };
+            readonly version: number;
+            /** Format: date-time */
+            readonly updatedAt: string | null;
+            readonly projectionState: components["schemas"]["AutomationConfigProjectionState"];
+            readonly requestId: string;
+        };
+        /** @enum {string} */
+        readonly AutomationConfigAssetKind: "WHATSAPP_PHONE_NUMBER" | "FACEBOOK_PAGE" | "INSTAGRAM_BUSINESS_ACCOUNT" | "INSTAGRAM_CREATOR_ACCOUNT";
+        /** @enum {string} */
+        readonly AutomationConfigField: "privateWelcomeMessage" | "commentPublicReply" | "commentPrivateReply";
+        /** @enum {string} */
+        readonly AutomationConfigProjectionState: "UNKNOWN" | "PENDING" | "SYNCED" | "STALE" | "FAILED";
         readonly AutomationConfigUpdate: {
             readonly enabled: boolean;
             readonly replyText: string;
+        };
+        readonly AutomationChannelConfigUpdate: {
+            readonly version: number;
+            /** @description Empty text clears the local value for this asset. */
+            readonly privateWelcomeMessage?: string;
+            /** @description Empty text clears the local value for this asset. */
+            readonly commentPublicReply?: string;
+            /** @description Empty text clears the local value for this asset. */
+            readonly commentPrivateReply?: string;
         };
         readonly ReplyRequest: {
             readonly inReplyToRef: string;
@@ -1227,10 +1479,22 @@ export interface components {
             readonly id: string;
             readonly name: string;
             readonly language: string;
-            /** @enum {string} */
+            /**
+             * @description Normalized status using the existing v1 enum; UNKNOWN covers other provider labels. This value does not establish approval.
+             * @enum {string}
+             */
             readonly status: "PENDING" | "APPROVED" | "REJECTED" | "PAUSED" | "UNKNOWN";
-            /** @enum {string} */
+            /**
+             * @description Normalized category using the existing v1 enum; UNKNOWN covers other provider labels.
+             * @enum {string}
+             */
             readonly category: "AUTHENTICATION" | "MARKETING" | "UTILITY" | "UNKNOWN";
+            /** @description Bounded, sanitized provider-reported status label, preserved for display without assigning approval semantics. */
+            readonly providerStatusLabel?: string;
+            /** @description Bounded, sanitized provider-reported category label, preserved without assigning local category semantics. */
+            readonly providerCategoryLabel?: string;
+            /** @description Sanitized BODY text, including any literal placeholders. Provider examples and other components are omitted; null means no safe BODY text was available. */
+            readonly bodyText?: string | null;
             /** Format: date-time */
             readonly updatedAt: string;
         };
@@ -1239,17 +1503,21 @@ export interface components {
             readonly nextCursor: string | null;
             readonly requestId: string;
         };
+        /** @description Local BODY-only request shape. Name/language/body limits and the local create-category allowlist are compatibility constraints of this API and are not asserted as current Meta rules. `exampleValues` has one entry per distinct BODY placeholder in first-occurrence order; repeated placeholders reuse that entry. This correspondence is a local contract rule, not a claim about Meta's current examples validation. */
         readonly TemplateCreateRequest: {
             readonly name: string;
             readonly language: string;
             /** @enum {string} */
             readonly category: "AUTHENTICATION" | "MARKETING" | "UTILITY";
+            /** @description BODY text. Matched placeholders use {{1}} through {{N}} with first occurrence in ascending order; repeats are allowed by this local request contract. */
             readonly bodyText: string;
+            /** @description Local BODY example values, one non-empty string for each distinct placeholder index. Omit or pass an empty array when the body has no placeholders. */
+            readonly exampleValues?: readonly string[];
         };
         readonly Notification: {
             readonly id: string;
             /** @enum {string} */
-            readonly kind: "MESSAGE_RECEIVED" | "ASSET_STATUS_CHANGED" | "ACTION_REQUIRED";
+            readonly kind: "MESSAGE_RECEIVED" | "COMMENT_RECEIVED" | "ASSET_STATUS_CHANGED" | "ACTION_REQUIRED";
             readonly assetRef: string;
             readonly messageRef: string | null;
             /** @enum {string} */
@@ -1257,7 +1525,7 @@ export interface components {
             readonly safeSummary: string;
             /** Format: date-time */
             readonly createdAt: string;
-            readonly actions: readonly ("MARK_READ" | "DISMISS" | "REPLY" | "REFRESH")[];
+            readonly actions: readonly ("MARK_READ" | "DISMISS" | "REPLY" | "REFRESH" | "SEND_TEMPLATE" | "REPLY_COMMENT" | "SEND_MESSAGE")[];
         };
         readonly NotificationListPage: {
             readonly items: readonly components["schemas"]["Notification"][];
@@ -1271,6 +1539,28 @@ export interface components {
             /** @constant */
             readonly action: "REPLY";
             readonly replyText: string;
+        } | {
+            /** @constant */
+            readonly action: "SEND_TEMPLATE";
+            readonly templateName: string;
+            readonly language: string;
+            readonly parameters: readonly string[];
+        } | {
+            /** @constant */
+            readonly action: "REPLY_COMMENT";
+            readonly replyText: string;
+        } | {
+            /** @constant */
+            readonly action: "SEND_MESSAGE";
+            readonly messageText: string;
+        };
+        readonly NotificationActionResult: {
+            readonly notificationId: string;
+            /** @enum {string} */
+            readonly action: "MARK_READ" | "DISMISS";
+            /** @enum {string} */
+            readonly status: "READ" | "DISMISSED";
+            readonly requestId: string;
         };
         readonly NotificationActionAccepted: {
             readonly notificationId: string;
@@ -1279,6 +1569,8 @@ export interface components {
             readonly status: "PENDING";
             readonly location: string;
             readonly requestId: string;
+            /** @description Same identifier as jobId; use GET /api/v1/operations/{operationId} for action status. */
+            readonly operationId?: string;
         };
         readonly WebhookChallengeResponse: {
             readonly challenge: string;
@@ -1434,7 +1726,9 @@ export interface components {
         /** @description Exact opaque WhatsApp phone number filter. */
         readonly AssetCatalogNumber: string;
         readonly AssetCatalogStatus: "ACTIVE" | "INACTIVE" | "UNKNOWN" | "STALE";
-        readonly ConnectionCatalogStatus: "ACTIVE" | "PARTIAL" | "REAUTH_REQUIRED" | "UNKNOWN" | "DISCONNECTED";
+        readonly ConnectionCatalogStatus: "ACTIVE" | "PARTIAL" | "REAUTH_REQUIRED" | "UNKNOWN" | "DISCONNECTED" | "STALE";
+        /** @description Exact configured Meta journey; combines with the product and status filters. */
+        readonly ConnectionCatalogFlowVariant: components["schemas"]["FlowVariant"];
         /** @description Page size, default 50, maximum 100. */
         readonly Limit: number;
         /** @description Provider signature over exact raw request bytes. Supported algorithm/header configuration must be ratified for the actual app. */
@@ -1822,7 +2116,10 @@ export interface operations {
     };
     readonly listIntegrationFlows: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                /** @description App-configuration offset. Omit for the first page; subsequent pages use 6 or 12. */
+                readonly appOffset?: 0 | 6 | 12;
+            };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
                 readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
@@ -2118,6 +2415,111 @@ export interface operations {
             readonly default: components["responses"]["UnexpectedError"];
         };
     };
+    readonly getOperationsDiagnostics: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Safe current-tenant operational summary */
+            readonly 200: {
+                headers: {
+                    readonly "Cache-Control"?: "no-store";
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OperationsDiagnostics"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly exportSupportDiagnostics: {
+        readonly parameters: {
+            readonly query: {
+                readonly reasonCode: components["schemas"]["OperationsReasonCode"];
+            };
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Sanitized export; support access is audited before the read */
+            readonly 200: {
+                headers: {
+                    readonly "Cache-Control"?: "no-store";
+                    readonly "Content-Disposition"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OperationsDiagnostics"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly requestOperationsAction: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+                /**
+                 * @description Random caller-generated request key; server scope is current tenant + operation + key. Same payload hash replays prior acceptance; different payload hash returns 409 with no new effect.
+                 * @example idem_example_key_01
+                 */
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["OperationsActionRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Typed action outcome; unavailable and ambiguous actions are never reported as accepted */
+            readonly 200: {
+                headers: {
+                    readonly "Cache-Control"?: "no-store";
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OperationsActionResult"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 404: components["responses"]["NotFound"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
     readonly listConnections: {
         readonly parameters: {
             readonly query?: {
@@ -2129,6 +2531,8 @@ export interface operations {
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
                 readonly status?: components["parameters"]["ConnectionCatalogStatus"];
+                /** @description Exact configured Meta journey; combines with the product and status filters. */
+                readonly flowVariant?: components["parameters"]["ConnectionCatalogFlowVariant"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -2716,6 +3120,101 @@ export interface operations {
             readonly default: components["responses"]["UnexpectedError"];
         };
     };
+    readonly getAutomationChannelConfig: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+            };
+            readonly path: {
+                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                readonly assetId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Sanitized success example */
+            readonly 200: {
+                headers: {
+                    readonly ETag?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AutomationChannelConfig"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 404: components["responses"]["NotFound"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 412: components["responses"]["PreconditionFailed"];
+            readonly 413: components["responses"]["PayloadTooLarge"];
+            readonly 422: components["responses"]["Unprocessable"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
+    readonly patchAutomationChannelConfig: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /**
+                 * @description Exact configured browser Origin; wildcard matching is forbidden.
+                 * @example https://portal.example.invalid
+                 */
+                readonly Origin: components["parameters"]["Origin"];
+                /** @description Must match the configured exact-origin topology; cross-site, missing or invalid values fail. */
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                /** @description Session-bound anti-CSRF value; not a DTO property and not sufficient without the session cookie. */
+                readonly "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
+                readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
+                /**
+                 * @description ETag from the latest representation. Missing/stale precondition is rejected; no blind overwrite.
+                 * @example "automation-v7"
+                 */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+            };
+            readonly path: {
+                /** @description Opaque resource identifier; authorization is always checked against the server-derived tenant. */
+                readonly assetId: string;
+            };
+            readonly cookie?: never;
+        };
+        /** @description Request uses a closed, size-bounded schema. */
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["AutomationChannelConfigUpdate"];
+            };
+        };
+        readonly responses: {
+            /** @description Sanitized success example */
+            readonly 200: {
+                headers: {
+                    readonly ETag?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AutomationChannelConfig"];
+                };
+            };
+            readonly 400: components["responses"]["BadRequest"];
+            readonly 401: components["responses"]["Unauthorized"];
+            readonly 403: components["responses"]["Forbidden"];
+            readonly 404: components["responses"]["NotFound"];
+            readonly 409: components["responses"]["Conflict"];
+            readonly 412: components["responses"]["PreconditionFailed"];
+            readonly 413: components["responses"]["PayloadTooLarge"];
+            readonly 422: components["responses"]["Unprocessable"];
+            readonly 429: components["responses"]["TooManyRequests"];
+            readonly 503: components["responses"]["Unavailable"];
+            readonly default: components["responses"]["UnexpectedError"];
+        };
+    };
     readonly sendReply: {
         readonly parameters: {
             readonly query?: never;
@@ -2855,17 +3354,13 @@ export interface operations {
                 readonly cursor?: components["parameters"]["Cursor"];
                 /** @description Page size, default 50, maximum 100. */
                 readonly limit?: components["parameters"]["Limit"];
-                readonly channel?: components["parameters"]["AssetCatalogChannel"];
-                /** @description Exact opaque WhatsApp phone number filter. */
-                readonly number?: components["parameters"]["AssetCatalogNumber"];
-                readonly status?: components["parameters"]["ConnectionCatalogStatus"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
                 readonly "X-Tenant-Context": components["parameters"]["TenantContext"];
             };
             readonly path: {
-                /** @description Opaque account asset ID; the server verifies tenant and MANAGE_TEMPLATES capability. */
+                /** @description Internal WABA asset UUID selected from this tenant's verified WhatsApp EXCLUSIVE assets. The server resolves the provider account identifier and MANAGE_TEMPLATES credential; browser-supplied provider IDs, cUUID, company_uuid and tokens are not accepted. */
                 readonly assetId: string;
             };
             readonly cookie?: never;
@@ -2916,7 +3411,7 @@ export interface operations {
                 readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             readonly path: {
-                /** @description Opaque account asset ID; the server verifies tenant and MANAGE_TEMPLATES capability. */
+                /** @description Internal WABA asset UUID selected from this tenant's verified WhatsApp EXCLUSIVE assets. The server resolves the provider account identifier and MANAGE_TEMPLATES credential; browser-supplied provider IDs, cUUID, company_uuid and tokens are not accepted. */
                 readonly assetId: string;
             };
             readonly cookie?: never;
@@ -2962,7 +3457,6 @@ export interface operations {
                 readonly channel?: components["parameters"]["AssetCatalogChannel"];
                 /** @description Exact opaque WhatsApp phone number filter. */
                 readonly number?: components["parameters"]["AssetCatalogNumber"];
-                readonly status?: components["parameters"]["ConnectionCatalogStatus"];
             };
             readonly header: {
                 /** @description Opaque current context reference returned by the session. It is not authorization without the cookie and current server membership. */
@@ -3029,10 +3523,19 @@ export interface operations {
             };
         };
         readonly responses: {
-            /** @description Sanitized success example */
+            /** @description Local READ/DISMISS state persisted successfully */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NotificationActionResult"];
+                };
+            };
+            /** @description Durable external action accepted for processing */
             readonly 202: {
                 headers: {
-                    /** @description Relative URI of the tenant-scoped accepted job; poll it for the outcome. */
+                    /** @description Existing tenant-scoped job resource; operationId also identifies GET /api/v1/operations/{operationId}. */
                     readonly Location?: string;
                     readonly [name: string]: unknown;
                 };

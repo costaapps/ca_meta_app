@@ -47,6 +47,7 @@
           "OUTCOME_UNKNOWN",
           "VERSION_CONFLICT",
           "IDEMPOTENCY_KEY_REUSED",
+          "COEXISTENCE_SESSION_ACTIVE",
           "CONTEXT_CHANGED",
           "ORIGIN_NOT_ALLOWED",
           "HOST_NOT_ALLOWED",
@@ -88,6 +89,10 @@
       "IDEMPOTENCY_KEY_REUSED": {
         "retryable": false,
         "action": "USE_NEW_REQUEST_KEY"
+      },
+      "COEXISTENCE_SESSION_ACTIVE": {
+        "retryable": false,
+        "action": "CHECK_STATUS"
       },
       "HOST_NOT_ALLOWED": {
         "retryable": false,

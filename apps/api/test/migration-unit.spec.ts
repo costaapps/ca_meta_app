@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MigrationEnvironmentError, readMigrationEnvironment } from '../src/database/migrations/migration-environment.js';
-import { migrationStepChecksum } from '../src/database/migrations/migration-fingerprint.js';
+import { migrationChecksum, migrationStepChecksum } from '../src/database/migrations/migration-fingerprint.js';
 import { DOMAIN_TABLES, MIGRATIONS } from '../src/database/migrations/migrations.js';
 import { DURABLE_WORK_MIGRATION } from '../src/database/migrations/durable-work.js';
 import { IDENTITY_MIGRATION } from '../src/database/migrations/identity.js';
@@ -19,6 +19,13 @@ import { LEGACY_IMPORT_MIGRATION, LEGACY_IMPORT_TABLES } from '../src/database/m
 import { ONBOARDING_CODE_TABLES, ONBOARDING_SAGA_MIGRATION } from '../src/database/migrations/onboarding-saga.js';
 import { ASSET_OBSERVATIONS_MIGRATION, ASSET_OBSERVATION_TABLES } from '../src/database/migrations/asset-observations.js';
 import { CONNECTION_LIFECYCLE_MIGRATION } from '../src/database/migrations/connection-lifecycle.js';
+import { INTERNAL_ASSET_OPERATIONS_MIGRATION } from '../src/database/migrations/internal-asset-operations.js';
+import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION, ONBOARDING_COEXISTENCE_LOCK_TABLES } from '../src/database/migrations/onboarding-coexistence-lock.js';
+import { AUTOMATION_CONFIG_MIGRATION, AUTOMATION_CONFIG_TABLES } from '../src/database/migrations/automation-config.js';
+import { NOTIFICATIONS_MIGRATION } from '../src/database/migrations/notifications.js';
+import { LEGACY_PROJECTION_MIGRATION } from '../src/database/migrations/legacy-projection.js';
+import { assertMigrationGrantRecords, CoexistenceLockDeleteGrantRequiredError, safeMigrationError } from '../src/database/migrations/migration-runner.js';
+import { MIGRATION_EXECUTION_CONTROL_MIGRATION, MIGRATION_EXECUTION_CONTROL_TABLES } from '../src/database/migrations/migration-execution-control.js';
 
 const validEnvironment: NodeJS.ProcessEnv = {
   MIGRATION_DATABASE_HOST: '127.0.0.1',
@@ -58,11 +65,56 @@ test('migration configuration rejects runtime account reuse and privileged built
   }), (error: unknown) => error instanceof MigrationEnvironmentError && error.fields.includes('MIGRATION_DATABASE_USER'));
 });
 
+test('migration grants require the lock-trigger definer privilege only on its exact table', () => {
+  const database = 'ca_meta_m5_03';
+  const schemaGrant = `GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES, TRIGGER ON \`${database}\`.* TO 'migrator'@'%'`;
+  const lockDeleteGrant = `GRANT DELETE ON \`${database}\`.\`ca_meta_onboarding_coexistence_locks\` TO 'migrator'@'%'`;
+  const usageGrant = "GRANT USAGE ON *.* TO 'migrator'@'%'";
+
+  assert.doesNotThrow(() => assertMigrationGrantRecords([usageGrant, schemaGrant, lockDeleteGrant], database));
+  assert.throws(() => assertMigrationGrantRecords([usageGrant, schemaGrant], database), /insufficient table-scoped/);
+  assert.doesNotThrow(() => assertMigrationGrantRecords([usageGrant, schemaGrant], database, {
+    allowMissingCoexistenceLockDelete: true,
+  }));
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant.replace('TRIGGER ON', 'DELETE, TRIGGER ON'),
+  ], database, { allowMissingCoexistenceLockDelete: true }), /unexpected database-scoped migration privileges/);
+  assert.equal(
+    safeMigrationError(new CoexistenceLockDeleteGrantRequiredError()),
+    'Migration paused before installing the v22 terminal-release trigger. Grant DELETE only on ca_meta_onboarding_coexistence_locks to the migration user, then rerun the migration command.',
+  );
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant.replace('TRIGGER ON', 'DELETE, TRIGGER ON'),
+    lockDeleteGrant,
+  ], database), /unexpected database-scoped migration privileges/);
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant,
+    lockDeleteGrant.replace('ca_meta_onboarding_coexistence_locks', 'ca_meta_onboarding_sessions'),
+  ], database), /unexpected table-scoped migration privileges/);
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant,
+    lockDeleteGrant.replace('GRANT DELETE ON', 'GRANT DELETE, SELECT ON'),
+  ], database), /unexpected table-scoped migration privileges/);
+  assert.throws(() => assertMigrationGrantRecords([
+    usageGrant,
+    schemaGrant,
+    lockDeleteGrant.replace(`\`${database}\``, '`another_schema`'),
+  ], database), /unexpected table-scoped migration privileges/);
+});
+
 test('versioned migrations carry deterministic checksums and explicit lifecycle phases', () => {
   const schemaVersions = MIGRATIONS.map((migration) => migration.schemaVersion);
-  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
-  assert.equal(schemaVersions.at(-1), 20);
-  assert.equal(MIGRATIONS.length, 20);
+  assert.deepEqual(schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
+  assert.equal(new Set(schemaVersions).size, schemaVersions.length);
+  assert.equal(schemaVersions.at(-1), 26);
+  assert.equal(MIGRATIONS.length, 26);
+  assert.equal(LEGACY_PROJECTION_MIGRATION.schemaVersion, 25);
+  assert.equal(MIGRATIONS.at(-2)?.id, LEGACY_PROJECTION_MIGRATION.id);
+  assert.equal(MIGRATIONS.at(-1)?.id, MIGRATION_EXECUTION_CONTROL_MIGRATION.id);
   for (const migration of MIGRATIONS) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
   assert.deepEqual(MIGRATIONS[0]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'expand']);
   assert.deepEqual(MIGRATIONS[1]?.steps.map((step) => step.phase), ['expand', 'expand', 'expand', 'backfill', 'validate']);
@@ -104,6 +156,29 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
   assert.equal(ASSET_OBSERVATIONS_MIGRATION.schemaVersion, 19);
   assert.equal(CONNECTION_LIFECYCLE_MIGRATION.id, '202611100020-meta-connection-lifecycle');
   assert.equal(CONNECTION_LIFECYCLE_MIGRATION.schemaVersion, 20);
+  assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.id, '202611110021-internal-asset-operations');
+  assert.equal(INTERNAL_ASSET_OPERATIONS_MIGRATION.schemaVersion, 21);
+  assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id, '202611120022-onboarding-coexistence-serialization');
+  assert.equal(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.schemaVersion, 22);
+  assert.equal(AUTOMATION_CONFIG_MIGRATION.id, '202611120023-asset-automation-config');
+  assert.equal(AUTOMATION_CONFIG_MIGRATION.schemaVersion, 23);
+  assert.equal(NOTIFICATIONS_MIGRATION.id, '202611120024-tenant-notifications');
+  assert.equal(NOTIFICATIONS_MIGRATION.schemaVersion, 24);
+  assert.equal(MIGRATIONS.find((migration) => migration.schemaVersion === NOTIFICATIONS_MIGRATION.schemaVersion)?.id, NOTIFICATIONS_MIGRATION.id);
+  const coexistenceLockTable = ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.find((step) => step.id === 'create-onboarding-coexistence-locks');
+  assert.ok(coexistenceLockTable && 'sql' in coexistenceLockTable);
+  assert.match(coexistenceLockTable.sql, /PRIMARY KEY \(tenant_id\)/);
+  assert.match(coexistenceLockTable.sql, /UNIQUE KEY uq_ca_meta_onboarding_coexistence_session/);
+  assert.match(coexistenceLockTable.sql, /FOREIGN KEY \(tenant_id, onboarding_session_id\)/);
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => step.id === 'validate-single-active-coexistence-session-per-tenant'));
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => 'runBatch' in step && step.id === 'backfill-active-onboarding-coexistence-locks'));
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_MIGRATION.steps.some((step) => step.id === 'release-coexistence-lock-on-terminal-onboarding-status'));
+  assert.ok(ONBOARDING_COEXISTENCE_LOCK_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
+  assert.ok(AUTOMATION_CONFIG_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
+  assert.equal(LEGACY_PROJECTION_MIGRATION.schemaVersion, 25);
+  assert.equal(MIGRATION_EXECUTION_CONTROL_MIGRATION.id, '202611120026-migration-execution-control');
+  assert.equal(MIGRATION_EXECUTION_CONTROL_MIGRATION.schemaVersion, 26);
+  assert.ok(MIGRATION_EXECUTION_CONTROL_TABLES.every((table) => DOMAIN_TABLES.includes(table as typeof DOMAIN_TABLES[number])));
   assert.deepEqual(ASSET_OBSERVATIONS_MIGRATION.steps.map((step) => step.id), [
     'create-meta-asset-observations', 'asset-observation-no-update', 'asset-observation-no-delete',
   ]);
@@ -236,6 +311,89 @@ test('versioned migrations carry deterministic checksums and explicit lifecycle 
     stepId: 'create-portal-sessions',
   }]);
   assert.match(entryModeStep.definition, /compatiblePriorSteps/);
+});
+
+test('M5.09 v26 schema verification rejects missing or altered FK and CHECK metadata', async () => {
+  const cases = [
+    {
+      table: 'ca_meta_migration_batch_manifests',
+      step: MIGRATION_EXECUTION_CONTROL_MIGRATION.steps.find((candidate) => candidate.id === 'create-migration-batch-manifests'),
+      columns: ['batch_id', 'source_snapshot_hash', 'source_version', 'projection_version', 'catalog_ref',
+        'planned_rows', 'candidate_rows', 'quarantined_rows', 'credential_reauth_rows', 'before_assets',
+        'before_templates', 'before_message_configs', 'before_relationships', 'before_credential_refs', 'after_assets',
+        'after_templates', 'after_message_configs', 'after_relationships', 'after_credential_refs',
+        'last_completed_sequence', 'state', 'version', 'created_at', 'updated_at'],
+      indexes: [
+        { name: 'PRIMARY', columns: ['batch_id'], non_unique: 0 },
+        { name: 'uq_ca_meta_migration_batch_snapshot', columns: ['source_snapshot_hash', 'projection_version'], non_unique: 0 },
+        { name: 'ix_ca_meta_migration_batch_state', columns: ['state', 'updated_at'], non_unique: 1 },
+      ],
+      foreignKey: { name: 'fk_ca_meta_migration_manifest_import_batch', columns: ['batch_id'], table: 'ca_meta_legacy_import_batches', referencedColumns: ['batch_id'] },
+      checks: [
+        { name: 'ck_ca_meta_migration_manifest_counts', clause: 'candidate_rows + quarantined_rows = planned_rows' },
+        { name: 'ck_ca_meta_migration_manifest_state', clause: "state IN ('PLANNED', 'APPLYING', 'PAUSED', 'COMPLETED', 'FAILED')" },
+      ],
+    },
+    {
+      table: 'ca_meta_migration_cohort_writers',
+      step: MIGRATION_EXECUTION_CONTROL_MIGRATION.steps.find((candidate) => candidate.id === 'create-migration-cohort-writer-matrix'),
+      columns: ['cohort_id', 'tenant_id', 'channel_family', 'consumer_kind', 'function_name', 'writer_owner',
+        'previous_writer_owner', 'phase', 'shadow_read_enabled', 'shadow_read_candidate_snapshot_hash',
+        'legacy_route_verified', 'unresolved_external_effects', 'drift_reconciled_snapshot_hash', 'version', 'created_at', 'updated_at'],
+      indexes: [
+        { name: 'PRIMARY', columns: ['tenant_id', 'channel_family', 'consumer_kind', 'function_name'], non_unique: 0 },
+        { name: 'uq_ca_meta_migration_cohort_function', columns: ['cohort_id', 'function_name'], non_unique: 0 },
+        { name: 'ix_ca_meta_migration_cohort_id', columns: ['cohort_id'], non_unique: 1 },
+      ],
+      foreignKey: { name: 'fk_ca_meta_migration_cohort_tenant', columns: ['tenant_id'], table: 'ca_meta_tenants', referencedColumns: ['id'] },
+      checks: [
+        { name: 'ck_ca_meta_migration_cohort_channel', clause: "channel_family IN ('WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE', 'FACEBOOK', 'INSTAGRAM')" },
+        { name: 'ck_ca_meta_migration_cohort_consumer', clause: "consumer_kind IN ('PORTAL', 'LEGACY_PHP', 'INTERNAL_WORKER', 'WEBHOOK_INGRESS', 'OTHER_INTERNAL')" },
+        { name: 'ck_ca_meta_migration_cohort_function', clause: "function_name IN ('CONFIGURATION', 'CREDENTIAL_REFERENCE', 'LEGACY_PROJECTION', 'OPERATION_RELAY', 'WEBHOOK_DISPATCH')" },
+        { name: 'ck_ca_meta_migration_cohort_writer', clause: "writer_owner IN ('LEGACY', 'CENTRAL', 'PROJECTOR', 'RELAY', 'NEW')" },
+        { name: 'ck_ca_meta_migration_cohort_phase', clause: "phase IN ('PREPARED', 'SHADOW_READ', 'CUTOVER', 'PAUSED', 'ROLLED_BACK')" },
+      ],
+    },
+  ];
+
+  for (const entry of cases) {
+    const step = entry.step;
+    assert.ok(step && 'verify' in step && 'sql' in step);
+    assert.equal(step.definitionVersion, 'v2');
+    assert.match(step.definition, /verifyForeignKeys/);
+    assert.match(step.definition, /verifyChecks/);
+    assert.equal(MIGRATION_EXECUTION_CONTROL_MIGRATION.checksum,
+      migrationChecksum(MIGRATION_EXECUTION_CONTROL_MIGRATION));
+    const queryRunner = (options: { omitForeignKey?: boolean; alterForeignKey?: boolean; omitCheck?: string; alterCheck?: string } = {}) => ({
+      async query(sql: string, parameters: readonly unknown[] = []) {
+        const query = sql.toLowerCase();
+        if (query.includes('information_schema.tables')) return [{ name: entry.table }];
+        if (query.includes('information_schema.columns')) return entry.columns.map((name) => ({ name }));
+        if (query.includes('information_schema.statistics')) return entry.indexes.flatMap((index) =>
+          index.columns.map((column_name) => ({ name: index.name, column_name, non_unique: index.non_unique })));
+        if (query.includes('information_schema.key_column_usage')) {
+          if (options.omitForeignKey) return [];
+          return entry.foreignKey.columns.map((column_name, index) => ({
+            current_schema: 'test_schema', name: entry.foreignKey.name, column_name,
+            referenced_schema: 'test_schema', referenced_table: options.alterForeignKey ? 'wrong_target' : entry.foreignKey.table,
+            referenced_column: entry.foreignKey.referencedColumns[index], update_rule: 'RESTRICT', delete_rule: 'RESTRICT',
+          }));
+        }
+        if (query.includes('information_schema.table_constraints')) return entry.checks
+          .filter((check) => check.name !== options.omitCheck)
+          .map((check) => ({ name: check.name, clause: `(${check.clause}${check.name === options.alterCheck ? ' OR 1 = 1' : ''})` }));
+        throw new Error(`Unexpected migration metadata query for ${String(parameters[0])}.`);
+      },
+    }) as never;
+    const context = { migrationId: MIGRATION_EXECUTION_CONTROL_MIGRATION.id, stepId: step.id };
+    assert.equal(await step.verify({ ...context, queryRunner: queryRunner() }), true);
+    await assert.rejects(step.verify({ ...context, queryRunner: queryRunner({ omitForeignKey: true }) }), /incompatible foreign key/);
+    await assert.rejects(step.verify({ ...context, queryRunner: queryRunner({ alterForeignKey: true }) }), /incompatible foreign key/);
+    const missingCheck = entry.checks[0]?.name;
+    assert.ok(missingCheck);
+    await assert.rejects(step.verify({ ...context, queryRunner: queryRunner({ omitCheck: missingCheck }) }), /incompatible CHECK constraints/);
+    await assert.rejects(step.verify({ ...context, queryRunner: queryRunner({ alterCheck: missingCheck }) }), /incompatible CHECK constraints/);
+  }
 });
 
 test('M3.03 append-only ledger trigger verification rejects a same-name trigger with a different body', async () => {

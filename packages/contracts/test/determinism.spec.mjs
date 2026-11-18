@@ -69,12 +69,18 @@ test('generation is deterministic in two isolated output directories', async () 
     const publicDocument = YAML.parse(generatedPublicOpenApi);
     const publicErrorCodes = publicDocument.components.schemas.ErrorEnvelope.properties.code.enum;
     const internalRoute = '/internal/v1/assets/{assetId}/operations';
+    const internalV2Route = '/internal/v2/assets/{assetId}/operations';
 
     assert.ok(canonicalDocument.paths[internalRoute], 'canonical source retains the internal operation');
+    assert.ok(canonicalDocument.paths[internalV2Route], 'canonical source retains the additive typed-proof operation');
     assert.ok(canonicalDocument.components.schemas.InternalAssetOperationRequest,
       'canonical source retains the internal request schema');
     assert.ok(canonicalDocument.components.securitySchemes.internalServiceAuth,
       'canonical source retains the internal service security scheme');
+    assert.ok(canonicalDocument.components.schemas.InternalAssetOperationV2Request,
+      'canonical source retains the v2 typed-operation request schema');
+    assert.ok(canonicalDocument.components.securitySchemes.internalServiceProofV2,
+      'canonical source retains the v2 service-proof security scheme');
     assert.ok(canonicalErrorCodes.includes('INTERNAL_SCOPE_DENIED'),
       'canonical source retains the internal-only error code');
     assert.ok(!Object.keys(publicDocument.paths).some((route) => route.startsWith('/internal/')),
@@ -83,9 +89,11 @@ test('generation is deterministic in two isolated output directories', async () 
       'published OpenAPI must exclude internal schemas');
     assert.ok(!Object.hasOwn(publicDocument.components.securitySchemes, 'internalServiceAuth'),
       'published OpenAPI must exclude the internal service security scheme');
+    assert.ok(!Object.hasOwn(publicDocument.components.securitySchemes, 'internalServiceProofV2'),
+      'published OpenAPI must exclude the v2 internal service security scheme');
     assert.ok(!publicErrorCodes.includes('INTERNAL_SCOPE_DENIED'),
       'published OpenAPI must exclude the internal-only error code');
-    assert.doesNotMatch(generatedPublicOpenApi, /InternalAssetOperationRequest|internalServiceAuth|\/internal\//,
+    assert.doesNotMatch(generatedPublicOpenApi, /InternalAssetOperation(?:V2)?(?:Request|Result)|internalService(?:Auth|ProofV2)|\/internal\//,
       'the published artifact must not retain internal component references');
     assert.doesNotMatch(generatedPublicOpenApi, /INTERNAL_SCOPE_DENIED/,
       'the published OpenAPI must not retain the internal-only error code');

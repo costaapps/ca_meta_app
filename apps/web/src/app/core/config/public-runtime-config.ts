@@ -47,6 +47,7 @@ export function validateExactHttpsOrigins(value: unknown): readonly string[] {
 function runtimeConfig(value: unknown): PublicRuntimeConfig | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) throw new Error('Public runtime configuration must be an object.');
+  if (Object.keys(value).length === 0) return undefined;
   const allowedKeys = ['metaApiBaseUrl', 'providerAuthorizationOrigins', 'suite4EmbedOrigins', 'version'];
   if (Object.keys(value).some((key) => !allowedKeys.includes(key)) || value['version'] !== 1) {
     throw new Error('Public runtime configuration does not match the supported schema.');
@@ -74,7 +75,7 @@ function publicConfig(): PublicRuntimeConfig | undefined {
 export const META_API_BASE_URL = new InjectionToken<string>('META_API_BASE_URL', {
   providedIn: 'root',
   factory: () => {
-    return publicConfig()?.metaApiBaseUrl ?? environment.metaApiBaseUrl;
+    return validateBaseUrl(publicConfig()?.metaApiBaseUrl ?? environment.metaApiBaseUrl);
   },
 });
 

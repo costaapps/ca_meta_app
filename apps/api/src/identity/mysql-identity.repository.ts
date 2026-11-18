@@ -17,8 +17,10 @@ import type {
 const MEMBERSHIP_ROLES = new Set<MembershipRole>(['owner', 'admin', 'operator', 'viewer']);
 const SERVICE_SCOPES = new Set<ServiceScope>([
   'TENANT_RESOURCE_READ',
+  'LEGACY_METADATA_PROJECT',
   'META_CONNECTION_EXECUTE',
   'CREDENTIAL_USE',
+  'NOTIFICATION_PROJECTION_WRITE',
   'WEBHOOK_ROUTE',
   'MAGIC_LINK_DELIVERY',
 ]);

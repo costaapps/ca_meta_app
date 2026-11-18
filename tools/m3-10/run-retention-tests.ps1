@@ -8,6 +8,18 @@ $initSqlPath = Join-Path $tempRoot 'init.sql'
 $composeFile = Join-Path $PSScriptRoot '..\m2-03\compose.yaml'
 $keepEnvironment = $env:M3_10_KEEP_ENVIRONMENT -eq '1'
 $isWindowsPlatform = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+$managedEnvironment = @(
+  'M2_ROOT_PASSWORD', 'M2_DB_PORT', 'M2_INIT_SQL_PATH', 'M3_10_TEST',
+  'MIGRATION_DATABASE_HOST', 'MIGRATION_DATABASE_PORT', 'MIGRATION_DATABASE_NAME',
+  'MIGRATION_DATABASE_USER', 'MIGRATION_DATABASE_PASSWORD', 'MIGRATION_DATABASE_CONNECT_TIMEOUT_MS',
+  'MIGRATION_LOCK_TIMEOUT_SECONDS', 'MIGRATION_STATEMENT_TIMEOUT_SECONDS', 'MIGRATION_MIN_SUPPORTED_API_VERSION',
+  'API_DATABASE_HOST', 'API_DATABASE_PORT', 'API_DATABASE_NAME', 'API_DATABASE_USER', 'API_DATABASE_PASSWORD',
+  'API_DATABASE_CONNECT_TIMEOUT_MS', 'API_PORTAL_SESSION_RECOVERY_KEY', 'API_PORT', 'API_BIND_ADDRESS',
+  'API_ALLOWED_HOSTS', 'API_TRUSTED_PROXIES', 'API_ALLOWED_ORIGINS', 'NODE_ENV',
+  'API_PORTAL_ENTRY_TICKET_ENABLED', 'M2_API_DATABASE_PASSWORD'
+)
+$previousEnvironment = @{}
+foreach ($name in $managedEnvironment) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name) }
 
 if ($isWindowsPlatform) {
   $runtimeDirectory = $env:M2_NODE_RUNTIME_DIR
@@ -87,8 +99,20 @@ $env:API_PORTAL_ENTRY_TICKET_ENABLED = 'false'
 $env:M2_API_DATABASE_PASSWORD = $apiPassword
 
   Write-Output "Disposable Compose project: $composeProject"
-  Invoke-Checked -FilePath 'docker' -ArgumentList @('compose', '-p', $composeProject, '-f', $composeFile, 'up', '-d', '--wait')
-  Invoke-Checked -FilePath $npmCommand -ArgumentList @('--workspace=@ca-meta/api', 'run', 'test:m3-10')
+  Write-Output "Runtime: Node $nodeVersion / npm $npmVersion"
+  Write-Output 'Database: isolated MariaDB 11.8.8; synthetic fixtures only.'
+  Push-Location $repoRoot
+  try {
+    Invoke-Checked -FilePath 'docker' -ArgumentList @('compose', '-p', $composeProject, '-f', $composeFile, 'up', '-d', '--wait')
+    Invoke-Checked -FilePath $npmCommand -ArgumentList @('--workspace=@ca-meta/api', 'run', 'build')
+    Invoke-Checked -FilePath $npmCommand -ArgumentList @('exec', '--workspace=@ca-meta/api', '--', 'tsc', '-p', 'tsconfig.test.json')
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @('tools/m3-10/prepare-current-schema.mjs')
+    Invoke-Checked -FilePath $nodeCommand -ArgumentList @(
+      '--test',
+      'apps/api/dist-test/test/m3-10-privacy.spec.js',
+      'apps/api/dist-test/test/m3-10-privacy.integration.spec.js'
+    )
+  } finally { Pop-Location }
 } finally {
   if (-not $keepEnvironment) {
     & docker compose -p $composeProject -f $composeFile down --volumes --remove-orphans
@@ -98,5 +122,9 @@ $env:M2_API_DATABASE_PASSWORD = $apiPassword
   } else {
     Write-Output "Preserved only this generated environment for local debugging: $composeProject"
     Write-Output "Cleanup: docker compose -p $composeProject -f `"$composeFile`" down --volumes --remove-orphans"
+  }
+  foreach ($name in $managedEnvironment) {
+    if ($null -eq $previousEnvironment[$name]) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
+    else { [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process') }
   }
 }

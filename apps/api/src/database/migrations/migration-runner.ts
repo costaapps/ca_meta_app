@@ -4,6 +4,7 @@ import type { MigrationEnvironment } from './migration-environment.js';
 import { migrationStepChecksum } from './migration-fingerprint.js';
 import type { MigrationStep, MigrationStepContext, VersionedMigration } from './migration.types.js';
 import { DOMAIN_TABLES, MIGRATIONS } from './migrations.js';
+import { ONBOARDING_COEXISTENCE_LOCK_MIGRATION } from './onboarding-coexistence-lock.js';
 import { tableExists } from './schema-inspection.js';
 
 export const MIGRATION_LEDGER = 'ca_meta_schema_migrations';
@@ -75,26 +76,65 @@ async function assertMariaDb(queryRunner: QueryRunner, environment: MigrationEnv
   return row.version;
 }
 
-async function assertMigrationGrants(queryRunner: QueryRunner, databaseName: string): Promise<void> {
-  const rows = await queryRunner.query('SHOW GRANTS') as Array<Record<string, string>>;
-  const grants = rows.flatMap((row) => Object.values(row)).filter((value) => typeof value === 'string');
+const COEXISTENCE_LOCK_TABLE = 'ca_meta_onboarding_coexistence_locks';
+const COEXISTENCE_LOCK_RELEASE_TRIGGER = 'tr_ca_meta_onboarding_coexistence_lock_release';
+
+export class CoexistenceLockDeleteGrantRequiredError extends Error {
+  readonly code = 'COEXISTENCE_LOCK_DELETE_GRANT_REQUIRED';
+
+  constructor() {
+    super('Migration preflight found insufficient table-scoped migration privileges.');
+    this.name = 'CoexistenceLockDeleteGrantRequiredError';
+  }
+}
+
+interface MigrationGrantOptions {
+  readonly allowMissingCoexistenceLockDelete?: boolean;
+}
+
+/** Validate the migration identity's database scope and the one trigger-definer table privilege. */
+export function assertMigrationGrantRecords(
+  grants: readonly string[],
+  databaseName: string,
+  options: MigrationGrantOptions = {},
+): void {
   const privileges = new Set<string>();
   let hasDatabaseGrant = false;
+  let hasCoexistenceLockDelete = false;
   for (const grant of grants) {
     const normalized = grant.toUpperCase();
-    if (/\bON\s+\*\.\*/.test(normalized) && !/\bGRANT\s+USAGE\b/.test(normalized)) {
-      throw new Error('Migration preflight rejects global database privileges.');
-    }
     if (/\bWITH\s+GRANT\s+OPTION\b/.test(normalized)) {
       throw new Error('Migration preflight rejects GRANT OPTION.');
     }
-    const objectMatch = grant.match(/\bON\s+`?([^`\s]+)`?\.\*\s+TO\b/i);
-    if (!objectMatch || objectMatch[1]?.toLowerCase() !== databaseName.toLowerCase()) continue;
-    hasDatabaseGrant = true;
     const privilegeMatch = grant.match(/^\s*GRANT\s+(.+?)\s+ON\b/i);
-    for (const privilege of (privilegeMatch?.[1] ?? '').split(',').map((item) => item.trim().toUpperCase())) {
-      if (privilege) privileges.add(privilege);
+    const grantPrivileges = (privilegeMatch?.[1] ?? '').split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
+    if (/\bON\s+\*\.\*/.test(normalized)) {
+      if (grantPrivileges.length === 1 && grantPrivileges[0] === 'USAGE') continue;
+      throw new Error('Migration preflight rejects global database privileges.');
     }
+
+    const databaseGrant = grant.match(/\bON\s+`?([^`\s]+)`?\.\*\s+TO\b/i);
+    if (databaseGrant) {
+      if (databaseGrant[1]?.toLowerCase() !== databaseName.toLowerCase()) {
+        throw new Error('Migration preflight found an unexpected database-scoped migration grant.');
+      }
+      hasDatabaseGrant = true;
+      for (const privilege of grantPrivileges) privileges.add(privilege);
+      continue;
+    }
+
+    const tableGrant = grant.match(/\bON\s+`?([^`\s]+)`?\.`?([^`\s]+)`?\s+TO\b/i);
+    if (tableGrant) {
+      if (tableGrant[1]?.toLowerCase() === databaseName.toLowerCase() &&
+          tableGrant[2]?.toLowerCase() === COEXISTENCE_LOCK_TABLE &&
+          grantPrivileges.length === 1 && grantPrivileges[0] === 'DELETE') {
+        hasCoexistenceLockDelete = true;
+        continue;
+      }
+      throw new Error('Migration preflight found unexpected table-scoped migration privileges.');
+    }
+
+    throw new Error('Migration preflight found an unexpected migration grant scope.');
   }
   const required = ['SELECT', 'INSERT', 'UPDATE', 'CREATE', 'ALTER', 'INDEX', 'REFERENCES', 'TRIGGER'];
   const unexpected = [...privileges].filter((privilege) => !required.includes(privilege));
@@ -104,6 +144,27 @@ async function assertMigrationGrants(queryRunner: QueryRunner, databaseName: str
   if (!hasDatabaseGrant || required.some((privilege) => !privileges.has(privilege))) {
     throw new Error('Migration preflight found insufficient database-scoped migration privileges.');
   }
+  if (!hasCoexistenceLockDelete && !options.allowMissingCoexistenceLockDelete) {
+    throw new CoexistenceLockDeleteGrantRequiredError();
+  }
+}
+
+async function assertMigrationGrants(
+  queryRunner: QueryRunner,
+  databaseName: string,
+  options: MigrationGrantOptions = {},
+): Promise<void> {
+  const rows = await queryRunner.query('SHOW GRANTS') as Array<Record<string, string>>;
+  const grants = rows.flatMap((row) => Object.values(row)).filter((value) => typeof value === 'string');
+  assertMigrationGrantRecords(grants, databaseName, options);
+}
+
+async function coexistenceReleaseTriggerExists(queryRunner: QueryRunner): Promise<boolean> {
+  const rows = await queryRunner.query(
+    'SELECT COUNT(*) AS count FROM information_schema.triggers WHERE trigger_schema = DATABASE() AND trigger_name = ?',
+    [COEXISTENCE_LOCK_RELEASE_TRIGGER],
+  ) as Array<{ count: number | string }>;
+  return Number(rows[0]?.count ?? 0) > 0;
 }
 
 async function ensureLedger(queryRunner: QueryRunner): Promise<void> {
@@ -231,6 +292,7 @@ async function verifyCompatiblePriorShape(
 
 async function runDdlStep(
   queryRunner: QueryRunner,
+  databaseName: string,
   migration: VersionedMigration,
   migrationId: string,
   step: Extract<MigrationStep, { phase: 'expand' | 'switch' | 'contract' }>,
@@ -257,6 +319,10 @@ async function runDdlStep(
   }
   if (!valid) {
     if (!step.retryWhenAbsent) throw new Error(`Migration step ${migrationId}/${step.id} requires a forward-fix.`);
+    if (migration.id === ONBOARDING_COEXISTENCE_LOCK_MIGRATION.id &&
+        step.id === 'release-coexistence-lock-on-terminal-onboarding-status') {
+      await assertMigrationGrants(queryRunner, databaseName);
+    }
     await queryRunner.query(step.sql);
     await hooks.afterDdl?.(migrationId, step.id);
     if (!(await step.verify(context))) throw new Error(`Migration step ${migrationId}/${step.id} did not verify after DDL.`);
@@ -306,6 +372,7 @@ async function runValidationStep(
 
 async function runMigration(
   queryRunner: QueryRunner,
+  databaseName: string,
   migration: VersionedMigration,
   hooks: MigrationRunHooks,
   migrations: readonly VersionedMigration[],
@@ -313,7 +380,7 @@ async function runMigration(
   await ensureMigrationRecord(queryRunner, migration);
   for (const step of migration.steps) {
     if ('sql' in step) {
-      await runDdlStep(queryRunner, migration, migration.id, step, hooks, migrations);
+      await runDdlStep(queryRunner, databaseName, migration, migration.id, step, hooks, migrations);
     } else if ('runBatch' in step) {
       await runBackfillStep(queryRunner, migration.id, step, hooks);
     } else {
@@ -367,14 +434,17 @@ export async function deployMigrations(
     const lockRows = await queryRunner.query('SELECT GET_LOCK(?, ?) AS acquired', [name, environment.lockTimeoutSeconds]) as Array<{ acquired: number | null }>;
     if (Number(lockRows[0]?.acquired) !== 1) throw new Error('Migration lock acquisition timed out or failed.');
     acquiredLock = true;
-    await assertMigrationGrants(queryRunner, environment.database.name);
+    const releaseTriggerExists = await coexistenceReleaseTriggerExists(queryRunner);
+    await assertMigrationGrants(queryRunner, environment.database.name, {
+      allowMissingCoexistenceLockDelete: !releaseTriggerExists,
+    });
     await ensureLedger(queryRunner);
     await assertKnownMigrationLedger(queryRunner);
     for (const migration of migrations) {
       if (migration.minimumSupportedApiVersion > environment.minimumSupportedApiVersion) {
         throw new Error(`Migration ${migration.id} requires API baseline ${migration.minimumSupportedApiVersion}.`);
       }
-      await runMigration(queryRunner, migration, hooks, migrations);
+      await runMigration(queryRunner, environment.database.name, migration, hooks, migrations);
     }
   } finally {
     if (queryRunner) {
@@ -427,5 +497,8 @@ export async function readMigrationStatus(environment: MigrationEnvironment): Pr
 }
 
 export function safeMigrationError(error: unknown): string {
+  if (error instanceof CoexistenceLockDeleteGrantRequiredError) {
+    return 'Migration paused before installing the v22 terminal-release trigger. Grant DELETE only on ca_meta_onboarding_coexistence_locks to the migration user, then rerun the migration command.';
+  }
   return `Migration operation failed (${errorCode(error)}).`;
 }

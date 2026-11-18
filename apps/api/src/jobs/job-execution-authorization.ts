@@ -55,10 +55,12 @@ interface OnboardingResourceRow {
 const REQUIRED_JOB_SCOPES: Readonly<Partial<Record<JobType, ServiceScope>>> = Object.freeze({
   INBOX_PROCESS: 'WEBHOOK_ROUTE',
   ONBOARDING_STEP: 'META_CONNECTION_EXECUTE',
-  PROJECTION_RECONCILE: 'TENANT_RESOURCE_READ',
+  PROJECTION_RECONCILE: 'LEGACY_METADATA_PROJECT',
   HISTORY_SYNC: 'TENANT_RESOURCE_READ',
   CREDENTIAL_INSPECTION: 'CREDENTIAL_USE',
   ASSET_REFRESH: 'META_CONNECTION_EXECUTE',
+  TEMPLATE_CREATE: 'CREDENTIAL_USE',
+  NOTIFICATION_ACTION: 'CREDENTIAL_USE',
 } as const satisfies Readonly<Partial<Record<JobType, ServiceScope>>>);
 
 function resourceReference(type: JobType, payload: JobPayload): string | undefined {
@@ -67,10 +69,12 @@ function resourceReference(type: JobType, payload: JobPayload): string | undefin
     case 'INBOX_PROCESS': return payload.inboxEventRef;
     case 'OUTBOX_DELIVER': return payload.outboxEventRef;
     case 'ONBOARDING_STEP': return payload.onboardingRef;
-    case 'PROJECTION_RECONCILE': return undefined;
+    case 'PROJECTION_RECONCILE': return payload.projectionRef;
     case 'HISTORY_SYNC': return undefined;
     case 'CREDENTIAL_INSPECTION': return payload.credentialId;
     case 'ASSET_REFRESH': return payload.assetId;
+    case 'TEMPLATE_CREATE': return payload.assetId;
+    case 'NOTIFICATION_ACTION': return payload.notificationId;
   }
 }
 
@@ -217,9 +221,18 @@ export class MysqlJobExecutionAuthorizationPort implements JobExecutionAuthoriza
         // The session's persisted tenant/principal stay authoritative across tenant switches; a revoked CONNECT role blocks the next provider step.
         return !!rows[0] && onboardingStepExists(rows[0].steps_json, payload.stepRef);
       }
-      case 'PROJECTION_RECONCILE':
+      case 'PROJECTION_RECONCILE': {
+        const rows = await database.query(
+          `SELECT id FROM ca_meta_outbox_events
+           WHERE id = ? AND tenant_id = ? AND aggregate_version = ?
+             AND event_type IN ('connection.changed', 'automation.config.changed')
+           LIMIT 1`,
+          [payload.projectionRef, tenantId, payload.sourceVersion],
+        ) as Array<{ id: string }>;
+        return rows.length === 1;
+      }
       case 'HISTORY_SYNC':
-        // These refs currently have no tenant-owned persisted resource table or producer.
+        // Historical sync refs currently have no tenant-owned resource table or producer.
         return false;
       case 'CREDENTIAL_INSPECTION': {
         const rows = await database.query(
@@ -264,6 +277,49 @@ export class MysqlJobExecutionAuthorizationPort implements JobExecutionAuthoriza
           [tenantId, payload.assetId, payload.appConfigurationId, payload.environment],
         ) as Array<{ id: string }>;
         // Match the current usable-authorization states required by the M3.08 credential resolver.
+        return rows.length === 1;
+      }
+      case 'TEMPLATE_CREATE': {
+        const rows = await database.query(
+          `SELECT a.id
+           FROM ca_meta_assets AS a
+           INNER JOIN ca_meta_asset_authorizations AS aa ON aa.tenant_id = a.tenant_id AND aa.asset_id = a.id
+             AND aa.app_configuration_id = a.app_configuration_id AND aa.provider = a.provider AND aa.environment = a.environment
+           INNER JOIN ca_meta_authorizations AS auth ON auth.tenant_id = aa.tenant_id AND auth.id = aa.authorization_id
+             AND auth.app_configuration_id = aa.app_configuration_id AND auth.provider = aa.provider AND auth.environment = aa.environment
+           INNER JOIN ca_meta_asset_grants AS g ON g.tenant_id = aa.tenant_id AND g.authorization_id = aa.authorization_id
+             AND g.asset_id = aa.asset_id AND g.app_configuration_id = aa.app_configuration_id
+             AND g.provider = aa.provider AND g.environment = aa.environment
+           WHERE a.tenant_id = ? AND a.id = ? AND a.app_configuration_id = ? AND a.environment = ?
+             AND a.provider = 'META' AND a.asset_kind = 'WHATSAPP_BUSINESS_ACCOUNT'
+             AND aa.state = 'ACTIVE' AND aa.verification_state = 'VERIFIED'
+             AND auth.authorization_state IN ('ACTIVE', 'PARTIAL')
+             AND auth.flow_variant = 'WHATSAPP_EXCLUSIVE' AND auth.auth_variant = 'WHATSAPP_EMBEDDED_SIGNUP'
+             AND g.grant_name = 'whatsapp_business_management' AND g.status = 'GRANTED'
+           LIMIT 1`,
+          [tenantId, payload.assetId, payload.appConfigurationId, payload.environment],
+        ) as Array<{ id: string }>;
+        // The operation grant name is a candidate only; real Meta eligibility remains a release gate.
+        return rows.length === 1;
+      }
+      case 'NOTIFICATION_ACTION': {
+        const isCommentReply = payload.request.action === 'REPLY_COMMENT';
+        const compatibleAssetKinds = isCommentReply
+          ? ['FACEBOOK_PAGE', 'INSTAGRAM_BUSINESS_ACCOUNT', 'INSTAGRAM_CREATOR_ACCOUNT']
+          : ['WHATSAPP_PHONE_NUMBER'];
+        const kindPredicate = isCommentReply ? "n.kind = 'COMMENT_RECEIVED'" : '1 = 1';
+        const rows = await database.query(
+          `SELECT n.id
+           FROM ca_meta_notifications n
+           JOIN ca_meta_assets a ON a.tenant_id = n.tenant_id AND a.id = n.asset_id
+           WHERE n.tenant_id = ? AND n.id = ? AND n.asset_id = ?
+             AND a.app_configuration_id = ? AND a.environment = ? AND a.provider = 'META'
+             AND n.status = 'UNREAD' AND a.asset_kind IN (${compatibleAssetKinds.map(() => '?').join(',')})
+             AND ${kindPredicate}
+           LIMIT 1`,
+          [tenantId, payload.notificationId, payload.assetId, payload.appConfigurationId, payload.environment,
+            ...compatibleAssetKinds],
+        ) as Array<{ id: string }>;
         return rows.length === 1;
       }
     }

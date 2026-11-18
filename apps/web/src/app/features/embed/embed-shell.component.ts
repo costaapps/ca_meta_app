@@ -24,7 +24,10 @@ export class EmbedShellComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.stopState = this.bridge.subscribe((snapshot) => { this.snapshot = snapshot; });
+    this.stopState = this.bridge.subscribe((snapshot) => {
+      this.snapshot = snapshot;
+      if (snapshot.state === 'ready') void this.router.navigate(['/connections']);
+    });
     this.stopNavigation = this.bridge.subscribeNavigation((request) => this.navigate(request));
     void this.bridge.start();
   }
@@ -46,7 +49,6 @@ export class EmbedShellComponent implements OnInit, AfterViewInit, OnDestroy {
     this.stopState?.();
     this.stopNavigation?.();
     this.resizeObserver?.disconnect();
-    this.bridge.dispose();
   }
 
   private navigate(request: EmbedNavigationRequest): void {

@@ -7,6 +7,10 @@ export const ERROR_POLICIES = Object.freeze({
     "retryable": false,
     "action": "USE_NEW_REQUEST_KEY"
   },
+  "COEXISTENCE_SESSION_ACTIVE": {
+    "retryable": false,
+    "action": "CHECK_STATUS"
+  },
   "HOST_NOT_ALLOWED": {
     "retryable": false,
     "action": "CONTACT_ADMIN"

@@ -4,6 +4,13 @@ import { Inject, Injectable } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { META_API_BASE_URL, PROVIDER_AUTHORIZATION_ORIGINS } from '../config/public-runtime-config';
 import {
+  PortalTenantIdentityService,
+  TENANT_IDENTITY_UNCONFIRMED_MESSAGE,
+  tenantMutationCapability,
+  type TenantMutationCapability,
+} from '../portal/portal-tenant-identity.service';
+import { isPortalSession } from '../portal/portal-session.service';
+import {
   COEXISTENCE_PROVIDER_ADAPTER,
   decodeCoexistenceMessage,
   hasReviewedCoexistenceContract,
@@ -61,6 +68,7 @@ export interface CoexistenceOnboardingSnapshot {
 interface PortalContext {
   readonly tenantContextRef: string;
   readonly csrfToken: string;
+  readonly tenantMutationCapability: TenantMutationCapability;
 }
 
 class TenantContextChangedError extends Error {
@@ -158,12 +166,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).sort().join(',') === [...keys].sort().join(',');
-}
-
-function isPortalSession(value: unknown): value is { tenantContextRef: string } {
-  if (!isRecord(value) || typeof value['tenantContextRef'] !== 'string' ||
-      !/^[A-Za-z0-9._~-]{16,512}$/.test(value['tenantContextRef'])) return false;
-  return true;
 }
 
 function isCoexistenceFlowProfile(value: unknown): value is Record<string, unknown> & {
@@ -272,6 +274,7 @@ export class CoexistenceOnboardingService {
   private flowAvailable = false;
   private ambiguousCreate = false;
   private disposed = false;
+  private tenantMutationCapability = tenantMutationCapability(null);
 
   constructor(
     private readonly http: HttpClient,
@@ -279,6 +282,7 @@ export class CoexistenceOnboardingService {
     @Inject(PROVIDER_AUTHORIZATION_ORIGINS) private readonly providerOrigins: readonly string[],
     @Inject(COEXISTENCE_PROVIDER_ADAPTER) private readonly providerAdapter: CoexistenceProviderAdapter,
     @Inject(DOCUMENT) private readonly documentRef: Document,
+    private readonly tenantIdentity: PortalTenantIdentityService,
   ) {
     const configuredBase = baseUrl.replace(/\/+$/, '');
     this.baseUrl = configuredBase.endsWith('/v1') ? configuredBase : `${configuredBase || '/api'}/v1`;
@@ -310,7 +314,12 @@ export class CoexistenceOnboardingService {
       if (this.disposed) return;
       const profiles = await this.readFlowProfiles(context);
       if (this.disposed) return;
-      this.flowAvailable = profiles !== undefined;
+      this.tenantMutationCapability = context.tenantMutationCapability;
+      this.flowAvailable = profiles !== undefined && context.tenantMutationCapability.confirmed;
+      if (!context.tenantMutationCapability.confirmed) {
+        this.publish('unavailable', TENANT_IDENTITY_UNCONFIRMED_MESSAGE);
+        return;
+      }
       this.publish(profiles ? 'confirmed' : 'unavailable', profiles
         ? 'O servidor e o contrato do provedor permitem iniciar uma sessão.'
         : 'O servidor não habilitou este fluxo. Nenhuma sessão de provedor foi iniciada.');
@@ -321,6 +330,11 @@ export class CoexistenceOnboardingService {
   }
 
   async start(): Promise<void> {
+    if (!this.tenantIdentity.current.confirmed) {
+      this.flowAvailable = false;
+      this.publish('unavailable', TENANT_IDENTITY_UNCONFIRMED_MESSAGE);
+      return;
+    }
     if (!this.documentRef.defaultView || this.disposed || !this.flowAvailable || this.startInFlight ||
         this.ambiguousCreate || this.hasPendingAttempt()) return;
     this.startInFlight = true;
@@ -361,6 +375,7 @@ export class CoexistenceOnboardingService {
       }
       const context = await this.readContext(true);
       if (this.disposed) return undefined;
+      this.assertTenantMutationCapability(context);
       if (expectedTenantContextRef && context.tenantContextRef !== expectedTenantContextRef) {
         throw new Error('The active tenant context changed since the original onboarding session.');
       }
@@ -507,6 +522,13 @@ export class CoexistenceOnboardingService {
   }
 
   async recover(onboardingRef: string, option: CoexistenceRecoveryOption): Promise<void> {
+    const capability = this.tenantIdentity.current;
+    if (!capability.confirmed) {
+      this.tenantMutationCapability = capability;
+      this.flowAvailable = false;
+      this.publish('unavailable', TENANT_IDENTITY_UNCONFIRMED_MESSAGE);
+      return;
+    }
     const attempt = this.attempts.find((item) => item.onboardingRef === onboardingRef);
     if (!attempt || this.disposed || this.startInFlight || this.ambiguousCreate || this.isTerminal(attempt.state) ||
         attempt.recoveryActionInFlight || attempt.pendingRecovery ||
@@ -564,6 +586,7 @@ export class CoexistenceOnboardingService {
 
       const context = await this.readContext(true);
       this.assertAttemptTenantContext(attempt, context);
+      this.assertTenantMutationCapability(context);
       const windowRef = this.documentRef.defaultView;
       const idempotencyKey = windowRef ? randomIdempotencyKey(windowRef) : undefined;
       if (!idempotencyKey) throw new Error('Unable to create a recovery request identifier.');
@@ -604,7 +627,19 @@ export class CoexistenceOnboardingService {
     if (!isPortalSession(session)) throw new Error('A verified portal session is required.');
     const csrfToken = readCookie(this.documentRef, '__Host-ca_meta_csrf');
     if (requireCsrf && !csrfToken) throw new Error('The session CSRF token is unavailable.');
-    return { tenantContextRef: session.tenantContextRef, csrfToken: csrfToken ?? '' };
+    const tenantIdentity = this.tenantIdentity.forSession(session);
+    this.tenantMutationCapability = tenantIdentity;
+    return {
+      tenantContextRef: session.tenantContextRef,
+      csrfToken: csrfToken ?? '',
+      tenantMutationCapability: tenantIdentity,
+    };
+  }
+
+  private assertTenantMutationCapability(context: PortalContext): void {
+    if (!context.tenantMutationCapability.confirmed) {
+      throw new Error(context.tenantMutationCapability.message);
+    }
   }
 
   private async readServerStatus(attempt: MutableAttempt): Promise<VersionedServerStatus | undefined> {
@@ -685,7 +720,7 @@ export class CoexistenceOnboardingService {
       attempt.codeSubmitted = true;
       attempt.confirmationRequested = true;
       attempt.state = 'awaiting_server_confirmation';
-      attempt.message = 'O código foi enviado uma vez à sessão correspondente. Aguardando confirmação do servidor.';
+      attempt.message = 'O provedor informou um código. Validando a sessão antes de enviá-lo ao servidor.';
       this.publish('awaiting_server_confirmation', attempt.message);
       void this.submitCode(attempt, message.authorizationCode);
       return;
@@ -706,6 +741,7 @@ export class CoexistenceOnboardingService {
       if (!windowRef) throw new Error('No browser window is available.');
       const context = await this.readContext(true);
       this.assertAttemptTenantContext(attempt, context);
+      this.assertTenantMutationCapability(context);
       const idempotencyKey = randomIdempotencyKey(windowRef);
       if (!idempotencyKey) throw new Error('Unable to create a request identifier.');
       const accepted = await firstValueFrom(this.http.post<unknown>(
@@ -716,7 +752,12 @@ export class CoexistenceOnboardingService {
       if (!isAcceptedJob(accepted)) throw new Error('Invalid code submission response.');
     } catch {
       // The code is never retained or blindly resubmitted after an ambiguous result.
-      attempt.message = 'Não foi possível confirmar o recebimento. O código não será reenviado; consulte o estado desta sessão.';
+      const capability = this.tenantIdentity.current;
+      this.tenantMutationCapability = capability;
+      if (!capability.confirmed) this.flowAvailable = false;
+      attempt.message = capability.confirmed
+        ? 'Não foi possível confirmar o recebimento. O código não será reenviado; consulte o estado desta sessão.'
+        : capability.message;
       attempt.state = 'awaiting_server_confirmation';
     }
     this.stopListening(attempt);
@@ -860,7 +901,8 @@ export class CoexistenceOnboardingService {
     this.snapshotValue = Object.freeze({
       state,
       message,
-      canStart: this.flowAvailable && !this.startInFlight && !this.ambiguousCreate && !this.hasPendingAttempt(),
+      canStart: this.tenantMutationCapability.confirmed && this.flowAvailable && !this.startInFlight &&
+        !this.ambiguousCreate && !this.hasPendingAttempt(),
       attempts: this.attempts.map((attempt) => Object.freeze({
         onboardingRef: attempt.onboardingRef,
         ordinal: attempt.ordinal,

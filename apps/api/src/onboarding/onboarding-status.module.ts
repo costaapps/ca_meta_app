@@ -127,7 +127,7 @@ export class OnboardingStatusModule {
         },
         { provide: ONBOARDING_COMPLETION_PORT, useExisting: OnboardingCompletionService },
       ],
-      exports: [ONBOARDING_COMPLETION_PORT, OnboardingCompletionService],
+      exports: [ONBOARDING_COMPLETION_PORT, OnboardingCompletionService, OnboardingSagaRecoveryService, ConnectionLifecycleService],
     };
   }
 }

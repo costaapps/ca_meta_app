@@ -8,9 +8,10 @@ type PublicReadDtoSecretKey = Extract<
 >;
 type ReadDtosHaveNoSecretFields = Expect<PublicReadDtoSecretKey extends never ? true : false>;
 type InternalRouteIsNotPublic = Expect<'/internal/v1/assets/{assetId}/operations' extends keyof paths ? false : true>;
+type InternalV2RouteIsNotPublic = Expect<'/internal/v2/assets/{assetId}/operations' extends keyof paths ? false : true>;
 type InternalErrorIsNotPublic = Expect<'INTERNAL_SCOPE_DENIED' extends components['schemas']['ErrorEnvelope']['code'] ? false : true>;
 
-const checkTypeConstraints: [ReadDtosHaveNoSecretFields, InternalRouteIsNotPublic, InternalErrorIsNotPublic] = [true, true, true];
+const checkTypeConstraints: [ReadDtosHaveNoSecretFields, InternalRouteIsNotPublic, InternalV2RouteIsNotPublic, InternalErrorIsNotPublic] = [true, true, true, true];
 void checkTypeConstraints;
 
 const api = createMetaApiClient('https://api.example.invalid');
@@ -45,6 +46,9 @@ api.POST('/api/v1/onboarding-sessions', { body: { flowVariant: 'WHATSAPP_COEXIST
 
 // @ts-expect-error Internal service operations are intentionally absent from the public generated client.
 api.POST('/internal/v1/assets/{assetId}/operations', { params: { path: { assetId: 'asset_example_01' } }, body: { kind: 'MARK_READ' } });
+
+// @ts-expect-error Typed service-proof operations are also intentionally absent from the public generated client.
+api.POST('/internal/v2/assets/{assetId}/operations', { params: { path: { assetId: 'asset_example_01' } }, body: { operation: 'READ_STATUS' } });
 
 type OperationIds = components['schemas']['JobStatus']['operation'];
 const typedJobOperation: OperationIds = 'SEND_REPLY';

@@ -362,6 +362,25 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
   const malformedWebhook = await invokeMiddleware(middleware, request({}, 'POST', '/api/v1/webhooks/meta/config/ref'));
   assert.equal(malformedWebhook.response.statusCodeValue(), 403);
 
+  const internalOperationPath = '/internal/v2/assets/50000000-0000-4000-8000-000000000001/operations';
+  const internalStatusPath = '/internal/v2/operations/50000000-0000-4000-8000-000000000002';
+  const serviceOperation = await invokeMiddleware(middleware, request({}, 'POST', internalOperationPath));
+  assert.equal(serviceOperation.continued, true);
+  for (const [method, path] of [
+    ['PUT', internalOperationPath],
+    ['PATCH', internalOperationPath],
+    ['DELETE', internalOperationPath],
+    ['POST', internalStatusPath],
+    ['PUT', internalStatusPath],
+    ['PATCH', internalStatusPath],
+    ['DELETE', internalStatusPath],
+    ['POST', '/internal/v1/assets/50000000-0000-4000-8000-000000000001/operations'],
+  ]) {
+    const unsupportedInternalMutation = await invokeMiddleware(middleware, request({}, method, path));
+    assert.equal(unsupportedInternalMutation.response.statusCodeValue(), 403, `${method} ${path}`);
+    assert.equal((unsupportedInternalMutation.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+  }
+
   const badOrigin = await invokeMiddleware(middleware, request({ ...baseHeaders, origin: 'https://attacker.example' }));
   assert.equal(badOrigin.response.statusCodeValue(), 403);
   assert.equal((badOrigin.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
@@ -379,23 +398,152 @@ test('mutations reject untrusted origins, Fetch Metadata and session CSRF mismat
   const good = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-csrf-token': csrf }));
   assert.equal(good.continued, true);
   assert.equal(good.response.headerValue('access-control-allow-origin'), 'https://portal.example');
+  const readableResponse = await invokeMiddleware(middleware, request({ origin: 'https://portal.example' }, 'GET'));
+  assert.equal(readableResponse.continued, true);
+  assert.match(String(readableResponse.response.headerValue('access-control-expose-headers')), /(?:^|,\s*)ETag(?:,|$)/i);
+
+  const missingCsrf = await invokeMiddleware(middleware, request(baseHeaders, 'POST', '/api/v1/session/logout'));
+  assert.equal((missingCsrf.response.bodyValue() as { code: string }).code, 'CSRF_INVALID');
 
   const validDelete = await invokeMiddleware(middleware, request({ ...baseHeaders, 'x-csrf-token': csrf }, 'DELETE'));
   assert.equal(validDelete.continued, true);
 
   const preflight = await invokeMiddleware(middleware, request({
     origin: 'https://portal.example',
-    'access-control-request-method': 'DELETE',
-    'access-control-request-headers': 'content-type,x-csrf-token',
+    'access-control-request-method': 'PATCH',
+    'access-control-request-headers': 'content-type,x-csrf-token,if-match',
   }, 'OPTIONS'));
   assert.equal(preflight.response.statusCodeValue(), 204);
   assert.match(String(preflight.response.headerValue('access-control-allow-headers')), /X-CSRF-Token/);
+  assert.match(String(preflight.response.headerValue('access-control-allow-headers')), /If-Match/);
   const legacyPreflight = await invokeMiddleware(middleware, request({
     origin: 'https://portal.example',
     'access-control-request-method': 'DELETE',
     'access-control-request-headers': 'x-meta-csrf',
   }, 'OPTIONS'));
   assert.equal(legacyPreflight.response.statusCodeValue(), 403);
+});
+
+test('public magic-link initiation tolerates stale portal cookies but retains browser origin checks', async () => {
+  const env = {
+    nodeEnv: 'test', port: 3000, bindAddress: '127.0.0.1', allowedHosts: ['portal.example'],
+    allowedOrigins: ['https://portal.example'], suite4EmbedOrigins: [], trustedProxyCidrs: false,
+    portalSessionRecoveryKey: recoveryKey,
+    portalSessionIdleTimeoutSeconds: 1800,
+    portalSessionAbsoluteTimeoutSeconds: 28800,
+    database: { host: '127.0.0.1', port: 3306, name: 'synthetic', user: 'synthetic', password: 'synthetic', connectTimeoutMs: 100 },
+  } satisfies ApiEnvironment;
+  let verifyCalls = 0;
+  const staleVerifier = { async verify() { verifyCalls += 1; return undefined; } } as unknown as PortalSessionVerifier;
+  const middleware = portalRequestSecurityMiddleware(env, staleVerifier);
+  const request = (headers: Record<string, string | string[] | undefined>, method = 'POST', path = '/api/v1/auth/magic-links') => ({
+    headers, method, path, protocol: 'https', get: (name: string) => name.toLowerCase() === 'host' ? 'portal.example' : undefined,
+  });
+  const staleCookie = `${PORTAL_SESSION_COOKIE}=expired-session-cookie-with-sufficient-entropy-123456`;
+  const sameOrigin = { origin: 'https://portal.example', 'sec-fetch-site': 'same-origin', cookie: staleCookie };
+
+  const publicEntry = await invokeMiddleware(middleware, request(sameOrigin));
+  assert.equal(publicEntry.continued, true);
+  assert.equal(publicEntry.response.statusCodeValue(), 200);
+  assert.equal(verifyCalls, 0);
+
+  const deniedOrigin = await invokeMiddleware(middleware, request({ ...sameOrigin, origin: 'https://attacker.example' }));
+  assert.equal(deniedOrigin.response.statusCodeValue(), 403);
+  assert.equal((deniedOrigin.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+
+  const deniedFetchMetadata = await invokeMiddleware(middleware, request({ ...sameOrigin, 'sec-fetch-site': 'same-site' }));
+  assert.equal(deniedFetchMetadata.response.statusCodeValue(), 403);
+  assert.equal((deniedFetchMetadata.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+
+  const authenticatedWrite = await invokeMiddleware(middleware, request(sameOrigin, 'POST', '/api/v1/session/logout'));
+  assert.equal(authenticatedWrite.response.statusCodeValue(), 401);
+  assert.equal((authenticatedWrite.response.bodyValue() as { code: string }).code, 'AUTH_REQUIRED');
+  assert.equal(verifyCalls, 1);
+
+  const wrongMethod = await invokeMiddleware(middleware, request(sameOrigin, 'PUT', '/api/v1/auth/magic-links'));
+  assert.equal(wrongMethod.response.statusCodeValue(), 401);
+  assert.equal((wrongMethod.response.bodyValue() as { code: string }).code, 'AUTH_REQUIRED');
+
+  const wrongPath = await invokeMiddleware(middleware, request(sameOrigin, 'POST', '/api/v1/auth/magic-links/extra'));
+  assert.equal(wrongPath.response.statusCodeValue(), 401);
+  assert.equal((wrongPath.response.bodyValue() as { code: string }).code, 'AUTH_REQUIRED');
+  assert.equal(verifyCalls, 3);
+});
+
+test('pre-auth POST bypasses prior-session CSRF only for its exact origin-checked route', async () => {
+  const env = {
+    nodeEnv: 'test', port: 3000, bindAddress: '127.0.0.1', allowedHosts: ['portal.example'],
+    allowedOrigins: ['https://portal.example'], suite4EmbedOrigins: [], trustedProxyCidrs: false,
+    portalSessionRecoveryKey: recoveryKey,
+    portalSessionIdleTimeoutSeconds: 1800,
+    portalSessionAbsoluteTimeoutSeconds: 28800,
+    database: { host: '127.0.0.1', port: 3306, name: 'synthetic', user: 'synthetic', password: 'synthetic', connectTimeoutMs: 100 },
+  } satisfies ApiEnvironment;
+  const activeCookie = 'active-session-cookie-with-sufficient-entropy-12345';
+  const staleCookie = 'expired-session-cookie-with-sufficient-entropy-123456';
+  const csrf = 'csrf-token-with-sufficient-entropy-123456';
+  let verifyCalls = 0;
+  const activeSession = {
+    sessionId: 'session-1', principalId, tenantId: tenantA, contextVersion: 1,
+    contextRefHash: 'a'.repeat(64), csrfTokenHash: hash(csrf), entryMode: 'PORTAL_TOP_LEVEL',
+  } as VerifiedPortalSession;
+  const verifier = { async verify(value: string | undefined) {
+    verifyCalls += 1;
+    return value === activeCookie ? activeSession : undefined;
+  } } as PortalSessionVerifier;
+  const middleware = portalRequestSecurityMiddleware(env, verifier);
+  const request = (headers: Record<string, string | string[] | undefined>, method = 'POST', path = '/api/v1/auth/preauth') => ({
+    headers, method, path, protocol: 'https', get: (name: string) => name.toLowerCase() === 'host' ? 'portal.example' : undefined,
+  });
+  const baseHeaders = { origin: 'https://portal.example', 'sec-fetch-site': 'same-origin' };
+
+  const activeCookiePreAuth = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    cookie: `${PORTAL_SESSION_COOKIE}=${activeCookie}`,
+  }));
+  assert.equal(activeCookiePreAuth.continued, true);
+  assert.equal(verifyCalls, 0);
+
+  const staleCookiePreAuth = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    cookie: `${PORTAL_SESSION_COOKIE}=${staleCookie}`,
+  }));
+  assert.equal(staleCookiePreAuth.continued, true);
+  assert.equal(verifyCalls, 0);
+
+  const deniedOrigin = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    origin: 'https://attacker.example',
+    cookie: `${PORTAL_SESSION_COOKIE}=${staleCookie}`,
+  }));
+  assert.equal(deniedOrigin.response.statusCodeValue(), 403);
+  assert.equal((deniedOrigin.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+  assert.equal(verifyCalls, 0);
+
+  const deniedFetchMetadata = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    'sec-fetch-site': 'same-site',
+    cookie: `${PORTAL_SESSION_COOKIE}=${staleCookie}`,
+  }));
+  assert.equal(deniedFetchMetadata.response.statusCodeValue(), 403);
+  assert.equal((deniedFetchMetadata.response.bodyValue() as { code: string }).code, 'ORIGIN_NOT_ALLOWED');
+  assert.equal(verifyCalls, 0);
+
+  const activeCookieHeader = `${PORTAL_SESSION_COOKIE}=${activeCookie}`;
+  const deniedMethod = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    cookie: activeCookieHeader,
+  }, 'PUT'));
+  assert.equal(deniedMethod.response.statusCodeValue(), 403);
+  assert.equal((deniedMethod.response.bodyValue() as { code: string }).code, 'CSRF_INVALID');
+
+  const deniedNeighborPath = await invokeMiddleware(middleware, request({
+    ...baseHeaders,
+    cookie: activeCookieHeader,
+  }, 'POST', '/api/v1/auth/preauth/extra'));
+  assert.equal(deniedNeighborPath.response.statusCodeValue(), 403);
+  assert.equal((deniedNeighborPath.response.bodyValue() as { code: string }).code, 'CSRF_INVALID');
+  assert.equal(verifyCalls, 2);
 });
 
 test('portal cookies are host-only, Secure, HttpOnly where required, and denial codes map to safe 403/409 envelopes', () => {

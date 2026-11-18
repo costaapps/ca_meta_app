@@ -23,6 +23,9 @@ import { MysqlOnboardingCodeConsumer } from '../onboarding/onboarding-code-submi
 import { createOnboardingSagaHandler } from '../onboarding/onboarding-saga.worker.js';
 import { MetaOnboardingConfigurationResolver } from '../onboarding/meta-onboarding-configuration.resolver.js';
 import { MetaAppConfigRegistry } from '../meta-config/meta-app-config.registry.js';
+import { createTemplateCreateJobHandler, type WhatsAppTemplateDispatchAdapter } from '../whatsapp-templates/template-create.worker.js';
+import { createNotificationActionJobHandler, notificationActionFinalizer } from '../notifications/notification-action.worker.js';
+import type { NotificationActionAdapter } from '../notifications/notification-action.worker.js';
 
 interface CredentialLifecycleAdapters {
   readonly policies: CredentialLifecyclePolicyPort;
@@ -45,6 +48,16 @@ function configuredMetaOnboardingSagaAdapter(): OnboardingSagaAdapter | undefine
   return undefined;
 }
 
+/** No reviewed template adapter is installed; create jobs are not claimed by the default worker. */
+function configuredWhatsAppTemplateDispatchAdapter(): WhatsAppTemplateDispatchAdapter | undefined {
+  return undefined;
+}
+
+/** External notification actions have no confirmed policy, credential profile or provider adapter. */
+function configuredNotificationActionAdapter(): NotificationActionAdapter | undefined {
+  return undefined;
+}
+
 interface MetaWebhookWorkerAdapters {
   readonly payloadProtector: MetaWebhookPayloadProtector;
   readonly processor: MetaWebhookItemProcessor;
@@ -52,6 +65,11 @@ interface MetaWebhookWorkerAdapters {
 
 /** Durable webhook items stay unclaimed until both the protected store and local processor exist. */
 function configuredMetaWebhookWorkerAdapters(): MetaWebhookWorkerAdapters | undefined {
+  return undefined;
+}
+
+/** Real enterprise DDL, connection catalog and destination credentials are not confirmed; no projection target is installed. */
+function configuredLegacyProjectionRuntime(): { readonly handler: JobHandler } | undefined {
   return undefined;
 }
 
@@ -65,6 +83,8 @@ export async function bootstrapWorker(): Promise<void> {
     const handlers = new Map<JobType, JobHandler>();
     const finalizers = new Map<JobType, JobFinalizer>();
     const webhookAdapters = configuredMetaWebhookWorkerAdapters();
+    const legacyProjectionRuntime = configuredLegacyProjectionRuntime();
+    if (legacyProjectionRuntime) handlers.set('PROJECTION_RECONCILE', legacyProjectionRuntime.handler);
     const webhookWorker = webhookAdapters
       ? new MetaWebhookWorker(new MetaWebhookRepository(database), webhookAdapters.payloadProtector,
         webhookAdapters.processor, `meta-webhook-worker:${process.pid}`)
@@ -106,6 +126,13 @@ export async function bootstrapWorker(): Promise<void> {
       const configurations = new MetaOnboardingConfigurationResolver(
         new MetaAppConfigRegistry(environment.metaAppConfigurations ?? []), environment.nodeEnv);
       handlers.set('ONBOARDING_STEP', createOnboardingSagaHandler(database, codeConsumer, onboardingSagaAdapter, undefined, configurations));
+    }
+    const templateAdapter = configuredWhatsAppTemplateDispatchAdapter();
+    if (templateAdapter) handlers.set('TEMPLATE_CREATE', createTemplateCreateJobHandler(templateAdapter));
+    const notificationActionAdapter = configuredNotificationActionAdapter();
+    if (notificationActionAdapter) {
+      handlers.set('NOTIFICATION_ACTION', createNotificationActionJobHandler(notificationActionAdapter));
+      finalizers.set('NOTIFICATION_ACTION', notificationActionFinalizer);
     }
     let authorization: JobExecutionAuthorizationPort = new FailClosedJobExecutionAuthorizationPort();
     if (handlers.size > 0) {

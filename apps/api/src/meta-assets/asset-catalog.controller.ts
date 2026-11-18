@@ -24,11 +24,15 @@ import {
   AssetCatalogService,
   AssetNotFoundError,
 } from './asset-catalog.service.js';
+import type { FlowCatalogAppOffset } from './meta-assets.types.js';
 import { AssetRefreshRateLimitError, AssetRefreshUnavailableError } from './asset-refresh.service.js';
 
 const CHANNELS = new Set(['FACEBOOK', 'INSTAGRAM', 'WHATSAPP']);
+const CONNECTION_FLOW_VARIANTS = new Set([
+  'FACEBOOK_LOGIN', 'INSTAGRAM_VIA_FACEBOOK_LOGIN', 'INSTAGRAM_LOGIN', 'WHATSAPP_CLOUD_API', 'WHATSAPP_COEXISTENCE',
+]);
 const STATUSES = new Set(['ACTIVE', 'INACTIVE', 'UNKNOWN', 'STALE']);
-const CONNECTION_STATUSES = new Set(['ACTIVE', 'PARTIAL', 'REAUTH_REQUIRED', 'UNKNOWN', 'DISCONNECTED']);
+const CONNECTION_STATUSES = new Set(['ACTIVE', 'PARTIAL', 'REAUTH_REQUIRED', 'UNKNOWN', 'DISCONNECTED', 'STALE']);
 
 function tenantContextRef(request: PortalRequest, headerContext?: string): string {
   const ref = headerContext ?? readPortalCookie(request.headers.cookie, PORTAL_CONTEXT_COOKIE);
@@ -37,6 +41,13 @@ function tenantContextRef(request: PortalRequest, headerContext?: string): strin
 }
 
 function requestId(request: PortalRequest): string { return request.requestId ?? 'unknown'; }
+
+function parseFlowCatalogAppOffset(value: unknown): FlowCatalogAppOffset {
+  if (value === undefined || value === '0') return 0;
+  if (value === '6') return 6;
+  if (value === '12') return 12;
+  throw new BadRequestException();
+}
 
 function parseAssetQuery(query: Record<string, unknown>) {
   const rawLimit = query.limit;
@@ -68,15 +79,18 @@ function parseConnectionQuery(query: Record<string, unknown>): ConnectionCatalog
   const status = query.status;
   const cursor = query.cursor;
   const number = query.number;
+  const flowVariant = query.flowVariant;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
       (channel !== undefined && (typeof channel !== 'string' || !CHANNELS.has(channel))) ||
       (status !== undefined && (typeof status !== 'string' || !CONNECTION_STATUSES.has(status))) ||
+      (flowVariant !== undefined && (typeof flowVariant !== 'string' || !CONNECTION_FLOW_VARIANTS.has(flowVariant))) ||
       (cursor !== undefined && typeof cursor !== 'string') ||
       (number !== undefined && (typeof number !== 'string' || !/^\+?[0-9]{1,32}$/.test(number)))) throw new BadRequestException();
   return {
     limit,
     ...(typeof cursor === 'string' ? { cursor } : {}),
     ...(typeof channel === 'string' ? { channel: channel as 'FACEBOOK' | 'INSTAGRAM' | 'WHATSAPP' } : {}),
+    ...(typeof flowVariant === 'string' ? { flowVariant: flowVariant as ConnectionCatalogQuery['flowVariant'] } : {}),
     ...(typeof number === 'string' ? { number } : {}),
     ...(typeof status === 'string' ? { status: status as ConnectionCatalogQuery['status'] } : {}),
   };
@@ -121,10 +135,12 @@ export class AssetCatalogController {
   @PublicRoute()
   @UseGuards(PortalSessionGuard)
   listFlows(
+    @Query('appOffset') appOffset: unknown,
     @Req() request: PortalRequest,
     @Headers('x-tenant-context') headerContext?: string,
   ): Promise<components['schemas']['FlowList']> {
-    return this.catalog.listFlows(request.portalSession, tenantContextRef(request, headerContext), requestId(request));
+    return this.catalog.listFlows(request.portalSession, tenantContextRef(request, headerContext), requestId(request),
+      parseFlowCatalogAppOffset(appOffset));
   }
 
   @Get('assets')

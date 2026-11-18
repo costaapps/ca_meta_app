@@ -7,6 +7,7 @@ import {
   type CoexistenceOnboardingSnapshot,
   type CoexistenceRecoveryOption,
 } from '../../core/coexistence/coexistence-onboarding.service';
+import { PortalTenantIdentityService } from '../../core/portal/portal-tenant-identity.service';
 
 @Component({
   selector: 'app-coexistence-setup',
@@ -20,7 +21,10 @@ export class CoexistenceSetupComponent implements OnInit, OnDestroy {
   snapshot: CoexistenceOnboardingSnapshot;
   private unsubscribe?: () => void;
 
-  constructor(private readonly onboarding: CoexistenceOnboardingService) {
+  constructor(
+    private readonly onboarding: CoexistenceOnboardingService,
+    private readonly tenantIdentity: PortalTenantIdentityService,
+  ) {
     this.snapshot = onboarding.getSnapshot();
   }
 
@@ -53,7 +57,7 @@ export class CoexistenceSetupComponent implements OnInit, OnDestroy {
   }
 
   isRecoveryDisabled(attempt: CoexistenceAttemptSnapshot): boolean {
-    return attempt.recoveryInFlight || !!attempt.pendingRecovery;
+    return !this.tenantIdentity.current.confirmed || attempt.recoveryInFlight || !!attempt.pendingRecovery;
   }
 
   isInProgress(attempt: CoexistenceAttemptSnapshot): boolean {

@@ -576,10 +576,21 @@ paths:
         current tenant and environment. `variant` remains the journey identifier; optional `flowVariant`
         groups journeys into the four Meta flow families. A journey is enabled only when its tenant feature
         flag and a registered server adapter are confirmed; either unknown or unavailable prerequisite
-        keeps it disabled.
+        keeps it disabled. Each page contains up to six app configurations (30 journeys), except offset 12,
+        which contains up to four configurations (20 journeys), for a maximum source of 16 configurations.
+        `truncated=true` means another page exists or the source exceeds 16 configurations. Clients must
+        request offsets 0, 6 and 12 in order until `truncated=false`; if the third page remains truncated,
+        the full catalog is unavailable and must not be used to choose an authorization flow.
       security: *a10
-      parameters: &a22
+      parameters: &flowCatalogPageParams
         - $ref: "#/components/parameters/TenantContext"
+        - name: appOffset
+          in: query
+          required: false
+          description: App-configuration offset. Omit for the first page; subsequent pages use 6 or 12.
+          schema:
+            type: integer
+            enum: [0, 6, 12]
       responses:
         "200":
           description: Sanitized success example
@@ -757,6 +768,9 @@ paths:
                           - operation: SUBSCRIBE_WEBHOOKS
                             enabled: false
                             reasonCode: CONFIGURATION_MISSING
+                          - operation: PHONE_REGISTRATION_CONVENTIONAL
+                            enabled: false
+                            reasonCode: CONFIGURATION_MISSING
                       - flowVariant: WHATSAPP_COEXISTENCE
                         authVariant: WHATSAPP_BUSINESS_APP_ONBOARDING
                         enabled: false
@@ -792,7 +806,9 @@ paths:
         use. Requests fail closed with a safe 503 when the required server-side signing key or
         trusted provider-launch configuration is unavailable. The signing key is runtime-configurable;
         its presence in any deployment is Not confirmed. A 201 or provider redirect means only that a
-        flow was created, never that a connection is READY.
+        flow was created, never that a connection is READY. A distinct idempotency key receives 409
+        COEXISTENCE_SESSION_ACTIVE while this tenant has another unexpired, nonterminal
+        WHATSAPP_COEXISTENCE session; a same-key retry replays the existing session.
       security: *a10
       parameters: &a23
         - &a26
@@ -878,7 +894,8 @@ paths:
         remains unavailable until a verified server adapter is configured. UNKNOWN/STALE evidence stays
         visible and blocks READY when required.
       security: *a10
-      parameters: *a22
+      parameters: &a22
+        - $ref: "#/components/parameters/TenantContext"
       responses:
         "200":
           description: Sanitized success example
@@ -1128,6 +1145,130 @@ paths:
       x-external-effect: Consumes one-time state and records provider return for a server-side job.
       x-retry-policy: State is single-use. A duplicate callback is rejected or safely resumes the same
         recorded operation; ambiguous exchange becomes UNKNOWN and is reconciled before retry.
+  /api/v1/operations/diagnostics:
+    get:
+      operationId: getOperationsDiagnostics
+      tags:
+        - Operations
+      summary: Read safe diagnostics for the current tenant
+      description: >-
+        The tenant is derived from the authenticated portal session and current server-validated
+        context. The request accepts no tenant ID. The read model contains status, counts, safe reason
+        codes, timestamps, request correlation and contract/read-model versions only. Missing adapters
+        remain UNKNOWN. Credential bytes, provider URLs and IDs, payloads, messages and contact details
+        are excluded.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Safe current-tenant operational summary
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationsDiagnostics"
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "409": *a15
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/support/diagnostics/export:
+    get:
+      operationId: exportSupportDiagnostics
+      tags:
+        - Operations
+      summary: Export audited support diagnostics for the current tenant
+      description: >-
+        The current tenant comes only from the authenticated session and server-validated context.
+        A trusted SUPPORT grant (maximum lifetime 15 minutes) and fixed reason code are required and audited before
+        the data is read. This route accepts no tenant ID. The export uses the same closed redaction
+        and status-only allowlist as the portal read model.
+      security: *a10
+      parameters:
+        - $ref: "#/components/parameters/TenantContext"
+        - name: reasonCode
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/OperationsReasonCode"
+      responses:
+        "200":
+          description: Sanitized export; support access is audited before the read
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationsDiagnostics"
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "429": *a19
+        "503": *a20
+        default: *a21
+  /api/v1/operations/actions:
+    post:
+      operationId: requestOperationsAction
+      tags:
+        - Operations
+      summary: Request a tenant-scoped operational action
+      description: >-
+        Every action requires a fixed reason code, current portal context and idempotency key. The
+        request has no tenant field. User actions use current membership roles and existing typed
+        handlers; tenant writes remain unavailable while the session has no trusted company identity.
+        Support actions require a trusted SUPPORT grant with a maximum 15-minute lifetime. Unsupported adapters return a typed
+        unavailable outcome. Replay is accepted only for a support-authorized dead letter whose stored
+        effect mode and deterministic replay key permit it; UNKNOWN or ambiguous outcomes are never
+        directly resent.
+      security: *a10
+      parameters:
+        - $ref: "#/components/parameters/TenantContext"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperationsActionRequest"
+            examples:
+              revalidate:
+                summary: Request a status refresh for one tenant-owned resource
+                value:
+                  action: REVALIDATE
+                  resourceRef: 10000000-0000-4000-8000-000000000004
+                  reasonCode: CUSTOMER_REQUEST
+      responses:
+        "200":
+          description: Typed action outcome; unavailable and ambiguous actions are never reported as accepted
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationsActionResult"
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "429": *a19
+        "503": *a20
+        default: *a21
   /api/v1/connections:
     get:
       operationId: listConnections
@@ -1138,13 +1279,14 @@ paths:
         items identify status, freshness and last confirmed evidence but contain no raw provider
         payload or credential.
       security: *a10
-      parameters: &a25
+      parameters:
         - $ref: "#/components/parameters/TenantContext"
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/AssetCatalogChannel"
         - $ref: "#/components/parameters/AssetCatalogNumber"
         - $ref: "#/components/parameters/ConnectionCatalogStatus"
+        - $ref: "#/components/parameters/ConnectionCatalogFlowVariant"
       responses:
         "200":
           description: Sanitized success example
@@ -1775,7 +1917,7 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
-                    assetId: 10000000-0000-4000-8000-000000000004
+                    assetId: asset_example_01
                     enabled: true
                     replyText: Thanks for contacting our team.
                     version: 7
@@ -1836,11 +1978,143 @@ paths:
                 sanitized:
                   summary: Sanitized success example
                   value:
-                    assetId: 10000000-0000-4000-8000-000000000004
+                    assetId: asset_example_01
                     enabled: false
                     replyText: ""
                     version: 8
                     updatedAt: 2026-10-29T12:02:00Z
+                    requestId: req_example_31
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+      x-retry-policy: On 412, read the current representation and make an explicit new update.
+  /api/v1/assets/{assetId}/automation-config/channels:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against the server-derived
+          tenant.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9_-]+$
+    get:
+      operationId: getAutomationChannelConfig
+      tags:
+        - Configuration
+      summary: Read automation/reply configuration
+      description: Tenant and asset authorization are checked for the requested capability. ETag is
+        returned for conditional updates.
+      security: *a10
+      parameters: *a22
+      responses:
+        "200":
+          description: Sanitized success example
+          headers:
+            ETag:
+              schema:
+                type: string
+                example: '"automation-v7"'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationChannelConfig"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    assetId: 10000000-0000-4000-8000-000000000004
+                    assetKind: WHATSAPP_PHONE_NUMBER
+                    inheritanceMode: ASSET_ONLY
+                    supportedFields: [privateWelcomeMessage]
+                    privateWelcomeMessage: Olá! Como podemos ajudar?
+                    commentPublicReply: null
+                    commentPrivateReply: null
+                    capabilities:
+                      canEdit: true
+                      executable: false
+                    version: 7
+                    updatedAt: 2026-10-29T11:00:00Z
+                    projectionState: PENDING
+                    requestId: req_example_30
+        "400": *a11
+        "401": *a12
+        "403": *a13
+        "404": *a14
+        "409": *a15
+        "412": *a16
+        "413": *a17
+        "422": *a18
+        "429": *a19
+        "503": *a20
+        default: *a21
+    patch:
+      operationId: patchAutomationChannelConfig
+      tags:
+        - Configuration
+      summary: Update channel-supported automation/reply fields conditionally
+      description: Requires exact Origin, CSRF, current tenant context and If-Match from the latest
+        representation. Unknown fields are rejected. This changes local configuration; delivery of a
+        reply is a separate external effect.
+      security: *a10
+      parameters:
+        - *a26
+        - *a27
+        - *a28
+        - *a29
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutomationChannelConfigUpdate"
+            examples:
+              whatsapp:
+                summary: Sanitized WhatsApp phone update
+                value:
+                  version: 7
+                  privateWelcomeMessage: ""
+      responses:
+        "200":
+          description: Sanitized success example
+          headers:
+            ETag:
+              schema:
+                type: string
+                example: '"automation-v8"'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationChannelConfig"
+              examples:
+                sanitized:
+                  summary: Sanitized success example
+                  value:
+                    assetId: 10000000-0000-4000-8000-000000000004
+                    assetKind: WHATSAPP_PHONE_NUMBER
+                    inheritanceMode: ASSET_ONLY
+                    supportedFields: [privateWelcomeMessage]
+                    privateWelcomeMessage: ""
+                    commentPublicReply: null
+                    commentPrivateReply: null
+                    capabilities:
+                      canEdit: true
+                      executable: false
+                    version: 8
+                    updatedAt: 2026-10-29T12:02:00Z
+                    projectionState: PENDING
                     requestId: req_example_31
         "400": *a11
         "401": *a12
@@ -2013,7 +2287,7 @@ paths:
                   summary: Sanitized success example
                   value:
                     id: op_example_01
-                    kind: SEND_REPLY
+                    kind: REPLY_COMMENT
                     status: UNKNOWN
                     requestId: req_example_35
                     updatedAt: 2026-10-29T12:03:20Z
@@ -2034,22 +2308,27 @@ paths:
       - name: assetId
         in: path
         required: true
-        description: Opaque account asset ID; the server verifies tenant and MANAGE_TEMPLATES capability.
+        description: Internal WABA asset UUID selected from this tenant's verified WhatsApp EXCLUSIVE assets.
+          The server resolves the provider account identifier and MANAGE_TEMPLATES credential; browser-supplied
+          provider IDs, cUUID, company_uuid and tokens are not accepted.
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
-          pattern: ^[A-Za-z0-9_-]+$
+          format: uuid
     get:
       operationId: listTemplates
       tags:
         - Templates
       summary: List templates for an authorized WhatsApp account
-      description: Returns a tenant/account-scoped template projection from the selected eligible grant.
-        Provider eligibility and actual grant semantics are Not confirmed; no global credential is
-        selected.
+      description: Returns a tenant/account-scoped template projection after current membership, WABA
+        ownership, WhatsApp EXCLUSIVE flow, verified asset and candidate MANAGE_TEMPLATES grant checks.
+        The provider adapter is disabled by default until current eligibility and capability evidence is
+        reviewed. Unrecognized provider states are normalized to UNKNOWN; exact provider fields and status
+        enumeration are Not confirmed. No root/global credential is selected.
       security: *a10
-      parameters: *a25
+      parameters:
+        - $ref: "#/components/parameters/TenantContext"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
       responses:
         "200":
           description: Sanitized success example
@@ -2065,8 +2344,11 @@ paths:
                       - id: template_example_01
                         name: order_update
                         language: en
-                        status: APPROVED
-                        category: UTILITY
+                        status: UNKNOWN
+                        category: UNKNOWN
+                        providerStatusLabel: EXTERNALLY_REVIEWED
+                        providerCategoryLabel: UTILITY
+                        bodyText: Your order is ready for pickup.
                         updatedAt: 2026-10-29T10:00:00Z
                     nextCursor: null
                     requestId: req_example_36
@@ -2087,7 +2369,10 @@ paths:
         - Templates
       summary: Request creation of a template
       description: Validates an allowlisted payload and selected account grant before dispatch. Provider
-        template review/approval is asynchronous and is not inferred from request acceptance.
+        template review/approval is asynchronous and is not inferred from request acceptance. The real
+        dispatch adapter remains disabled until current provider capability and tenant eligibility are
+        confirmed. Body and category constraints are local request-contract limits, not a claim about the
+        current Meta validation rules.
       security: *a10
       parameters: *a23
       requestBody:
@@ -2105,6 +2390,7 @@ paths:
                   language: en
                   category: UTILITY
                   bodyText: Your order is ready for pickup.
+                  exampleValues: []
       responses:
         "202":
           description: Sanitized success example
@@ -2132,11 +2418,15 @@ paths:
         "429": *a19
         "503": *a20
         default: *a21
-      x-external-effect: Submits template creation to the provider for review.
+      x-external-effect: The installed worker adapter submits template creation to the provider for review.
+        The API and worker adapters are disabled by default until current capability evidence is reviewed.
       x-idempotency-scope: tenant + operation + Idempotency-Key and canonical request payload hash.
       x-retry-policy: At most one automatic provider submission, including the initial request; zero
-        automatic retries without verified provider idempotency. If the result is ambiguous, reconcile by
-        provider template identity before any new explicit request.
+        automatic retries without verified provider idempotency. The durable job has one attempt and
+        AMBIGUOUS effect mode. If the outcome is ambiguous, status is UNKNOWN and a read-only
+        reconciliation checks the same internal account for a name/language candidate. A candidate can
+        predate the request and does not prove causation; without confirmed provider correlation the
+        outcome remains UNKNOWN. No blind retry.
   /api/v1/notifications:
     get:
       operationId: listNotifications
@@ -2144,9 +2434,15 @@ paths:
         - Notifications
       summary: List tenant-scoped operational notifications
       description: Returns safe metadata, references and freshness; no message body or raw provider
-        payload is included. Cursor and limit are bounded.
+        payload is included. Cursor and limit are bounded. Repeat the same channel and number filters
+        on every page request when continuing with a cursor.
       security: *a10
-      parameters: *a25
+      parameters:
+        - $ref: "#/components/parameters/TenantContext"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/AssetCatalogChannel"
+        - $ref: "#/components/parameters/AssetCatalogNumber"
       responses:
         "200":
           description: Sanitized success example
@@ -2169,7 +2465,7 @@ paths:
                         actions:
                           - MARK_READ
                           - DISMISS
-                          - REPLY
+                          - SEND_TEMPLATE
                     nextCursor: null
                     requestId: req_example_38
         "400": *a11
@@ -2200,10 +2496,13 @@ paths:
       tags:
         - Notifications
       summary: Apply a notification action
-      description: The action is checked against current membership, asset grant and role.
-        MARK_READ/DISMISS are local; REPLY is an external message effect and enters the bounded
-        async job/reconciliation path. This endpoint never reports a provider send as complete on
-        HTTP acceptance.
+      description: The server derives the tenant from the verified session and current membership,
+        then resolves the notification and asset in that tenant. MARK_READ/DISMISS are local state
+        changes and return 200 only after persistence. When an eligible external adapter is available,
+        SEND_TEMPLATE/REPLY_COMMENT return a durable operation; HTTP acceptance is not provider success.
+        The current runtime has no confirmed credential or action adapter and returns 503 for those
+        external actions. SEND_MESSAGE is unavailable until current eligibility and supported message
+        context are confirmed. Browser input cannot select an asset/provider ID or tenant.
       security: *a10
       parameters: *a23
       requestBody:
@@ -2217,24 +2516,43 @@ paths:
               sanitized:
                 summary: Sanitized request example
                 value:
-                  action: REPLY
-                  replyText: Thanks, we will follow up shortly.
+                  action: MARK_READ
       responses:
+        "200":
+          description: Local READ/DISMISS state persisted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationActionResult"
+              examples:
+                read:
+                  summary: Local action result
+                  value:
+                    notificationId: 20000000-0000-4000-8000-000000000001
+                    action: MARK_READ
+                    status: READ
+                    requestId: req_example_39
         "202":
-          description: Sanitized success example
-          headers: *a24
+          description: Durable external action accepted for processing
+          headers:
+            Location:
+              description: Existing tenant-scoped job resource; operationId also identifies GET /api/v1/operations/{operationId}.
+              schema:
+                type: string
+                pattern: ^/api/v1/jobs/[A-Za-z0-9_-]+$
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/NotificationActionAccepted"
               examples:
                 sanitized:
-                  summary: Sanitized success example
+                  summary: Sanitized accepted operation
                   value:
-                    notificationId: notice_example_01
-                    jobId: job_example_07
+                    notificationId: 20000000-0000-4000-8000-000000000001
+                    jobId: 20000000-0000-4000-8000-000000000002
+                    operationId: 20000000-0000-4000-8000-000000000002
                     status: PENDING
-                    location: /api/v1/jobs/job_example_07
+                    location: /api/v1/jobs/20000000-0000-4000-8000-000000000002
                     requestId: req_example_39
         "400": *a11
         "401": *a12
@@ -2247,12 +2565,13 @@ paths:
         "429": *a19
         "503": *a20
         default: *a21
-      x-external-effect: REPLY may send an outbound message. MARK_READ and DISMISS only update local
-        notification state.
-      x-idempotency-scope: tenant + operation + Idempotency-Key plus payload hash.
-      x-retry-policy: For REPLY, at most one automatic attempt including the initial send. A proven
-        pre-effect failure may permit a new explicit user request; an ambiguous outcome is UNKNOWN until
-        reconciled. Do not automatically retry.
+      x-external-effect: SEND_TEMPLATE and REPLY_COMMENT may send an outbound message when an adapter
+        is enabled; the current runtime has none. SEND_MESSAGE remains unavailable. MARK_READ and
+        DISMISS only update local notification state.
+      x-idempotency-scope: tenant + notification action + Idempotency-Key and canonical request payload hash.
+      x-retry-policy: External actions use at most one automatic attempt, which is the initial dispatch,
+        with no automatic retry. A null/error/timeout or ambiguous result becomes UNKNOWN and is never
+        blindly retried. A failed action does not mark the notification read or dismissed.
   /internal/v1/assets/{assetId}/operations:
     parameters:
       - name: assetId
@@ -2271,25 +2590,12 @@ paths:
         - Internal Operations
       summary: Execute an allowlisted tenant-scoped asset operation
       description: Service-to-service only, with a dedicated short-lived internal service identity and
-        explicit tenant/asset/operation scopes. The signed workload token has audience `msg4-meta-internal`
-        and carries `service_id`, `tenant_ref`, `asset_ref`, and `operation` claims. Each claim is matched
-        against the server-resolved tenant, this path's `assetId`, and the request's `kind`; the server
-        rechecks the current tenant grant and exact operation allowlist on every call. Issuer and key
-        rotation are deployment-configured and remain Not confirmed. Server resolves the asset and credential; caller
+        explicit tenant/asset/operation scopes. Server resolves the asset and credential; caller
         cannot provide a Graph URL, token, credential, tenant override or raw SQL. `SEND_REPLY`,
         `MARK_READ` and `REFRESH_STATUS` are distinct typed operations. This endpoint never decrypts
         or returns a token.
       security:
         - internalServiceAuth: []
-      x-internal-authorization:
-        requiredClaims: [service_id, tenant_ref, asset_ref, operation]
-        audience: msg4-meta-internal
-        bindings:
-          tenant_ref: tenant owning the asset identified by path.assetId
-          asset_ref: path.assetId
-          operation: requestBody.kind
-        enforceCurrentTenantGrant: true
-        allowlist: [SEND_REPLY, MARK_READ, REFRESH_STATUS]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2349,6 +2655,132 @@ paths:
       x-idempotency-scope: tenant + operation + Idempotency-Key and canonical payload hash.
       x-retry-policy: Use the same UNKNOWN/reconciliation and bounded retry rules as the corresponding
         public operation.
+  /internal/v2/assets/{assetId}/operations:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        description: Opaque resource identifier; authorization is always checked against the server-derived
+          tenant.
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: runInternalAssetOperationV2
+      tags:
+        - Internal Operations
+      summary: Accept an allowlisted tenant-scoped asset operation
+      description: Service-to-service only. An opaque high-entropy bearer proof is mapped by protected
+        server configuration to exactly one service principal and tenant; the current active tenant grant
+        must include META_CONNECTION_EXECUTE and CREDENTIAL_USE. The caller supplies no tenant, app,
+        authorization, provider object ID, credential family, or Graph URL. The server loads one current
+        verified asset authorization, checks the server capability gate, and resolves a one-use M3.08
+        credential handle. Payloads are a closed operation-specific union. The idempotency ledger stores
+        hashes and metadata only. The production adapter is unavailable until the real Meta capability and
+        deployment gates pass; recipient/comment references also need a tenant/asset-bound server mapping.
+        No operation is reported as successful in their absence. Permanent Meta tokens are never returned
+        or sent to the caller.
+      security:
+        - internalServiceProofV2: []
+      x-internal-authorization:
+        requiredProof: "Authorization: Bearer <opaque service credential>"
+        serverMapping: API_INTERNAL_SERVICE_CREDENTIAL_HASHES_JSON -> one principalId + tenantId
+        bindings:
+          tenantId: server-mapped service credential and current service grant
+          assetId: path.assetId plus current verified tenant-owned asset authorization
+          operation: requestBody.operation
+        enforceCurrentTenantGrant: true
+        requiredServiceScopes: [META_CONNECTION_EXECUTE, CREDENTIAL_USE]
+        allowlist: [SEND_MESSAGE, MANAGE_TEMPLATES, MANAGE_COMMENTS, READ_STATUS, SUBSCRIBE_WEBHOOKS]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        description: Request uses a closed, size-bounded schema.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InternalAssetOperationV2Request"
+            examples:
+              sanitized_template_send:
+                summary: Typed template send; IDs are synthetic references, not provider IDs.
+                value:
+                  operation: SEND_MESSAGE
+                  recipientRef: "50000000-0000-4000-8000-000000000001"
+                  message:
+                    kind: TEMPLATE
+                    name: welcome_message
+                    language: pt_BR
+                    parameters: ["Example"]
+      responses:
+        "202":
+          description: Accepted or immediately resolved operation status. UNKNOWN remains ambiguous and is never a blind retry signal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalAssetOperationV2Result"
+              examples:
+                unknown:
+                  summary: Ambiguous external result requiring reconciliation by operationId.
+                  value:
+                    operationId: "50000000-0000-4000-8000-000000000002"
+                    status: UNKNOWN
+                    reasonCode: PROVIDER_RESULT_UNKNOWN
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+        default:
+          $ref: "#/components/responses/UnexpectedError"
+      x-external-effect: The trusted adapter may mutate the selected provider asset. The registered production
+        adapter is currently unavailable; this API therefore fails closed before claiming an operation.
+      x-idempotency-scope: Current tenant + service principal + asset + operation + Idempotency-Key and request payload hash.
+      x-retry-policy: A unique UNKNOWN ledger row is committed before adapter invocation. Same key and body returns
+        the stored status without another adapter call; same key with another body returns 409. Adapter timeout or
+        response loss remains UNKNOWN and is never retried blindly.
+  /internal/v2/operations/{operationId}:
+    get:
+      operationId: readInternalAssetOperationStatusV2
+      tags:
+        - Internal Operations
+      summary: Read a service operation outcome in its mapped tenant
+      description: Requires the same tenant-bound service proof and current META_CONNECTION_EXECUTE grant. The
+        operation ID is readable only by the same service principal that submitted it in that tenant. Returns
+        status and a fixed safe reason code only; no payload, provider ID, tenant ID, or credential is returned.
+      security:
+        - internalServiceProofV2: []
+      parameters:
+        - name: operationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tenant- and service-principal-scoped operation outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalAssetOperationV2Result"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+        default:
+          $ref: "#/components/responses/UnexpectedError"
   /api/v1/webhooks/meta/{appConfigRef}:
     parameters:
       - name: appConfigRef
@@ -2507,9 +2939,16 @@ components:
       type: http
       scheme: bearer
       bearerFormat: service token
-      description: Short-lived signed workload token for audience `msg4-meta-internal` with `service_id`,
-        `tenant_ref`, `asset_ref`, and `operation` claims. Issuer and key rotation are deployment-configured
-        and Not confirmed. Never a Meta token or user session.
+      description: Dedicated service identity with tenant/asset/operation scopes; never a Meta token or
+        user session.
+    internalServiceProofV2:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque high-entropy service proof
+      description: Proof is verified against SHA-256 hashes in protected server configuration and maps to
+        exactly one service principal and tenant. Current service and tenant grants are rechecked on every
+        operation/status request. Rotation and revocation require server configuration rollout plus grant
+        changes; issuer, client distribution, and production setup are Not confirmed. Never a Meta token or user session.
   parameters:
     Origin:
       name: Origin
@@ -2642,6 +3081,14 @@ components:
           - REAUTH_REQUIRED
           - UNKNOWN
           - DISCONNECTED
+          - STALE
+    ConnectionCatalogFlowVariant:
+      name: flowVariant
+      in: query
+      required: false
+      description: Exact configured Meta journey; combines with the product and status filters.
+      schema:
+        $ref: "#/components/schemas/FlowVariant"
     Limit:
       name: limit
       in: query
@@ -2708,6 +3155,7 @@ components:
             - OUTCOME_UNKNOWN
             - VERSION_CONFLICT
             - IDEMPOTENCY_KEY_REUSED
+            - COEXISTENCE_SESSION_ACTIVE
             - CONTEXT_CHANGED
             - ORIGIN_NOT_ALLOWED
             - HOST_NOT_ALLOWED
@@ -2743,6 +3191,9 @@ components:
         IDEMPOTENCY_KEY_REUSED:
           retryable: false
           action: USE_NEW_REQUEST_KEY
+        COEXISTENCE_SESSION_ACTIVE:
+          retryable: false
+          action: CHECK_STATUS
         HOST_NOT_ALLOWED:
           retryable: false
           action: CONTACT_ADMIN
@@ -2969,6 +3420,7 @@ components:
             - READ_STATUS
             - SUBSCRIBE_WEBHOOKS
             - SYNC_HISTORY
+            - PHONE_REGISTRATION_CONVENTIONAL
         enabled:
           type: boolean
         reasonCode:
@@ -3192,6 +3644,293 @@ components:
         result:
           type: string
           enum: [APPLIED, DUPLICATE, UNMAPPED]
+    OperationsReasonCode:
+      type: string
+      enum: [INCIDENT, CUSTOMER_REQUEST, SECURITY_REVIEW]
+    OperationsActionRequest:
+      oneOf:
+        - $ref: "#/components/schemas/OperationsRevalidateRequest"
+        - $ref: "#/components/schemas/OperationsResumeStageRequest"
+        - $ref: "#/components/schemas/OperationsReconcileSubscriptionRequest"
+        - $ref: "#/components/schemas/OperationsRequestReauthRequest"
+        - $ref: "#/components/schemas/OperationsReplayJobRequest"
+    OperationsRevalidateRequest:
+      type: object
+      additionalProperties: false
+      required: [action, resourceRef, reasonCode]
+      properties:
+        action:
+          type: string
+          const: REVALIDATE
+        resourceRef:
+          type: string
+          format: uuid
+        reasonCode:
+          $ref: "#/components/schemas/OperationsReasonCode"
+    OperationsResumeStageRequest:
+      type: object
+      additionalProperties: false
+      required: [action, resourceRef, stage, reasonCode]
+      properties:
+        action:
+          type: string
+          const: RESUME_STAGE
+        resourceRef:
+          type: string
+          format: uuid
+        stage:
+          type: string
+          enum: [authorization, asset-verification, subscription, projection]
+        reasonCode:
+          $ref: "#/components/schemas/OperationsReasonCode"
+    OperationsReconcileSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      required: [action, resourceRef, reasonCode]
+      properties:
+        action:
+          type: string
+          const: RECONCILE_SUBSCRIPTION
+        resourceRef:
+          type: string
+          format: uuid
+        reasonCode:
+          $ref: "#/components/schemas/OperationsReasonCode"
+    OperationsRequestReauthRequest:
+      type: object
+      additionalProperties: false
+      required: [action, resourceRef, reasonCode]
+      properties:
+        action:
+          type: string
+          const: REQUEST_REAUTH
+        resourceRef:
+          type: string
+          format: uuid
+        reasonCode:
+          $ref: "#/components/schemas/OperationsReasonCode"
+    OperationsReplayJobRequest:
+      type: object
+      additionalProperties: false
+      required: [action, resourceRef, reasonCode]
+      properties:
+        action:
+          type: string
+          const: REPLAY_JOB
+        resourceRef:
+          type: string
+          format: uuid
+        reasonCode:
+          $ref: "#/components/schemas/OperationsReasonCode"
+    OperationsActionResult:
+      type: object
+      additionalProperties: false
+      required: [action, outcome, reasonCode, requestId, operationRef]
+      properties:
+        action:
+          type: string
+          enum: [REVALIDATE, RESUME_STAGE, RECONCILE_SUBSCRIPTION, REQUEST_REAUTH, REPLAY_JOB]
+        outcome:
+          type: string
+          enum: [ACCEPTED, DUPLICATE, UNAVAILABLE, REJECTED]
+        reasonCode:
+          type: string
+          enum:
+            - AUDIT_UNAVAILABLE
+            - REFRESH_QUEUED
+            - REFRESH_ADAPTER_UNAVAILABLE
+            - TENANT_IDENTITY_NOT_CONFIRMED
+            - STAGE_RESUME_QUEUED
+            - ONBOARDING_ADAPTER_UNAVAILABLE
+            - REAUTHORIZATION_REQUESTED
+            - REAUTHORIZATION_NOT_CONFIGURED
+            - SUPPORT_ROLE_NOT_CONFIRMED
+            - SUBSCRIPTION_ADAPTER_NOT_CONFIRMED
+            - DEAD_LETTER_NOT_FOUND
+            - AUTHORIZATION_DENIED
+            - AUTHORIZATION_UNAVAILABLE
+            - AUTHORIZATION_EXPIRED
+            - GRANT_INVALID
+            - SCOPE_MISMATCH
+            - AMBIGUOUS_EFFECT_NOT_REPLAYABLE
+            - REPLAY_ENQUEUED
+            - REPLAY_DUPLICATE
+            - DRY_RUN_AUTHORIZED
+        requestId:
+          type: string
+          format: uuid
+        operationRef:
+          type:
+            - string
+            - "null"
+          maxLength: 128
+    OperationsDiagnosticSection:
+      type: object
+      additionalProperties: false
+      required: [state, reasonCode, observedAt]
+      properties:
+        state:
+          type: string
+          enum: [HEALTHY, ACTION_REQUIRED, PENDING, FAILED, UNKNOWN]
+        reasonCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: ^[A-Z0-9_]+$
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+    OperationsOnboardingSection:
+      type: object
+      additionalProperties: false
+      required: [state, reasonCode, observedAt, nextAction]
+      properties:
+        state:
+          type: string
+          enum: [HEALTHY, ACTION_REQUIRED, PENDING, FAILED, UNKNOWN]
+        reasonCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: ^[A-Z0-9_]+$
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        nextAction:
+          type:
+            - string
+            - "null"
+          maxLength: 32
+    OperationsGrantsSection:
+      type: object
+      additionalProperties: false
+      required: [state, reasonCode, observedAt, grantedCount, revokedCount]
+      properties:
+        state:
+          type: string
+          enum: [HEALTHY, ACTION_REQUIRED, PENDING, FAILED, UNKNOWN]
+        reasonCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: ^[A-Z0-9_]+$
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        grantedCount:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        revokedCount:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+    OperationsJobsSection:
+      type: object
+      additionalProperties: false
+      required: [state, reasonCode, observedAt, counts]
+      properties:
+        state:
+          type: string
+          enum: [HEALTHY, ACTION_REQUIRED, PENDING, FAILED, UNKNOWN]
+        reasonCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: ^[A-Z0-9_]+$
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        counts:
+          type: object
+          maxProperties: 16
+          additionalProperties:
+            type: integer
+            minimum: 0
+    OperationsProjectionSection:
+      type: object
+      additionalProperties: false
+      required: [state, reasonCode, observedAt, pendingCount, failedCount, lagSeconds]
+      properties:
+        state:
+          type: string
+          enum: [HEALTHY, ACTION_REQUIRED, PENDING, FAILED, UNKNOWN]
+        reasonCode:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          pattern: ^[A-Z0-9_]+$
+        observedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        pendingCount:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        failedCount:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        lagSeconds:
+          type: "null"
+    OperationsDiagnostics:
+      type: object
+      additionalProperties: false
+      required: [requestId, generatedAt, versions, onboarding, credentialHealth, grants, subscription, webhook, jobs, projection, nextAction]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        generatedAt:
+          type: string
+          format: date-time
+        versions:
+          type: object
+          additionalProperties: false
+          required: [contract, readModel]
+          properties:
+            contract:
+              type: string
+              const: 1.0.0-proposed
+            readModel:
+              type: integer
+              const: 1
+        onboarding:
+          $ref: "#/components/schemas/OperationsOnboardingSection"
+        credentialHealth:
+          $ref: "#/components/schemas/OperationsDiagnosticSection"
+        grants:
+          $ref: "#/components/schemas/OperationsGrantsSection"
+        subscription:
+          $ref: "#/components/schemas/OperationsDiagnosticSection"
+        webhook:
+          $ref: "#/components/schemas/OperationsDiagnosticSection"
+        jobs:
+          $ref: "#/components/schemas/OperationsJobsSection"
+        projection:
+          $ref: "#/components/schemas/OperationsProjectionSection"
+        nextAction:
+          type: string
+          enum: [REQUEST_REAUTHORIZATION, WAIT_FOR_PROCESSING, CONTACT_SUPPORT, REVIEW_SYNC, CHECK_CONNECTION, NO_ACTION, UNKNOWN]
     JobAccepted:
       type: object
       additionalProperties: false
@@ -3444,6 +4183,12 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        displayLabel:
+          type:
+            - string
+            - "null"
+          maxLength: 128
+          description: Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback.
         kind:
           type: string
           enum:
@@ -3585,6 +4330,12 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        displayLabel:
+          type:
+            - string
+            - "null"
+          maxLength: 128
+          description: Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback.
         kind:
           type: string
           enum:
@@ -3645,6 +4396,12 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        displayLabel:
+          type:
+            - string
+            - "null"
+          maxLength: 128
+          description: Sanitized server-owned display label. WhatsApp phone-like text is masked; provider identifiers are never used as a fallback.
         kind:
           type: string
           enum:
@@ -3854,6 +4611,8 @@ components:
           type: boolean
         canDisconnect:
           type: boolean
+        canRefresh:
+          type: boolean
     AssetListPage:
       type: object
       additionalProperties: false
@@ -3956,6 +4715,78 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+    AutomationChannelConfig:
+      type: object
+      additionalProperties: false
+      required:
+        - assetId
+        - assetKind
+        - inheritanceMode
+        - supportedFields
+        - privateWelcomeMessage
+        - commentPublicReply
+        - commentPrivateReply
+        - capabilities
+        - version
+        - updatedAt
+        - projectionState
+        - requestId
+      properties:
+        assetId:
+          type: string
+          format: uuid
+        assetKind:
+          $ref: "#/components/schemas/AutomationConfigAssetKind"
+        inheritanceMode:
+          type: string
+          const: ASSET_ONLY
+          description: Each resource owns independent values. No account-level default is applied.
+        supportedFields:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AutomationConfigField"
+        privateWelcomeMessage:
+          type: [string, "null"]
+          maxLength: 4096
+        commentPublicReply:
+          type: [string, "null"]
+          maxLength: 4096
+        commentPrivateReply:
+          type: [string, "null"]
+          maxLength: 4096
+        capabilities:
+          type: object
+          additionalProperties: false
+          required: [canEdit, executable]
+          properties:
+            canEdit:
+              type: boolean
+            executable:
+              type: boolean
+              const: false
+              description: The API stores settings only; message execution is a separate fail-closed capability.
+        version:
+          type: integer
+          minimum: 0
+        updatedAt:
+          type: [string, "null"]
+          format: date-time
+        projectionState:
+          $ref: "#/components/schemas/AutomationConfigProjectionState"
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+    AutomationConfigAssetKind:
+      type: string
+      enum: [WHATSAPP_PHONE_NUMBER, FACEBOOK_PAGE, INSTAGRAM_BUSINESS_ACCOUNT, INSTAGRAM_CREATOR_ACCOUNT]
+    AutomationConfigField:
+      type: string
+      enum: [privateWelcomeMessage, commentPublicReply, commentPrivateReply]
+    AutomationConfigProjectionState:
+      type: string
+      enum: [UNKNOWN, PENDING, SYNCED, STALE, FAILED]
     AutomationConfigUpdate:
       type: object
       additionalProperties: false
@@ -3968,6 +4799,30 @@ components:
         replyText:
           type: string
           maxLength: 4096
+    AutomationChannelConfigUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 2
+      required: [version]
+      properties:
+        version:
+          type: integer
+          minimum: 0
+        privateWelcomeMessage:
+          type: string
+          maxLength: 4096
+          description: Empty text clears the local value for this asset.
+          pattern: "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$"
+        commentPublicReply:
+          type: string
+          maxLength: 4096
+          description: Empty text clears the local value for this asset.
+          pattern: "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$"
+        commentPrivateReply:
+          type: string
+          maxLength: 4096
+          description: Empty text clears the local value for this asset.
+          pattern: "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$"
     ReplyRequest:
       type: object
       additionalProperties: false
@@ -4110,6 +4965,7 @@ components:
             - REJECTED
             - PAUSED
             - UNKNOWN
+          description: Normalized status using the existing v1 enum; UNKNOWN covers other provider labels. This value does not establish approval.
         category:
           type: string
           enum:
@@ -4117,6 +4973,23 @@ components:
             - MARKETING
             - UTILITY
             - UNKNOWN
+          description: Normalized category using the existing v1 enum; UNKNOWN covers other provider labels.
+        providerStatusLabel:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Bounded, sanitized provider-reported status label, preserved for display without assigning approval semantics.
+        providerCategoryLabel:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Bounded, sanitized provider-reported category label, preserved without assigning local category semantics.
+        bodyText:
+          type:
+            - string
+            - "null"
+          maxLength: 1024
+          description: Sanitized BODY text, including any literal placeholders. Provider examples and other components are omitted; null means no safe BODY text was available.
         updatedAt:
           type: string
           format: date-time
@@ -4145,6 +5018,10 @@ components:
     TemplateCreateRequest:
       type: object
       additionalProperties: false
+      description: Local BODY-only request shape. Name/language/body limits and the local create-category
+        allowlist are compatibility constraints of this API and are not asserted as current Meta rules. `exampleValues` has one entry
+        per distinct BODY placeholder in first-occurrence order; repeated placeholders reuse that entry.
+        This correspondence is a local contract rule, not a claim about Meta's current examples validation.
       required:
         - name
         - language
@@ -4160,6 +5037,7 @@ components:
           type: string
           minLength: 2
           maxLength: 16
+          pattern: '^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8}){0,2}$'
         category:
           type: string
           enum:
@@ -4170,6 +5048,17 @@ components:
           type: string
           minLength: 1
           maxLength: 1024
+          description: BODY text. Matched placeholders use {{1}} through {{N}} with first occurrence in
+            ascending order; repeats are allowed by this local request contract.
+        exampleValues:
+          type: array
+          maxItems: 100
+          description: Local BODY example values, one non-empty string for each distinct placeholder index.
+            Omit or pass an empty array when the body has no placeholders.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 1024
     Notification:
       type: object
       additionalProperties: false
@@ -4191,6 +5080,7 @@ components:
           type: string
           enum:
             - MESSAGE_RECEIVED
+            - COMMENT_RECEIVED
             - ASSET_STATUS_CHANGED
             - ACTION_REQUIRED
         assetRef:
@@ -4225,6 +5115,9 @@ components:
               - DISMISS
               - REPLY
               - REFRESH
+              - SEND_TEMPLATE
+              - REPLY_COMMENT
+              - SEND_MESSAGE
     NotificationListPage:
       type: object
       additionalProperties: false
@@ -4273,6 +5166,88 @@ components:
               minLength: 1
               maxLength: 4096
               writeOnly: true
+        - type: object
+          additionalProperties: false
+          required:
+            - action
+            - templateName
+            - language
+            - parameters
+          properties:
+            action:
+              type: string
+              const: SEND_TEMPLATE
+            templateName:
+              type: string
+              minLength: 1
+              maxLength: 128
+            language:
+              type: string
+              minLength: 2
+              maxLength: 16
+            parameters:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+                minLength: 1
+                maxLength: 1024
+                writeOnly: true
+        - type: object
+          additionalProperties: false
+          required:
+            - action
+            - replyText
+          properties:
+            action:
+              type: string
+              const: REPLY_COMMENT
+            replyText:
+              type: string
+              minLength: 1
+              maxLength: 4096
+              writeOnly: true
+        - type: object
+          additionalProperties: false
+          required:
+            - action
+            - messageText
+          properties:
+            action:
+              type: string
+              const: SEND_MESSAGE
+            messageText:
+              type: string
+              minLength: 1
+              maxLength: 4096
+              writeOnly: true
+    NotificationActionResult:
+      type: object
+      additionalProperties: false
+      required:
+        - notificationId
+        - action
+        - status
+        - requestId
+      properties:
+        notificationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        action:
+          type: string
+          enum:
+            - MARK_READ
+            - DISMISS
+        status:
+          type: string
+          enum:
+            - READ
+            - DISMISSED
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
     NotificationActionAccepted:
       type: object
       additionalProperties: false
@@ -4301,6 +5276,11 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        operationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Same identifier as jobId; use GET /api/v1/operations/{operationId} for action status.
     InternalAssetOperationRequest:
       oneOf:
         - type: object
@@ -4332,6 +5312,94 @@ components:
               enum:
                 - MARK_READ
                 - REFRESH_STATUS
+    InternalAssetOperationV2Request:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [operation, recipientRef, message]
+          properties:
+            operation: { type: string, const: SEND_MESSAGE }
+            recipientRef:
+              type: string
+              format: uuid
+              description: Internal recipient reference resolved inside the current tenant and asset; never a provider ID.
+            message:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [kind, text]
+                  properties:
+                    kind: { type: string, const: TEXT }
+                    text: { type: string, minLength: 1, maxLength: 4096, writeOnly: true }
+                - type: object
+                  additionalProperties: false
+                  required: [kind, name, language, parameters]
+                  properties:
+                    kind: { type: string, const: TEMPLATE }
+                    name: { type: string, minLength: 1, maxLength: 128, pattern: '^[a-z0-9_]+$' }
+                    language: { type: string, minLength: 2, maxLength: 16, pattern: '^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})?$' }
+                    parameters:
+                      type: array
+                      maxItems: 20
+                      items: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+        - type: object
+          additionalProperties: false
+          required: [operation, action]
+          properties:
+            operation: { type: string, const: MANAGE_TEMPLATES }
+            action: { type: string, const: LIST }
+        - type: object
+          additionalProperties: false
+          required: [operation, action, name, language, category, bodyText]
+          properties:
+            operation: { type: string, const: MANAGE_TEMPLATES }
+            action: { type: string, const: CREATE }
+            name: { type: string, minLength: 1, maxLength: 128, pattern: '^[a-z0-9_]+$' }
+            language: { type: string, minLength: 2, maxLength: 16, pattern: '^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})?$' }
+            category: { type: string, enum: [AUTHENTICATION, MARKETING, UTILITY] }
+            bodyText: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+            exampleValues:
+              type: array
+              maxItems: 20
+              items: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+        - type: object
+          additionalProperties: false
+          required: [operation, action]
+          properties:
+            operation: { type: string, const: MANAGE_COMMENTS }
+            action: { type: string, const: LIST }
+        - type: object
+          additionalProperties: false
+          required: [operation, action, commentRef, text]
+          properties:
+            operation: { type: string, const: MANAGE_COMMENTS }
+            action: { type: string, const: REPLY }
+            commentRef:
+              type: string
+              format: uuid
+              description: Internal comment reference resolved inside the current tenant and asset; never a provider ID.
+            text: { type: string, minLength: 1, maxLength: 4096, writeOnly: true }
+        - type: object
+          additionalProperties: false
+          required: [operation]
+          properties:
+            operation: { type: string, const: READ_STATUS }
+        - type: object
+          additionalProperties: false
+          required: [operation, action]
+          properties:
+            operation: { type: string, const: SUBSCRIBE_WEBHOOKS }
+            action: { type: string, enum: [READ, RECONCILE] }
+    InternalAssetOperationV2Result:
+      type: object
+      additionalProperties: false
+      required: [operationId, status]
+      properties:
+        operationId: { type: string, format: uuid }
+        status: { type: string, enum: [UNKNOWN, SUCCEEDED, FAILED] }
+        reasonCode:
+          type: string
+          enum: [OPERATION_ACCEPTED, PROVIDER_REJECTED, PROVIDER_RESULT_UNKNOWN, OPERATION_FAILED, OPERATION_UNSUPPORTED, CREDENTIAL_UNAVAILABLE]
     WebhookChallengeResponse:
       type: object
       additionalProperties: false
@@ -4446,6 +5514,14 @@ components:
                 requestId: req_example_05
                 retryable: false
                 action: USE_NEW_REQUEST_KEY
+            coexistenceSessionActive:
+              summary: A WhatsApp Coexistence onboarding session is already active
+              value:
+                code: COEXISTENCE_SESSION_ACTIVE
+                safeMessage: A WhatsApp Coexistence onboarding session is already active for this company.
+                requestId: req_example_45
+                retryable: false
+                action: CHECK_STATUS
     PreconditionFailed:
       description: The supplied ETag is missing or stale.
       content:

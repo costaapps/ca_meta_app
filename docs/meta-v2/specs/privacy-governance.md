@@ -9,7 +9,7 @@ Issue: [#35 — M3.10](https://github.com/costaapps/ca_meta_app/issues/35). This
 - Keep retention policies scoped by tenant, runtime environment, category and version. No policy or duration is seeded by migration. Activation needs an approval reference and server authorization; the shipped authorization port denies by default.
 - Persist purge progress in a tenant/category/environment scoped run. A run has a fixed cutoff and phase cursor, deletes bounded batches, writes its audit event in the same transaction, pauses when a mail delivery is still processing and resumes after the work becomes terminal.
 - Keep deletion requests and tombstones metadata-only. Hash the requester and target references, return status plus evidence reference, and record each status transition with a fixed reason enum. This service does not invoke Meta or delete provider assets.
-- Require a short-lived authorization grant and a fixed reason code before support diagnostics are read. Sanitize returned diagnostics. No support controller, screen or export exists in this API package yet.
+- Require a trusted `SUPPORT` role grant bound to tenant, actor, target and one fixed reason code before diagnostics are read. Grant lifetime is capped at 15 minutes; audit the reason before reading and sanitize the returned object.
 
 ## Implemented local category
 
@@ -22,8 +22,8 @@ The category registry is intentionally closed. Inbox envelopes, durable jobs, me
 - M3.06 authorization snapshots write `AUTHORIZATION_CONNECTED`, `AUTHORIZATION_REAUTHORIZED`, `AUTHORIZATION_OBSERVED` or `AUTHORIZATION_DISCONNECTED` in the same transaction as the state/outbox update. Browser claims without verified provider evidence are recorded as observations. The source platform's exact meaning of a renewed authorization remains **Not confirmed**.
 - M3.07 credential store, use and rotation append metadata-only `ASSET_OPERATION` events alongside the existing credential access audit. Event fields contain operation reason and key version only.
 - Identity administration denials within a verified tenant write `AUTHORIZATION_DENIED` with a fixed reason code and a constant target. Unverified callers do not get a tenant-scoped event.
-- M2 durable replay already records operator reference, authorization reference, scope, action and safe reason code in `ca_meta_replay_audit`. Its authorization adapter remains fail-closed until a trusted operator-role adapter is supplied.
-- Support diagnostics, retention runs and deletion status transitions are written to `ca_meta_audit_events`. Audit and tombstone rows are append-only.
+- M2 durable replay records operator reference, authorization reference, scope, action and safe reason code in `ca_meta_replay_audit`. M5.10 may call its bounded requeue path only after a current tenant check and short-lived support grant; the installed support authority still denies by default.
+- Support diagnostics, retention runs and deletion status transitions are written to `ca_meta_audit_events`. Audit and tombstone rows are append-only. M5.10 adds a tenant-scoped support export, with its runtime grant adapter and Suite4 support role **Not confirmed**.
 
 ## Decisions still required before production
 

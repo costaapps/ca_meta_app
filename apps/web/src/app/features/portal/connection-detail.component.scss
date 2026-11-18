@@ -1,0 +1,19 @@
+:host { display: block; }
+.detail-page { max-width: 760px; }
+.back-link { display: inline-block; margin-bottom: 1.4rem; color: #0067d8; text-decoration: none; }
+.back-link:hover { text-decoration: underline; }
+.eyebrow { color: #0070f2; font-size: .76rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+h1 { margin: .35rem 0; font-size: clamp(1.6rem, 4vw, 2rem); }
+.intro { margin-bottom: 1.2rem; color: #63717c; line-height: 1.55; }
+.availability-card, .variant-picker { margin-top: 1rem; padding: 1.2rem; border: 1px solid #e1e6ea; border-radius: 8px; background: #fff; }
+.state-label { display: inline-flex; border-radius: 99px; padding: .28rem .6rem; color: #66737e; background: #f0f2f4; font-size: .75rem; font-weight: 700; }
+.state-label.available { color: #237443; background: #edf8f0; }
+.availability-card p { margin-top: .7rem; color: #53616c; line-height: 1.5; }
+.verification-note, .pending-note { font-size: .86rem; }
+button { min-height: 42px; margin-top: 1rem; border: 1px solid #0070f2; border-radius: 6px; padding: .55rem .85rem; color: #fff; background: #0070f2; font: inherit; font-weight: 600; }
+button:disabled { border-color: #aeb8c0; color: #57636c; background: #e5e9ec; }
+.variant-picker { display: grid; gap: .5rem; }
+.variant-picker label { font-weight: 600; }
+select { max-width: 100%; min-height: 42px; border: 1px solid #cbd4db; border-radius: 6px; padding: .55rem; background: #fff; font: inherit; }
+.state { color: #53616c; }
+.error { padding: .8rem 1rem; border: 1px solid #f0c7c7; border-radius: 6px; color: #8f2525; background: #fff3f3; }

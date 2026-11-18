@@ -5,6 +5,7 @@ import { DurableWorkDatabase } from '../jobs/durable-work-database.js';
 import { DurableJobStore } from '../jobs/job-store.js';
 import { OutboxService } from '../outbox/outbox-service.js';
 import { META_ASSETS_REPOSITORY, MysqlMetaAssetsRepository } from './mysql-meta-assets.repository.js';
+import type { MetaAssetsRepository } from './mysql-meta-assets.repository.js';
 import { ConfiguredCredentialKeyProvider } from '../credentials/credential-key-provider.js';
 import { CREDENTIAL_KEY_PROVIDER, CREDENTIAL_VAULT_AUTHORIZATION, CREDENTIAL_VAULT_REPOSITORY } from '../credentials/credential-vault.types.js';
 import { CredentialVaultService, FailClosedCredentialVaultAuthorization } from '../credentials/credential-vault.service.js';
@@ -31,8 +32,21 @@ import { TenantAuthorizationService, TenantContextService } from '../identity/id
 import { PortalSessionGuard } from '../identity/portal-session.guard.js';
 import { AssetCatalogController } from './asset-catalog.controller.js';
 import { AssetCatalogService, META_FLOW_ADAPTER_VARIANTS } from './asset-catalog.service.js';
+import { AutomationConfigController } from '../automation-config/automation-config.controller.js';
+import { AutomationConfigService } from '../automation-config/automation-config.service.js';
+import { MysqlAutomationConfigRepository } from '../automation-config/mysql-automation-config.repository.js';
+import { AUTOMATION_CONFIG_REPOSITORY } from '../automation-config/automation-config.tokens.js';
+import type { AutomationConfigRepository } from '../automation-config/automation-config.types.js';
 import { AssetRefreshCoordinator, META_ASSET_REFRESH_ADAPTER, type MetaAssetRefreshAdapter } from './asset-refresh.service.js';
 import type { FlowCatalogVariant } from './meta-assets.types.js';
+import { WhatsAppTemplatesController } from '../whatsapp-templates/whatsapp-templates.controller.js';
+import {
+  META_WHATSAPP_TEMPLATES_ACCOUNT_DIRECTORY, META_WHATSAPP_TEMPLATES_CREATE_ENABLED, META_WHATSAPP_TEMPLATES_PROVIDER,
+  MysqlWhatsAppTemplatesAccountDirectory, WhatsAppTemplatesService,
+} from '../whatsapp-templates/whatsapp-templates.service.js';
+import type { WhatsAppTemplatesProvider } from '../whatsapp-templates/whatsapp-templates.service.js';
+import { NotificationsController } from '../notifications/notifications.controller.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 
 @Module({})
 export class MetaAssetsModule {
@@ -40,7 +54,7 @@ export class MetaAssetsModule {
     return {
       module: MetaAssetsModule,
       imports: [identityModule, JobsModule.register(environment), PrivacyModule.register(environment)],
-      controllers: [AssetCatalogController],
+      controllers: [AssetCatalogController, WhatsAppTemplatesController, AutomationConfigController, NotificationsController],
       providers: [
         {
           provide: PortalSessionGuard,
@@ -55,6 +69,23 @@ export class MetaAssetsModule {
             new AssetCatalogService(repository, contexts, authorization, environment.nodeEnv, refresh, flowVariants),
           inject: [META_ASSETS_REPOSITORY, TenantContextService, TenantAuthorizationService,
             AssetRefreshCoordinator, META_FLOW_ADAPTER_VARIANTS],
+        },
+        {
+          provide: META_WHATSAPP_TEMPLATES_ACCOUNT_DIRECTORY,
+          useFactory: (database: DurableWorkDatabase) => new MysqlWhatsAppTemplatesAccountDirectory(database, environment.nodeEnv),
+          inject: [DURABLE_WORK_DATABASE],
+        },
+        // The provider list adapter and create worker are absent until current grant/capability eligibility is confirmed.
+        { provide: META_WHATSAPP_TEMPLATES_PROVIDER, useValue: null },
+        { provide: META_WHATSAPP_TEMPLATES_CREATE_ENABLED, useValue: false },
+        {
+          provide: WhatsAppTemplatesService,
+          useFactory: (contexts: TenantContextService, authorization: TenantAuthorizationService,
+            accounts: MysqlWhatsAppTemplatesAccountDirectory, provider: WhatsAppTemplatesProvider | null,
+            createEnabled: boolean, database: DurableWorkDatabase, jobs: DurableJobStore) =>
+            new WhatsAppTemplatesService(contexts, authorization, accounts, provider, createEnabled, database, jobs),
+          inject: [TenantContextService, TenantAuthorizationService, META_WHATSAPP_TEMPLATES_ACCOUNT_DIRECTORY,
+            META_WHATSAPP_TEMPLATES_PROVIDER, META_WHATSAPP_TEMPLATES_CREATE_ENABLED, DURABLE_WORK_DATABASE, DURABLE_JOB_STORE],
         },
         // No real flow adapter is installed in this runtime.
         { provide: META_FLOW_ADAPTER_VARIANTS, useFactory: (): ReadonlySet<FlowCatalogVariant> => new Set() },
@@ -71,6 +102,25 @@ export class MetaAssetsModule {
           useFactory: (database: DurableWorkDatabase, outbox: OutboxService, audit: AuditEventWriter) =>
             new MysqlMetaAssetsRepository(database, outbox, audit),
           inject: [DURABLE_WORK_DATABASE, OutboxService, PRIVACY_AUDIT_WRITER],
+        },
+        {
+          provide: AUTOMATION_CONFIG_REPOSITORY,
+          useFactory: (database: DurableWorkDatabase, outbox: OutboxService) => new MysqlAutomationConfigRepository(database, outbox),
+          inject: [DURABLE_WORK_DATABASE, OutboxService],
+        },
+        {
+          provide: AutomationConfigService,
+          useFactory: (repository: AutomationConfigRepository, assets: MetaAssetsRepository,
+            contexts: TenantContextService, authorization: TenantAuthorizationService) =>
+            new AutomationConfigService(repository, assets, contexts, authorization, environment.nodeEnv),
+          inject: [AUTOMATION_CONFIG_REPOSITORY, META_ASSETS_REPOSITORY, TenantContextService, TenantAuthorizationService],
+        },
+        {
+          provide: NotificationsService,
+          useFactory: (database: DurableWorkDatabase, contexts: TenantContextService,
+            authorization: TenantAuthorizationService, serviceAuthorization: ServiceTenantAuthorizationService, jobs: DurableJobStore) =>
+            new NotificationsService(database, contexts, authorization, serviceAuthorization, jobs, false),
+          inject: [DURABLE_WORK_DATABASE, TenantContextService, TenantAuthorizationService, ServiceTenantAuthorizationService, DURABLE_JOB_STORE],
         },
         { provide: CREDENTIAL_KEY_PROVIDER, useFactory: () => new ConfiguredCredentialKeyProvider(environment.credentialKeyRing) },
         { provide: CREDENTIAL_VAULT_AUTHORIZATION, useClass: FailClosedCredentialVaultAuthorization },
@@ -117,7 +167,7 @@ export class MetaAssetsModule {
             CREDENTIAL_RESOLUTION_AUDIT, CredentialVaultService],
         },
       ],
-      exports: [META_ASSETS_REPOSITORY, CredentialVaultService, CredentialResolverService, JobsModule],
+      exports: [META_ASSETS_REPOSITORY, AssetCatalogService, CredentialVaultService, CredentialResolverService, JobsModule],
     };
   }
 }

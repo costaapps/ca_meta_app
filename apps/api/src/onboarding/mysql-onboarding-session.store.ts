@@ -1,6 +1,7 @@
 import { Injectable, type OnApplicationShutdown } from '@nestjs/common';
 import { createPool, type Pool, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import type { ApiEnvironment } from '../config/environment.js';
+import { OnboardingCoexistenceActiveSessionConflictError } from './onboarding-session.types.js';
 import type {
   OnboardingCreateCommand,
   OnboardingFlowVariant,
@@ -188,10 +189,65 @@ export class MysqlOnboardingSessionStore implements OnboardingSessionStore, OnAp
   }
 
   async createOrReplay(command: OnboardingCreateCommand): Promise<OnboardingStoredRecord> {
-    const existing = await this.findByIdempotency(command.tenantId, command.idempotencyHash);
-    if (existing) return existing;
+    const connection = await this.pool.getConnection();
+    let committed = false;
     try {
-      await this.pool.execute<ResultSetHeader>(
+      await connection.beginTransaction();
+      const [tenantRows] = await connection.execute<Array<{ id: string } & RowDataPacket>>(
+        'SELECT id FROM ca_meta_tenants WHERE id = ? FOR UPDATE', [command.tenantId],
+      );
+      if (!tenantRows[0]) throw new Error('Onboarding tenant disappeared before session creation.');
+
+      const [existingRows] = await connection.execute<OnboardingRow[]>(
+        `SELECT id, tenant_id, principal_id, portal_session_id, tenant_context_hash, flow_variant,
+                configuration_ref, provider_app_id, provider_environment, auth_variant,
+                capability_manifest_version, graph_api_version, requested_capabilities, return_route,
+                idempotency_key_hash, request_hash, provider_state_hash, expires_at, status, readiness,
+                steps_json, saga_checkpoint_json, next_action, last_updated_at, provider_state_consumed_at
+         FROM ca_meta_onboarding_sessions WHERE tenant_id = ? AND idempotency_key_hash = ? LIMIT 1`,
+        [command.tenantId, command.idempotencyHash],
+      );
+      if (existingRows[0]) {
+        await connection.commit();
+        committed = true;
+        return mapRecord(existingRows[0]);
+      }
+
+      if (command.flowVariant === 'WHATSAPP_COEXISTENCE') {
+        await connection.execute<ResultSetHeader>(
+          `UPDATE ca_meta_onboarding_sessions
+           SET status = 'EXPIRED', readiness = 'UNKNOWN', next_action = 'NONE',
+               provider_state_consumed_at = COALESCE(provider_state_consumed_at, UTC_TIMESTAMP(6)),
+               last_updated_at = UTC_TIMESTAMP(6), version = version + 1
+           WHERE tenant_id = ? AND flow_variant = 'WHATSAPP_COEXISTENCE' AND expires_at <= UTC_TIMESTAMP(6)
+             AND status IN ('CREATED','AWAITING_PROVIDER','CODE_RECEIVED','EXCHANGING','ASSETS_VERIFIED','PROVISIONING','PARTIAL')`,
+          [command.tenantId],
+        );
+        const [activeRows] = await connection.execute<Array<{ id: string; expires_at: string | Date } & RowDataPacket>>(
+          `SELECT id, expires_at FROM ca_meta_onboarding_sessions
+           WHERE tenant_id = ? AND flow_variant = 'WHATSAPP_COEXISTENCE'
+             AND status IN ('CREATED','AWAITING_PROVIDER','CODE_RECEIVED','EXCHANGING','ASSETS_VERIFIED','PROVISIONING','PARTIAL')
+             AND expires_at > UTC_TIMESTAMP(6)
+           ORDER BY created_at, id LIMIT 1 FOR UPDATE`,
+          [command.tenantId],
+        );
+        if (activeRows[0]) {
+          await connection.execute<ResultSetHeader>(
+            `INSERT IGNORE INTO ca_meta_onboarding_coexistence_locks
+              (tenant_id, onboarding_session_id, expires_at, created_at)
+             VALUES (?, ?, ?, UTC_TIMESTAMP(6))`,
+            [command.tenantId, activeRows[0].id, activeRows[0].expires_at],
+          );
+          await connection.commit();
+          committed = true;
+          throw new OnboardingCoexistenceActiveSessionConflictError();
+        }
+        await connection.execute<ResultSetHeader>(
+          'DELETE FROM ca_meta_onboarding_coexistence_locks WHERE tenant_id = ?', [command.tenantId],
+        );
+      }
+
+      await connection.execute<ResultSetHeader>(
         `INSERT INTO ca_meta_onboarding_sessions
           (id, tenant_id, principal_id, portal_session_id, tenant_context_hash, flow_variant,
            configuration_ref, provider_app_id, provider_environment, auth_variant, capability_manifest_version, graph_api_version,
@@ -209,12 +265,35 @@ export class MysqlOnboardingSessionStore implements OnboardingSessionStore, OnAp
           ]),
           command.createdAt, command.createdAt],
       );
+      if (command.flowVariant === 'WHATSAPP_COEXISTENCE') {
+        await connection.execute<ResultSetHeader>(
+          `INSERT INTO ca_meta_onboarding_coexistence_locks
+            (tenant_id, onboarding_session_id, expires_at, created_at)
+           VALUES (?, ?, ?, UTC_TIMESTAMP(6))`,
+          [command.tenantId, command.id, command.expiresAt],
+        );
+      }
+      const [createdRows] = await connection.execute<OnboardingRow[]>(
+        `SELECT id, tenant_id, principal_id, portal_session_id, tenant_context_hash, flow_variant,
+                configuration_ref, provider_app_id, provider_environment, auth_variant,
+                capability_manifest_version, graph_api_version, requested_capabilities, return_route,
+                idempotency_key_hash, request_hash, provider_state_hash, expires_at, status, readiness,
+                steps_json, saga_checkpoint_json, next_action, last_updated_at, provider_state_consumed_at
+         FROM ca_meta_onboarding_sessions WHERE tenant_id = ? AND idempotency_key_hash = ? LIMIT 1`,
+        [command.tenantId, command.idempotencyHash],
+      );
+      if (!createdRows[0]) throw new Error('Onboarding persistence did not return the created record.');
+      await connection.commit();
+      committed = true;
+      return mapRecord(createdRows[0]);
     } catch (error) {
-      if ((error as { code?: unknown })?.code !== 'ER_DUP_ENTRY') throw error;
+      if (!committed) {
+        try { await connection.rollback(); } catch { /* Preserve the original database failure. */ }
+      }
+      throw error;
+    } finally {
+      connection.release();
     }
-    const stored = await this.findByIdempotency(command.tenantId, command.idempotencyHash);
-    if (!stored) throw new Error('Onboarding persistence did not return the created record.');
-    return stored;
   }
 
   async findForSession(id: string, sessionId: string, principalId: string): Promise<OnboardingStoredRecord | undefined> {
