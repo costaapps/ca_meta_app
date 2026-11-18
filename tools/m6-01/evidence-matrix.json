@@ -1,0 +1,100 @@
+{
+  "issue": 69,
+  "package": "M6.01",
+  "baseline": "b54bde1ed170a4304e281383f70ded6ed0a4f5dc",
+  "localSuite": [
+    "src/app/core/embed/embed-contract.spec.ts",
+    "src/app/core/embed/embed-bridge.service.spec.ts",
+    "src/app/core/portal/portal-entry-return.store.spec.ts",
+    "src/app/core/portal/portal-session.service.spec.ts",
+    "src/app/core/portal/meta-flow-catalog.service.spec.ts",
+    "src/app/core/portal/connection-catalog.service.spec.ts",
+    "src/app/core/onboarding/portal-onboarding.service.spec.ts",
+    "src/app/core/coexistence/coexistence-onboarding.service.spec.ts",
+    "src/app/features/portal/portal-access.component.spec.ts",
+    "src/app/features/portal/portal-shell.component.spec.ts",
+    "src/app/features/portal/onboarding/portal-onboarding.component.spec.ts",
+    "src/app/features/portal/connections-home.component.spec.ts",
+    "src/app/features/portal/connection-detail.component.spec.ts",
+    "src/app/features/portal/connection-record-detail.component.spec.ts",
+    "src/app/features/portal/asset-automation-config.component.spec.ts",
+    "src/app/features/portal/whatsapp-templates.component.spec.ts",
+    "src/app/features/portal/notifications.component.spec.ts"
+  ],
+  "scenarios": [
+    {
+      "id": "M6.01-S1",
+      "requirement": "Suite4 entry, magic-link access and safe return",
+      "localTests": [
+        { "file": "src/app/core/embed/embed-contract.spec.ts", "case": "rejects" },
+        { "file": "src/app/core/embed/embed-bridge.service.spec.ts", "case": "origin" },
+        { "file": "src/app/core/portal/portal-session.service.spec.ts", "case": "stale context" },
+        { "file": "src/app/features/portal/portal-access.component.spec.ts", "case": "allowlisted deep link" }
+      ],
+      "externalGate": "Suite4 identity, membership, iframe and real invitation walkthrough are Not confirmed."
+    },
+    {
+      "id": "M6.01-S2",
+      "requirement": "Facebook, Instagram variants, WhatsApp exclusive and WhatsApp Coexistence stay distinct",
+      "localTests": [
+        { "file": "src/app/core/onboarding/portal-onboarding.service.spec.ts", "case": "all five exact auth variants" },
+        { "file": "src/app/core/onboarding/portal-onboarding.service.spec.ts", "case": "each product and both Instagram auth variants" },
+        { "file": "src/app/features/portal/onboarding/portal-onboarding.component.spec.ts", "case": "disables every mutation action" }
+      ],
+      "externalGate": "Meta permissions, App Review, eligible real assets and provider callbacks are Not confirmed."
+    },
+    {
+      "id": "M6.01-S3",
+      "requirement": "Four sequential Coexistence numbers, concurrent tabs, popup close and callback recovery",
+      "localTests": [
+        { "file": "src/app/core/onboarding/portal-onboarding.service.spec.ts", "case": "four sequential Coexistence numbers" },
+        { "file": "src/app/core/onboarding/portal-onboarding.service.spec.ts", "case": "two-tab Coexistence starts" },
+        { "file": "src/app/core/onboarding/portal-onboarding.service.spec.ts", "case": "closed popup" }
+      ],
+      "externalGate": "No real number was authorized, connected or changed in this local suite."
+    },
+    {
+      "id": "M6.01-S4",
+      "requirement": "Connection management exposes verified, partial, stale, error and action-required states",
+      "localTests": [
+        { "file": "src/app/core/portal/connection-catalog.service.spec.ts", "case": "server pagination" },
+        { "file": "src/app/features/portal/connections-home.component.spec.ts", "case": "error" },
+        { "file": "src/app/features/portal/connection-record-detail.component.spec.ts", "case": "revoked" }
+      ],
+      "externalGate": "State parity against deployed consumer and provider responses remains Not confirmed."
+    },
+    {
+      "id": "M6.01-S5",
+      "requirement": "Template and automation workflows preserve validated local behavior and fail safely",
+      "localTests": [
+        { "file": "src/app/features/portal/whatsapp-templates.component.spec.ts", "case": "UNKNOWN" },
+        { "file": "src/app/features/portal/asset-automation-config.component.spec.ts", "case": "tenant context changes" }
+      ],
+      "externalGate": "Provider template permissions and live delivery semantics are Not confirmed."
+    },
+    {
+      "id": "M6.01-S6",
+      "requirement": "Notifications do not report success or mark actions complete after a failed operation",
+      "localTests": [
+        { "file": "src/app/features/portal/notifications.component.spec.ts", "case": "READ only after a successful" }
+      ],
+      "externalGate": "Suite4/Msg4 consumer action semantics and provider results are Not confirmed."
+    },
+    {
+      "id": "M6.01-S7",
+      "requirement": "Critical views expose semantic names and loading/error/status feedback",
+      "localTests": [
+        { "file": "src/app/features/portal/portal-access.component.spec.ts", "case": "allowlisted deep link" },
+        { "file": "src/app/features/portal/onboarding/portal-onboarding.component.spec.ts", "case": "disables every mutation action" },
+        { "file": "src/app/features/portal/connection-record-detail.component.spec.ts", "case": "readable status text" }
+      ],
+      "externalGate": "Keyboard-only, focus order, screen reader, zoom, contrast and mobile browser checks require a browser walkthrough; Not confirmed."
+    },
+    {
+      "id": "M6.01-S8",
+      "requirement": "Browser, mobile, standalone and embedded behavior is reproduced by a second operator on one release candidate digest",
+      "localTests": [],
+      "externalGate": "No M6 release candidate image digest, staging environment or independent operator walkthrough is available; Not confirmed."
+    }
+  ]
+}
