@@ -1,14 +1,17 @@
 {
   "package": "M6.01",
   "issue": 69,
-  "executedAtUtc": "2026-11-18T20:00:09.267Z",
-  "gitHeadAtRun": "58344d398df601c15a0de5705efe80f7d0501b79",
+  "executedAtUtc": "2026-11-18T20:13:29.152Z",
+  "gitHeadAtRun": "ca4967780c4b7eec852e23ca228f0819751afaac",
   "testInputFingerprint": "b91a7ca86cb518344657a2469c785394839d445b3cfaa2bb04b2db8129fd7027",
   "node": "v24.22.2",
+  "expectedSpecCount": 17,
   "selectedSpecCount": 17,
+  "expectedJUnitSuiteCount": 17,
   "junitSuiteCount": 17,
   "testCount": 99,
   "failureCount": 0,
+  "skippedCount": 0,
   "result": "PASS_LOCAL_FIXTURES",
   "scope": "Local Angular/Vitest specs only; no provider, Suite4 or browser E2E evidence."
 }
