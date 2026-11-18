@@ -1,0 +1,165 @@
+{
+  "formatVersion": 1,
+  "package": "M6.06",
+  "status": "preparation-only",
+  "deploymentReady": false,
+  "observedAt": "2026-11-18",
+  "source": {
+    "milestoneBranch": "desktop/milestone-m6",
+    "milestoneBaseSha": "f09c12df0cbd77be4f4271d71e08c13e1913a781",
+    "releaseCommit": null,
+    "releaseTag": null,
+    "releaseId": null,
+    "releaseManifestSha256": null,
+    "candidateReferencesAreNonBinding": true
+  },
+  "candidatePullRequests": [
+    {
+      "package": "M6.01",
+      "issue": 69,
+      "pr": 170,
+      "branch": "desktop/m6-01",
+      "headSha": "7b9930622369b6ee68a2903c3b1bf4ff80eb8e03",
+      "state": "open"
+    },
+    {
+      "package": "M6.02",
+      "issue": 70,
+      "pr": 167,
+      "branch": "desktop/m6-02",
+      "headSha": "0f37cf6e42e1d84a761d956029fe0895c6bb1025",
+      "state": "open",
+      "note": "This is the GitHub PR head observed at capture time; the local unpushed candidate is being revised and must be refreshed before promotion."
+    },
+    {
+      "package": "M6.03",
+      "issue": 66,
+      "pr": 168,
+      "branch": "desktop/m6-03",
+      "headSha": "f217108140c7b1b67c707b0e8dde833d1f171850",
+      "state": "open"
+    },
+    {
+      "package": "M6.04",
+      "issue": 67,
+      "pr": 169,
+      "branch": "desktop/m6-04",
+      "headSha": "bcd6de9f8fea4f7b7ea805ea6aa1dfecc07f792f",
+      "state": "open"
+    },
+    {
+      "package": "M6.05",
+      "issue": 68,
+      "pr": 171,
+      "branch": "desktop/m6-05",
+      "headSha": "d73834ae2da1aeb5e85734aa9c50fd18438e6f1e",
+      "state": "open"
+    }
+  ],
+  "targets": {
+    "staging": {
+      "status": "Not confirmed",
+      "resourceReferences": []
+    },
+    "production": {
+      "status": "Not confirmed",
+      "resourceReferences": []
+    }
+  },
+  "images": {
+    "web": {
+      "digest": null,
+      "sourceRevision": null,
+      "sbomSha256": null,
+      "provenanceSha256": null,
+      "scanResultsSha256": null
+    },
+    "api": {
+      "digest": null,
+      "sourceRevision": null,
+      "sbomSha256": null,
+      "provenanceSha256": null,
+      "scanResultsSha256": null
+    },
+    "worker": {
+      "mustUseApiDigest": true,
+      "digest": null
+    }
+  },
+  "databaseSchema": {
+    "targetVersion": null,
+    "minCompatible": null,
+    "maxCompatible": null,
+    "migrationPreflight": "Not confirmed"
+  },
+  "gates": [
+    {
+      "id": "infrastructure-and-ownership",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "dns-tls-network-and-ingress",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "database-queue-capacity-and-schema-compatibility",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "secret-store-and-service-account-ownership",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "immutable-image-digests-sbom-provenance-and-scans",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "github-staging-and-production-environments-and-gates",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "callbacks-webhooks-privacy-and-revocation-routes",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "meta-flow-permissions-eligibility-and-test-assets",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "m6-01-through-m6-05-integrated-and-revalidated",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "previous-manifest-backup-and-rollback-evidence",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "product-security-and-operations-go-no-go",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "promotion-operator-and-auditable-trail",
+      "status": "Not confirmed",
+      "evidence": []
+    }
+  ],
+  "rollback": {
+    "previousManifestSha256": null,
+    "backupReference": null,
+    "restoreEvidence": null,
+    "operatorReference": null,
+    "auditTrailReference": null,
+    "status": "Not confirmed"
+  }
+}
