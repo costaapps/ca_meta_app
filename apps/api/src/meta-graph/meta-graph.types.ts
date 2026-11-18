@@ -180,7 +180,7 @@ export interface MetaGraphMetricLabels {
 }
 
 export interface MetaGraphMetrics {
-  record(labels: MetaGraphMetricLabels): void;
+  record(labels: MetaGraphMetricLabels, context?: { readonly correlationId: string }): void;
 }
 
 export const META_GRAPH_METRICS = Symbol('META_GRAPH_METRICS');
