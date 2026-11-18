@@ -19,6 +19,7 @@ import { DurableWorkDatabase } from '../src/jobs/durable-work-database.js';
 import { DurableJobStore } from '../src/jobs/job-store.js';
 import type { InboxEventEnvelope, OutboxEventEnvelope } from '../src/jobs/event-validation.js';
 import { MysqlLegacyProjectionCheckpointStore } from '../src/legacy-projection/mysql-legacy-projection-checkpoints.js';
+import { MysqlConnectionLifecycleCommandRepository } from '../src/meta-lifecycle/mysql-connection-lifecycle.repository.js';
 import { MysqlPortalSessionStore } from '../src/identity/mysql-portal-session.store.js';
 import { OutboxService } from '../src/outbox/outbox-service.js';
 import { AuditEventWriter } from '../src/privacy/audit.service.js';
@@ -232,6 +233,7 @@ test('M6.05 restores an encrypted logical backup with keyring, durable state and
     environment: 'test' as const,
     family: 'USER_ACCESS' as const,
   }));
+  const revokedAuthorizationId = randomUUID();
   const credentialMarkers = bindings.map((_, index) => `m6-05-synthetic-credential-${index}-${randomUUID()}`);
   const checkpointKey = sha256('m6-05-synthetic-legacy-destination');
   const checkpointRef = `m6-05-asset-${randomUUID()}`;
@@ -242,6 +244,7 @@ test('M6.05 restores an encrypted logical backup with keyring, durable state and
   const portalSessionId = randomUUID();
   let sourceFixtureCommitAt: number | undefined;
   let dumpDurationMs = 0;
+  let dumpCommandInvocationLagMs: number | null = null;
   let encryptionDurationMs = 0;
   let importDurationMs = 0;
   let backupBytes = 0;
@@ -256,6 +259,7 @@ test('M6.05 restores an encrypted logical backup with keyring, durable state and
   let restoreStartedAt = 0;
   let rotationCursorPresent = false;
   let sessionRevoked = false;
+  let revokedAuthorizationState: string | null = null;
 
   try {
     const source = await sourceDatabase.getDataSource();
@@ -283,6 +287,19 @@ test('M6.05 restores an encrypted logical backup with keyring, durable state and
         [binding.credentialId, tenantId, binding.authorizationId, binding.appConfigurationId, timestamp, timestamp],
       );
     }
+    await source.query(
+      `INSERT INTO ca_meta_authorizations
+       (id, tenant_id, app_configuration_id, provider, environment, provider_authorization_id,
+        authorization_state, observed_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'META', 'test', ?, 'REVOKED', ?, ?, ?)`,
+      [revokedAuthorizationId, tenantId, bindings[0]!.appConfigurationId,
+        `m6-05-revoked-auth-${revokedAuthorizationId}`, timestamp, timestamp, timestamp],
+    );
+    const sourceRevokedAuthorization = await source.query(
+      'SELECT authorization_state FROM ca_meta_authorizations WHERE tenant_id = ? AND id = ?',
+      [tenantId, revokedAuthorizationId],
+    ) as Array<{ authorization_state: string }>;
+    assert.equal(sourceRevokedAuthorization[0]?.authorization_state, 'REVOKED');
 
     const vaultRepository = new MysqlCredentialVaultRepository(sourceDatabase, new AuditEventWriter(sourceDatabase));
     const writerV1 = new CredentialVaultService(vaultRepository, providerV1, new AllowVaultAccess());
@@ -522,9 +539,18 @@ test('M6.05 restores an encrypted logical backup with keyring, durable state and
     ) as Array<{ revoked_at: string | null }>;
     assert.ok(revokedSession?.revoked_at);
 
-    const snapshotLagFromLastSyntheticCommitMs = sourceFixtureCommitAt === undefined
+    dumpCommandInvocationLagMs = sourceFixtureCommitAt === undefined
       ? null
       : Number((dumpStartedAt - sourceFixtureCommitAt).toFixed(2));
+    const recoveredAuthorization = await new MysqlConnectionLifecycleCommandRepository(
+      restoredDatabase, new AuditEventWriter(restoredDatabase),
+    ).findBinding({ tenantId, authorizationId: revokedAuthorizationId });
+    assert.ok(recoveredAuthorization, 'the revoked Meta authorization remains available to the application lifecycle lookup');
+    assert.equal(recoveredAuthorization.authorizationState, 'REVOKED',
+      'recovery preserves the revoked authorization state instead of reactivating it');
+    assert.equal(['ACTIVE', 'PARTIAL'].includes(recoveredAuthorization.authorizationState), false,
+      'the restored revoked Meta authorization is not eligible as active');
+    revokedAuthorizationState = recoveredAuthorization.authorizationState;
     const restoreProcedureMs = Number((performance.now() - restoreStartedAt).toFixed(2));
     process.stdout.write(`${JSON.stringify({
       evidenceClass: 'DISPOSABLE_MARIADB_ENCRYPTED_BACKUP_RESTORE',
@@ -544,7 +570,7 @@ test('M6.05 restores an encrypted logical backup with keyring, durable state and
         artifactTemporaryAndRemovedByRunner: true,
       },
       observationsOnly: {
-        localSnapshotLagFromLastSyntheticCommitMs: snapshotLagFromLastSyntheticCommitMs,
+        localDumpCommandInvocationLagFromLastSyntheticCommitMs: dumpCommandInvocationLagMs,
         logicalDumpMs: Number(dumpDurationMs.toFixed(2)),
         encryptionMs: Number(encryptionDurationMs.toFixed(2)),
         restoreImportMs: Number(importDurationMs.toFixed(2)),
@@ -563,6 +589,8 @@ test('M6.05 restores an encrypted logical backup with keyring, durable state and
         outboxJobState: restoredJobRows.find((row) => row.id === outboxJobId)?.status,
         ambiguousOutboxNotReplayed: noAmbiguousReplay === null && outboxRedelivery.jobId === null,
         projectionCheckpointPreserved: restoredCheckpoint.state === 'PENDING',
+        revokedAuthorizationState,
+        revokedAuthorizationNotActive: revokedAuthorizationState === 'REVOKED',
         portalSessionRevokedDuringRecovery: sessionRevoked,
         providerCalls: 0,
       },
