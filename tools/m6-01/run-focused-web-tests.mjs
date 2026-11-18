@@ -11,8 +11,9 @@ const matrixPath = join(repositoryRoot, 'tools', 'm6-01', 'evidence-matrix.json'
 const outputRoot = join(webRoot, '.test-runs');
 const temporaryOutput = join(outputRoot, `m6-01-${process.pid}-${Date.now()}`);
 
-if (Number(process.versions.node.split('.')[0]) !== 24) {
-  throw new Error(`M6.01 focused tests require Node 24; received ${process.version}.`);
+const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+if (nodeMajor !== 24 || nodeMinor < 15) {
+  throw new Error(`M6.01 focused tests require Node >=24.15.0 <25; received ${process.version}.`);
 }
 const matrix = JSON.parse(await readFile(matrixPath, 'utf8'));
 if (matrix.issue !== 69 || matrix.package !== 'M6.01' || !Array.isArray(matrix.localSuite)) {
