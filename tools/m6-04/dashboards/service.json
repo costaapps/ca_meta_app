@@ -1,0 +1,18 @@
+{
+  "uid": "ca-meta-service-m6-04",
+  "title": "CA Meta API service",
+  "tags": ["ca-meta", "m6-04", "release-artifact"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    { "id": 1, "type": "timeseries", "title": "API requests / second by finite route group and outcome", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }, "targets": [{ "expr": "sum by (route_group, outcome) (rate(ca_meta_api_http_requests_total[5m]))", "legendFormat": "{{route_group}} / {{outcome}}", "refId": "A" }] },
+    { "id": 2, "type": "timeseries", "title": "API request p95 duration (ms)", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }, "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, route_group) (rate(ca_meta_api_http_request_duration_ms_bucket[5m])))", "legendFormat": "{{route_group}}", "refId": "A" }] },
+    { "id": 3, "type": "timeseries", "title": "Meta Graph operation outcomes by category", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }, "targets": [{ "expr": "sum by (product, operation, outcome, category) (rate(ca_meta_graph_calls_total[5m]))", "legendFormat": "{{product}} / {{operation}} / {{outcome}} / {{category}}", "refId": "A" }] },
+    { "id": 4, "type": "timeseries", "title": "Webhook ingress outcomes and latency", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }, "targets": [{ "expr": "sum by (outcome) (rate(ca_meta_webhook_ingress_requests_total[5m]))", "legendFormat": "{{outcome}} requests/s", "refId": "A" }, { "expr": "histogram_quantile(0.99, sum by (le) (rate(ca_meta_webhook_ingress_duration_ms_bucket{outcome=\"accepted\"}[5m])))", "legendFormat": "accepted p99 ms", "refId": "B" }] },
+    { "id": 5, "type": "stat", "title": "Operational source availability (0 means unavailable, not healthy/empty)", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "gridPos": { "x": 0, "y": 16, "w": 24, "h": 5 }, "targets": [{ "expr": "ca_meta_observability_source_available", "legendFormat": "{{signal}}", "refId": "A" }] },
+    { "id": 6, "type": "text", "title": "Verification and ingestion provenance", "gridPos": { "x": 0, "y": 21, "w": 24, "h": 4 }, "options": { "mode": "markdown", "content": "**Release:** dashboard and alert files are versioned in `tools/m6-04`. **Ingestion:** Prometheus scrape timestamps represent collection; `ca_meta_webhook_last_ack_timestamp_seconds` is the last durable acknowledgement observed by this process. **lastVerifiedAt:** real staging verification is Not confirmed and must be recorded by the release operator; no application metric claims external Meta/Suite4 verification." } }
+  ]
+}

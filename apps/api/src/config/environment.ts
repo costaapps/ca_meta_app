@@ -43,6 +43,10 @@ export interface ApiEnvironment {
   readonly portalSessionAbsoluteTimeoutSeconds: number;
   /** Opt-in local lifecycle queueing; provider inspection remains impossible without explicit adapters. */
   readonly credentialLifecycleSchedulerEnabled?: boolean;
+  /** Optional bearer proof for the private metrics endpoint; absent disables it. */
+  readonly observabilityMetricsToken?: string;
+  /** Zero disables inactivity alerts until an authorized expected-activity baseline is configured. */
+  readonly expectedWebhookIntervalSeconds?: number;
   readonly database: {
     readonly host: string;
     readonly port: number;
@@ -535,6 +539,15 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
   const credentialLifecycleSchedulerEnabled = optionalBooleanField(
     source, 'API_CREDENTIAL_LIFECYCLE_SCHEDULER_ENABLED', false, invalid,
   );
+  const metricsTokenValue = source.API_OBSERVABILITY_METRICS_TOKEN;
+  const observabilityMetricsToken = metricsTokenValue === undefined || metricsTokenValue.trim() === ''
+    ? undefined : metricsTokenValue;
+  if (observabilityMetricsToken !== undefined &&
+      (observabilityMetricsToken.length < 32 || observabilityMetricsToken.length > 512 ||
+       /[\u0000-\u0020\u007f]/.test(observabilityMetricsToken))) invalid.push('API_OBSERVABILITY_METRICS_TOKEN');
+  const expectedWebhookIntervalSeconds = optionalIntegerField(
+    source, 'API_OBSERVABILITY_EXPECTED_WEBHOOK_INTERVAL_SECONDS', 0, 0, 2_592_000, invalid,
+  );
   const host = required(source, 'API_DATABASE_HOST', invalid);
   if (!/^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(host) && isIP(host) === 0) {
     invalid.push('API_DATABASE_HOST');
@@ -597,6 +610,8 @@ export function validateEnvironment(source: NodeJS.ProcessEnv): ApiEnvironment {
     portalSessionIdleTimeoutSeconds,
     portalSessionAbsoluteTimeoutSeconds,
     credentialLifecycleSchedulerEnabled,
+    ...(observabilityMetricsToken ? { observabilityMetricsToken } : {}),
+    expectedWebhookIntervalSeconds,
     portalSessionRecoveryKey,
     ...(credentialKeyRing ? { credentialKeyRing } : {}),
     ...(onboardingStateSigningKey ? { onboardingStateSigningKey } : {}),

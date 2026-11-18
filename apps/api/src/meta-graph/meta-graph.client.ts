@@ -574,7 +574,8 @@ export class MetaGraphClient {
     const environments: readonly string[] = ['development', 'test', 'staging', 'production'];
     if (operations.includes(input.operation) && flows.includes(input.context.flowVariant) && environments.includes(input.context.environment)) {
       this.metrics.record(Object.freeze({ operation: input.operation, product: input.context.flowVariant, environment: input.context.environment,
-        outcome: result.outcome, category: result.error?.category ?? 'NONE', attempts: result.attempts, retries: result.retries }));
+        outcome: result.outcome, category: result.error?.category ?? 'NONE', attempts: result.attempts, retries: result.retries }),
+      { correlationId: input.correlationId });
     }
     return result;
   }

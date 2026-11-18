@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "isolated synthetic MariaDB/API integration",
+  "seed": "m6-03-local-2026-11-18",
+  "workers": 8,
+  "syntheticHandlerDelayMs": 3,
+  "tenants": [
+    { "name": "noisy", "historicalProjectionJobs": 240, "webhookEvents": 20, "concurrentOnboards": 4 },
+    { "name": "regular-1", "historicalProjectionJobs": 64, "webhookEvents": 20, "concurrentOnboards": 4 },
+    { "name": "regular-2", "historicalProjectionJobs": 64, "webhookEvents": 20, "concurrentOnboards": 4 },
+    { "name": "regular-3", "historicalProjectionJobs": 64, "webhookEvents": 20, "concurrentOnboards": 4 }
+  ],
+  "assetsPerTenant": 4,
+  "faultScenarios": [
+    "safe inbox retry after synthetic provider dependency failure",
+    "lease expiry and worker reclaim after persisted inbox event",
+    "projection retry after synthetic enterprise destination failure",
+    "ambiguous outbox outcome remains UNKNOWN and is not reclaimed"
+  ]
+}
