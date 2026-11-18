@@ -10,6 +10,8 @@ const cli = join(repositoryRoot, 'node_modules', '@angular', 'cli', 'bin', 'ng.j
 const matrixPath = join(repositoryRoot, 'tools', 'm6-01', 'evidence-matrix.json');
 const outputRoot = join(webRoot, '.test-runs');
 const temporaryOutput = join(outputRoot, `m6-01-${process.pid}-${Date.now()}`);
+const expectedSpecCount = 17;
+const expectedSuiteCount = 17;
 
 const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
 if (nodeMajor !== 24 || nodeMinor < 15) {
@@ -23,7 +25,10 @@ if (matrix.issue !== 69 || matrix.package !== 'M6.01' || !Array.isArray(matrix.l
 const specs = [...new Set(matrix.localSuite)];
 const declaredSpecs = new Set(specs);
 const caseEvidence = matrix.scenarios.flatMap((scenario) => scenario.localTests ?? []);
-if (specs.length === 0 || caseEvidence.some((item) => !declaredSpecs.has(item.file))) {
+if (specs.length !== expectedSpecCount) {
+  throw new Error(`M6.01 focused suite must declare exactly ${expectedSpecCount} spec files; found ${specs.length}.`);
+}
+if (caseEvidence.some((item) => !declaredSpecs.has(item.file))) {
   throw new Error('Each automated scenario must point to a spec included in the focused suite.');
 }
 
@@ -82,7 +87,8 @@ try {
   const total = (attribute) => suites.reduce((sum, suite) => sum + Number(suite[1].match(new RegExp(`\\b${attribute}="(\\d+)"`))?.[1] ?? 0), 0);
   const tests = total('tests');
   const failures = total('failures') + total('errors');
-  process.stdout.write(`JUnit: ${tests} test(s), ${failures} failure(s).\n`);
+  const skipped = total('skipped');
+  process.stdout.write(`JUnit: ${suites.length} suite(s), ${tests} test(s), ${failures} failure(s), ${skipped} skipped.\n`);
   const headResult = spawnSync('git', ['rev-parse', 'HEAD'], {
     cwd: repositoryRoot,
     encoding: 'utf8',
@@ -96,14 +102,17 @@ try {
     gitHeadAtRun: headResult.stdout.trim(),
     testInputFingerprint,
     node: process.version,
+    expectedSpecCount,
     selectedSpecCount: specs.length,
+    expectedJUnitSuiteCount: expectedSuiteCount,
     junitSuiteCount: suites.length,
     testCount: tests,
     failureCount: failures,
-    result: commandPassed && tests > 0 && failures === 0 ? 'PASS_LOCAL_FIXTURES' : 'FAIL',
+    skippedCount: skipped,
+    result: commandPassed && specs.length === expectedSpecCount && suites.length === expectedSuiteCount && tests > 0 && failures === 0 && skipped === 0 ? 'PASS_LOCAL_FIXTURES' : 'FAIL',
     scope: 'Local Angular/Vitest specs only; no provider, Suite4 or browser E2E evidence.',
   }, null, 2)}\n`, 'utf8');
-  if (!commandPassed || tests === 0 || failures !== 0) process.exitCode = 1;
+  if (!commandPassed || specs.length !== expectedSpecCount || suites.length !== expectedSuiteCount || tests === 0 || failures !== 0 || skipped !== 0) process.exitCode = 1;
 } finally {
   const outputRootInfo = await lstat(outputRoot);
   const temporaryInfo = await lstat(temporaryOutput);

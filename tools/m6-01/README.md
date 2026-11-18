@@ -16,7 +16,7 @@ From the repository root (with the required Node version first on `PATH`):
 node tools/m6-01/run-focused-web-tests.mjs
 ```
 
-The harness verifies every mapped test title still exists, computes a SHA-256 fingerprint over the selected spec sources and matrix, runs the 17 declared web spec files once through Angular's configured JUnit reporter, checks the report has tests and no failures, writes the sanitized summary to `tools/m6-01/last-run.json`, then removes only its uniquely named JUnit output directory under `apps/web/.test-runs/`.
+The harness verifies every mapped test title still exists, requires exactly 17 declared spec files, computes a SHA-256 fingerprint over the selected spec sources and matrix, runs them once through Angular's configured JUnit reporter, and requires exactly 17 JUnit suites with at least one test, no failures/errors and no skipped tests. It writes the sanitized summary to `tools/m6-01/last-run.json`, then removes only its uniquely named JUnit output directory under `apps/web/.test-runs/`.
 
 ## Evidence limits
 
