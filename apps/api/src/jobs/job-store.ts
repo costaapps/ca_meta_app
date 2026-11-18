@@ -315,7 +315,7 @@ export class DurableJobStore implements JobStore {
             `SELECT id, tenant_id, job_type, schema_version, lane, effect_mode, resource_scope_ref, idempotency_key,
                     correlation_id, causation_id, payload_json, attempt, max_attempts,
                     claim_token, budget_started_at,
-                    TIMESTAMPDIFF(MICROSECOND, budget_started_at, UTC_TIMESTAMP(6)) DIV 1000 AS budget_elapsed_ms,
+                    GREATEST(0, TIMESTAMPDIFF(MICROSECOND, budget_started_at, UTC_TIMESTAMP(6)) DIV 1000) AS budget_elapsed_ms,
                     created_at
              FROM ca_meta_jobs
              WHERE tenant_id = ? AND lane = ? AND job_type IN (${typePlaceholders}) AND NOT EXISTS (
@@ -382,7 +382,7 @@ export class DurableJobStore implements JobStore {
               `UPDATE ca_meta_job_attempts
                SET outcome = 'RETRY_PENDING', safe_error_code = 'LEASE_EXPIRED', safe_error_action = 'RETRY_LATER',
                    finished_at = UTC_TIMESTAMP(6),
-                   duration_ms = TIMESTAMPDIFF(MICROSECOND, started_at, UTC_TIMESTAMP(6)) DIV 1000
+                   duration_ms = GREATEST(0, TIMESTAMPDIFF(MICROSECOND, started_at, UTC_TIMESTAMP(6)) DIV 1000)
                WHERE tenant_id = ? AND job_id = ? AND attempt = ? AND outcome = 'RUNNING'`,
               [row.tenant_id, row.id, attempt],
             );
@@ -463,7 +463,7 @@ export class DurableJobStore implements JobStore {
       const rows = await manager.query(
         `SELECT id, tenant_id, job_type, lane, effect_mode, attempt, max_attempts,
                 budget_started_at, claim_token,
-                TIMESTAMPDIFF(MICROSECOND, budget_started_at, UTC_TIMESTAMP(6)) DIV 1000 AS budget_elapsed_ms
+                GREATEST(0, TIMESTAMPDIFF(MICROSECOND, budget_started_at, UTC_TIMESTAMP(6)) DIV 1000) AS budget_elapsed_ms
          FROM ca_meta_jobs
          WHERE id = ? AND tenant_id = ? AND status = 'RUNNING' AND claim_token = ?
            AND lease_expires_at > UTC_TIMESTAMP(6)
@@ -533,7 +533,7 @@ export class DurableJobStore implements JobStore {
       await manager.query(
         `UPDATE ca_meta_job_attempts
          SET outcome = ?, safe_error_code = ?, safe_error_action = ?, finished_at = UTC_TIMESTAMP(6),
-             duration_ms = TIMESTAMPDIFF(MICROSECOND, started_at, UTC_TIMESTAMP(6)) DIV 1000
+             duration_ms = GREATEST(0, TIMESTAMPDIFF(MICROSECOND, started_at, UTC_TIMESTAMP(6)) DIV 1000)
          WHERE tenant_id = ? AND job_id = ? AND attempt = ? AND outcome = 'RUNNING'`,
         [nextStatus, code, action, job.tenantId, job.id, attempt],
       );
@@ -590,7 +590,7 @@ export class DurableJobStore implements JobStore {
           `UPDATE ca_meta_job_attempts
            SET outcome = 'UNKNOWN', safe_error_code = 'LEASE_EXPIRED', safe_error_action = 'CHECK_STATUS',
                finished_at = UTC_TIMESTAMP(6),
-               duration_ms = TIMESTAMPDIFF(MICROSECOND, started_at, UTC_TIMESTAMP(6)) DIV 1000
+               duration_ms = GREATEST(0, TIMESTAMPDIFF(MICROSECOND, started_at, UTC_TIMESTAMP(6)) DIV 1000)
            WHERE tenant_id = ? AND job_id = ? AND attempt = ? AND outcome = 'RUNNING'`,
           [stale.tenant_id, row.id, Number(row.attempt)],
         );
