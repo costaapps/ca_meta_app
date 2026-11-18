@@ -19,3 +19,10 @@
 - **Issue / gate:** Package and cumulative checks must cover the M6 criteria without duplicating full suites across subagents.
 - **Decision:** Each package owner runs only the focused harness/checks they introduce or materially affect. The coordinator runs one cumulative relevant set after integration; reviewers use the recorded command, environment, and SHA unless a concrete gap requires a new check.
 - **Consequence:** Re-run only checks invalidated by changes to their source, contracts, base, or environment.
+
+## 2026-11-18 — refresh of public Meta acceptance references
+
+- **Issue / gate:** M6.07 must confirm current App Review/access requirements and the Embedded Signup version used by each WhatsApp mode before enabling it.
+- **Evidence:** On 2026-11-18, the official Meta [WhatsApp Business app onboarding (Coexistence)](https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users/) page stated that Embedded Signup v2 and v3 were deprecated on 2026-10-15 and directs integrations to v4; it also identifies the Tech Provider/Solution Partner, webhook and session logging prerequisites. The official [App Review introduction](https://developers.facebook.com/docs/resp-plat-initiatives/app-review/introduction) describes per-permission/feature approval and reviewer access/recording requirements. In this checkout, `embeddedSignupVersion` is configuration data, and the Coexistence provider adapter remains disabled; no deployed configuration or app-specific approval is available here.
+- **Decision:** Keep the Coexistence activation gate closed until an authorized owner confirms the real per-flow configuration is v4 or newer and supplies app-specific permission/eligibility evidence. Use current dashboard state for exact permission names and approval status; public docs do not prove this app is approved.
+- **Consequence:** Local fixtures cannot clear M6.07 or M6.08 for Coexistence. Record the checked documentation date and leave any deployed version/approval **Not confirmed** until independently evidenced.
