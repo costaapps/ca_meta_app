@@ -162,9 +162,9 @@ export class ObservabilityRegistry implements MetaGraphMetrics {
     if (!accepted) return;
     this.lastWebhookAckSeconds = Math.floor(this.now() / 1_000);
     if (itemCounts) {
-      for (const name of ['received', 'inserted', 'duplicate', 'quarantined'] as const) {
-        const value = itemCounts[name];
-        if (Number.isSafeInteger(value) && value > 0) this.increment('webhook_items', tupleKey([this.environment, name]), value);
+      for (const itemType of ['received', 'inserted', 'duplicate', 'quarantined'] as const) {
+        const value = itemCounts[itemType];
+        if (Number.isSafeInteger(value) && value > 0) this.increment('webhook_items', tupleKey([this.environment, itemType]), value);
       }
     }
   }
@@ -198,10 +198,10 @@ export class ObservabilityRegistry implements MetaGraphMetrics {
     lines.push('# HELP ca_meta_webhook_ingress_items_total Durable webhook inbox item counts.',
       '# TYPE ca_meta_webhook_ingress_items_total counter');
     for (const [key, value] of sorted(this.counters, 'webhook_items')) {
-      const [environment, outcome] = JSON.parse(key) as string[];
-      lines.push(`ca_meta_webhook_ingress_items_total${labels({ environment: environment!, outcome: outcome! })} ${value}`);
+      const [environment, itemType] = JSON.parse(key) as string[];
+      lines.push(`ca_meta_webhook_ingress_items_total${labels({ environment: environment!, item_type: itemType! })} ${value}`);
     }
-    lines.push('# HELP ca_meta_webhook_ingress_duration_ms Time from webhook handler start to response.',
+    lines.push('# HELP ca_meta_webhook_ingress_duration_ms Time from request-context middleware start through HTTP response finish.',
       '# TYPE ca_meta_webhook_ingress_duration_ms histogram');
     for (const [key, row] of sortedHistogram(this.webhookHistograms)) {
       const [environment] = JSON.parse(key) as string[];

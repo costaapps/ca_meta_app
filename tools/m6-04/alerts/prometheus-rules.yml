@@ -49,11 +49,13 @@ groups:
 
       - alert: CaMetaWebhookExpectedActivityMissing
         expr: |
-          ca_meta_webhook_expected_activity_interval_seconds > 0
-          and ((ca_meta_webhook_last_ack_timestamp_seconds > 0
-                and time() - ca_meta_webhook_last_ack_timestamp_seconds > 3 * ca_meta_webhook_expected_activity_interval_seconds)
-            or (ca_meta_webhook_last_ack_timestamp_seconds == 0
-                and time() - ca_meta_api_process_start_timestamp_seconds > 3 * ca_meta_webhook_expected_activity_interval_seconds))
+          max by (environment) (ca_meta_webhook_expected_activity_interval_seconds) > 0
+          and ((max by (environment) (ca_meta_webhook_last_ack_timestamp_seconds) > 0
+                and time() - max by (environment) (ca_meta_webhook_last_ack_timestamp_seconds) >
+                  3 * max by (environment) (ca_meta_webhook_expected_activity_interval_seconds))
+            or (max by (environment) (ca_meta_webhook_last_ack_timestamp_seconds) == 0
+                and time() - min by (environment) (ca_meta_api_process_start_timestamp_seconds) >
+                  3 * max by (environment) (ca_meta_webhook_expected_activity_interval_seconds)))
         for: 10m
         labels:
           severity: warning
@@ -61,8 +63,8 @@ groups:
           owner_assignee: unassigned
           runbook: "tools/m6-04/runbooks/operations.md#expected-webhook-silence"
         annotations:
-          summary: "Expected webhook activity has not been durably acknowledged"
-          description: "Only enable after an authorized environment-specific baseline is agreed. A zero expected interval disables this alert."
+          summary: "Expected webhook activity has not been durably acknowledged by any API replica"
+          description: "The rule aggregates the latest durable ACK and configured interval by environment. It alerts only when no replica has ACKed within the expected interval, or no replica has ACKed since the earliest process start. Configure one authorized baseline per environment."
 
       - alert: CaMetaOperationalSignalSourceUnavailable
         expr: ca_meta_observability_source_available{signal=~"credential_health|subscription_drift|queue_backlog|dead_letter|projection_lag"} == 0

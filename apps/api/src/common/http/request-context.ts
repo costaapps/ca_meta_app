@@ -26,6 +26,14 @@ export interface StructuredLogger {
   write(record: StructuredLogRecord): void;
 }
 
+type RequestWithObservedDuration = Request & { observabilityRequestDurationMs?: () => number };
+
+/** Returns the monotonic request lifetime captured before body parsing, if the middleware ran. */
+export function observedRequestDurationMs(request: Request): number | undefined {
+  const readDuration = (request as RequestWithObservedDuration).observabilityRequestDurationMs;
+  return typeof readDuration === 'function' ? readDuration() : undefined;
+}
+
 export const STRUCTURED_LOGGER = Symbol('STRUCTURED_LOGGER');
 export class ConsoleStructuredLogger implements StructuredLogger {
   write(record: StructuredLogRecord): void {
@@ -50,10 +58,12 @@ export function requestContextMiddleware(
     request.correlationId = requestId;
     response.setHeader('X-Request-Id', requestId);
     const startedAt = clock.now();
+    (request as RequestWithObservedDuration).observabilityRequestDurationMs = () =>
+      Math.max(0, Math.round(clock.now() - startedAt));
 
     response.once('finish', () => {
       const route = request.route?.path;
-      const durationMs = Math.max(0, Math.round(clock.now() - startedAt));
+      const durationMs = observedRequestDurationMs(request) ?? 0;
       const metrics = observability.recordHttpRequest({ path: request.path, method: request.method,
         statusCode: response.statusCode, durationMs });
       logger.write({
