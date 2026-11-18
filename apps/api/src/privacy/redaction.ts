@@ -56,15 +56,39 @@ export function isSafeOpaqueReference(value: string): boolean {
 }
 
 const SAFE_LOG_FIELDS = new Set([
-  'level', 'event', 'requestId', 'method', 'route', 'statusCode', 'durationMs', 'errorType',
+  'level', 'event', 'requestId', 'correlationId', 'method', 'route', 'statusCode', 'durationMs', 'errorType',
+  'operation', 'product', 'environment', 'outcome', 'category',
 ]);
+const SAFE_LOG_ENUMS: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
+  operation: new Set(['ASSET_DISCOVERY', 'SEND_MESSAGE', 'MANAGE_COMMENTS', 'MANAGE_TEMPLATES', 'READ_STATUS',
+    'SUBSCRIBE_WEBHOOKS', 'SYNC_HISTORY', 'PHONE_REGISTRATION_CONVENTIONAL']),
+  product: new Set(['FACEBOOK', 'INSTAGRAM', 'WHATSAPP_EXCLUSIVE', 'WHATSAPP_COEXISTENCE']),
+  environment: new Set(['development', 'test', 'staging', 'production']),
+  outcome: new Set(['SUCCEEDED', 'PARTIAL', 'FAILED', 'UNKNOWN', 'success', 'redirect', 'client_failure',
+    'auth_failure', 'dependency_failure', 'internal_failure', 'rate_limited']),
+  category: new Set(['CAPABILITY_DISABLED', 'CONFIGURATION_UNAVAILABLE', 'CREDENTIAL_UNAVAILABLE', 'CREDENTIAL_REJECTED',
+    'PERMISSION_REQUIRED', 'REQUEST_BUDGET_EXHAUSTED', 'REQUEST_INVALID', 'RESPONSE_INVALID', 'NETWORK_ERROR', 'RATE_LIMITED',
+    'TRANSIENT_PROVIDER_FAILURE', 'INVALID_REQUEST', 'AUTHORIZATION_FAILED', 'PROVIDER_ERROR', 'PROVIDER_UNAVAILABLE',
+    'REDIRECT_REFUSED', 'RESPONSE_TOO_LARGE', 'PAGINATION_INVALID', 'PAGINATION_LOOP', 'LIMIT_REACHED', 'BUSY',
+    'AMBIGUOUS_POST', 'NONE']),
+});
 
 /** Structured logs use a closed field allowlist, even if callers pass extra properties at runtime. */
 export function redactStructuredLogRecord(record: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
   const safe: Record<string, unknown> = {};
   for (const field of SAFE_LOG_FIELDS) {
     const value = record[field];
-    if (typeof value === 'string') safe[field] = safeString(value);
+    if (typeof value === 'string') {
+      if (field === 'requestId' || field === 'correlationId') {
+        if (UUID_REFERENCE.test(value)) safe[field] = value;
+      } else if (SAFE_LOG_ENUMS[field]) {
+        if (SAFE_LOG_ENUMS[field]!.has(value)) safe[field] = value;
+      } else if (field === 'event' && /^[a-z][a-z0-9_.-]{0,79}$/.test(value)) safe[field] = value;
+      else if (field === 'method' && /^(?:GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)$/.test(value)) safe[field] = value;
+      else if (field === 'route' && /^\/?[A-Za-z0-9_:/.*-]{1,128}$/.test(value)) safe[field] = value;
+      else if (field === 'level' && /^(?:info|warn|error)$/.test(value)) safe[field] = value;
+      else if (field === 'errorType' && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(value)) safe[field] = safeString(value);
+    }
     else if (typeof value === 'number' && Number.isFinite(value)) safe[field] = value;
   }
   return Object.freeze(safe);

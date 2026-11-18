@@ -2,7 +2,6 @@ import { DynamicModule, Module } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import type { ApiEnvironment } from './config/environment.js';
 import { SafeExceptionFilter } from './common/http/safe-exception.filter.js';
-import { ConsoleStructuredLogger, STRUCTURED_LOGGER } from './common/http/request-context.js';
 import { REQUEST_DRAIN, RequestDrain } from './common/http/request-drain.js';
 import { RequestDrainInterceptor } from './common/http/request-drain.interceptor.js';
 import { DenyByDefaultGuard } from './common/security/deny-by-default.guard.js';
@@ -27,6 +26,7 @@ import { MetaSubscriptionsModule } from './meta-subscriptions/meta-subscriptions
 import { FacebookPagesModule } from './meta-facebook/facebook-pages.module.js';
 import { InternalAssetOperationsModule } from './internal-operations/internal-operations.module.js';
 import { OperationsModule } from './operations/operations.module.js';
+import { ObservabilityModule } from './observability/observability.module.js';
 
 @Module({})
 export class ApiModule {
@@ -60,6 +60,7 @@ export class ApiModule {
     return {
       module: ApiModule,
       imports: [
+        ObservabilityModule.register(environment),
         HealthModule.register(environment),
         metaAssetsModule,
         metaWebhooksModule,
@@ -76,7 +77,6 @@ export class ApiModule {
         operationsModule,
       ],
       providers: [
-        { provide: STRUCTURED_LOGGER, useClass: ConsoleStructuredLogger },
         { provide: CLOCK, useClass: SystemMonotonicClock },
         { provide: REQUEST_DRAIN, useClass: RequestDrain },
         { provide: APP_GUARD, useClass: DenyByDefaultGuard },
