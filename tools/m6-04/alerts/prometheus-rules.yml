@@ -1,0 +1,77 @@
+groups:
+  - name: ca-meta-api-observability
+    interval: 30s
+    rules:
+      - alert: CaMetaApiServerErrorRateHigh
+        expr: |
+          (sum(rate(ca_meta_api_http_requests_total{route_group!~"health|metrics",outcome=~"dependency_failure|internal_failure"}[5m]))
+            / clamp_min(sum(rate(ca_meta_api_http_requests_total{route_group!~"health|metrics"}[5m])), 1)) > 0.05
+          and sum(increase(ca_meta_api_http_requests_total{route_group!~"health|metrics"}[5m])) > 20
+        for: 10m
+        labels:
+          severity: warning
+          owner_role: "SRE / operations"
+          owner_assignee: unassigned
+          runbook: "tools/m6-04/runbooks/operations.md#api-errors"
+        annotations:
+          summary: "API dependency or internal error rate is over 5%"
+          description: "Inspect outcome and route_group, then correlate safe requestId/correlationId logs. Do not attach tokens or request bodies."
+
+      - alert: CaMetaGraphFailureRateHigh
+        expr: |
+          (sum(rate(ca_meta_graph_calls_total{outcome=~"FAILED|UNKNOWN|PARTIAL"}[5m]))
+            / clamp_min(sum(rate(ca_meta_graph_calls_total[5m])), 1)) > 0.05
+          and sum(increase(ca_meta_graph_calls_total[5m])) > 20
+        for: 10m
+        labels:
+          severity: warning
+          owner_role: "Meta integration / SRE"
+          owner_assignee: unassigned
+          runbook: "tools/m6-04/runbooks/operations.md#meta-graph-failure"
+        annotations:
+          summary: "Meta Graph operation failure ratio is over 5%"
+          description: "Group by product, operation and safe category; distinguish provider categories from configuration/credential/runtime failures."
+
+      - alert: CaMetaWebhookAckLatencyHigh
+        expr: |
+          (sum(increase(ca_meta_webhook_ingress_duration_ms_bucket{outcome="accepted",le="3000"}[10m]))
+            / clamp_min(sum(increase(ca_meta_webhook_ingress_duration_ms_count{outcome="accepted"}[10m])), 1)) < 0.99
+          and sum(increase(ca_meta_webhook_ingress_duration_ms_count{outcome="accepted"}[10m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+          owner_role: "SRE / operations"
+          owner_assignee: unassigned
+          runbook: "tools/m6-04/runbooks/operations.md#webhook-ingress"
+        annotations:
+          summary: "Fewer than 99% of accepted webhooks were durably acknowledged within 3 seconds"
+          description: "Check database and ingress latency first. This alert excludes rejected signatures, invalid payloads and configuration failures."
+
+      - alert: CaMetaWebhookExpectedActivityMissing
+        expr: |
+          ca_meta_webhook_expected_activity_interval_seconds > 0
+          and ((ca_meta_webhook_last_ack_timestamp_seconds > 0
+                and time() - ca_meta_webhook_last_ack_timestamp_seconds > 3 * ca_meta_webhook_expected_activity_interval_seconds)
+            or (ca_meta_webhook_last_ack_timestamp_seconds == 0
+                and time() - ca_meta_api_process_start_timestamp_seconds > 3 * ca_meta_webhook_expected_activity_interval_seconds))
+        for: 10m
+        labels:
+          severity: warning
+          owner_role: "Operations / Meta integration"
+          owner_assignee: unassigned
+          runbook: "tools/m6-04/runbooks/operations.md#expected-webhook-silence"
+        annotations:
+          summary: "Expected webhook activity has not been durably acknowledged"
+          description: "Only enable after an authorized environment-specific baseline is agreed. A zero expected interval disables this alert."
+
+      - alert: CaMetaOperationalSignalSourceUnavailable
+        expr: ca_meta_observability_source_available{signal=~"credential_health|subscription_drift|queue_backlog|dead_letter|projection_lag"} == 0
+        for: 15m
+        labels:
+          severity: info
+          owner_role: "SRE / operations"
+          owner_assignee: unassigned
+          runbook: "tools/m6-04/runbooks/operations.md#unavailable-signal-sources"
+        annotations:
+          summary: "An operational aggregate signal is not instrumented"
+          description: "This reports coverage, not a zero count or a detected tenant incident. Keep dependent activation gated until a safe aggregate source exists."

@@ -1,0 +1,15 @@
+{
+  "uid": "ca-meta-flows-m6-04",
+  "title": "CA Meta product flows",
+  "tags": ["ca-meta", "m6-04", "release-artifact"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-7d", "to": "now" },
+  "panels": [
+    { "id": 1, "type": "timeseries", "title": "Meta Graph operations by product and outcome", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "gridPos": { "x": 0, "y": 0, "w": 24, "h": 9 }, "targets": [{ "expr": "sum by (product, outcome) (rate(ca_meta_graph_calls_total[5m]))", "legendFormat": "{{product}} / {{outcome}}", "refId": "A" }] },
+    { "id": 2, "type": "timeseries", "title": "Provider and internal failure categories", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "gridPos": { "x": 0, "y": 9, "w": 24, "h": 9 }, "targets": [{ "expr": "sum by (product, operation, category) (rate(ca_meta_graph_calls_total{outcome=~\"FAILED|UNKNOWN|PARTIAL\"}[5m]))", "legendFormat": "{{product}} / {{operation}} / {{category}}", "refId": "A" }] },
+    { "id": 3, "type": "text", "title": "Flow coverage", "gridPos": { "x": 0, "y": 18, "w": 24, "h": 5 }, "options": { "mode": "markdown", "content": "Products are finite labels: `FACEBOOK`, `INSTAGRAM`, `WHATSAPP_EXCLUSIVE`, and `WHATSAPP_COEXISTENCE`. No Meta account, asset, phone, tenant, or payload fields are exported as labels. A product with no calls has no data; that is not evidence of successful onboarding or active permissions. Real flow lastVerifiedAt and Meta/Suite4 staging evidence remain Not confirmed." } }
+  ]
+}

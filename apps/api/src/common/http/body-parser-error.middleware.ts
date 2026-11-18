@@ -14,11 +14,13 @@ export function bodyParserErrorMiddleware(logger: StructuredLogger): ErrorReques
       return;
     }
 
-    const requestId = (request as typeof request & { requestId?: string }).requestId ?? 'unknown';
+    const contextRequest = request as typeof request & { requestId?: string; correlationId?: string };
+    const requestId = contextRequest.requestId ?? 'unknown';
+    const correlationId = contextRequest.correlationId ?? requestId;
     const tooLarge = error.type === 'entity.too.large' || error.status === 413;
     const status = tooLarge ? 413 : 400;
     const code = tooLarge ? 'PAYLOAD_TOO_LARGE' : 'VALIDATION_FAILED';
-    logger.write({ level: 'warn', event: 'http.body_rejected', requestId, statusCode: status, code });
+    logger.write({ level: 'warn', event: 'http.body_rejected', requestId, correlationId, statusCode: status, code });
     response.status(status).json(
       tooLarge
         ? errorEnvelope(code, 'The submitted content is too large.', requestId, false, 'REDUCE_REQUEST')
