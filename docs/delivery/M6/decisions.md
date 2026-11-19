@@ -40,3 +40,17 @@
 - **Evidence:** PR #167 head `9a67dff70e437c1bdf52445198493c30fd9886c8`, CI run `44398836758`: desktop-candidate, MariaDB and image scans passed; `m2-08-security` failed on one new moderate dev-only `pacote`/`sigstore` tuple under `node_modules/pacote`, with zero severity escalations. The full audit has zero high/critical findings and production audit has zero findings. No safe semver-compatible Angular 21 resolution was confirmed.
 - **Decision:** Keep PR #167 open and exclude its dependency changes from `desktop/milestone-m6` and the consolidated PR while the required check is red. Do not weaken the M2.08 scanner, invent a waiver or close #70.
 - **Consequence:** M6.06's M6.01–M6.05 release gate remains **Not confirmed**. The consolidated PR may present the other locally deliverable packages for review, but it must say M6 is not complete while this P0 dependency remains unresolved.
+
+## 2026-11-19 — refresh pinned NGINX image after M6 aggregate scan
+
+- **Issue / gate:** M6.02/#70 audits runtime images; M6 aggregate CI must remain fail-closed on HIGH/CRITICAL image vulnerabilities.
+- **Evidence:** Image scan run 44554604698 on desktop/milestone-m6 candidate c7673bad0c3d0ca2f0978985a402793ba0ecd9e8 found three CRITICAL and three HIGH findings against NGINX 1.30.6-r1, each with fixed version 1.30.7-r0. Official NGINX [security advisories](https://nginx.org/en/security_advisories.html) list 1.30.7+ as not vulnerable to the reported issues. The official [nginx-unprivileged image package](https://github.com/nginx/docker-nginx-unprivileged/pkgs/container/nginx-unprivileged/versions?filters%5Bversion_type%5D=tagged) lists the stable Alpine 3.24 image at digest 0c53a1f2890c3526bfd201440f0fd3970e5b78f80630f58284aad0d34b5ec7bd; docker buildx imagetools inspect returned that same manifest-list digest from both GHCR and ECR Public.
+- **Decision:** Pin the web image and its approved CI smoke mirror to the exact patched digest. Keep the Trivy HIGH/CRITICAL threshold unchanged and require the candidate scan to pass.
+- **Consequence:** This remediation addresses the NGINX image findings only. M6.02/#70 remains blocked by PR #167's separate moderate dev-only pacote/sigstore dependency finding in required m2-08-security; no waiver or scanner relaxation is authorized.
+
+## 2026-11-19 — distinguish APK checksums from EA token markers
+
+- **Issue / gate:** M6.02/#70 requires the final-image smoke to detect credential markers while avoiding false positives from image metadata.
+- **Evidence:** Candidate CI run 44556283133 built the web image with the updated NGINX digest, then failed before Trivy because the M2.06 metadata scan classified a value in `web/image-metadata.json` as a credential marker. Read-only inspection of the official NGINX 1.30.7 image config identified the source: its package-install history contains an unprefixed, 64-character hexadecimal APK SHA-256 beginning with `EA`, which matched the broad alphanumeric heuristic. This finding is limited to the upstream image's public build history; no image layer was scanned and the Trivy jobs were skipped.
+- **Decision:** Exclude all-hex strings from the `EA` token heuristic while preserving detection of mixed-alphanumeric EA markers, JWT/PEM patterns, named credential assignments, all layer/path checks, and the HIGH/CRITICAL Trivy threshold.
+- **Consequence:** The exact updated image smoke and candidate CI must pass before integration. The heuristic remains a bounded marker scan; it does not prove absence of all secrets or credentials.

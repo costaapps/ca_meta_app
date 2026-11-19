@@ -17,7 +17,7 @@ $workerContainer = "m206-worker-$suffix"
 $webImage = "ca-meta-web:m206-$suffix"
 $apiImage = "ca-meta-api:m206-$suffix"
 $approvedNodeImageMirror = 'docker.io/library/node@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85'
-$approvedNginxImageMirror = 'ghcr.io/nginx/nginx-unprivileged@sha256:2daef144b574804198caccc4041819fa1801ecd5df2252a39646bfa2b1ff3bea'
+$approvedNginxImageMirror = 'ghcr.io/nginx/nginx-unprivileged@sha256:0c53a1f2890c3526bfd201440f0fd3970e5b78f80630f58284aad0d34b5ec7bd'
 $nodeBuildArguments = @()
 $nginxBuildArguments = @()
 if ($NodeImage) {
@@ -162,7 +162,8 @@ function Test-AppTextContent {
   }
   if (-not $inApp) { return }
 
-  $credentialPattern = '(?i)-----BEGIN (?:(?:RSA|EC|OPENSSH|DSA) )?PRIVATE KEY-----|(?<!sha256:)\bEA[A-Za-z0-9]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|\b(?:META_APP_SECRET|META_ACCESS_TOKEN|API_DATABASE_PASSWORD|MARIADB_ROOT_PASSWORD)\s*[:=]\s*["'']?(?!change_me|replace_me|placeholder|synthetic_unused|your_|<)[A-Za-z0-9_./+=-]{8,}'
+  # NGINX package history contains an unprefixed APK SHA-256 beginning with EA; do not treat all-hex checksums as token markers.
+  $credentialPattern = '(?i)-----BEGIN (?:(?:RSA|EC|OPENSSH|DSA) )?PRIVATE KEY-----|(?<!sha256:)\bEA(?![A-F0-9]{20,}\b)[A-Za-z0-9]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|\b(?:META_APP_SECRET|META_ACCESS_TOKEN|API_DATABASE_PASSWORD|MARIADB_ROOT_PASSWORD)\s*[:=]\s*["'']?(?!change_me|replace_me|placeholder|synthetic_unused|your_|<)[A-Za-z0-9_./+=-]{8,}'
   if ($Content -match $credentialPattern) {
     $displayName = [System.IO.Path]::GetFileName($Name.Replace('\', '/'))
     throw "Credential marker found in a final image application file ($ImageKind/$displayName); value suppressed."
