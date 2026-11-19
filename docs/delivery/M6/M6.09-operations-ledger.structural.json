@@ -1,0 +1,106 @@
+{
+  "formatVersion": 1,
+  "package": "M6.09",
+  "status": "preparation-only",
+  "evidenceMode": "structural-only",
+  "operationalRunStarted": false,
+  "deploymentReady": false,
+  "source": {
+    "milestoneBranch": "desktop/milestone-m6",
+    "milestoneBaseSha": "81e22140086167209d8b1d2bf6908b399794defa",
+    "releaseCandidateRevision": null,
+    "releaseManifestRef": null
+  },
+  "owners": {
+    "operations": null,
+    "support": null,
+    "security": null,
+    "product": null,
+    "status": "Not confirmed"
+  },
+  "hypercare": {
+    "status": "Not confirmed",
+    "issueProposedMinimumDays": 7,
+    "approvedStartAt": null,
+    "approvedEndAt": null,
+    "observedDurationDays": null,
+    "coverageScheduleRef": null,
+    "requiredRoutineObservations": ["token-expiry-and-reauth", "scheduled-jobs", "queue-recovery", "projection-refresh", "backup-and-restore"],
+    "observations": []
+  },
+  "slo": {
+    "source": "M6.04 contains proposals, not ratified service objectives",
+    "ratified": false,
+    "window": null,
+    "ownerReference": null,
+    "metricEvidence": {
+      "apiAvailability": { "observedValue": null, "evidenceReferences": [], "status": "Not confirmed" },
+      "webhookAckLatency": { "observedValue": null, "evidenceReferences": [], "status": "Not confirmed" },
+      "grantAndTokenHealth": { "observedValue": null, "evidenceReferences": [], "status": "Not confirmed" },
+      "subscriptionDrift": { "observedValue": null, "evidenceReferences": [], "status": "Not confirmed" },
+      "queueAndDeadLetter": { "observedValue": null, "evidenceReferences": [], "status": "Not confirmed" },
+      "projectionLag": { "observedValue": null, "evidenceReferences": [], "status": "Not confirmed" },
+      "userFacingErrors": { "observedValue": null, "evidenceReferences": [], "status": "Not confirmed" }
+    },
+    "status": "Not confirmed"
+  },
+  "operations": {
+    "incidentRecords": [],
+    "incidentHistoryStatus": "Not confirmed",
+    "stalledJobCount": null,
+    "unownedJobCount": null,
+    "stalledProjectionCount": null,
+    "queueAndProjectionStatus": "Not confirmed",
+    "routineObservations": [],
+    "status": "Not confirmed"
+  },
+  "improvementAndDebtRegister": {
+    "status": "Not confirmed",
+    "requiredFields": ["id", "description", "priority", "risk", "ownerReference", "status", "evidenceReferences"],
+    "closureBlockerPriorities": ["P0", "P1"],
+    "scopeExpansionAllowedBeforeStability": false,
+    "entries": []
+  },
+  "support": {
+    "userGuideStatus": "Not confirmed",
+    "supportRunbookStatus": "draft-only",
+    "authorizedUserReviewReference": null,
+    "secondOperatorReviewReference": null,
+    "ticketingRouteReference": null,
+    "secretHandling": "never request or copy access tokens, app secrets, passwords or verification codes",
+    "databaseHandling": "no manual SQL or direct credential edits for support recovery",
+    "unknownDeliveryOutcomeMayBeRetried": false,
+    "status": "Not confirmed"
+  },
+  "adoption": {
+    "status": "Not confirmed",
+    "measurements": {
+      "activeUsers": null,
+      "connectionAddsByFlow": null,
+      "successfulReauthByFlow": null,
+      "supportContacts": null,
+      "userAcceptanceReference": null
+    },
+    "evidenceReferences": []
+  },
+  "legacyDependencies": {
+    "status": "Not confirmed",
+    "hostingerRouteInventoryReference": null,
+    "callbackAndCronInventoryReference": null,
+    "globalTokenConsumerInventoryReference": null,
+    "retirementDecisionReference": null
+  },
+  "dependencies": {
+    "m6_04": { "milestoneEvidence": "observability code and local tests integrated", "productionReceiverAndSloRatification": "Not confirmed" },
+    "m6_05": { "milestoneEvidence": "synthetic isolated restore report integrated", "productionBackupKeyCustodyAndIndependentRestore": "Not confirmed" },
+    "m6_08": { "pr": 173, "prHeadSha": "acf2cf53fc55743d30d9217bc72e4f50ee3faaa7", "milestoneSha": "81e22140086167209d8b1d2bf6908b399794defa", "evidence": "structural preparation only; no canary executed", "integrationAndRealRollback": "Not confirmed" },
+    "m5_10": { "productionSupportAndDiagnosticUse": "Not confirmed" }
+  },
+  "acceptance": {
+    "sloObservedForOwnerRatifiedWindow": "Not confirmed",
+    "noUnownedStalledJobsOrProjections": "Not confirmed",
+    "runbooksReproducedByAnotherOperator": "Not confirmed",
+    "userManagesConnectionsWithoutSecretsOrManualSql": "Not confirmed",
+    "legacyAndGlobalTokenDependenciesInventoried": "Not confirmed"
+  }
+}
