@@ -57,6 +57,8 @@
   "improvementAndDebtRegister": {
     "status": "Not confirmed",
     "requiredFields": ["id", "description", "priority", "risk", "ownerReference", "status", "evidenceReferences"],
+    "closureBlockerPriorities": ["P0", "P1"],
+    "scopeExpansionAllowedBeforeStability": false,
     "entries": []
   },
   "support": {

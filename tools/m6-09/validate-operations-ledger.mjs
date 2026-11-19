@@ -73,6 +73,7 @@ function validateOperationsLedger(ledger) {
   const debtRegister = ledger.improvementAndDebtRegister;
   requireValue(debtRegister?.status === 'Not confirmed', 'The operational debt register must remain Not confirmed until reviewed.');
   requireValue(JSON.stringify(debtRegister.requiredFields) === JSON.stringify(requiredDebtRegisterFields), 'The operational debt register schema is incomplete.');
+  requireValue(JSON.stringify(debtRegister.closureBlockerPriorities) === JSON.stringify(['P0', 'P1']) && debtRegister.scopeExpansionAllowedBeforeStability === false, 'P0/P1 debt must block closure, and scope cannot expand before stability.');
   requireValue(Array.isArray(debtRegister.entries) && debtRegister.entries.length === 0, 'No unverified operational debt entry or owner may be fabricated.');
 
   requireValue(ledger.support?.status === 'Not confirmed' && ledger.support.userGuideStatus === 'Not confirmed', 'User guide and support workflow require real review.');
@@ -146,6 +147,14 @@ export async function runOperationsLedgerValidation(path = resolve('docs/deliver
   const fabricatedDebt = structuredClone(ledger);
   fabricatedDebt.improvementAndDebtRegister.entries.push({ id: 'synthetic', ownerReference: 'unassigned' });
   cases.push(expectReject('fabricated debt register entry', () => validateOperationsLedger(fabricatedDebt)));
+
+  const removedDebtGate = structuredClone(ledger);
+  removedDebtGate.improvementAndDebtRegister.closureBlockerPriorities = [];
+  cases.push(expectReject('missing P0/P1 closure gate', () => validateOperationsLedger(removedDebtGate)));
+
+  const prematureExpansion = structuredClone(ledger);
+  prematureExpansion.improvementAndDebtRegister.scopeExpansionAllowedBeforeStability = true;
+  cases.push(expectReject('premature scope expansion', () => validateOperationsLedger(prematureExpansion)));
 
   return { ...result, cases };
 }
