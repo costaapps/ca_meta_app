@@ -9,7 +9,7 @@ Updated 2026-11-19 (America/Sao_Paulo).
 - The latest package integrations are M6.06 ledger refresh PR #180 / squash `f20072797370af3b9b9821e289929227985f5ae7` and M6.07 dependency-reference refresh PR #181 / squash `d4346e0795b11e223237cadd43e618dedafa2333`. All M6 package PRs and follow-ups are integrated by squash on `desktop/milestone-m6`.
 - Current package PRs/squashes, evidence and limitations are in [progress.md](./progress.md); issue bodies #66–#75 and the full M6 prompt were reread.
 - M6.02/#70 PR #167 head `d782276361424aa63fdfc3e8802494ff6b4fdb0a` is integrated as `83364168b0dfbe0404cf8dae100ae1d51a07ba84`; run `44584757470` and orchestrator `44584757958` passed with zero new dependency tuples. The historical Angular 21 failure remains documented as history; M2.08 no longer blocks integration. Issue #70 remains open for staging and independent multi-process evidence.
-- Consolidated PR #177 to develop is an open draft for final acceptance. Its head and checks must be read from GitHub. Do not merge it; the user requested acceptance before final integration.
+- Consolidated PR #177 to develop is open and ready for the user's final review. Aggregate CI passed on head `29e28b6b80a7e5481889e6d4e3f5dbfc2e7c02b3`; the final status-document sync will advance its head and rerun aggregate CI. Read the exact current head and checks from GitHub. Do not merge until the user accepts it.
 
 ## Worktrees and active writers
 

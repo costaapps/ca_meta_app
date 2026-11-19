@@ -28,7 +28,7 @@ Package CI and review evidence belongs to the exact heads above; it does not pro
 
 ## Consolidated delivery and next action
 
-Consolidated PR [#177](https://github.com/costaapps/ca_meta_app/pull/177) targets develop at `b54bde1ed170a4304e281383f70ded6ed0a4f5dc`. Aggregate CI passed on latest package-integrated head `d4346e0795b11e223237cadd43e618dedafa2333` (run `44589495584`, orchestrator `44589495687`). This tracking-document commit creates another head and requires exact-head checks; use GitHub for the current candidate and result. Every M6 package PR and follow-up is integrated by squash. Keep #177 in draft until the final exact-head aggregate checks pass and the user reviews it; external evidence still gates declaring M6 complete and any production activation or legacy retirement.
+Consolidated PR [#177](https://github.com/costaapps/ca_meta_app/pull/177) targets develop at `b54bde1ed170a4304e281383f70ded6ed0a4f5dc`. Aggregate CI passed on latest package-integrated head `d4346e0795b11e223237cadd43e618dedafa2333` (run `44589495584`, orchestrator `44589495687`) and on documentation head `29e28b6b80a7e5481889e6d4e3f5dbfc2e7c02b3` (run `44590242436`, orchestrator `44590242453`). The final status-document sync creates another head and must pass its exact-head checks. PR #177 is ready for the user's final review; do not merge until the user accepts it. External evidence still gates declaring M6 complete and any production activation or legacy retirement.
 
 ## Environment and validation policy
 
