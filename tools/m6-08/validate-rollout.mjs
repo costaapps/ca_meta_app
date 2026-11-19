@@ -15,8 +15,20 @@ const requiredFunctions = [
   'OPERATION_RELAY',
   'WEBHOOK_DISPATCH',
 ];
+const requiredMonitoringSignals = [
+  'onboarding',
+  'send-and-return',
+  'credential-state',
+  'subscription-drift',
+  'webhook-ack',
+  'queue-backlog',
+  'projection',
+  'error-rate',
+  'parity',
+];
 const allowedOwners = ['LEGACY', 'CENTRAL', 'PROJECTOR', 'RELAY', 'NEW'];
 const shaPattern = /^[0-9a-f]{40}$/;
+const requiredRollbackMethod = 'scoped route/flag and writer-matrix transition only after current-version evidence and external-outcome reconciliation';
 
 function requireValue(condition, message) {
   if (!condition) throw new Error(message);
@@ -67,6 +79,7 @@ function validateLedger(ledger) {
   requireValue(matrix.unknownWriterBlocksExpansion === true && matrix.credentialAction === 'NONE' && matrix.grantAction === 'NONE', 'Unknown writer or credential/grant mutation must block rollout.');
 
   requireValue(ledger.monitoring?.status === 'Not confirmed' && ledger.monitoring.ownerReference === null && ledger.monitoring.evidenceReferences?.length === 0, 'Monitoring owner/evidence must remain Not confirmed.');
+  requireValue(JSON.stringify(ledger.monitoring.signals) === JSON.stringify(requiredMonitoringSignals), 'Required monitoring signal coverage is incomplete or reordered.');
   requireValue(Object.values(ledger.monitoring?.thresholds ?? {}).length > 0 && Object.values(ledger.monitoring.thresholds).every((value) => value === null), 'Unratified SLO thresholds and windows must not be guessed.');
   requireValue(ledger.abort?.status === 'Not confirmed' && ledger.abort.operatorReference === null && ledger.abort.evidenceReferences?.length === 0, 'Abort evidence and ownership must remain Not confirmed.');
   for (const trigger of ['CROSS_TENANT_ACCESS', 'SECRET_DISCLOSURE', 'DOUBLE_SEND']) {
@@ -76,6 +89,7 @@ function validateLedger(ledger) {
 
   const rollback = ledger.rollback;
   requireValue(rollback?.status === 'Not confirmed', 'Rollback cannot be claimed without an authorized rehearsal.');
+  requireValue(rollback.method === requiredRollbackMethod, 'Rollback must use the scoped, version-checked route/flag and writer transition contract.');
   for (const field of ['previousManifestSha256', 'backupReference', 'restoreEvidenceReference', 'operatorReference', 'auditTrailReference', 'rpo', 'rto', 'externalEffectsReconciled']) {
     requireValue(rollback[field] === null, `Rollback field ${field} must remain unassigned.`);
   }
@@ -117,6 +131,14 @@ export async function runRolloutValidation(path = resolve('docs/delivery/M6/M6.0
   const guessedThreshold = structuredClone(ledger);
   guessedThreshold.monitoring.thresholds.errorRate = 0.01;
   cases.push(expectReject('unratified SLO threshold', () => validateLedger(guessedThreshold)));
+
+  const missingSignal = structuredClone(ledger);
+  missingSignal.monitoring.signals.pop();
+  cases.push(expectReject('missing required monitoring signal', () => validateLedger(missingSignal)));
+
+  const unsafeRollback = structuredClone(ledger);
+  unsafeRollback.rollback.method = 'restore prior credentials';
+  cases.push(expectReject('unsafe rollback method', () => validateLedger(unsafeRollback)));
 
   return { ...result, cases };
 }
