@@ -3,10 +3,10 @@
   "package": "M6.06",
   "status": "preparation-only",
   "deploymentReady": false,
-  "observedAt": "2026-11-18",
+  "observedAt": "2026-11-19",
   "source": {
     "milestoneBranch": "desktop/milestone-m6",
-    "milestoneBaseSha": "f09c12df0cbd77be4f4271d71e08c13e1913a781",
+    "milestoneBaseSha": "05ab14af8638e11e2dd99a39b06fe4fb0f50e0d8",
     "releaseCommit": null,
     "releaseTag": null,
     "releaseId": null,
@@ -20,40 +20,50 @@
       "pr": 170,
       "branch": "desktop/m6-01",
       "headSha": "7b9930622369b6ee68a2903c3b1bf4ff80eb8e03",
-      "state": "open"
+      "state": "merged",
+      "milestoneSha": "a856bf4319519d75c1c02907afbfb477a453bf08",
+      "requiredCheck": { "runId": 44389497887, "status": "success" }
     },
     {
       "package": "M6.02",
       "issue": 70,
       "pr": 167,
       "branch": "desktop/m6-02",
-      "headSha": "0f37cf6e42e1d84a761d956029fe0895c6bb1025",
-      "state": "open",
-      "note": "This is the GitHub PR head observed at capture time; the local unpushed candidate is being revised and must be refreshed before promotion."
+      "headSha": "9a67dff70e437c1bdf52445198493c30fd9886c8",
+      "state": "blocked",
+      "milestoneSha": null,
+      "requiredCheck": { "runId": 44398836758, "status": "failure" },
+      "note": "M2.08 m2-08-security reports one new moderate dev-only pacote/sigstore tuple; the required check is not green."
     },
     {
       "package": "M6.03",
       "issue": 66,
       "pr": 168,
       "branch": "desktop/m6-03",
-      "headSha": "f217108140c7b1b67c707b0e8dde833d1f171850",
-      "state": "open"
+      "headSha": "251bc7c392b1d796d7365310a452792865d611b9",
+      "state": "merged",
+      "milestoneSha": "5629ff9f81401f673ef91d2de5de5e1faadaf7eb",
+      "requiredCheck": { "runId": 44398162113, "status": "success" }
     },
     {
       "package": "M6.04",
       "issue": 67,
       "pr": 169,
       "branch": "desktop/m6-04",
-      "headSha": "bcd6de9f8fea4f7b7ea805ea6aa1dfecc07f792f",
-      "state": "open"
+      "headSha": "faa0a8745b66742b5aaf8648fa53ecb530883901",
+      "state": "merged",
+      "milestoneSha": "42f0a4d32edd33c6a47a32f1e260481adaa4afd6",
+      "requiredCheck": { "runId": 44399644424, "status": "success" }
     },
     {
       "package": "M6.05",
       "issue": 68,
       "pr": 171,
       "branch": "desktop/m6-05",
-      "headSha": "d73834ae2da1aeb5e85734aa9c50fd18438e6f1e",
-      "state": "open"
+      "headSha": "bcf9fc0314ec7480179aef3dc1209c1a4bcea62d",
+      "state": "merged",
+      "milestoneSha": "3da17eff8fe2fdeb914013c895744716fec8fd6e",
+      "requiredCheck": { "runId": 44400610909, "status": "success" }
     }
   ],
   "targets": {
