@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
@@ -13,6 +13,7 @@ import { WhatsAppTemplate } from '../../../../core/models/channel.model';
   standalone: true,
   imports: [CommonModule, FormsModule, RouterModule],
   templateUrl: './channel-templates.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./channel-templates.component.scss']
 })
 export class ChannelTemplatesComponent implements OnInit, OnDestroy {

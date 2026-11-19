@@ -5,7 +5,7 @@
 ### Angular Signals
 - URL: https://angular.dev/guide/signals
 - Topic: Signals overview and reactive model
-- Applicable version: Angular 21 codebase, doc page currently served by Angular docs
+- Guidance remains applicable to the Angular 22 codebase; this reference was consulted against Angular 21 on 2026-06-23.
 - Consulted on: 2026-06-23
 - Decision used here:
   - Signals are available and mature enough to use selectively, but this repo does not currently use them and should not be force-migrated without a concrete state need.
@@ -13,7 +13,7 @@
 ### RxJS Interop With Signals
 - URL: https://angular.dev/ecosystem/rxjs-interop
 - Topic: `@angular/core/rxjs-interop`, `toSignal`, subscription lifecycle
-- Applicable version: Angular 21 codebase, doc page currently served by Angular docs
+- Guidance remains applicable to the Angular 22 codebase; this reference was consulted against Angular 21 on 2026-06-23.
 - Consulted on: 2026-06-23
 - Decision used here:
   - If Signals are introduced later, bridge Observables intentionally and create each signal once instead of repeatedly.
@@ -21,7 +21,7 @@
 ### HttpClient Overview
 - URL: https://angular.dev/guide/http
 - Topic: typed responses, error handling, interception, testing
-- Applicable version: Angular 21 codebase, doc page currently served by Angular docs
+- Guidance remains applicable to the Angular 22 codebase; this reference was consulted against Angular 21 on 2026-06-23.
 - Consulted on: 2026-06-23
 - Decision used here:
   - Continue using `HttpClient` with typed response shapes as the primary backend boundary.
@@ -29,7 +29,7 @@
 ### Angular Style Guide
 - URL: https://angular.dev/style-guide
 - Topic: consistency, file naming, project structure, `apps/web/src/main.ts`
-- Applicable version: Angular 21 codebase, doc page currently served by Angular docs
+- Guidance remains applicable to the Angular 22 codebase; this reference was consulted against Angular 21 on 2026-06-23.
 - Consulted on: 2026-06-23
 - Decision used here:
   - Preserve standalone, feature-oriented structure and keep file naming aligned with primary identifiers.

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import { OperationsDiagnosticsService, type OperationsDiagnostics, type OperationsDiagnosticSection } from '../../core/portal/operations-diagnostics.service';
@@ -11,6 +11,7 @@ import { safeRequestId } from '../../core/portal/safe-api-error';
   standalone: true,
   imports: [CommonModule, RouterLink],
   templateUrl: './operations-diagnostics.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './operations-diagnostics.component.scss',
 })
 export class OperationsDiagnosticsComponent implements OnInit, OnDestroy {

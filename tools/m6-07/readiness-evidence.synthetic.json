@@ -1,0 +1,382 @@
+{
+  "schemaVersion": 1,
+  "package": "M6.07",
+  "issue": 72,
+  "snapshot": {
+    "preparedOn": "2026-11-19",
+    "baseSha": "f20072797370af3b9b9821e289929227985f5ae7",
+    "issueState": "open",
+    "issueUpdatedAt": "2026-11-19T14:54:15Z",
+    "kind": "SYNTHETIC_READINESS_SKELETON"
+  },
+  "decision": {
+    "status": "Not confirmed",
+    "activationAllowed": false,
+    "externalEvidenceWasCollected": false,
+    "note": "This fixture does not represent any real Meta app, business, customer, asset, Suite4/Msg4 identity, grant, approval, or environment."
+  },
+  "dependencies": [
+    {
+      "key": "M4.01",
+      "issue": 42,
+      "issueUrl": "https://github.com/costaapps/ca_meta_app/issues/42",
+      "prReferenceStatus": "VERIFIED",
+      "pullRequestUrl": "https://github.com/costaapps/ca_meta_app/pull/128",
+      "integratedSha": "65233723351432d5f49306666f7fe777f7ead8b3",
+      "consolidatedPullRequestUrl": "https://github.com/costaapps/ca_meta_app/pull/151",
+      "consolidatedIntegratedSha": "c3e9baa75ea793d74292e62038e0d8d11bb61295"
+    },
+    {
+      "key": "M6.01",
+      "issue": 69,
+      "issueUrl": "https://github.com/costaapps/ca_meta_app/issues/69",
+      "prReferenceStatus": "VERIFIED",
+      "pullRequestUrl": "https://github.com/costaapps/ca_meta_app/pull/170",
+      "integratedSha": "a856bf4319519d75c1c02907afbfb477a453bf08",
+      "consolidatedPullRequestUrl": null,
+      "consolidatedIntegratedSha": null
+    },
+    {
+      "key": "M6.02",
+      "issue": 70,
+      "issueUrl": "https://github.com/costaapps/ca_meta_app/issues/70",
+      "prReferenceStatus": "VERIFIED",
+      "pullRequestUrl": "https://github.com/costaapps/ca_meta_app/pull/167",
+      "integratedSha": "83364168b0dfbe0404cf8dae100ae1d51a07ba84",
+      "consolidatedPullRequestUrl": null,
+      "consolidatedIntegratedSha": null
+    },
+    {
+      "key": "M6.06",
+      "issue": 71,
+      "issueUrl": "https://github.com/costaapps/ca_meta_app/issues/71",
+      "prReferenceStatus": "VERIFIED",
+      "pullRequestUrl": "https://github.com/costaapps/ca_meta_app/pull/176",
+      "integratedSha": "da234f4ae7900a078a7973d79ee49ee3d074d32b",
+      "consolidatedPullRequestUrl": null,
+      "consolidatedIntegratedSha": null
+    }
+  ],
+  "applicationLevelGates": [
+    {
+      "id": "app_identity_and_configuration",
+      "status": "Not confirmed",
+      "evidenceReference": null,
+      "proofRequired": [
+        "Redacted app type, owning/claiming business reference, app mode, exact login configurations, callback origins, Graph API version and Embedded Signup version for the candidate.",
+        "Change history or approved config export bound to the candidate SHA; no app ID or secret in this repository."
+      ]
+    },
+    {
+      "id": "permission_and_feature_map",
+      "status": "Not confirmed",
+      "evidenceReference": null,
+      "proofRequired": [
+        "Operation-to-permission/feature mapping separately for all five auth variants; request only capabilities currently used.",
+        "Current App Dashboard access level and per-permission/feature status; distinguish Standard from Advanced Access.",
+        "Redacted grant observation from a non-role test user where Advanced Access is required; do not treat app-level access as a customer grant."
+      ]
+    },
+    {
+      "id": "app_review",
+      "status": "Not confirmed",
+      "evidenceReference": null,
+      "proofRequired": [
+        "Per-permission/feature App Review result, submission revision, any reviewer conditions, and matching test walkthrough for each released capability.",
+        "App Live mode or a developer/admin/tester login alone is not acceptance evidence."
+      ]
+    },
+    {
+      "id": "developer_business_verification",
+      "status": "Not confirmed",
+      "evidenceReference": null,
+      "proofRequired": [
+        "Current verification result for the app-owning business and evidence that the exact app remains attached to that business.",
+        "Redacted status/date only; submitted company documents remain in Meta's restricted process."
+      ]
+    },
+    {
+      "id": "tech_provider_or_solution_partner",
+      "status": "Not confirmed",
+      "evidenceReference": null,
+      "conditionalApplicability": "Coexistence requires Solution Partner or Tech Provider per current Meta documentation. Tech Provider access verification is also independent of App Review for the applicable business-owned app permissions.",
+      "proofRequired": [
+        "Current access-verification/partner status for the provider business, app attachment, permission applicability and restriction check.",
+        "Do not present this provider status as customer asset permission, business verification for each customer, or App Review approval."
+      ]
+    },
+    {
+      "id": "data_handling_and_data_use_checkup",
+      "status": "Not confirmed",
+      "evidenceReference": null,
+      "proofRequired": [
+        "Current data-handling submissions and Data Use Checkup state when applicable, plus approved purposes/processors and user-data handling answers.",
+        "Product/privacy approval of purpose, consent, retention, deletion and customer notice per flow."
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "facebook_pages",
+      "productFamily": "FACEBOOK",
+      "flowVariant": "FACEBOOK",
+      "authVariant": "FACEBOOK_LOGIN_FOR_BUSINESS",
+      "status": "Not confirmed",
+      "releaseActivationAllowed": false,
+      "permissionMapping": {
+        "status": "Not confirmed",
+        "requiredEvidence": [
+          "Exact configured permissions/features mapped to Page discovery and each shipped Page operation.",
+          "App Review/access result and current non-role customer grant; do not infer a Page permission from tasks, target IDs, or another product flow."
+        ]
+      },
+      "customerGrant": {
+        "status": "Not confirmed",
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Authorized non-role test identity completes the exact Facebook Login for Business configuration.",
+          "Sanitized granted permissions, consent time, current Page role/task observation, and revoke/reauthorize outcome."
+        ]
+      },
+      "assetEligibility": {
+        "status": "Not confirmed",
+        "assetTypes": ["FACEBOOK_PAGE"],
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Page is returned by provider-authorized discovery, selected explicitly, and bound to the same current tenant, app, environment and authorization.",
+          "Operation-specific Page task/grant is verified; Page task is not treated as a permission.",
+          "Current Page subscription endpoint/fields and callback behavior are separately proven before any webhook-dependent capability is released."
+        ]
+      },
+      "walkthrough": {
+        "status": "Not confirmed",
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "One authorized test Page covers selected operation, partial grant, empty Page list, expiry/revoke, subscription and webhook result, safe recovery, and redacted support trace.",
+          "Unsupported comments, messages or other capabilities remain off until their own operation-to-permission and provider behavior are approved."
+        ]
+      }
+    },
+    {
+      "id": "instagram_facebook_login",
+      "productFamily": "INSTAGRAM",
+      "flowVariant": "INSTAGRAM_VIA_FACEBOOK_LOGIN",
+      "authVariant": "INSTAGRAM_VIA_FACEBOOK_LOGIN",
+      "status": "Not confirmed",
+      "releaseActivationAllowed": false,
+      "permissionMapping": {
+        "status": "Not confirmed",
+        "requiredEvidence": [
+          "Separate Facebook Login config, Facebook User token family and exact IG-operation permission map.",
+          "Reconcile each shipped operation with current Meta requirements; never copy Instagram Login scopes into this variant."
+        ]
+      },
+      "customerGrant": {
+        "status": "Not confirmed",
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Authorized non-role test identity grants this exact Facebook Login variant and its operation-specific permissions.",
+          "Sanitized consent, scopes, current grant and revoke/reauthorize observation."
+        ]
+      },
+      "assetEligibility": {
+        "status": "Not confirmed",
+        "assetTypes": ["INSTAGRAM_PROFESSIONAL_ACCOUNT", "FACEBOOK_PAGE"],
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Instagram Business/Creator account is eligible and linked to the selected Page.",
+          "Instagram-to-Page relation and both assets belong to the same tenant, app, environment and authorization.",
+          "Grant covers the exact operation; test subscription/webhook behavior independently."
+        ]
+      },
+      "walkthrough": {
+        "status": "Not confirmed",
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Non-role test identity proves account/Page discovery, only approved feature behavior, partial permission, missing Page relation, revoke/expiry, webhook and safe recovery.",
+          "Messages, comments or publishing stay blocked unless separately approved and implemented for this variant."
+        ]
+      }
+    },
+    {
+      "id": "instagram_instagram_login",
+      "productFamily": "INSTAGRAM",
+      "flowVariant": "INSTAGRAM_LOGIN",
+      "authVariant": "INSTAGRAM_LOGIN",
+      "status": "Not confirmed",
+      "releaseActivationAllowed": false,
+      "permissionMapping": {
+        "status": "Not confirmed",
+        "requiredEvidence": [
+          "Separate Instagram Login configuration, graph.instagram.com host/token family and exact feature-to-scope map using current scope names.",
+          "Record app-level approval per requested scope; do not inherit Facebook Login/Page permissions."
+        ]
+      },
+      "customerGrant": {
+        "status": "Not confirmed",
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Authorized non-role test user grants the exact direct Instagram Login variant for an eligible professional account.",
+          "Sanitized scopes, consent time, current grant and revoke/reauthorize observation."
+        ]
+      },
+      "assetEligibility": {
+        "status": "Not confirmed",
+        "assetTypes": ["INSTAGRAM_PROFESSIONAL_ACCOUNT"],
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Business/Creator account is confirmed through provider-authorized discovery and bound to the exact current authorization.",
+          "No Facebook Page relation is required or synthesized for this direct variant.",
+          "Verify subscription/webhook and only the approved operations."
+        ]
+      },
+      "walkthrough": {
+        "status": "Not confirmed",
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Non-role test identity proves direct login, selected account, permission denial, revoke/expiry, webhook and safe recovery without a Page lookup.",
+          "Document the direct-login feature limits that apply to the release."
+        ]
+      }
+    },
+    {
+      "id": "whatsapp_exclusive",
+      "productFamily": "WHATSAPP_EXCLUSIVE",
+      "flowVariant": "WHATSAPP_CLOUD_API",
+      "authVariant": "WHATSAPP_EMBEDDED_SIGNUP",
+      "status": "Not confirmed",
+      "releaseActivationAllowed": false,
+      "permissionMapping": {
+        "status": "Not confirmed",
+        "requiredEvidence": [
+          "Exact Facebook Login for Business Embedded Signup configuration, current selected Cloud API product, Embedded Signup/Graph versions and allowed HTTPS callback origins.",
+          "Current configured scope names, Advanced Access/App Review result, webhook topics and operation-to-scope map for messaging/management features actually shipped."
+        ]
+      },
+      "customerGrant": {
+        "status": "Not confirmed",
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Authorized customer business admin completes standard Cloud API onboarding and grants this app access to selected WhatsApp/Messaging account and phone.",
+          "Sanitized consent, account/phone grant, phone verification/registration state and revoke/reauthorize outcome; never store token, code or PIN."
+        ]
+      },
+      "assetEligibility": {
+        "status": "Not confirmed",
+        "assetTypes": ["WHATSAPP_MESSAGING_ACCOUNT", "WHATSAPP_ACCOUNT", "WHATSAPP_PHONE_NUMBER"],
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Account and phone ownership/relationship are confirmed server-side for the same customer, tenant and authorization.",
+          "Verify current grant covers each operation and confirm phone eligibility and registration requirement from provider state.",
+          "Business verification/health/payment or other customer-account state is checked only where the exact Meta product/operation requires it; do not substitute provider-business verification."
+        ]
+      },
+      "walkthrough": {
+        "status": "Not confirmed",
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Isolated authorized test account covers server-side code exchange, discovery, explicit selection, required registration without blind retries, webhook subscription and receipt, approved message/template path, revoke and recovery.",
+          "Message behavior uses a dedicated consenting test contact and a separately approved test plan; no send is authorized by this fixture."
+        ]
+      }
+    },
+    {
+      "id": "whatsapp_coexistence",
+      "productFamily": "WHATSAPP_COEXISTENCE",
+      "flowVariant": "WHATSAPP_COEXISTENCE",
+      "authVariant": "WHATSAPP_BUSINESS_APP_ONBOARDING",
+      "status": "Not confirmed",
+      "releaseActivationAllowed": false,
+      "permissionMapping": {
+        "status": "Not confirmed",
+        "requiredEvidence": [
+          "Current Tech Provider or Solution Partner eligibility plus a separate Embedded Signup configuration and exact current version/session-info/webhook contract.",
+          "Current scope names, Advanced Access/App Review status and operation-to-scope map; do not transfer exclusive WhatsApp registration permissions or steps."
+        ]
+      },
+      "customerGrant": {
+        "status": "Not confirmed",
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Authorized customer controls the existing WhatsApp Business App number, grants this provider access through the Coexistence path and makes an explicit history-sharing choice.",
+          "Record app version/eligibility observation, consent choice/time and revoke/reauthorize result as redacted references; do not store QR, code or token."
+        ]
+      },
+      "assetEligibility": {
+        "status": "Not confirmed",
+        "assetTypes": ["WHATSAPP_BUSINESS_APP_NUMBER", "WHATSAPP_MESSAGING_ACCOUNT", "WHATSAPP_ACCOUNT"],
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "Exact current-version session result and server-side observation prove the Business App phone/account relation for the same customer, tenant and authorization.",
+          "Confirm customer number and partner/account eligibility plus callback/webhook subscription; browser event or QR completion is not readiness.",
+          "No conventional /register, deregister, delete or number replacement on the Coexistence path."
+        ]
+      },
+      "walkthrough": {
+        "status": "Not confirmed",
+        "evidenceReference": null,
+        "requiredEvidence": [
+          "One authorized test number covers Business App and API behavior, inbound/outbound echoes, webhooks, explicit history consent/refusal, revoke and support escalation.",
+          "Document version-specific session fields and limitations before testing; confirm the M4.05 adapter has a reviewed current provider contract and remains blocked until then."
+        ]
+      }
+    }
+  ],
+  "suite4Msg4Gate": {
+    "status": "Not confirmed",
+    "evidenceReference": null,
+    "proofRequired": [
+      "Joint walkthrough using a real authorized non-admin/tester identity and company; bind identity, membership, tenant, app and candidate SHA.",
+      "Issuer/audience/claims, key rotation, expiry, replay, current membership, membership revocation and tenant switching fail-closed evidence.",
+      "Embedded and standalone origin/return, browser session, Msg4 request/response/readiness semantics, callback handling and consumer outcome.",
+      "Redacted diagnostic bundle and named Suite4/Msg4 owner sign-off; no assertion from mocks or a Suite4-looking UUID."
+    ]
+  },
+  "productDataPolicyGate": {
+    "status": "Not confirmed",
+    "evidenceReference": null,
+    "proofRequired": [
+      "Per-flow purpose/data map, data minimization, processor list, retention/deletion schedule and customer-facing notice approved by product/privacy/legal.",
+      "Separate consent to import Coexistence history, with timestamp/scope/refusal handling and current retention policy.",
+      "Applicable Meta Data Handling Questions, Data Use Checkup and deletion/callback status documented without putting personal data in the repository."
+    ]
+  },
+  "operations": {
+    "status": "Not confirmed",
+    "roleAssignments": [
+      { "role": "meta_app_owner_admin", "assignedTo": null, "status": "Not confirmed" },
+      { "role": "developer_business_admin", "assignedTo": null, "status": "Not confirmed" },
+      { "role": "flow_integration_operator", "assignedTo": null, "status": "Not confirmed" },
+      { "role": "customer_test_admin", "assignedTo": null, "status": "Not confirmed" },
+      { "role": "suite4_msg4_owner", "assignedTo": null, "status": "Not confirmed" },
+      { "role": "product_privacy_legal_owner", "assignedTo": null, "status": "Not confirmed" },
+      { "role": "support_on_call_owner", "assignedTo": null, "status": "Not confirmed" },
+      { "role": "release_operator", "assignedTo": null, "status": "Not confirmed" }
+    ],
+    "supportScenarios": [
+      "internal service or callback failure",
+      "customer reauthorization, missing permission or asset role",
+      "Meta app review, business verification, Tech Provider or eligibility block",
+      "expired/revoked grant or ambiguous provider response",
+      "webhook signature, subscription or consumer mismatch",
+      "Coexistence history consent/refusal or unsupported app behavior",
+      "Suite4 membership revocation, tenant mismatch or embed failure"
+    ],
+    "requiredExercise": "Sanitized synthetic support ticket with correct internal/customer/Meta/Suite4 escalation and no raw token or SQL/Graph shortcut."
+  },
+  "sourceReferences": [
+    { "title": "App Review process", "url": "https://developers.facebook.com/documentation/resp-plat-initiatives/individual-processes/app-review", "accessedOn": "2026-11-18" },
+    { "title": "Graph API access levels", "url": "https://developers.facebook.com/documentation/development/graph-api/overview/access-levels", "accessedOn": "2026-11-18" },
+    { "title": "Tech Providers", "url": "https://developers.facebook.com/docs/development/release/tech-providers/", "accessedOn": "2026-11-18" },
+    { "title": "WhatsApp Embedded Signup overview", "url": "https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/overview", "accessedOn": "2026-11-18" },
+    { "title": "WhatsApp Embedded Signup versioning", "url": "https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/versions", "accessedOn": "2026-11-18" },
+    { "title": "WhatsApp Embedded Signup v5", "url": "https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/version-5", "accessedOn": "2026-11-18" },
+    { "title": "WhatsApp Business App onboarding", "url": "https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users", "accessedOn": "2026-11-18" },
+    { "title": "WhatsApp Tech Provider customer onboarding", "url": "https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-customers-as-a-tech-provider", "accessedOn": "2026-11-18" },
+    { "title": "Instagram API with Facebook Login", "url": "https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login", "accessedOn": "2026-11-18" },
+    { "title": "Instagram API with Instagram Login", "url": "https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login", "accessedOn": "2026-11-18" },
+    { "title": "Instagram IG User reference", "url": "https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user", "accessedOn": "2026-11-18" },
+    { "title": "Graph API User Accounts", "url": "https://developers.facebook.com/docs/graph-api/reference/user/accounts/", "accessedOn": "2026-11-18" },
+    { "title": "Data Handling Questions FAQs", "url": "https://developers.facebook.com/docs/resp-plat-initiatives/individual-processes/data-handling-questions/faqs/", "accessedOn": "2026-11-18" }
+  ]
+}

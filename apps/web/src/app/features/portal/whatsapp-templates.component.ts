@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 import type { components } from '@ca-meta/contracts';
@@ -18,6 +18,7 @@ type TemplateForm = { name: string; language: string; category: TemplateCategory
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './whatsapp-templates.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './whatsapp-templates.component.scss',
 })
 export class WhatsAppTemplatesComponent implements OnInit, OnDestroy {

@@ -1,6 +1,6 @@
 # ADR-001 · Stack web e API
 
-Status: aceita como direção inicial de implementação, condicionada aos gatilhos abaixo. Issues: [M1.04 / #13](https://github.com/costaapps/ca_meta_app/issues/13). Data: 2026-10-28.
+Status: aceita como direção inicial de implementação; a linha Angular/TypeScript foi atualizada por [ADR-024](ADR-024-m6-02-angular22-toolchain.md). Issues: [M1.04 / #13](https://github.com/costaapps/ca_meta_app/issues/13). Data: 2026-10-28.
 
 ## Contexto comprovado
 
@@ -23,6 +23,10 @@ Fontes primárias consultadas em 2026-10-28: [Node 26.13.0](https://nodejs.org/e
 ## Decisão e consequência
 
 Preservar Angular em `apps/web` e adotar NestJS 12 em `apps/api`, como monólito modular sem SSR obrigatório. O contrato HTTP versionado e o build da API não dependem do ciclo de build da UI. Fixar a linha Node 24 LTS como runtime comum inicial e fixar patches por imagem/lockfile; a PoC fixa Node 24.22.2. Manter toolchains TypeScript isoladas por workspace: Angular usa versão suportada menor que 6; API usa TypeScript 6 para satisfazer Nest 12 schematics. Não forçar uma única instalação física de TypeScript.
+
+### Atualização M6.02 — 2026-11-19
+
+A decisão inicial sobre Angular 21/TypeScript 5.9 e a separação de versões entre web e API foi substituída para a aplicação atual por [ADR-024](ADR-024-m6-02-angular22-toolchain.md): Angular 22.3.0 e TypeScript 6.0.x no web, mantendo Node 24.22.2 e o isolamento de dependências por workspace. A PoC histórica M1.04 continua fixada em Angular 21/TypeScript 5.9 e não é prova do build atual.
 
 O pacote M1.04 fixa versões somente no harness: Nest core 12.3.2, CLI 12.0.11, schematics 12.0.12, TypeORM 1.1.2, `mysql2` 3.24.6, Angular compiler 21.0.8, TypeScript 5.9.3/6.0.3. São versões consultadas no registro npm em 2026-10-28, sem compromisso de que continuarão mais recentes. `package-lock.json` captura a resolução testada.
 

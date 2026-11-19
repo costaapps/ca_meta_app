@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
@@ -25,6 +25,7 @@ const FLOW_COPY: Readonly<Record<MetaFlowVariant, { title: string; description: 
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
   templateUrl: './connection-detail.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './connection-detail.component.scss',
 })
 export class ConnectionDetailComponent implements OnInit, OnDestroy {

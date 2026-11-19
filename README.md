@@ -45,7 +45,7 @@ workspace, `npm run build`, `npm test`, `npm run typecheck`, and `npm start` add
 
 ## Current architecture
 
-- `apps/web`: preserved Angular 21 standalone UI.
+- `apps/web`: Angular 22 standalone UI; the M6.02 version change and behavior-preserving migrations are recorded in [ADR-024](docs/meta-v2/adrs/ADR-024-m6-02-angular22-toolchain.md).
 - `apps/api`: reserved workspace for the NestJS API (M2.02).
 - `packages/contracts`: public HTTP/event contract artifacts (M2.04).
 - `docs/meta-v2/contracts`: canonical OpenAPI and inbox/outbox source specifications.

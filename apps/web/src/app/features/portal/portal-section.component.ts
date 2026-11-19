@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 
 @Component({
@@ -14,6 +14,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
       <a routerLink="/connections">Voltar às conexões</a>
     </section>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [`
     :host { display: block; }
     .section-page { max-width: 720px; padding: 1.5rem; border: 1px solid #e1e6ea; border-radius: 8px; background: #fff; }

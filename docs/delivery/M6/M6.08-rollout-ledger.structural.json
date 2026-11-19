@@ -1,0 +1,149 @@
+{
+  "formatVersion": 1,
+  "package": "M6.08",
+  "status": "preparation-only",
+  "evidenceMode": "structural-only",
+  "rolloutExecuted": false,
+  "deploymentReady": false,
+  "source": {
+    "milestoneBranch": "desktop/milestone-m6",
+    "milestoneBaseSha": "05ab14af8638e11e2dd99a39b06fe4fb0f50e0d8",
+    "releaseCandidateRevision": null,
+    "releaseManifestRef": null,
+    "releaseManifestSha256": null
+  },
+  "owners": {
+    "product": null,
+    "security": null,
+    "operations": null,
+    "incidentCommander": null,
+    "status": "Not confirmed"
+  },
+  "preconditions": {
+    "m5_09RealSourceAndWriterEvidence": "Not confirmed",
+    "m6_06ReleaseAndRollbackEvidence": "Not confirmed",
+    "m6_07MetaAndConsumerAcceptance": "Not confirmed",
+    "authorizedStagingCanary": "Not confirmed",
+    "namedOperatorsAndApprovers": "Not confirmed"
+  },
+  "cohortPlan": {
+    "scopeKeys": ["tenantRef", "channelFamily", "consumerKind"],
+    "selectionPolicy": "explicit allow-list by tenant, channel and consumer; random traffic splitting is prohibited",
+    "percentage": null,
+    "cohorts": [],
+    "phaseOrder": ["PREPARED", "SHADOW_READ", "CANARY", "EXPANSION", "FULL_CUTOVER", "PAUSED", "ROLLED_BACK"],
+    "status": "Not confirmed"
+  },
+  "requiredCoverage": {
+    "journeys": [
+      {
+        "channelFamily": "FACEBOOK",
+        "contractVariants": ["FACEBOOK_LOGIN"],
+        "enabledForCanary": false,
+        "assetReferences": [],
+        "credentialChangeAllowed": false,
+        "status": "Not confirmed"
+      },
+      {
+        "channelFamily": "INSTAGRAM",
+        "contractVariants": ["INSTAGRAM_VIA_FACEBOOK_LOGIN", "INSTAGRAM_LOGIN"],
+        "enabledForCanary": false,
+        "assetReferences": [],
+        "credentialChangeAllowed": false,
+        "status": "Not confirmed"
+      },
+      {
+        "channelFamily": "WHATSAPP_EXCLUSIVE",
+        "contractVariants": ["WHATSAPP_CLOUD_API"],
+        "enabledForCanary": false,
+        "assetReferences": [],
+        "credentialChangeAllowed": false,
+        "status": "Not confirmed"
+      },
+      {
+        "channelFamily": "WHATSAPP_COEXISTENCE",
+        "contractVariants": ["WHATSAPP_COEXISTENCE"],
+        "enabledForCanary": false,
+        "assetReferences": [],
+        "credentialChangeAllowed": false,
+        "status": "Not confirmed"
+      }
+    ],
+    "coexistenceNumberRequirement": {
+      "requiredDistinctNumbers": 4,
+      "numberReferences": [],
+      "credentialChangeAllowed": false,
+      "status": "Not confirmed"
+    }
+  },
+  "flags": {
+    "scopeKeys": ["tenantRef", "channelFamily", "consumerKind"],
+    "defaultEnabled": false,
+    "entries": [],
+    "actorReference": null,
+    "auditRecordReference": null,
+    "status": "Not confirmed"
+  },
+  "writerMatrix": {
+    "scopeKeys": ["tenantRef", "channelFamily", "consumerKind", "functionName"],
+    "allowedOwners": ["LEGACY", "CENTRAL", "PROJECTOR", "RELAY", "NEW"],
+    "functions": [
+      { "functionName": "CONFIGURATION", "currentOwner": null, "targetOwner": null, "phase": null, "version": null, "status": "Not confirmed" },
+      { "functionName": "CREDENTIAL_REFERENCE", "currentOwner": null, "targetOwner": null, "phase": null, "version": null, "status": "Not confirmed" },
+      { "functionName": "LEGACY_PROJECTION", "currentOwner": null, "targetOwner": null, "phase": null, "version": null, "status": "Not confirmed" },
+      { "functionName": "OPERATION_RELAY", "currentOwner": null, "targetOwner": null, "phase": null, "version": null, "status": "Not confirmed" },
+      { "functionName": "WEBHOOK_DISPATCH", "currentOwner": null, "targetOwner": null, "phase": null, "version": null, "status": "Not confirmed" }
+    ],
+    "cohortAssignments": [],
+    "unknownWriterBlocksExpansion": true,
+    "credentialRollbackPolicy": "keep central when the prior credential-reference owner was legacy",
+    "credentialAction": "NONE",
+    "grantAction": "NONE",
+    "status": "Not confirmed"
+  },
+  "monitoring": {
+    "signals": ["onboarding", "send-and-return", "credential-state", "subscription-drift", "webhook-ack", "queue-backlog", "projection", "error-rate", "parity"],
+    "thresholds": {
+      "latency": null,
+      "errorRate": null,
+      "backlog": null,
+      "observationWindow": null
+    },
+    "evidenceReferences": [],
+    "ownerReference": null,
+    "status": "Not confirmed"
+  },
+  "abort": {
+    "immediateTriggers": ["CROSS_TENANT_ACCESS", "SECRET_DISCLOSURE", "DOUBLE_SEND"],
+    "immediateActions": ["stop scoped activation", "block expansion", "preserve known-compatible legacy paths", "reconcile external outcomes before another attempt"],
+    "unknownWriterBlocksExpansion": true,
+    "sloThresholdsRatified": false,
+    "evidenceReferences": [],
+    "operatorReference": null,
+    "status": "Not confirmed"
+  },
+  "rollback": {
+    "method": "scoped route/flag and writer-matrix transition only after current-version evidence and external-outcome reconciliation",
+    "preserveUnmigratedLegacyCohorts": true,
+    "previousManifestSha256": null,
+    "backupReference": null,
+    "restoreEvidenceReference": null,
+    "operatorReference": null,
+    "auditTrailReference": null,
+    "rpo": null,
+    "rto": null,
+    "credentialAction": "NONE",
+    "grantAction": "NONE",
+    "subscriptionAction": "NONE",
+    "replayUnknownOutcome": false,
+    "externalEffectsReconciled": null,
+    "status": "Not confirmed"
+  },
+  "ledger": {
+    "cohortDecisions": [],
+    "abortEvents": [],
+    "rollbackEvents": [],
+    "expansionApprovals": [],
+    "status": "Not confirmed"
+  }
+}

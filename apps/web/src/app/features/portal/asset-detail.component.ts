@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component } from '@angular/core';
+import { Component, ChangeDetectionStrategy } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AssetAutomationConfigComponent } from './asset-automation-config.component';
 
@@ -14,6 +14,7 @@ import { AssetAutomationConfigComponent } from './asset-automation-config.compon
       <app-asset-automation-config />
     </section>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [`
     :host { display: block; }
     .asset-page { max-width: 720px; padding: 1.5rem; border: 1px solid #e1e6ea; border-radius: 8px; background: #fff; }

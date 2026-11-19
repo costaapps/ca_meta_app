@@ -22,9 +22,10 @@ export class SafeExceptionFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
-    const request = context.getRequest<Request & { requestId?: string }>();
+    const request = context.getRequest<Request & { requestId?: string; correlationId?: string }>();
     const response = context.getResponse<Response>();
     const requestId = request.requestId ?? 'unknown';
+    const correlationId = request.correlationId ?? requestId;
     const status = exception instanceof OnboardingCoexistenceActiveSessionConflictError
       ? HttpStatus.CONFLICT
       : exception instanceof IdentityDeniedError
@@ -39,6 +40,7 @@ export class SafeExceptionFilter implements ExceptionFilter {
       level: status >= 500 ? 'error' : 'warn',
       event: 'http.exception',
       requestId,
+      correlationId,
       statusCode: status,
       code: details.code,
       errorType: exception instanceof OnboardingCoexistenceActiveSessionConflictError ? 'OnboardingCoexistenceActiveSessionConflictError' :

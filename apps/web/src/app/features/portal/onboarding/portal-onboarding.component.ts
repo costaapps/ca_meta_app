@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { Subject, takeUntil } from 'rxjs';
 import {
   ONBOARDING_FLOW_GROUPS,
@@ -21,6 +21,7 @@ import {
   standalone: true,
   imports: [CommonModule],
   templateUrl: './portal-onboarding.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './portal-onboarding.component.scss',
 })
 export class PortalOnboardingComponent implements OnInit, OnDestroy {

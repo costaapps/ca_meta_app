@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
@@ -13,6 +13,7 @@ import { NotificationBellComponent } from '../../components/notification-bell/no
   standalone: true,
   imports: [CommonModule, RouterModule, FormsModule, NotificationBellComponent],
   templateUrl: './channel-list.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./channel-list.component.scss']
 })
 export class ChannelListComponent implements OnInit, OnDestroy {
