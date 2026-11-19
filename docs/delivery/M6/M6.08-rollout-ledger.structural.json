@@ -7,7 +7,7 @@
   "deploymentReady": false,
   "source": {
     "milestoneBranch": "desktop/milestone-m6",
-    "milestoneBaseSha": "5629ff9f81401f673ef91d2de5de5e1faadaf7eb",
+    "milestoneBaseSha": "05ab14af8638e11e2dd99a39b06fe4fb0f50e0d8",
     "releaseCandidateRevision": null,
     "releaseManifestRef": null,
     "releaseManifestSha256": null
