@@ -18,7 +18,7 @@ const expectedGates = [
 ];
 const expectedPackages = new Map([
   ['M6.01', { issue: 69, pr: 170, headSha: '7b9930622369b6ee68a2903c3b1bf4ff80eb8e03', state: 'merged', milestoneSha: 'a856bf4319519d75c1c02907afbfb477a453bf08', runId: 44389497887, checkStatus: 'success' }],
-  ['M6.02', { issue: 70, pr: 167, headSha: '9a67dff70e437c1bdf52445198493c30fd9886c8', state: 'blocked', milestoneSha: null, runId: 44398836758, checkStatus: 'failure' }],
+  ['M6.02', { issue: 70, pr: 167, headSha: '6886dfa7397092d16055f2994d9f05547f9df776', state: 'merged', milestoneSha: '83364168b0dfbe0404cf8dae100ae1d51a07ba84', runId: 44584757470, checkStatus: 'success' }],
   ['M6.03', { issue: 66, pr: 168, headSha: '251bc7c392b1d796d7365310a452792865d611b9', state: 'merged', milestoneSha: '5629ff9f81401f673ef91d2de5de5e1faadaf7eb', runId: 44398162113, checkStatus: 'success' }],
   ['M6.04', { issue: 67, pr: 169, headSha: 'faa0a8745b66742b5aaf8648fa53ecb530883901', state: 'merged', milestoneSha: '42f0a4d32edd33c6a47a32f1e260481adaa4afd6', runId: 44399644424, checkStatus: 'success' }],
   ['M6.05', { issue: 68, pr: 171, headSha: 'bcf9fc0314ec7480179aef3dc1209c1a4bcea62d', state: 'merged', milestoneSha: '3da17eff8fe2fdeb914013c895744716fec8fd6e', runId: 44400610909, checkStatus: 'success' }],
@@ -30,7 +30,7 @@ const expectedSubsequentPreparations = new Map([
 ]);
 const shaPattern = /^[0-9a-f]{40}$/;
 const hex256Pattern = /^[0-9a-f]{64}$/;
-const currentMilestoneBaseSha = 'd4cb4f84c8a1f39d34befcda2329cc590d9a6d90';
+const currentMilestoneBaseSha = '8fc1b3e82d19e7785638ec715ea3490e63aa962d';
 
 function requireValue(condition, message) {
   if (!condition) throw new Error(message);
@@ -58,7 +58,7 @@ function validateReadiness(pack) {
     requireValue(candidate.state === expected.state && candidate.milestoneSha === expected.milestoneSha, `${candidate.package} integration/blocker state is inaccurate.`);
     requireValue(candidate.requiredCheck?.runId === expected.runId && candidate.requiredCheck?.status === expected.checkStatus, `${candidate.package} required-check evidence is inaccurate.`);
     if (candidate.package === 'M6.02') {
-      requireValue(typeof candidate.note === 'string' && candidate.note.includes('moderate dev-only'), 'M6.02 must state the current required-check blocker.');
+      requireValue(typeof candidate.note === 'string' && candidate.note.includes('zero new advisory/package/path/scope tuples'), 'M6.02 must record the passing dependency comparison.');
     }
     candidates.set(candidate.package, candidate);
   }
@@ -127,7 +127,7 @@ function expectReject(label, action) {
 export async function runReadinessValidation(path = resolve('docs/delivery/M6/release-readiness.json')) {
   const pack = JSON.parse(await readFile(path, 'utf8'));
   const validated = validateReadiness(pack);
-  const cases = ['readiness ledger remains blocked: pass'];
+  const cases = ['readiness ledger remains preparation-only: pass'];
 
   const enabled = structuredClone(pack);
   enabled.deploymentReady = true;
@@ -146,10 +146,9 @@ export async function runReadinessValidation(path = resolve('docs/delivery/M6/re
   cases.push(expectReject('unverified rollback backup claim', () => validateReadiness(rollbackClaim)));
 
   const m602Claim = structuredClone(pack);
-  const blockedCandidate = m602Claim.candidatePullRequests.find((candidate) => candidate.package === 'M6.02');
-  blockedCandidate.state = 'merged';
-  blockedCandidate.milestoneSha = 'a856bf4319519d75c1c02907afbfb477a453bf08';
-  cases.push(expectReject('blocked M6.02 integration claim', () => validateReadiness(m602Claim)));
+  const alteredM602Candidate = m602Claim.candidatePullRequests.find((candidate) => candidate.package === 'M6.02');
+  alteredM602Candidate.milestoneSha = 'a856bf4319519d75c1c02907afbfb477a453bf08';
+  cases.push(expectReject('incorrect M6.02 squash SHA', () => validateReadiness(m602Claim)));
 
   const alteredPreparationReference = structuredClone(pack);
   alteredPreparationReference.subsequentPreparationPackages[0].milestoneSha = 'a856bf4319519d75c1c02907afbfb477a453bf08';

@@ -6,7 +6,7 @@
   "observedAt": "2026-11-19",
   "source": {
     "milestoneBranch": "desktop/milestone-m6",
-    "milestoneBaseSha": "d4cb4f84c8a1f39d34befcda2329cc590d9a6d90",
+    "milestoneBaseSha": "8fc1b3e82d19e7785638ec715ea3490e63aa962d",
     "releaseCommit": null,
     "releaseTag": null,
     "releaseId": null,
@@ -29,11 +29,11 @@
       "issue": 70,
       "pr": 167,
       "branch": "desktop/m6-02",
-      "headSha": "9a67dff70e437c1bdf52445198493c30fd9886c8",
-      "state": "blocked",
-      "milestoneSha": null,
-      "requiredCheck": { "runId": 44398836758, "status": "failure" },
-      "note": "M2.08 m2-08-security reports one new moderate dev-only pacote/sigstore tuple; the required check is not green."
+      "headSha": "6886dfa7397092d16055f2994d9f05547f9df776",
+      "state": "merged",
+      "milestoneSha": "83364168b0dfbe0404cf8dae100ae1d51a07ba84",
+      "requiredCheck": { "runId": 44584757470, "status": "success" },
+      "note": "M2.08 passed with zero new advisory/package/path/scope tuples. External staging and independent multi-process evidence remain Not confirmed."
     },
     {
       "package": "M6.03",
