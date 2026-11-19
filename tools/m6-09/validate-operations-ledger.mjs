@@ -10,6 +10,23 @@ const requiredAcceptance = [
   'userManagesConnectionsWithoutSecretsOrManualSql',
   'legacyAndGlobalTokenDependenciesInventoried',
 ];
+const requiredMetricEvidence = [
+  'apiAvailability',
+  'webhookAckLatency',
+  'grantAndTokenHealth',
+  'subscriptionDrift',
+  'queueAndDeadLetter',
+  'projectionLag',
+  'userFacingErrors',
+];
+const requiredRoutineObservations = [
+  'token-expiry-and-reauth',
+  'scheduled-jobs',
+  'queue-recovery',
+  'projection-refresh',
+  'backup-and-restore',
+];
+const requiredDebtRegisterFields = ['id', 'description', 'priority', 'risk', 'ownerReference', 'status', 'evidenceReferences'];
 
 function requireValue(condition, message) {
   if (!condition) throw new Error(message);
@@ -33,11 +50,16 @@ function validateOperationsLedger(ledger) {
   for (const field of ['approvedStartAt', 'approvedEndAt', 'observedDurationDays', 'coverageScheduleRef']) {
     requireValue(hypercare[field] === null, `Hypercare field ${field} must remain unset.`);
   }
+  requireValue(JSON.stringify(hypercare.requiredRoutineObservations) === JSON.stringify(requiredRoutineObservations), 'The required recurring-operation coverage inventory is incomplete or reordered.');
   requireValue(Array.isArray(hypercare.observations) && hypercare.observations.length === 0, 'No real hypercare observations may be fabricated.');
 
   const slo = ledger.slo;
   requireValue(slo?.ratified === false && slo.window === null && slo.ownerReference === null && slo.status === 'Not confirmed', 'SLO ratification, window and owner must remain Not confirmed.');
-  for (const metric of Object.values(slo.metricEvidence ?? {})) {
+  const metricEvidence = slo?.metricEvidence;
+  requireValue(metricEvidence && typeof metricEvidence === 'object' && !Array.isArray(metricEvidence), 'SLO metric coverage inventory is required.');
+  requireValue(JSON.stringify(Object.keys(metricEvidence).sort()) === JSON.stringify([...requiredMetricEvidence].sort()), 'The SLO metric coverage inventory is incomplete or contains unsupported metrics.');
+  for (const metricName of requiredMetricEvidence) {
+    const metric = metricEvidence[metricName];
     requireValue(metric.observedValue === null && metric.status === 'Not confirmed' && metric.evidenceReferences?.length === 0, 'SLO observations must remain empty until verified.');
   }
 
@@ -47,6 +69,11 @@ function validateOperationsLedger(ledger) {
     requireValue(ledger.operations[field] === null, `${field} cannot be reported without production observations.`);
   }
   requireValue(ledger.operations.queueAndProjectionStatus === 'Not confirmed', 'Queue and projection health must remain Not confirmed.');
+
+  const debtRegister = ledger.improvementAndDebtRegister;
+  requireValue(debtRegister?.status === 'Not confirmed', 'The operational debt register must remain Not confirmed until reviewed.');
+  requireValue(JSON.stringify(debtRegister.requiredFields) === JSON.stringify(requiredDebtRegisterFields), 'The operational debt register schema is incomplete.');
+  requireValue(Array.isArray(debtRegister.entries) && debtRegister.entries.length === 0, 'No unverified operational debt entry or owner may be fabricated.');
 
   requireValue(ledger.support?.status === 'Not confirmed' && ledger.support.userGuideStatus === 'Not confirmed', 'User guide and support workflow require real review.');
   requireValue(ledger.support.supportRunbookStatus === 'draft-only', 'Support material cannot be represented as exercised.');
@@ -107,6 +134,18 @@ export async function runOperationsLedgerValidation(path = resolve('docs/deliver
   const adoptionClaim = structuredClone(ledger);
   adoptionClaim.adoption.measurements.activeUsers = 1;
   cases.push(expectReject('fabricated adoption count', () => validateOperationsLedger(adoptionClaim)));
+
+  const missingMetric = structuredClone(ledger);
+  delete missingMetric.slo.metricEvidence.queueAndDeadLetter;
+  cases.push(expectReject('missing SLO coverage metric', () => validateOperationsLedger(missingMetric)));
+
+  const missingRoutine = structuredClone(ledger);
+  missingRoutine.hypercare.requiredRoutineObservations.pop();
+  cases.push(expectReject('missing recurring-operation coverage', () => validateOperationsLedger(missingRoutine)));
+
+  const fabricatedDebt = structuredClone(ledger);
+  fabricatedDebt.improvementAndDebtRegister.entries.push({ id: 'synthetic', ownerReference: 'unassigned' });
+  cases.push(expectReject('fabricated debt register entry', () => validateOperationsLedger(fabricatedDebt)));
 
   return { ...result, cases };
 }

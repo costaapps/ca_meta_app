@@ -54,6 +54,11 @@
     "routineObservations": [],
     "status": "Not confirmed"
   },
+  "improvementAndDebtRegister": {
+    "status": "Not confirmed",
+    "requiredFields": ["id", "description", "priority", "risk", "ownerReference", "status", "evidenceReferences"],
+    "entries": []
+  },
   "support": {
     "userGuideStatus": "Not confirmed",
     "supportRunbookStatus": "draft-only",
