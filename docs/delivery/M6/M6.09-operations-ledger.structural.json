@@ -7,7 +7,7 @@
   "deploymentReady": false,
   "source": {
     "milestoneBranch": "desktop/milestone-m6",
-    "milestoneBaseSha": "3da17eff8fe2fdeb914013c895744716fec8fd6e",
+    "milestoneBaseSha": "81e22140086167209d8b1d2bf6908b399794defa",
     "releaseCandidateRevision": null,
     "releaseManifestRef": null
   },
@@ -93,7 +93,7 @@
   "dependencies": {
     "m6_04": { "milestoneEvidence": "observability code and local tests integrated", "productionReceiverAndSloRatification": "Not confirmed" },
     "m6_05": { "milestoneEvidence": "synthetic isolated restore report integrated", "productionBackupKeyCustodyAndIndependentRestore": "Not confirmed" },
-    "m6_08": { "localCandidateSha": "fa287625ee856eacd5eabba737260032c7d4dbc9", "evidence": "structural preparation only; no canary executed", "integrationAndRealRollback": "Not confirmed" },
+    "m6_08": { "pr": 173, "prHeadSha": "acf2cf53fc55743d30d9217bc72e4f50ee3faaa7", "milestoneSha": "81e22140086167209d8b1d2bf6908b399794defa", "evidence": "structural preparation only; no canary executed", "integrationAndRealRollback": "Not confirmed" },
     "m5_10": { "productionSupportAndDiagnosticUse": "Not confirmed" }
   },
   "acceptance": {
