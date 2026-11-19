@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -13,6 +13,7 @@ type FlowStateMap = Record<MetaProductType, MetaFlowState>;
   standalone: true,
   imports: [CommonModule, RouterLink],
   templateUrl: './channel-setup.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./channel-setup.component.scss']
 })
 export class ChannelSetupComponent implements OnInit, OnDestroy {

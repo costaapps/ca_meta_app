@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Component, ElementRef, HostListener, OnDestroy } from '@angular/core';
+import { Component, ElementRef, HostListener, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { Subject } from 'rxjs';
 import { finalize, takeUntil } from 'rxjs/operators';
 import { environment } from '../../../../../environments/environment';
@@ -43,6 +43,7 @@ interface NotificationActionResponse {
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './notification-bell.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./notification-bell.component.scss']
 })
 export class NotificationBellComponent implements OnDestroy {

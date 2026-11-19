@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { Subject, takeUntil } from 'rxjs';
 import { PortalContextStore } from '../../core/portal/portal-context.store';
 import { PortalSessionService } from '../../core/portal/portal-session.service';
@@ -12,6 +12,7 @@ import { PortalTenantIdentityService, TENANT_IDENTITY_UNCONFIRMED_MESSAGE } from
   standalone: true,
   imports: [CommonModule],
   templateUrl: './notifications.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './notifications.component.scss',
 })
 export class NotificationsComponent implements OnInit, OnDestroy {

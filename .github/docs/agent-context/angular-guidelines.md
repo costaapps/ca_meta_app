@@ -2,7 +2,7 @@
 
 ## Goals For This Repository
 - Preserve current behavior first.
-- Keep the code consistent with the real Angular 21 standalone app already in place.
+- Keep the code consistent with the Angular 22 standalone app already in place.
 - Use strict typing and small, feature-scoped edits.
 
 Evidence:
@@ -37,7 +37,7 @@ Evidence:
 
 ## Signals And RxJS
 - Current code is RxJS-first and that is acceptable for now.
-- Do not add Signals just because Angular 21 supports them.
+- Do not add Signals just because Angular supports them.
 - Prefer Signals only when introducing synchronous UI state that benefits from fine-grained derivation.
 - When bridging Observables to Signals, use `@angular/core/rxjs-interop` deliberately and create the signal once, not repeatedly.
 - For this codebase today, new API calls and async backend flows should continue to use `HttpClient` + Observable unless a local state need clearly favors Signals.
@@ -108,7 +108,7 @@ Evidence:
 - Do not rely on color alone for status.
 
 ## Testing
-- Update or add tests only against the actual Angular 21 component API.
+- Update or add tests only against the actual Angular 22 component API.
 - Use the configured test toolchain; do not reintroduce Jasmine globals as a default.
 - Prioritize tests for:
   - route/query behavior

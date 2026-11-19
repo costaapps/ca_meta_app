@@ -61,7 +61,7 @@ Evidence:
 ## Styling And Tooling
 - Styling is SCSS-based.
 - There is a lightweight global utility layer, but no true Tailwind build pipeline.
-- Build and test tooling are modern Angular 21 tooling, though the tests themselves still need cleanup.
+- Build and test tooling use Angular 22 and Vitest; the M6.02 major update is recorded in ADR-024.
 
 Evidence:
 - `apps/web/src/styles.scss`
