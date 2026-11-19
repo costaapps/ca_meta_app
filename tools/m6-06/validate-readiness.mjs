@@ -151,6 +151,14 @@ export async function runReadinessValidation(path = resolve('docs/delivery/M6/re
   blockedCandidate.milestoneSha = 'a856bf4319519d75c1c02907afbfb477a453bf08';
   cases.push(expectReject('blocked M6.02 integration claim', () => validateReadiness(m602Claim)));
 
+  const alteredPreparationReference = structuredClone(pack);
+  alteredPreparationReference.subsequentPreparationPackages[0].milestoneSha = 'a856bf4319519d75c1c02907afbfb477a453bf08';
+  cases.push(expectReject('altered M6.08 milestone reference', () => validateReadiness(alteredPreparationReference)));
+
+  const executedCanaryClaim = structuredClone(pack);
+  executedCanaryClaim.subsequentPreparationPackages[0].operationStatus = 'executed';
+  cases.push(expectReject('unverified M6.08 canary execution claim', () => validateReadiness(executedCanaryClaim)));
+
   return { ...validated, cases };
 }
 
