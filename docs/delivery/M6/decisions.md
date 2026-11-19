@@ -34,19 +34,19 @@
 - **Decision:** Supersede the prior v4-specific wording: require the deployed configuration and adapter contract to be confirmed against the current supported version before Coexistence activation. Keep all app-specific permissions, customer grants, eligible assets and Suite4/Msg4 behavior **Not confirmed**.
 - **Consequence:** The M6.07 checklist is preparation only; no flow is cleared to activate and no Coexistence compatibility is claimed.
 
-## 2026-11-19 — preserve M6.02 security gate failure
+## 2026-11-19 — preserve M6.02 security gate failure (historical; superseded below)
 
 - **Issue / gate:** M6.02/#70 requires the unchanged M2.08 security comparison to pass before dependency changes can be integrated.
 - **Evidence:** PR #167 head `9a67dff70e437c1bdf52445198493c30fd9886c8`, CI run `44398836758`: desktop-candidate, MariaDB and image scans passed; `m2-08-security` failed on one new moderate dev-only `pacote`/`sigstore` tuple under `node_modules/pacote`, with zero severity escalations. The full audit has zero high/critical findings and production audit has zero findings. No safe semver-compatible Angular 21 resolution was confirmed.
-- **Decision:** Keep PR #167 open and exclude its dependency changes from `desktop/milestone-m6` and the consolidated PR while the required check is red. Do not weaken the M2.08 scanner, invent a waiver or close #70.
-- **Consequence:** M6.06's M6.01–M6.05 release gate remains **Not confirmed**. The consolidated PR may present the other locally deliverable packages for review, but it must say M6 is not complete while this P0 dependency remains unresolved.
+- **Decision at that time:** Keep PR #167 open and exclude its dependency changes from `desktop/milestone-m6` and the consolidated PR while the required check is red. Do not weaken the M2.08 scanner, invent a waiver or close #70.
+- **Consequence at that time:** M6.06's M6.01–M6.05 release gate remained **Not confirmed**. The consolidated PR could present the other locally deliverable packages for review, but it had to say M6 was not complete while this P0 dependency remained unresolved.
 
 ## 2026-11-19 — refresh pinned NGINX image after M6 aggregate scan
 
 - **Issue / gate:** M6.02/#70 audits runtime images; M6 aggregate CI must remain fail-closed on HIGH/CRITICAL image vulnerabilities.
 - **Evidence:** Image scan run 44554604698 on desktop/milestone-m6 candidate c7673bad0c3d0ca2f0978985a402793ba0ecd9e8 found three CRITICAL and three HIGH findings against NGINX 1.30.6-r1, each with fixed version 1.30.7-r0. Official NGINX [security advisories](https://nginx.org/en/security_advisories.html) list 1.30.7+ as not vulnerable to the reported issues. The official [nginx-unprivileged image package](https://github.com/nginx/docker-nginx-unprivileged/pkgs/container/nginx-unprivileged/versions?filters%5Bversion_type%5D=tagged) lists the stable Alpine 3.24 image at digest 0c53a1f2890c3526bfd201440f0fd3970e5b78f80630f58284aad0d34b5ec7bd; docker buildx imagetools inspect returned that same manifest-list digest from both GHCR and ECR Public.
 - **Decision:** Pin the web image and its approved CI smoke mirror to the exact patched digest. Keep the Trivy HIGH/CRITICAL threshold unchanged and require the candidate scan to pass.
-- **Consequence:** This remediation addresses the NGINX image findings only. M6.02/#70 remains blocked by PR #167's separate moderate dev-only pacote/sigstore dependency finding in required m2-08-security; no waiver or scanner relaxation is authorized.
+- **Consequence at that point:** This remediation addressed the NGINX image findings only. M6.02/#70 was still blocked by PR #167's separate moderate dev-only pacote/sigstore dependency finding in required m2-08-security; no waiver or scanner relaxation was authorized. The dependency finding was later resolved as recorded below.
 
 ## 2026-11-19 — distinguish APK checksums from EA token markers
 
@@ -54,3 +54,10 @@
 - **Evidence:** Candidate CI run 44556283133 built the web image with the updated NGINX digest, then failed before Trivy because the M2.06 metadata scan classified a value in `web/image-metadata.json` as a credential marker. Read-only inspection of the official NGINX 1.30.7 image config identified the source: its package-install history contains an unprefixed, 128-character hexadecimal APK checksum beginning with `EA`, which matched the broad alphanumeric heuristic. This finding is limited to the upstream image's public build history; no image layer was scanned and the Trivy jobs were skipped.
 - **Decision:** Prefix only the exact `PKGOSSCHECKSUM` value in the pinned web image's metadata history before marker scanning. Keep the global `EA` token heuristic, JWT/PEM patterns, named credential assignments, all layer/path checks, and the HIGH/CRITICAL Trivy threshold unchanged. Run small startup fixtures proving that the known metadata context passes while unrelated all-hex, mixed-alphanumeric, altered-context, and API metadata markers still fail.
 - **Consequence:** The exact updated image smoke and candidate CI must pass before integration. The heuristic remains a bounded marker scan; it does not prove absence of all secrets or credentials.
+
+## 2026-11-19 — resolve M6.02 dependency comparison and integrate
+
+- **Issue / gate:** M6.02/#70's Angular 21 candidate added one moderate dev-only tuple to the unchanged M2.08 comparator; scanner or threshold changes were not acceptable.
+- **Evidence:** The final PR #167 head was `d782276361424aa63fdfc3e8802494ff6b4fdb0a`, containing code candidate `6886dfa7397092d16055f2994d9f05547f9df776`. CI run `44584757470` passed the required checks and reported zero new advisory/package/path/scope tuples; orchestrator `44584757958` passed. The reviewed change moved the web toolchain to Angular 22.3.0/TypeScript 6.0.3 and `@nestjs/cli` to 12.0.13, with no scanner, threshold or override change. PR #167 was squash-merged as `83364168b0dfbe0404cf8dae100ae1d51a07ba84`.
+- **Decision:** Treat M6.02's dependency check as resolved and include the squash in the milestone branch. Keep #70 open until authorized staging tests and independent multi-process evidence are recorded.
+- **Consequence:** M2.08 no longer blocks package integration or the consolidated PR. External security acceptance, final candidate/digest binding, and M6 deployment gates remain **Not confirmed**; `deploymentReady=false` stays in force.
