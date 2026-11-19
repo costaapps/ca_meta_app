@@ -23,9 +23,14 @@ const expectedPackages = new Map([
   ['M6.04', { issue: 67, pr: 169, headSha: 'faa0a8745b66742b5aaf8648fa53ecb530883901', state: 'merged', milestoneSha: '42f0a4d32edd33c6a47a32f1e260481adaa4afd6', runId: 44399644424, checkStatus: 'success' }],
   ['M6.05', { issue: 68, pr: 171, headSha: 'bcf9fc0314ec7480179aef3dc1209c1a4bcea62d', state: 'merged', milestoneSha: '3da17eff8fe2fdeb914013c895744716fec8fd6e', runId: 44400610909, checkStatus: 'success' }],
 ]);
+const expectedSubsequentPreparations = new Map([
+  ['M6.08', { issue: 73, pr: 173, headSha: 'acf2cf53fc55743d30d9217bc72e4f50ee3faaa7', milestoneSha: '81e22140086167209d8b1d2bf6908b399794defa', runId: 44549470024, operationStatus: 'not-executed' }],
+  ['M6.09', { issue: 74, pr: 174, headSha: '40dd4aec38386746d249cfa8d8794a0b1bd4671a', milestoneSha: 'e3ad62659097c9b7611fe4b176bbd7d4a8a14f23', runId: 44550933360, operationStatus: 'not-started' }],
+  ['M6.10', { issue: 75, pr: 175, headSha: 'c2a9badb2e49b2dc95268233225b0ad1c7c451de', milestoneSha: 'd4cb4f84c8a1f39d34befcda2329cc590d9a6d90', runId: 44551732552, operationStatus: 'not-executed' }],
+]);
 const shaPattern = /^[0-9a-f]{40}$/;
 const hex256Pattern = /^[0-9a-f]{64}$/;
-const currentMilestoneBaseSha = '05ab14af8638e11e2dd99a39b06fe4fb0f50e0d8';
+const currentMilestoneBaseSha = 'd4cb4f84c8a1f39d34befcda2329cc590d9a6d90';
 
 function requireValue(condition, message) {
   if (!condition) throw new Error(message);
@@ -58,6 +63,21 @@ function validateReadiness(pack) {
     candidates.set(candidate.package, candidate);
   }
   requireValue([...expectedPackages.keys()].every((name) => candidates.has(name)), 'A required candidate package reference is missing.');
+
+  requireValue(Array.isArray(pack.subsequentPreparationPackages) && pack.subsequentPreparationPackages.length === expectedSubsequentPreparations.size, 'Subsequent M6.08-M6.10 preparation references must be present exactly once.');
+  const subsequentPreparations = new Map();
+  for (const preparation of pack.subsequentPreparationPackages) {
+    const expected = expectedSubsequentPreparations.get(preparation.package);
+    requireValue(expected && !subsequentPreparations.has(preparation.package), 'Subsequent preparation references contain an unknown or duplicate package.');
+    requireValue(preparation.issue === expected.issue && preparation.pr === expected.pr, `${preparation.package} PR/issue identity is invalid.`);
+    requireValue(preparation.branch === `desktop/${preparation.package.toLowerCase().replace('.', '-')}`, `${preparation.package} branch is invalid.`);
+    requireValue(preparation.headSha === expected.headSha && shaPattern.test(preparation.headSha), `${preparation.package} must identify the observed PR head SHA.`);
+    requireValue(preparation.state === 'merged' && preparation.milestoneSha === expected.milestoneSha, `${preparation.package} integration reference is inaccurate.`);
+    requireValue(preparation.requiredCheck?.runId === expected.runId && preparation.requiredCheck?.status === 'success', `${preparation.package} required-check evidence is inaccurate.`);
+    requireValue(preparation.operationStatus === expected.operationStatus, `${preparation.package} must not claim operational activity.`);
+    subsequentPreparations.set(preparation.package, preparation);
+  }
+  requireValue([...expectedSubsequentPreparations.keys()].every((name) => subsequentPreparations.has(name)), 'A required subsequent preparation reference is missing.');
 
   requireValue(pack.targets && typeof pack.targets === 'object', 'Environment targets are missing.');
   for (const environment of ['staging', 'production']) {
@@ -92,7 +112,7 @@ function validateReadiness(pack) {
   for (const field of ['previousManifestSha256', 'backupReference', 'restoreEvidence', 'operatorReference', 'auditTrailReference']) {
     requireValue(pack.rollback[field] === null, `Rollback field ${field} must remain empty until evidenced in the authorized environment.`);
   }
-  return { status: pack.status, deploymentReady: pack.deploymentReady, gateCount: pack.gates.length, candidateCount: pack.candidatePullRequests.length };
+  return { status: pack.status, deploymentReady: pack.deploymentReady, gateCount: pack.gates.length, candidateCount: pack.candidatePullRequests.length, subsequentPreparationCount: pack.subsequentPreparationPackages.length };
 }
 
 function expectReject(label, action) {

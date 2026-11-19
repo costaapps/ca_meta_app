@@ -6,7 +6,7 @@
   "observedAt": "2026-11-19",
   "source": {
     "milestoneBranch": "desktop/milestone-m6",
-    "milestoneBaseSha": "05ab14af8638e11e2dd99a39b06fe4fb0f50e0d8",
+    "milestoneBaseSha": "d4cb4f84c8a1f39d34befcda2329cc590d9a6d90",
     "releaseCommit": null,
     "releaseTag": null,
     "releaseId": null,
@@ -64,6 +64,41 @@
       "state": "merged",
       "milestoneSha": "3da17eff8fe2fdeb914013c895744716fec8fd6e",
       "requiredCheck": { "runId": 44400610909, "status": "success" }
+    }
+  ],
+  "subsequentPreparationPackages": [
+    {
+      "package": "M6.08",
+      "issue": 73,
+      "pr": 173,
+      "branch": "desktop/m6-08",
+      "headSha": "acf2cf53fc55743d30d9217bc72e4f50ee3faaa7",
+      "state": "merged",
+      "milestoneSha": "81e22140086167209d8b1d2bf6908b399794defa",
+      "requiredCheck": { "runId": 44549470024, "status": "success" },
+      "operationStatus": "not-executed"
+    },
+    {
+      "package": "M6.09",
+      "issue": 74,
+      "pr": 174,
+      "branch": "desktop/m6-09",
+      "headSha": "40dd4aec38386746d249cfa8d8794a0b1bd4671a",
+      "state": "merged",
+      "milestoneSha": "e3ad62659097c9b7611fe4b176bbd7d4a8a14f23",
+      "requiredCheck": { "runId": 44550933360, "status": "success" },
+      "operationStatus": "not-started"
+    },
+    {
+      "package": "M6.10",
+      "issue": 75,
+      "pr": 175,
+      "branch": "desktop/m6-10",
+      "headSha": "c2a9badb2e49b2dc95268233225b0ad1c7c451de",
+      "state": "merged",
+      "milestoneSha": "d4cb4f84c8a1f39d34befcda2329cc590d9a6d90",
+      "requiredCheck": { "runId": 44551732552, "status": "success" },
+      "operationStatus": "not-executed"
     }
   ],
   "targets": {
