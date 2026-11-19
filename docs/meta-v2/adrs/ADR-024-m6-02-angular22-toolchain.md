@@ -1,6 +1,6 @@
 # ADR-024 · Atualizar toolchain Angular para remover o advisory de minimatch
 
-Status: accepted for the M6.02 candidate; exact-head CI and independent review are required before integration. Issue: [M6.02 / #70](https://github.com/costaapps/ca_meta_app/issues/70). Date: 2026-11-19.
+Status: accepted for the M6.02 code candidate; code CI and independent code/security reviews passed. Issue: [M6.02 / #70](https://github.com/costaapps/ca_meta_app/issues/70). Date: 2026-11-19.
 
 ## Context
 
@@ -23,9 +23,11 @@ Apply the official Angular CLI/Core 21→22 migrations. They add `ChangeDetectio
 ## Evidence and acceptance
 
 - Official npm metadata on 2026-11-19: Angular CLI/build 22.3.0 do not declare `pacote`; Nest CLI 12.0.13 uses `minimatch@11.0.5`.
-- A temporary lock-resolution audit based on the candidate workspace manifests and current lockfile reported 0 vulnerabilities. This is preliminary evidence; the M2.08 comparison against the actual PR target and all candidate checks must pass on the exact pushed SHA.
+- A temporary lock-resolution audit and the local full workspace `npm audit --json` both reported 0 vulnerabilities. CI run 44583581344 confirmed no new M2.08 tuple against the actual PR target and passed all four candidate jobs on code SHA `6886dfa7397092d16055f2994d9f05547f9df776`.
+- `npm run build:web && node tools/m2/check-web-bundle.mjs` passed on that code SHA; 24 browser files were scanned. Independent code and security reviews found no blocking issue.
 - Node 24.22.2/npm 11.19.1 were prepared locally without global installation. Angular migrations were applied from the web workspace. No production or Meta operation was performed.
-- Keep M6.02 open until the exact PR head passes required CI and independent review. M6's external staging and operational acceptance gates remain separate and **Not confirmed**.
+- Angular CLI 22 includes the optional `ng mcp` command. No repository script or workflow invokes it; review its capabilities separately before enabling it in developer workflows.
+- Keep issue #70 open: independent staging evidence and concurrent multi-process testing remain **Not confirmed**. M6's external operational acceptance gates remain separate.
 
 ## Revisit
 
