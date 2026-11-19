@@ -18,7 +18,7 @@ const expectedGates = [
 ];
 const expectedPackages = new Map([
   ['M6.01', { issue: 69, pr: 170, headSha: '7b9930622369b6ee68a2903c3b1bf4ff80eb8e03', state: 'merged', milestoneSha: 'a856bf4319519d75c1c02907afbfb477a453bf08', runId: 44389497887, checkStatus: 'success' }],
-  ['M6.02', { issue: 70, pr: 167, headSha: '6886dfa7397092d16055f2994d9f05547f9df776', state: 'merged', milestoneSha: '83364168b0dfbe0404cf8dae100ae1d51a07ba84', runId: 44584757470, checkStatus: 'success' }],
+  ['M6.02', { issue: 70, pr: 167, headSha: 'd782276361424aa63fdfc3e8802494ff6b4fdb0a', state: 'merged', milestoneSha: '83364168b0dfbe0404cf8dae100ae1d51a07ba84', runId: 44584757470, checkStatus: 'success' }],
   ['M6.03', { issue: 66, pr: 168, headSha: '251bc7c392b1d796d7365310a452792865d611b9', state: 'merged', milestoneSha: '5629ff9f81401f673ef91d2de5de5e1faadaf7eb', runId: 44398162113, checkStatus: 'success' }],
   ['M6.04', { issue: 67, pr: 169, headSha: 'faa0a8745b66742b5aaf8648fa53ecb530883901', state: 'merged', milestoneSha: '42f0a4d32edd33c6a47a32f1e260481adaa4afd6', runId: 44399644424, checkStatus: 'success' }],
   ['M6.05', { issue: 68, pr: 171, headSha: 'bcf9fc0314ec7480179aef3dc1209c1a4bcea62d', state: 'merged', milestoneSha: '3da17eff8fe2fdeb914013c895744716fec8fd6e', runId: 44400610909, checkStatus: 'success' }],

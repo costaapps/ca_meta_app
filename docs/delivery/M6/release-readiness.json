@@ -29,7 +29,7 @@
       "issue": 70,
       "pr": 167,
       "branch": "desktop/m6-02",
-      "headSha": "6886dfa7397092d16055f2994d9f05547f9df776",
+      "headSha": "d782276361424aa63fdfc3e8802494ff6b4fdb0a",
       "state": "merged",
       "milestoneSha": "83364168b0dfbe0404cf8dae100ae1d51a07ba84",
       "requiredCheck": { "runId": 44584757470, "status": "success" },
