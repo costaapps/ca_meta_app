@@ -17,6 +17,9 @@ const expectedDomains = [
   'retention_and_hosting_disposition',
   'support_ownership_and_milestone_acceptance',
 ];
+const shaPattern = /^[0-9a-f]{40}$/;
+const expectedStartingBase = '3da17eff8fe2fdeb914013c895744716fec8fd6e';
+const expectedBase = 'e3ad62659097c9b7611fe4b176bbd7d4a8a14f23';
 const errors = [];
 const fail = (message) => errors.push(message);
 
@@ -33,6 +36,11 @@ if (ledger) {
   if (ledger.schemaVersion !== 1) fail('schemaVersion must be 1');
   if (ledger.packageId !== 'M6.10') fail('packageId must be M6.10');
   if (ledger.issue?.number !== 75 || ledger.issue?.stateAtPreparation !== 'open') fail('issue #75 must remain recorded as open');
+  if (ledger.startingBaseCommit !== expectedStartingBase || ledger.baseCommit !== expectedBase || !shaPattern.test(ledger.baseCommit ?? '')) fail('starting and synchronized milestone bases must match the observed history');
+  const m608 = ledger.milestoneDependencies?.m6_08;
+  if (m608?.pr !== 173 || m608.prHeadSha !== 'acf2cf53fc55743d30d9217bc72e4f50ee3faaa7' || m608.milestoneSha !== '81e22140086167209d8b1d2bf6908b399794defa' || m608.rolloutExecuted !== false || m608.acceptance !== 'Not confirmed') fail('M6.08 preparation/integration reference or external gate is inaccurate');
+  const m609 = ledger.milestoneDependencies?.m6_09;
+  if (m609?.pr !== 174 || m609.prHeadSha !== '40dd4aec38386746d249cfa8d8794a0b1bd4671a' || m609.milestoneSha !== expectedBase || m609.operationalRunStarted !== false || m609.acceptance !== 'Not confirmed') fail('M6.09 preparation/integration reference or external gate is inaccurate');
   if (ledger.recordType !== 'structural-preparation-only') fail('recordType must remain structural-preparation-only');
   if (ledger.liveInventoryPerformed !== false) fail('liveInventoryPerformed must be false');
   if (ledger.retirementAuthorized !== false) fail('retirementAuthorized must be false');

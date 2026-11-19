@@ -8,7 +8,23 @@
   },
   "preparedOn": "2026-11-19",
   "startingBaseCommit": "3da17eff8fe2fdeb914013c895744716fec8fd6e",
-  "baseCommit": "05ab14af8638e11e2dd99a39b06fe4fb0f50e0d8",
+  "baseCommit": "e3ad62659097c9b7611fe4b176bbd7d4a8a14f23",
+  "milestoneDependencies": {
+    "m6_08": {
+      "pr": 173,
+      "prHeadSha": "acf2cf53fc55743d30d9217bc72e4f50ee3faaa7",
+      "milestoneSha": "81e22140086167209d8b1d2bf6908b399794defa",
+      "rolloutExecuted": false,
+      "acceptance": "Not confirmed"
+    },
+    "m6_09": {
+      "pr": 174,
+      "prHeadSha": "40dd4aec38386746d249cfa8d8794a0b1bd4671a",
+      "milestoneSha": "e3ad62659097c9b7611fe4b176bbd7d4a8a14f23",
+      "operationalRunStarted": false,
+      "acceptance": "Not confirmed"
+    }
+  },
   "recordType": "structural-preparation-only",
   "liveInventoryPerformed": false,
   "retirementAuthorized": false,
