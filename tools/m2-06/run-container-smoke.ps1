@@ -150,7 +150,7 @@ function Test-AppLayerPath {
   }
 }
 
-function Test-AppTextContent {
+function Test-AppCredentialMarker {
   param([Parameter(Mandatory)][string] $Name, [Parameter(Mandatory)][string] $Content, [Parameter(Mandatory)][ValidateSet('web', 'api')][string] $ImageKind)
   $path = $Name.Replace('\', '/')
   $inApp = if ($ImageKind -eq 'web') {
@@ -160,14 +160,34 @@ function Test-AppTextContent {
     $path -eq 'workspace/image-metadata.json' -or
       $path -match '^(?:workspace/apps/api/|workspace/packages/contracts/)'
   }
-  if (-not $inApp) { return }
+  if (-not $inApp) { return $false }
 
-  # NGINX package history contains an unprefixed APK SHA-256 beginning with EA; do not treat all-hex checksums as token markers.
-  $credentialPattern = '(?i)-----BEGIN (?:(?:RSA|EC|OPENSSH|DSA) )?PRIVATE KEY-----|(?<!sha256:)\bEA(?![A-F0-9]{20,}\b)[A-Za-z0-9]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|\b(?:META_APP_SECRET|META_ACCESS_TOKEN|API_DATABASE_PASSWORD|MARIADB_ROOT_PASSWORD)\s*[:=]\s*["'']?(?!change_me|replace_me|placeholder|synthetic_unused|your_|<)[A-Za-z0-9_./+=-]{8,}'
-  if ($Content -match $credentialPattern) {
+  $credentialPattern = '(?i)-----BEGIN (?:(?:RSA|EC|OPENSSH|DSA) )?PRIVATE KEY-----|(?<!sha256:)\bEA[A-Za-z0-9]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|\b(?:META_APP_SECRET|META_ACCESS_TOKEN|API_DATABASE_PASSWORD|MARIADB_ROOT_PASSWORD)\s*[:=]\s*["'']?(?!change_me|replace_me|placeholder|synthetic_unused|your_|<)[A-Za-z0-9_./+=-]{8,}'
+  $scanContent = $Content
+  if ($ImageKind -eq 'web' -and $path -eq 'workspace/image-metadata.json') {
+    # The pinned NGINX base embeds this exact 128-character APK checksum in its image history.
+    $nginxPackageChecksumPattern = '(?i)(PKGOSSCHECKSUM=[\\]{3}")([A-F0-9]{128})(?=\s+\*\$\{NGINX_VERSION\})'
+    $scanContent = [regex]::Replace($Content, $nginxPackageChecksumPattern, '$1sha256:$2')
+  }
+  return [regex]::IsMatch($scanContent, $credentialPattern)
+}
+
+function Test-AppTextContent {
+  param([Parameter(Mandatory)][string] $Name, [Parameter(Mandatory)][string] $Content, [Parameter(Mandatory)][ValidateSet('web', 'api')][string] $ImageKind)
+  if (Test-AppCredentialMarker -Name $Name -Content $Content -ImageKind $ImageKind) {
     $displayName = [System.IO.Path]::GetFileName($Name.Replace('\', '/'))
     throw "Credential marker found in a final image application file ($ImageKind/$displayName); value suppressed."
   }
+}
+
+function Assert-CredentialMarkerFixtures {
+  $syntheticApkChecksum = 'PKGOSSCHECKSUM=' + ([string][char] 92 * 3) + '"' + ('EA' + ('a' * 126)) + ' *${NGINX_VERSION}'
+  Assert-True (-not (Test-AppCredentialMarker -Name 'workspace/image-metadata.json' -Content $syntheticApkChecksum -ImageKind web)) 'Known NGINX APK checksum metadata was classified as a credential marker.'
+  Assert-True (Test-AppCredentialMarker -Name 'workspace/image-metadata.json' -Content ('EA' + ('a' * 126)) -ImageKind web) 'An all-hex EA marker outside the known checksum field was not detected.'
+  Assert-True (Test-AppCredentialMarker -Name 'workspace/image-metadata.json' -Content 'EAAG1234567890abcdefghijklmnoQRSTUVWXYZ1234567890' -ImageKind web) 'A mixed-alphanumeric EA marker was not detected.'
+  Assert-True (Test-AppCredentialMarker -Name 'workspace/image-metadata.json' -Content $syntheticApkChecksum.Replace('${NGINX_VERSION}', '${OTHER_VERSION}') -ImageKind web) 'An EA marker in an unrecognized checksum context was not detected.'
+  Assert-True (Test-AppCredentialMarker -Name 'workspace/image-metadata.json' -Content $syntheticApkChecksum -ImageKind api) 'An EA marker outside the web image exception was not detected.'
+  Write-Output 'PASS: credential marker fixtures preserve the scoped NGINX checksum exception.'
 }
 
 function Test-ImageLayerStream {
@@ -292,6 +312,7 @@ function Test-ImageArchiveLayers {
 }
 
 try {
+  Assert-CredentialMarkerFixtures
   if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'Docker CLI is required.' }
   if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git is required to label the tested revision.' }
   if (-not $ociRevision -or $LASTEXITCODE -ne 0) { throw 'Could not resolve the tested Git revision.' }
