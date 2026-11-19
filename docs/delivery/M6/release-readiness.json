@@ -1,0 +1,210 @@
+{
+  "formatVersion": 1,
+  "package": "M6.06",
+  "status": "preparation-only",
+  "deploymentReady": false,
+  "observedAt": "2026-11-19",
+  "source": {
+    "milestoneBranch": "desktop/milestone-m6",
+    "milestoneBaseSha": "d4cb4f84c8a1f39d34befcda2329cc590d9a6d90",
+    "releaseCommit": null,
+    "releaseTag": null,
+    "releaseId": null,
+    "releaseManifestSha256": null,
+    "candidateReferencesAreNonBinding": true
+  },
+  "candidatePullRequests": [
+    {
+      "package": "M6.01",
+      "issue": 69,
+      "pr": 170,
+      "branch": "desktop/m6-01",
+      "headSha": "7b9930622369b6ee68a2903c3b1bf4ff80eb8e03",
+      "state": "merged",
+      "milestoneSha": "a856bf4319519d75c1c02907afbfb477a453bf08",
+      "requiredCheck": { "runId": 44389497887, "status": "success" }
+    },
+    {
+      "package": "M6.02",
+      "issue": 70,
+      "pr": 167,
+      "branch": "desktop/m6-02",
+      "headSha": "9a67dff70e437c1bdf52445198493c30fd9886c8",
+      "state": "blocked",
+      "milestoneSha": null,
+      "requiredCheck": { "runId": 44398836758, "status": "failure" },
+      "note": "M2.08 m2-08-security reports one new moderate dev-only pacote/sigstore tuple; the required check is not green."
+    },
+    {
+      "package": "M6.03",
+      "issue": 66,
+      "pr": 168,
+      "branch": "desktop/m6-03",
+      "headSha": "251bc7c392b1d796d7365310a452792865d611b9",
+      "state": "merged",
+      "milestoneSha": "5629ff9f81401f673ef91d2de5de5e1faadaf7eb",
+      "requiredCheck": { "runId": 44398162113, "status": "success" }
+    },
+    {
+      "package": "M6.04",
+      "issue": 67,
+      "pr": 169,
+      "branch": "desktop/m6-04",
+      "headSha": "faa0a8745b66742b5aaf8648fa53ecb530883901",
+      "state": "merged",
+      "milestoneSha": "42f0a4d32edd33c6a47a32f1e260481adaa4afd6",
+      "requiredCheck": { "runId": 44399644424, "status": "success" }
+    },
+    {
+      "package": "M6.05",
+      "issue": 68,
+      "pr": 171,
+      "branch": "desktop/m6-05",
+      "headSha": "bcf9fc0314ec7480179aef3dc1209c1a4bcea62d",
+      "state": "merged",
+      "milestoneSha": "3da17eff8fe2fdeb914013c895744716fec8fd6e",
+      "requiredCheck": { "runId": 44400610909, "status": "success" }
+    }
+  ],
+  "subsequentPreparationPackages": [
+    {
+      "package": "M6.08",
+      "issue": 73,
+      "pr": 173,
+      "branch": "desktop/m6-08",
+      "headSha": "acf2cf53fc55743d30d9217bc72e4f50ee3faaa7",
+      "state": "merged",
+      "milestoneSha": "81e22140086167209d8b1d2bf6908b399794defa",
+      "requiredCheck": { "runId": 44549470024, "status": "success" },
+      "operationStatus": "not-executed"
+    },
+    {
+      "package": "M6.09",
+      "issue": 74,
+      "pr": 174,
+      "branch": "desktop/m6-09",
+      "headSha": "40dd4aec38386746d249cfa8d8794a0b1bd4671a",
+      "state": "merged",
+      "milestoneSha": "e3ad62659097c9b7611fe4b176bbd7d4a8a14f23",
+      "requiredCheck": { "runId": 44550933360, "status": "success" },
+      "operationStatus": "not-started"
+    },
+    {
+      "package": "M6.10",
+      "issue": 75,
+      "pr": 175,
+      "branch": "desktop/m6-10",
+      "headSha": "c2a9badb2e49b2dc95268233225b0ad1c7c451de",
+      "state": "merged",
+      "milestoneSha": "d4cb4f84c8a1f39d34befcda2329cc590d9a6d90",
+      "requiredCheck": { "runId": 44551732552, "status": "success" },
+      "operationStatus": "not-executed"
+    }
+  ],
+  "targets": {
+    "staging": {
+      "status": "Not confirmed",
+      "resourceReferences": []
+    },
+    "production": {
+      "status": "Not confirmed",
+      "resourceReferences": []
+    }
+  },
+  "images": {
+    "web": {
+      "digest": null,
+      "sourceRevision": null,
+      "sbomSha256": null,
+      "provenanceSha256": null,
+      "scanResultsSha256": null
+    },
+    "api": {
+      "digest": null,
+      "sourceRevision": null,
+      "sbomSha256": null,
+      "provenanceSha256": null,
+      "scanResultsSha256": null
+    },
+    "worker": {
+      "mustUseApiDigest": true,
+      "digest": null
+    }
+  },
+  "databaseSchema": {
+    "targetVersion": null,
+    "minCompatible": null,
+    "maxCompatible": null,
+    "migrationPreflight": "Not confirmed"
+  },
+  "gates": [
+    {
+      "id": "infrastructure-and-ownership",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "dns-tls-network-and-ingress",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "database-queue-capacity-and-schema-compatibility",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "secret-store-and-service-account-ownership",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "immutable-image-digests-sbom-provenance-and-scans",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "github-staging-and-production-environments-and-gates",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "callbacks-webhooks-privacy-and-revocation-routes",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "meta-flow-permissions-eligibility-and-test-assets",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "m6-01-through-m6-05-integrated-and-revalidated",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "previous-manifest-backup-and-rollback-evidence",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "product-security-and-operations-go-no-go",
+      "status": "Not confirmed",
+      "evidence": []
+    },
+    {
+      "id": "promotion-operator-and-auditable-trail",
+      "status": "Not confirmed",
+      "evidence": []
+    }
+  ],
+  "rollback": {
+    "previousManifestSha256": null,
+    "backupReference": null,
+    "restoreEvidence": null,
+    "operatorReference": null,
+    "auditTrailReference": null,
+    "status": "Not confirmed"
+  }
+}

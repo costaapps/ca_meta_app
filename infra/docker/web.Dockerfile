@@ -1,5 +1,5 @@
 ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24.22.2-alpine3.24@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
-ARG NGINX_IMAGE=public.ecr.aws/nginx/nginx-unprivileged:stable-alpine3.24@sha256:2daef144b574804198caccc4041819fa1801ecd5df2252a39646bfa2b1ff3bea
+ARG NGINX_IMAGE=public.ecr.aws/nginx/nginx-unprivileged:stable-alpine3.24@sha256:0c53a1f2890c3526bfd201440f0fd3970e5b78f80630f58284aad0d34b5ec7bd
 
 FROM ${NODE_IMAGE} AS build
 WORKDIR /workspace

@@ -1,0 +1,214 @@
+{
+  "schemaVersion": 1,
+  "packageId": "M6.10",
+  "issue": {
+    "number": 75,
+    "url": "https://github.com/costaapps/ca_meta_app/issues/75",
+    "stateAtPreparation": "open"
+  },
+  "preparedOn": "2026-11-19",
+  "startingBaseCommit": "3da17eff8fe2fdeb914013c895744716fec8fd6e",
+  "baseCommit": "e3ad62659097c9b7611fe4b176bbd7d4a8a14f23",
+  "milestoneDependencies": {
+    "m6_08": {
+      "pr": 173,
+      "prHeadSha": "acf2cf53fc55743d30d9217bc72e4f50ee3faaa7",
+      "milestoneSha": "81e22140086167209d8b1d2bf6908b399794defa",
+      "rolloutExecuted": false,
+      "acceptance": "Not confirmed"
+    },
+    "m6_09": {
+      "pr": 174,
+      "prHeadSha": "40dd4aec38386746d249cfa8d8794a0b1bd4671a",
+      "milestoneSha": "e3ad62659097c9b7611fe4b176bbd7d4a8a14f23",
+      "operationalRunStarted": false,
+      "acceptance": "Not confirmed"
+    }
+  },
+  "recordType": "structural-preparation-only",
+  "liveInventoryPerformed": false,
+  "retirementAuthorized": false,
+  "externalActionsPerformed": false,
+  "claimBoundary": "This ledger defines evidence to collect. It contains no live route, callback, scheduler, credential, consumer, traffic, backup, retention, or owner findings.",
+  "sourceDocuments": [
+    {
+      "reference": "github-issue-75",
+      "url": "https://github.com/costaapps/ca_meta_app/issues/75",
+      "accessedOn": "2026-11-19",
+      "use": "Current issue scope and acceptance criteria; issue was open with implementation and validations pending."
+    },
+    {
+      "reference": "docs/codex-desktop/prompts/M6.md",
+      "section": "M6.10",
+      "use": "Milestone checklist and production-operation authorization boundary."
+    },
+    {
+      "reference": "docs/meta-v2/06-delivery-migration-and-operations.md",
+      "section": "retirada, backup, rollback e operação",
+      "use": "Staged decommission, retention, recovery, and shared callback constraints."
+    },
+    {
+      "reference": "docs/meta-v2/07-acceptance-risk-and-governance.md",
+      "section": "responsabilidades e risco R25",
+      "use": "Functional review roles and shared root-token dependency risk."
+    }
+  ],
+  "evidenceDomains": [
+    {
+      "id": "legacy_routes_and_rewrites",
+      "subject": "PHP/Hostinger route, rewrite, redirect, and error behavior used by migrated functions",
+      "status": "Not confirmed",
+      "ownerRoles": ["Operations/SRE", "Legacy/backend owner"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Sanitized live inventory of route and rewrite rules with responsible environment and capture time.",
+        "Access and outcome evidence over a window that covers relevant traffic, scheduled work, support, and reauthentication cadence.",
+        "Per-route mapping to replacement behavior, safe redirect/error behavior, rollback trigger, and accountable operator."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "callbacks_webhooks_and_subscriptions",
+      "subject": "App-level callbacks, supported per-asset overrides, webhook subscriptions, and downstream consumers",
+      "status": "Not confirmed",
+      "ownerRoles": ["Meta integration owner", "Operations/SRE", "Security"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Sanitized app-level and per-asset callback configuration, subscription state, and ownership for each relevant environment.",
+        "Delivery/consumer traces over an agreed observation window and proof of single execution per business action.",
+        "Validated gateway or cutover routing, signature handling, idempotency, rollback, and operator sign-off."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "cron_and_scheduled_jobs",
+      "subject": "Hostinger cron, external schedulers, recurring workers, and periodic reauthentication work",
+      "status": "Not confirmed",
+      "ownerRoles": ["Operations/SRE", "Backend/job owner"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Sanitized scheduler inventory with cadence, last execution outcomes, side effects, and owner for every job.",
+        "Observation window covering each relevant cadence and periodic reauthentication or reconciliation behavior.",
+        "Replacement/disable order, alerting, and recoverable rollback evidence."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "general_settings_and_global_token_sources",
+      "subject": "GeneralSettings and any global/root credential source or fallback, without credential values",
+      "status": "Not confirmed",
+      "ownerRoles": ["Backend", "Security", "Operations/SRE"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Sanitized inventory of credential identifiers/versions and scope from the authorized secret inventory; never record values.",
+        "Code/config ownership and read/write/fallback mapping, including whether credentials serve other apps or resources.",
+        "Approved replacement and selective revocation plan with verified non-impact to unrelated consumers."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "global_token_consumers",
+      "subject": "All products, services, integrations, and jobs that consume a global/root token or equivalent shared credential",
+      "status": "Not confirmed",
+      "ownerRoles": ["Backend", "Security", "Owners of dependent products", "Operations/SRE"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Consumer-to-credential-scope map with owner, purpose, environment, and evidence source for each consumer.",
+        "Proof that each migrated function uses an authorized tenant/resource grant and no inappropriate global-token fallback.",
+        "Impact review for non-Meta products and an explicit credential disposition approved by its owner."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "client_tenant_and_legacy_consumers",
+      "subject": "Msg4/Suite4, portal, API, projections, client/tenant readers and writers, and remaining PHP consumers",
+      "status": "Not confirmed",
+      "ownerRoles": ["Product", "Suite4/Msg4 consumer owner", "Backend", "Support"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Complete consumer and writer matrix linked to tenant, function, and replacement contract, with evidence provenance.",
+        "Proof that migrated tenants have no unplanned legacy dependency and unmigrated tenants remain safely supported until their own cutover.",
+        "Independent checks for cross-tenant access, duplicate effects, and missing consumer coverage."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "four_flow_and_multi_number_acceptance",
+      "subject": "Facebook, Instagram, WhatsApp exclusive, and WhatsApp Coexistence kept as distinct flows; multiple numbers/companies",
+      "status": "Not confirmed",
+      "ownerRoles": ["Product", "Meta integration", "QA", "Operations/SRE"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Flow-specific end-to-end evidence for each of the four modalities in the approved test context.",
+        "Multi-company and multiple-number evidence, including Coexistence, authorization isolation, recovery, and no credential swapping.",
+        "Applicable M4/M5/M6 acceptance evidence and a reviewer decision for each unsupported or externally gated case."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "observation_window_and_staged_disable",
+      "subject": "Order, observation window, and rollback for disabling old writers/routes, readers, and jobs",
+      "status": "Not confirmed",
+      "ownerRoles": ["Operations/SRE", "Backend", "Product"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Approved window justified by observed route traffic, job cadence, reauthentication, callbacks, and support patterns.",
+        "Per-stage preconditions, monitored signals, abort thresholds with owners, and rollback procedure across code/schema/data/external effects.",
+        "Post-stage evidence that no unexpected dependency or duplicate business executor appeared."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "meta_asset_non_deletion",
+      "subject": "Preservation of Meta accounts, phone numbers, WABAs, subscriptions, and other assets during hosting decommission",
+      "status": "Not confirmed",
+      "ownerRoles": ["Meta integration", "Operations/SRE", "Product"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Change plan proves host/route retirement is separate from deleting Meta assets or client connections.",
+        "Pre/post inventory comparison or equivalent authorized evidence proving no unintended asset deletion or subscription change.",
+        "Explicit approval for any separate Meta-side change, if one is later proposed."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "backup_contract_and_recovery",
+      "subject": "Approved backup, sanitized contract/archive, rollback, key recovery, and restore readiness before destructive action",
+      "status": "Not confirmed",
+      "ownerRoles": ["Data/DBA", "Operations/SRE", "Security", "Architecture"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Backup scope, integrity, destination, custody, and retained version confirmed for affected data and infrastructure.",
+        "Restore exercise in a clean isolated environment with required keys/jobs and comparison against approved recovery criteria.",
+        "Sanitized architecture/contract and migration ledger archive; no operational source or secret copied into the archive."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "retention_and_hosting_disposition",
+      "subject": "Approved retention, access, export, and disposal of hosting data and artifacts",
+      "status": "Not confirmed",
+      "ownerRoles": ["Data protection", "Operations/SRE", "Hosting account owner", "Product"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Named accountable owner and approved retention schedule for each affected data/artifact class.",
+        "Documented legal/business exceptions, access controls, export/restore needs, and disposal proof requirements.",
+        "Separate approved execution record for any future hosting shutdown or data deletion."
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "id": "support_ownership_and_milestone_acceptance",
+      "subject": "Named operational and support owners, remaining cross-milestone gates, and final M6 acceptance",
+      "status": "Not confirmed",
+      "ownerRoles": ["Operations/SRE", "Support", "Product", "Milestone coordinator"],
+      "ownerAssignmentStatus": "Not confirmed",
+      "requiredEvidence": [
+        "Named people assigned to operate, review, support, and approve; generic roles alone are insufficient for execution.",
+        "Verified M6.09/M5.07/M5.08/M5.09 evidence and all applicable milestone acceptance gates.",
+        "Final auditable change record, rollback/recovery outcome, and explicit closeout review."
+      ],
+      "evidenceRefs": []
+    }
+  ]
+}
