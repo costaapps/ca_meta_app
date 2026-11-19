@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
   CoexistenceOnboardingService,
@@ -15,6 +15,7 @@ import { PortalTenantIdentityService } from '../../core/portal/portal-tenant-ide
   imports: [CommonModule, RouterLink],
   providers: [CoexistenceOnboardingService],
   templateUrl: './coexistence-setup.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './coexistence-setup.component.scss',
 })
 export class CoexistenceSetupComponent implements OnInit, OnDestroy {

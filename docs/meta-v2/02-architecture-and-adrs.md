@@ -81,7 +81,7 @@ Nenhuma reorganização ocorre no PR de planejamento. Os caminhos acima são alv
 
 ## Estratégia de versões
 
-Angular 21 estava em LTS na consulta de 28/10/2026 segundo [Angular releases](https://angular.dev/reference/releases). Não há necessidade de migrar imediatamente para a versão mais nova para resolver os problemas. Antes de implementar, selecionar patches/Node/TypeScript compatíveis em [Version compatibility](https://angular.dev/reference/versions) e registrar lockfile/base image. NestJS e bibliotecas de auth também exigem versão suportada verificada; a proposta não presume API disponível em uma versão antiga.
+Angular 21 estava em LTS na consulta de 28/10/2026 segundo [Angular releases](https://angular.dev/reference/releases). Na execução M6.02 de 19/11/2026, o gate de segurança não tinha uma correção compatível na linha Angular 21; o candidato migra para Angular 22.3.0 e TypeScript 6.0.x conforme [ADR-024](adrs/ADR-024-m6-02-angular22-toolchain.md). Para novas mudanças, selecionar versões compatíveis de Node/TypeScript em [Version compatibility](https://angular.dev/reference/versions) e registrar lockfile/base image. NestJS e bibliotecas de auth também exigem versão suportada verificada; a proposta não presume API disponível em uma versão antiga.
 
 Versão da Graph API e versão do Embedded Signup são configurações diferentes e devem ser tratadas separadamente por modalidade. Não copiar `v24.0` do PHP nem uma versão citada no chat sem confirmação na matriz M1.03.
 

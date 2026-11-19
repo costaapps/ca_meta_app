@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
@@ -14,6 +14,7 @@ import { safeRequestId } from '../../core/portal/safe-api-error';
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
   templateUrl: './connections-home.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './connections-home.component.scss',
 })
 export class ConnectionsHomeComponent implements OnInit, OnDestroy {

@@ -20,7 +20,8 @@ are all satisfied. Missing Meta configuration does not prevent unrelated API sta
 ## Toolchain and commands
 
 Use Node 24.22.2 and npm 11.19.1, matching ADR-001 and the M1.04 Nest toolchain. The root npm
-lockfile contains the API dependencies while Angular retains its separate TypeScript 5.9 toolchain.
+lockfile contains all workspace dependencies. The Angular 22 and Nest 12 workspaces use TypeScript
+6.0.x; their build tools and dependencies remain isolated by workspace.
 
 From the repository root:
 

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -30,6 +30,7 @@ const FIELD_LABELS: Readonly<Record<AutomationConfigField, string>> = Object.fre
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './asset-automation-config.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './asset-automation-config.component.scss',
 })
 export class AssetAutomationConfigComponent implements OnInit, OnDestroy {

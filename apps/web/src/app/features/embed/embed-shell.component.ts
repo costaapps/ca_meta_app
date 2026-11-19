@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild, ChangeDetectionStrategy } from '@angular/core';
 import { Router } from '@angular/router';
 import { EmbedBridgeService, type EmbedBridgeSnapshot } from '../../core/embed/embed-bridge.service';
 import { embedRoutePath, type EmbedNavigationRequest } from '../../core/embed/embed-contract';
@@ -9,6 +9,7 @@ import { embedRoutePath, type EmbedNavigationRequest } from '../../core/embed/em
   standalone: true,
   imports: [CommonModule],
   templateUrl: './embed-shell.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './embed-shell.component.scss',
 })
 export class EmbedShellComponent implements OnInit, AfterViewInit, OnDestroy {

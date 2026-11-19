@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, HostListener, OnInit } from '@angular/core';
+import { Component, HostListener, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { PortalSessionService } from '../../core/portal/portal-session.service';
@@ -11,6 +11,7 @@ import { safeRequestId } from '../../core/portal/safe-api-error';
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
   templateUrl: './portal-access.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './portal-access.component.scss',
 })
 export class PortalAccessComponent implements OnInit {

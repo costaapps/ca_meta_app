@@ -1,9 +1,10 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { oauthReturnSignalFromSearch } from '../../core/embed/embed-contract';
 
 @Component({
   selector: 'app-oauth-return',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: '<main aria-live="polite"><h1>Retorno recebido</h1><p>{{ message }}</p></main>',
 })
 export class OAuthReturnComponent implements OnInit {

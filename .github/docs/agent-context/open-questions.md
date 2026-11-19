@@ -44,6 +44,6 @@
 - Missing evidence: product requirements and Meta policy alignment
 
 ## Test Runner Intent
-- Is the team intentionally standardizing on Vitest through Angular 21 tooling, or are the remaining Jasmine specs accidental leftovers?
+- Is the team intentionally standardizing on Vitest through Angular 22 tooling, or are the remaining Jasmine specs accidental leftovers?
 - Status: inferred leftover, not formally confirmed
 - Missing evidence: repo-level testing guideline or updated test examples

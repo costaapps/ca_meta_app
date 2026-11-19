@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import type { components } from '@ca-meta/contracts';
@@ -31,6 +31,7 @@ const SAFE_REFERENCE = /^[A-Za-z0-9_-]{1,128}$/;
   standalone: true,
   imports: [CommonModule, RouterLink],
   templateUrl: './connection-record-detail.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './connection-record-detail.component.scss',
 })
 export class ConnectionRecordDetailComponent implements OnInit, OnDestroy {

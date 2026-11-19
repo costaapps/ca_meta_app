@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, OnInit, ViewChild, ChangeDetectionStrategy } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import { PortalContextStore } from '../../core/portal/portal-context.store';
@@ -23,6 +23,7 @@ export const PORTAL_NAVIGATION = Object.freeze([
   standalone: true,
   imports: [CommonModule, RouterLink, RouterLinkActive, RouterOutlet],
   templateUrl: './portal-shell.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './portal-shell.component.scss',
 })
 export class PortalShellComponent implements OnInit, OnDestroy {
