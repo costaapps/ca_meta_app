@@ -3,10 +3,10 @@
   "package": "M6.07",
   "issue": 72,
   "snapshot": {
-    "preparedOn": "2026-11-18",
-    "baseSha": "a856bf4319519d75c1c02907afbfb477a453bf08",
+    "preparedOn": "2026-11-19",
+    "baseSha": "f20072797370af3b9b9821e289929227985f5ae7",
     "issueState": "open",
-    "issueUpdatedAt": "2026-10-28T04:26:09Z",
+    "issueUpdatedAt": "2026-11-19T14:54:15Z",
     "kind": "SYNTHETIC_READINESS_SKELETON"
   },
   "decision": {
@@ -20,33 +20,41 @@
       "key": "M4.01",
       "issue": 42,
       "issueUrl": "https://github.com/costaapps/ca_meta_app/issues/42",
-      "prReferenceStatus": "PROVISIONAL",
-      "pullRequestUrl": null,
-      "integratedSha": null
+      "prReferenceStatus": "VERIFIED",
+      "pullRequestUrl": "https://github.com/costaapps/ca_meta_app/pull/128",
+      "integratedSha": "65233723351432d5f49306666f7fe777f7ead8b3",
+      "consolidatedPullRequestUrl": "https://github.com/costaapps/ca_meta_app/pull/151",
+      "consolidatedIntegratedSha": "c3e9baa75ea793d74292e62038e0d8d11bb61295"
     },
     {
       "key": "M6.01",
       "issue": 69,
       "issueUrl": "https://github.com/costaapps/ca_meta_app/issues/69",
-      "prReferenceStatus": "PROVISIONAL",
-      "pullRequestUrl": null,
-      "integratedSha": null
+      "prReferenceStatus": "VERIFIED",
+      "pullRequestUrl": "https://github.com/costaapps/ca_meta_app/pull/170",
+      "integratedSha": "a856bf4319519d75c1c02907afbfb477a453bf08",
+      "consolidatedPullRequestUrl": null,
+      "consolidatedIntegratedSha": null
     },
     {
       "key": "M6.02",
       "issue": 70,
       "issueUrl": "https://github.com/costaapps/ca_meta_app/issues/70",
-      "prReferenceStatus": "PROVISIONAL",
-      "pullRequestUrl": null,
-      "integratedSha": null
+      "prReferenceStatus": "VERIFIED",
+      "pullRequestUrl": "https://github.com/costaapps/ca_meta_app/pull/167",
+      "integratedSha": "83364168b0dfbe0404cf8dae100ae1d51a07ba84",
+      "consolidatedPullRequestUrl": null,
+      "consolidatedIntegratedSha": null
     },
     {
       "key": "M6.06",
       "issue": 71,
       "issueUrl": "https://github.com/costaapps/ca_meta_app/issues/71",
-      "prReferenceStatus": "PROVISIONAL",
-      "pullRequestUrl": null,
-      "integratedSha": null
+      "prReferenceStatus": "VERIFIED",
+      "pullRequestUrl": "https://github.com/costaapps/ca_meta_app/pull/176",
+      "integratedSha": "da234f4ae7900a078a7973d79ee49ee3d074d32b",
+      "consolidatedPullRequestUrl": null,
+      "consolidatedIntegratedSha": null
     }
   ],
   "applicationLevelGates": [

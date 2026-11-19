@@ -18,7 +18,34 @@ const expectedApplicationGates = new Set([
   'data_handling_and_data_use_checkup',
 ]);
 const expectedDependencies = new Set(['M4.01', 'M6.01', 'M6.02', 'M6.06']);
-const expectedAccessDate = '2026-11-18';
+const expectedPreparedOn = '2026-11-19';
+const expectedSourceAccessDate = '2026-11-18';
+const expectedDependencyReferences = new Map([
+  ['M4.01', {
+    pullRequestUrl: 'https://github.com/costaapps/ca_meta_app/pull/128',
+    integratedSha: '65233723351432d5f49306666f7fe777f7ead8b3',
+    consolidatedPullRequestUrl: 'https://github.com/costaapps/ca_meta_app/pull/151',
+    consolidatedIntegratedSha: 'c3e9baa75ea793d74292e62038e0d8d11bb61295',
+  }],
+  ['M6.01', {
+    pullRequestUrl: 'https://github.com/costaapps/ca_meta_app/pull/170',
+    integratedSha: 'a856bf4319519d75c1c02907afbfb477a453bf08',
+    consolidatedPullRequestUrl: null,
+    consolidatedIntegratedSha: null,
+  }],
+  ['M6.02', {
+    pullRequestUrl: 'https://github.com/costaapps/ca_meta_app/pull/167',
+    integratedSha: '83364168b0dfbe0404cf8dae100ae1d51a07ba84',
+    consolidatedPullRequestUrl: null,
+    consolidatedIntegratedSha: null,
+  }],
+  ['M6.06', {
+    pullRequestUrl: 'https://github.com/costaapps/ca_meta_app/pull/176',
+    integratedSha: 'da234f4ae7900a078a7973d79ee49ee3d074d32b',
+    consolidatedPullRequestUrl: null,
+    consolidatedIntegratedSha: null,
+  }],
+]);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -40,7 +67,7 @@ function validateEvidence(evidence) {
   assert(evidence?.schemaVersion === 1, 'Unsupported or missing evidence schemaVersion.');
   assert(evidence.package === 'M6.07' && evidence.issue === 72, 'Fixture must target M6.07 / issue #72.');
   assert(evidence.snapshot?.kind === 'SYNTHETIC_READINESS_SKELETON', 'Fixture must remain explicitly synthetic.');
-  assert(evidence.snapshot?.preparedOn === expectedAccessDate, 'Preparation/access date must match the recorded source review date.');
+  assert(evidence.snapshot?.preparedOn === expectedPreparedOn, 'Preparation date must match the current readiness snapshot.');
   assert(evidence.decision?.status === 'Not confirmed' && evidence.decision.activationAllowed === false, 'Unproven gates must block activation.');
   assert(evidence.decision.externalEvidenceWasCollected === false, 'This local package must not claim external evidence.');
 
@@ -66,8 +93,10 @@ function validateEvidence(evidence) {
   const dependencyIds = new Set((evidence.dependencies ?? []).map((item) => item.key));
   assert(dependencyIds.size === expectedDependencies.size && [...expectedDependencies].every((id) => dependencyIds.has(id)), 'All declared issue dependencies must remain present.');
   for (const dependency of evidence.dependencies) {
-    assert(dependency.prReferenceStatus === 'PROVISIONAL', `${dependency.key} PR reference must remain provisional until integration is verified.`);
-    assert(dependency.pullRequestUrl === null && dependency.integratedSha === null, `${dependency.key} must not claim an unverified PR or integration SHA.`);
+    const expected = expectedDependencyReferences.get(dependency.key);
+    assert(dependency.prReferenceStatus === 'VERIFIED', `${dependency.key} must reference a verified upstream integration.`);
+    assert(dependency.pullRequestUrl === expected.pullRequestUrl && dependency.integratedSha === expected.integratedSha, `${dependency.key} package PR or integration SHA is inaccurate.`);
+    assert(dependency.consolidatedPullRequestUrl === expected.consolidatedPullRequestUrl && dependency.consolidatedIntegratedSha === expected.consolidatedIntegratedSha, `${dependency.key} consolidated integration reference is inaccurate.`);
   }
 
   assert(evidence.suite4Msg4Gate?.status === 'Not confirmed', 'Real Suite4/Msg4 evidence is not confirmed.');
@@ -82,7 +111,7 @@ function validateEvidence(evidence) {
   for (const reference of references) {
     const url = new URL(reference.url);
     assert(url.protocol === 'https:' && url.hostname === 'developers.facebook.com', `Source must be an official Meta developer URL: ${reference.url}`);
-    assert(reference.accessedOn === expectedAccessDate, `Source access date must be ${expectedAccessDate}.`);
+    assert(reference.accessedOn === expectedSourceAccessDate, `Source access date must be ${expectedSourceAccessDate}.`);
   }
 
   const serialized = JSON.stringify(evidence);
@@ -94,4 +123,4 @@ assert(process.argv.length === 2, 'This offline validator accepts no file paths;
 const fixturePath = resolve(fileURLToPath(new URL('./readiness-evidence.synthetic.json', import.meta.url)));
 const evidence = JSON.parse(await readFile(fixturePath, 'utf8'));
 const summary = validateEvidence(evidence);
-process.stdout.write(`M6.07 synthetic checklist valid: ${summary.flowCount} distinct flow variants; ${summary.dependencyCount} provisional dependencies; ${summary.sourceCount} primary Meta sources; ${summary.statusCount} gates remain Not confirmed. No external acceptance was certified.\n`);
+process.stdout.write(`M6.07 synthetic checklist valid: ${summary.flowCount} distinct flow variants; ${summary.dependencyCount} upstream integrations verified; ${summary.sourceCount} primary Meta sources; ${summary.statusCount} gates remain Not confirmed. No external acceptance was certified.\n`);
