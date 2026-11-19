@@ -12,18 +12,20 @@ import { CLOCK, type MonotonicClock } from './common/time/clock.port.js';
 import { portalRequestSecurityMiddleware } from './common/security/portal-request-security.js';
 import { PortalSessionVerifier } from './identity/identity.trust.js';
 import { META_LIFECYCLE_RAW_POST_PATH, META_WEBHOOK_MAX_BODY_BYTES, META_WEBHOOK_RAW_POST_PATH } from './meta-webhooks/meta-webhook-validation.js';
+import { OBSERVABILITY_REGISTRY, type ObservabilityRegistry } from './observability/observability.registry.js';
 
 export const API_BODY_LIMIT_BYTES = 65_536;
 
 export function configureHttpBoundaries(app: INestApplication, environment: ApiEnvironment): void {
   const logger = app.get<StructuredLogger>(STRUCTURED_LOGGER);
   const clock = app.get<MonotonicClock>(CLOCK);
+  const observability = app.get<ObservabilityRegistry>(OBSERVABILITY_REGISTRY);
   const requestDrain = app.get<RequestDrain>(REQUEST_DRAIN);
   const expressApp = app.getHttpAdapter().getInstance() as import('express').Express;
   expressApp.disable('x-powered-by');
   expressApp.set('trust proxy', environment.trustedProxyCidrs === false ? false : [...environment.trustedProxyCidrs]);
 
-  app.use(requestContextMiddleware(logger, clock));
+  app.use(requestContextMiddleware(logger, clock, observability));
   app.use((request: import('express').Request, response: import('express').Response, next: import('express').NextFunction) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('X-Frame-Options', 'DENY');
@@ -62,6 +64,7 @@ export function configureHttpBoundaries(app: INestApplication, environment: ApiE
     exclude: [
       { path: 'health', method: RequestMethod.GET },
       { path: 'ready', method: RequestMethod.GET },
+      { path: 'internal/metrics', method: RequestMethod.GET },
       { path: 'internal/v1/assets/:assetId/operations', method: RequestMethod.POST },
       { path: 'internal/v1/operations/:operationId', method: RequestMethod.GET },
       { path: 'internal/v2/assets/:assetId/operations', method: RequestMethod.POST },

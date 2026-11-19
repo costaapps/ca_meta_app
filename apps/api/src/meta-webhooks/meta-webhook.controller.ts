@@ -1,4 +1,4 @@
-import { Controller, Get, HttpStatus, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PublicRoute } from '../common/security/public-route.decorator.js';
 import {
@@ -8,6 +8,8 @@ import {
   MetaWebhookSignatureError,
 } from './meta-webhook-ingress.service.js';
 import { MetaWebhookPayloadValidationError } from './meta-webhook-validation.js';
+import { OBSERVABILITY_REGISTRY, type ObservabilityRegistry, type WebhookOutcome } from '../observability/observability.registry.js';
+import { observedRequestDurationMs } from '../common/http/request-context.js';
 
 function oneQueryString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length <= 512 ? value : undefined;
@@ -15,7 +17,8 @@ function oneQueryString(value: unknown): string | undefined {
 
 @Controller('/webhooks/meta')
 export class MetaWebhookController {
-  constructor(private readonly ingress: MetaWebhookIngressService) {}
+  constructor(private readonly ingress: MetaWebhookIngressService,
+    @Inject(OBSERVABILITY_REGISTRY) private readonly observability: ObservabilityRegistry) {}
 
   @Get(':appConfigRef')
   @PublicRoute()
@@ -48,7 +51,7 @@ export class MetaWebhookController {
     @Res() response: Response,
   ): Promise<void> {
     if (!request.is('application/json') || !Buffer.isBuffer(request.body)) {
-      response.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).json({ received: false });
+      this.respond(response, request, 'invalid_content_type', HttpStatus.UNSUPPORTED_MEDIA_TYPE, { received: false });
       return;
     }
     try {
@@ -58,25 +61,42 @@ export class MetaWebhookController {
         signature: request.get('x-hub-signature-256'),
       });
       // HTTP success is emitted only after the durable inbox transaction commits.
-      response.status(HttpStatus.OK).json({ received: true, items: result.received });
+      this.respond(response, request, 'accepted', HttpStatus.OK, { received: true, items: result.received }, result);
     } catch (error) {
       if (error instanceof MetaWebhookSignatureError) {
-        response.status(HttpStatus.FORBIDDEN).json({ received: false });
+        this.respond(response, request, 'signature_rejected', HttpStatus.FORBIDDEN, { received: false });
         return;
       }
       if (error instanceof MetaWebhookConfigurationUnavailableError) {
-        response.status(HttpStatus.SERVICE_UNAVAILABLE).json({ received: false });
+        this.respond(response, request, 'configuration_unavailable', HttpStatus.SERVICE_UNAVAILABLE, { received: false });
         return;
       }
       if (error instanceof MetaWebhookPayloadValidationError) {
-        response.status(HttpStatus.BAD_REQUEST).json({ received: false });
+        this.respond(response, request, 'payload_rejected', HttpStatus.BAD_REQUEST, { received: false });
         return;
       }
       if (error instanceof MetaWebhookChallengeError) {
-        response.status(HttpStatus.FORBIDDEN).json({ received: false });
+        this.respond(response, request, 'signature_rejected', HttpStatus.FORBIDDEN, { received: false });
         return;
       }
-      response.status(HttpStatus.SERVICE_UNAVAILABLE).json({ received: false });
+      this.respond(response, request, 'ingress_failure', HttpStatus.SERVICE_UNAVAILABLE, { received: false });
     }
+  }
+
+  private respond(
+    response: Response,
+    request: Request,
+    outcome: WebhookOutcome,
+    status: number,
+    body: Readonly<Record<string, unknown>>,
+    itemCounts?: { readonly received: number; readonly inserted: number; readonly duplicate: number; readonly quarantined: number },
+  ): void {
+    response.once('finish', () => {
+      const durationMs = observedRequestDurationMs(request);
+      // Without the early request-context middleware, omit the latency/ACK sample rather than
+      // claiming a controller-only duration as an end-to-end ingress measurement.
+      if (durationMs !== undefined) this.observability.recordWebhookRequest(outcome, durationMs, itemCounts);
+    });
+    response.status(status).json(body);
   }
 }

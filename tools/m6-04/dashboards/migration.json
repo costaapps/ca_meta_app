@@ -1,0 +1,15 @@
+{
+  "uid": "ca-meta-migration-m6-04",
+  "title": "CA Meta migration observability coverage",
+  "tags": ["ca-meta", "m6-04", "release-artifact"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-7d", "to": "now" },
+  "panels": [
+    { "id": 1, "type": "stat", "title": "Available aggregate signal sources (0 = not instrumented) ", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "gridPos": { "x": 0, "y": 0, "w": 24, "h": 7 }, "targets": [{ "expr": "ca_meta_observability_source_available{signal=~\"credential_health|subscription_drift|queue_backlog|dead_letter|projection_lag\"}", "legendFormat": "{{signal}}", "refId": "A" }] },
+    { "id": 2, "type": "timeseries", "title": "Meta activity by product (not migration completion)", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "gridPos": { "x": 0, "y": 7, "w": 24, "h": 8 }, "targets": [{ "expr": "sum by (product, outcome) (rate(ca_meta_graph_calls_total[5m]))", "legendFormat": "{{product}} / {{outcome}}", "refId": "A" }] },
+    { "id": 3, "type": "text", "title": "Migration evidence boundaries", "gridPos": { "x": 0, "y": 15, "w": 24, "h": 7 }, "options": { "mode": "markdown", "content": "Credential health, subscription drift, queue/dead-letter backlog, and projection lag do not currently have a safe global aggregate source. Their availability value is **0 (unknown/unavailable)**, never a zero count. Per-tenant operations diagnostics require authorized tenant context and must not be scraped into global metrics. Do not use this dashboard to authorize migration or cutover. Staging, destination database, and migration-cohort verification are Not confirmed." } }
+  ]
+}
