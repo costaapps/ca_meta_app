@@ -26,3 +26,17 @@
 - **Evidence:** On 2026-11-18, the official Meta [WhatsApp Business app onboarding (Coexistence)](https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users/) page stated that Embedded Signup v2 and v3 were deprecated on 2026-10-15 and directs integrations to v4; it also identifies the Tech Provider/Solution Partner, webhook and session logging prerequisites. The official [App Review introduction](https://developers.facebook.com/docs/resp-plat-initiatives/app-review/introduction) describes per-permission/feature approval and reviewer access/recording requirements. In this checkout, `embeddedSignupVersion` is configuration data, and the Coexistence provider adapter remains disabled; no deployed configuration or app-specific approval is available here.
 - **Decision:** Keep the Coexistence activation gate closed until an authorized owner confirms the real per-flow configuration is v4 or newer and supplies app-specific permission/eligibility evidence. Use current dashboard state for exact permission names and approval status; public docs do not prove this app is approved.
 - **Consequence:** Local fixtures cannot clear M6.07 or M6.08 for Coexistence. Record the checked documentation date and leave any deployed version/approval **Not confirmed** until independently evidenced.
+
+## 2026-11-19 — refresh Meta Embedded Signup version evidence
+
+- **Issue / gate:** M6.07 must use the correct WhatsApp Embedded Signup contract and keep Coexistence distinct from exclusive onboarding.
+- **Evidence:** M6.07 review checked the official Meta versioning, v5, Coexistence, Access Levels, Tech Provider, App Review and Instagram login sources on 2026-11-18. Meta lists Embedded Signup v5 as the current version; v2/v3 were deprecated on 2026-10-15. v5 changes Coexistence session-info fields (`messaging_account_ids`, `primary_waac_ids`, `is_on_biz_app`). M4.05 still has no confirmed provider contract/configuration for that version.
+- **Decision:** Supersede the prior v4-specific wording: require the deployed configuration and adapter contract to be confirmed against the current supported version before Coexistence activation. Keep all app-specific permissions, customer grants, eligible assets and Suite4/Msg4 behavior **Not confirmed**.
+- **Consequence:** The M6.07 checklist is preparation only; no flow is cleared to activate and no Coexistence compatibility is claimed.
+
+## 2026-11-19 — preserve M6.02 security gate failure
+
+- **Issue / gate:** M6.02/#70 requires the unchanged M2.08 security comparison to pass before dependency changes can be integrated.
+- **Evidence:** PR #167 head `9a67dff70e437c1bdf52445198493c30fd9886c8`, CI run `44398836758`: desktop-candidate, MariaDB and image scans passed; `m2-08-security` failed on one new moderate dev-only `pacote`/`sigstore` tuple under `node_modules/pacote`, with zero severity escalations. The full audit has zero high/critical findings and production audit has zero findings. No safe semver-compatible Angular 21 resolution was confirmed.
+- **Decision:** Keep PR #167 open and exclude its dependency changes from `desktop/milestone-m6` and the consolidated PR while the required check is red. Do not weaken the M2.08 scanner, invent a waiver or close #70.
+- **Consequence:** M6.06's M6.01–M6.05 release gate remains **Not confirmed**. The consolidated PR may present the other locally deliverable packages for review, but it must say M6 is not complete while this P0 dependency remains unresolved.

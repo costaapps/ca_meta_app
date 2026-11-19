@@ -1,29 +1,41 @@
 # M6 execution progress
 
-Base `develop` and `origin/develop`: `b54bde1ed170a4304e281383f70ded6ed0a4f5dc`.
-Integration branch: `desktop/milestone-m6`, created from that base and pushed.
+Updated 2026-11-19 (America/Sao_Paulo). This reports engineering preparation and evidence; it does not claim M6 operational acceptance or completion.
 
-M5 entry gate: PR #166 is merged into `develop`; its package PRs #152–#165 were squashed into `desktop/milestone-m5` before consolidation. The M5 handoff and PR record implementation evidence and preserve external limits. In particular, PHP consumers for M5.07, real enterprise destinations for M5.08, and real shadow/pilot/cutover for M5.09 remain **Not confirmed**.
+## Base and entry gate
+
+- develop / origin/develop: b54bde1ed170a4304e281383f70ded6ed0a4f5dc; consolidated M5 PR [#166](https://github.com/costaapps/ca_meta_app/pull/166) is merged.
+- desktop/milestone-m6 before this tracking update: da234f4ae7900a078a7973d79ee49ee3d074d32b.
+- M6 packages are integrated by squash except M6.02/#70, which is deliberately omitted while its required security check fails. Issues remain open because their full acceptance criteria, including external operational evidence, are not satisfied.
+- No production, staging, Meta account, message delivery, real data migration, canary, hypercare completion, PHP/Hostinger retirement, or issue closure was performed.
 
 ## Package status
 
-| Package / issue | Stage | Candidate | Evidence | PR | Next action |
-|---|---|---|---|---|---|
-| M6.01 / #69 | implemented locally; awaiting current-base validation | `desktop/m6-01` @ `20eb9d6129b733c0b88d7c13d2736f27627364b4` | Focused Angular/Vitest snapshot: 17 specs, 99 tests, 0 failures; fingerprint `b91a7ca86cb518344657a2469c785394839d445b3cfaa2bb04b2db8129fd7027`. Run was before commit and before the Angular security update. | — | Re-run focused harness after M6.02 integration; keep browser/accessibility/provider gates open |
-| M6.02 / #70 | implementing security fix and adversarial evidence | worktree `m6-02-security`, based on `b54bde1` | Base `npm audit --omit=dev` found 6 HIGH Angular runtime advisories in 21.0.8. Targeted Angular 21 upgrade and harness are in progress; no updated candidate result yet. | — | Finish patched lock/install, focused web/API checks, assessment and review |
-| M6.03 / #66 | implementing load/fault harness | worktree `m6-03-load`, based on `b54bde1` | Docker daemon is available; synthetic MariaDB-backed profile is in progress. No M6 load result claimed yet. | — | Finish one focused load/fault run and capacity report |
-| M6.04 / #67 | implementing observability package | `desktop/m6-04`, based on current milestone SHA `5365954` | Existing API request logs include generated requestId, route template, status and duration; M6 metrics/alert evidence is not yet complete. | — | Finish bounded telemetry, rules/runbooks and focused API check |
-| M6.05 / #68 | queued | — | prior M5 restore evidence is not a complete M6 restore proof | — | exercise synthetic restore and record measured limits |
-| M6.06 / #71 | queued | — | M2.09/M2.10 release tools exist | — | assemble immutable local candidate and promotion gates |
-| M6.07 / #72 | external gate | — | Meta/Suite4 real acceptance not confirmed | — | prepare readiness checklist; no external approval claimed |
-| M6.08 / #73 | external operation | — | production/canary not authorized or evidenced | — | prepare reversible plan; do not execute canary |
-| M6.09 / #74 | external operation | — | production hypercare window not observed | — | prepare support/runbook artifacts; no stability claim |
-| M6.10 / #75 | external operation | — | legacy traffic/decommission evidence unavailable | — | prepare inventory/checklist; do not disable legacy |
+| Package / issue | Milestone integration | Candidate → squash | Evidence and remaining gates |
+|---|---|---|---|
+| M6.01 / #69 | PR [#170](https://github.com/costaapps/ca_meta_app/pull/170), integrated | 7b9930622369b6ee68a2903c3b1bf4ff80eb8e03 → a856bf4319519d75c1c02907afbfb477a453bf08 | CI run 44389497887 green. Focused Angular/Vitest: 17 specs, 99 tests, 0 failures. Browser E2E, external consumer, keyboard/screen-reader, and second-operator evidence remain **Not confirmed**. |
+| M6.02 / #70 | PR [#167](https://github.com/costaapps/ca_meta_app/pull/167) remains open; excluded | head 9a67dff70e437c1bdf52445198493c30fd9886c8; no squash | Run 44398836758: desktop, MariaDB and image jobs passed; required m2-08-security failed on one new moderate dev-only pacote/sigstore tuple, with zero severity escalations. Full audit: 0 high/critical; production audit: 0 findings. No safe semver-compatible Angular 21 fix was confirmed. Scanner/workflow was not weakened and no waiver was added. |
+| M6.03 / #66 | PR [#168](https://github.com/costaapps/ca_meta_app/pull/168), integrated | 251bc7c392b1d796d7365310a452792865d611b9 → 5629ff9f81401f673ef91d2de5de5e1faadaf7eb | CI run 44398162113 green. Synthetic MariaDB profile: 528 jobs, 4 tenants, 8 workers, 40.04 jobs/s, 13.187 s drain; API suite 430 tests, 403 passed, 27 skipped, 0 failures. Ratified SLOs, ACK, real outage and external DB behavior remain **Not confirmed**. |
+| M6.04 / #67 | PR [#169](https://github.com/costaapps/ca_meta_app/pull/169), integrated | faa0a8745b66742b5aaf8648fa53ecb530883901 → 42f0a4d32edd33c6a47a32f1e260481adaa4afd6 | CI run 44399644424 green; independent review passed. Focused API checks passed 3/3. Staging alert delivery, ratified SLO owner, end-to-end tracing and release wiring remain **Not confirmed**. |
+| M6.05 / #68 | PR [#171](https://github.com/costaapps/ca_meta_app/pull/171), integrated | bcf9fc0314ec7480179aef3dc1209c1a4bcea62d → 3da17eff8fe2fdeb914013c895744716fec8fd6e | CI run 44400610909 green; independent review passed. MariaDB 11.8.8 local restore: 74 tables, tamper rejected, missing old key failed closed, provider calls 0. RPO/RTO, KMS recovery and independent operator remain **Not confirmed**. |
+| M6.06 / #71 | PR [#176](https://github.com/costaapps/ca_meta_app/pull/176), integrated | c4965fa0ab46aa6965f7f11cc3a55da0fabc6068 → da234f4ae7900a078a7973d79ee49ee3d074d32b | CI run 44553202541 green 4/4; orchestrator green; exact-head validator and independent review passed. Ledger keeps deploymentReady=false and all 12 external gates **Not confirmed**. Final M6.01–M6.05 integration/revalidation and release manifest remain blocked by M6.02. |
+| M6.07 / #72 | PR [#172](https://github.com/costaapps/ca_meta_app/pull/172), integrated | c2e8bee3518ea3d32325052bf06c0d6c2b3d7f69 → 05ab14af8638e11e2dd99a39b06fe4fb0f50e0d8 | CI run 44400876736 green; exact-head readiness validator and review passed. Meta source check reports Embedded Signup v5 current; M4.05 adapter compatibility, App Review, permissions, real assets, Suite4/Msg4 and owners remain **Not confirmed**. No flow was activated. |
+| M6.08 / #73 | PR [#173](https://github.com/costaapps/ca_meta_app/pull/173), integrated | acf2cf53fc55743d30d9217bc72e4f50ee3faaa7 → 81e22140086167209d8b1d2bf6908b399794defa | CI run 44549470024 green; final validator and review passed. Canary and rollback were not executed; no route or tenant was activated. |
+| M6.09 / #74 | PR [#174](https://github.com/costaapps/ca_meta_app/pull/174), integrated | 40dd4aec38386746d249cfa8d8794a0b1bd4671a → e3ad62659097c9b7611fe4b176bbd7d4a8a14f23 | CI run 44550933360 green; final validator and review passed. No production observation/hypercare began; live SLO, incident, routine, support and adoption evidence remain **Not confirmed**. |
+| M6.10 / #75 | PR [#175](https://github.com/costaapps/ca_meta_app/pull/175), integrated | c2a9badb2e49b2dc95268233225b0ad1c7c451de → d4cb4f84c8a1f39d34befcda2329cc590d9a6d90 | CI run 44551732552 green 4/4; exact-head validator and review passed. Ledger has 12 structural domains only; no live inventory, retirement authorization or legacy decommission occurred. |
 
-## Environment
+Package CI and review evidence belongs to the exact heads above; it does not prove external operation or release readiness.
 
-The system Node/npm remain `v22.17.0` / `10.9.2`; the compatible isolated runtime is Node `v24.22.2` + npm `11.19.1` at `C:\Users\user\AppData\Local\ca-meta-runtimes\node-v24.22.2-win-x64` (official archive SHA-256 verified). Python `3.13.7` is available. Root `npm ci --ignore-scripts` completed once in about 3 minutes and reported 47 baseline audit findings; no blanket audit fix was used. The targeted Angular runtime update is owned by M6.02. Docker Desktop was started by the coordinator; `docker info` confirms daemon `28.3.0`. GitHub CLI is absent, while GitHub MCP reads and SSH push work. Package checks have not yet run on an integrated M6 candidate.
+## Consolidated delivery and next action
 
-## Validation policy for this run
+A consolidated draft PR to develop is the review artifact for this milestone. Its body lists every issue, package PR, squash, checks, the omitted M6.02 blocker and all external limitations. The PR's exact candidate SHA and aggregate CI are authoritative on GitHub; do not merge it until the user accepts it and the blocking M6.02 and any required external gates are resolved.
 
-Use one focused check per package on its candidate source, then one cumulative API/web/release validation on the integrated milestone candidate. Reuse only checks whose SHA and environment match. The M6.01 snapshot run is not inherited as a pass for a later candidate; it will be repeated once after the Angular fix. Independent reviewers will inspect recorded evidence rather than rerun entire suites. Real staging, Meta accounts, production data, publication, canary, and PHP retirement remain separate gates.
+## Environment and validation policy
+
+The isolated runtime is Node v24.22.2 / npm 11.19.1; Python 3.13.7 and Docker Engine 28.3.0 are available. GitHub MCP and SSH Git push work; GitHub CLI is absent. Do not install or rerun tools without a concrete need.
+
+Package owners ran only focused checks for their deliverables; independent reviewers used exact-SHA evidence. Required package PR CI ran once per final package head. The consolidated PR runs the aggregate checks once on its exact candidate. Re-run only a gate invalidated by a source/base/environment change.
+
+## Authorization boundary
+
+This run authorizes local/synthetic implementation, package PRs and their squash into desktop/milestone-m6, plus a consolidated draft PR to develop. It does not authorize publishing images, staging/production changes, data migration, Meta account/subscription changes, messages, canary, hypercare completion, PHP/Hostinger retirement or issue closure. M6 is **not complete** while M6.02's required security check is red and required external evidence is **Not confirmed**.
